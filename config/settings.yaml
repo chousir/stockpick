@@ -1,0 +1,26 @@
+paths:
+  data_dir: data
+  cache_dir: data/cache
+  raw_dir: data/raw
+  reports_dir: reports
+  logs_dir: logs
+  watchlist_dir: watchlist
+  strategies_dir: config/strategies
+
+goodinfo:
+  base_url: "https://goodinfo.tw/tw"
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  request_interval_sec: 3
+  request_interval_jitter_sec: 1
+  cache_ttl_hours: 24
+  max_retries: 3
+  concurrency: 1
+
+twse:
+  base_url: "https://openapi.twse.com.tw/v1"
+  user_agent: "tw-stock-screener/0.1"
+  request_interval_sec: 1
+  cache_ttl_hours: 6
+
+report:
+  default_top_n: 10

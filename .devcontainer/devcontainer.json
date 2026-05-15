@@ -1,0 +1,17 @@
+{
+  "name": "tw-stock-screener",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "20" }
+  },
+  "postCreateCommand": "curl -LsSf https://astral.sh/uv/install.sh | sh && uv sync && npm install -g @anthropic-ai/claude-code",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "redhat.vscode-yaml"
+      ]
+    }
+  }
+}
