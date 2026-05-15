@@ -1,0 +1,35 @@
+[
+  {
+    "Date": "115/05/01",
+    "TradeVolume": "20,000",
+    "TradeValue": "21,400,000,000",
+    "OpeningPrice": "1070.00",
+    "HighestPrice": "1075.00",
+    "LowestPrice": "1065.00",
+    "ClosingPrice": "1070.00",
+    "Change": "10.00",
+    "Transaction": "15,000"
+  },
+  {
+    "Date": "115/05/02",
+    "TradeVolume": "18,500",
+    "TradeValue": "19,980,000,000",
+    "OpeningPrice": "1080.00",
+    "HighestPrice": "1085.00",
+    "LowestPrice": "1075.00",
+    "ClosingPrice": "1080.00",
+    "Change": "10.00",
+    "Transaction": "12,800"
+  },
+  {
+    "Date": "115/05/05",
+    "TradeVolume": "22,100",
+    "TradeValue": "23,852,000,000",
+    "OpeningPrice": "1078.00",
+    "HighestPrice": "1082.00",
+    "LowestPrice": "1072.00",
+    "ClosingPrice": "1079.00",
+    "Change": "-1.00",
+    "Transaction": "14,200"
+  }
+]

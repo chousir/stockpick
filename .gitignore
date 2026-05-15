@@ -13,10 +13,10 @@ build/
 .venv/
 .env
 
-# Data & Reports (personal, not committed)
-data/
-logs/
-watchlist/
+# Data & Reports (personal, not committed) — 僅排除根目錄下的資料夾
+/data/
+/logs/
+/watchlist/
 
 # Reports — commit only analysis outputs, not raw data
 reports/*/stocks/
