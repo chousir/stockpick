@@ -1,14 +1,22 @@
 """fetcher.py — Goodinfo HTML 取得器（rate limit + cache + retry）。"""
 
+import datetime
 import gzip
 import hashlib
 import random
+import re
 import time
 from pathlib import Path
 
 import httpx
 from loguru import logger
 from tenacity import Retrying, stop_after_attempt, wait_exponential
+
+# Goodinfo 首次訪問時回傳 JS session init 頁面，需要：
+#   1. 計算 CLIENT_KEY cookie
+#   2. 追蹤 window.location.replace() 的重導向 URL
+_JS_REDIRECT_RE = re.compile(r"window\.location\.replace\('([^']+)'\)")
+_ARR_CONST_RE = re.compile(r"arr\[(\d+)\]\s*=\s*'([^']+)'")
 
 
 class GoodinfoBlockedError(Exception):
@@ -68,14 +76,44 @@ class GoodinfoFetcher:
             time.sleep(target - elapsed)
         self._last_request = time.monotonic()
 
-    # ── Blocked detection ────────────────────────────────────────────────────
+    # ── Blocked / JS-init detection ──────────────────────────────────────────
 
     def _check_blocked(self, html: str, url: str) -> None:
         if self._BLOCKED_MARKER in html:
             logger.error("Goodinfo access blocked: {}", url)
             raise GoodinfoBlockedError(url)
 
+    @staticmethod
+    def _is_js_init_page(html: str) -> bool:
+        """Goodinfo 的 JavaScript session 初始化頁（需要追蹤 JS 重導向）。"""
+        return "window.location.replace" in html and "CLIENT_KEY" in html
+
     # ── Network ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_client_key(html: str) -> str:
+        """從 JS init 頁面還原 Goodinfo 的 CLIENT_KEY cookie 值。
+
+        Goodinfo JS:
+            arr[0] = '4.8'
+            arr[1] = <constant1>
+            arr[2] = <constant2>
+            arr[3] = GetTimezoneOffset()          # JS: minutes west of UTC
+            arr[4] = Date.now()/86400000 - tz/1440 + 25569  # Excel 日期
+            arr[5..7] = 0
+        """
+        constants = {int(k): v for k, v in _ARR_CONST_RE.findall(html)}
+        arr1 = constants.get(1, "38077.6754492846")
+        arr2 = constants.get(2, "46966.5643381734")
+
+        # JS getTimezoneOffset() = minutes WEST of UTC (negative for UTC+N)
+        now = datetime.datetime.now(datetime.UTC).astimezone()
+        js_tz = int(-now.utcoffset().total_seconds() / 60)
+
+        # arr[4]: Excel date-time of now in local timezone
+        excel_date = time.time() / 86400 - js_tz / 1440 + 25569
+
+        return f"4.8|{arr1}|{arr2}|{js_tz}|{excel_date}|0|0|0"
 
     def _http_get(self, url: str) -> str:
         self._rate_limit()
@@ -86,7 +124,22 @@ class GoodinfoFetcher:
         with httpx.Client(follow_redirects=True, timeout=30.0) as client:
             resp = client.get(url, headers=headers)
             resp.raise_for_status()
-            return resp.text
+            html = resp.text
+
+            # Goodinfo 首次訪問先回傳 JS init 頁面再重導向
+            if self._is_js_init_page(html):
+                m = _JS_REDIRECT_RE.search(html)
+                if m:
+                    client_key = self._build_client_key(html)
+                    client.cookies.set("CLIENT_KEY", client_key, domain="goodinfo.tw")
+                    redirect_url = f"{self._base_url}/{m.group(1)}"
+                    logger.debug("JS init → redirect: {}", redirect_url)
+                    self._rate_limit()
+                    resp = client.get(redirect_url, headers=headers)
+                    resp.raise_for_status()
+                    html = resp.text
+
+            return html
 
     # ── Public API ───────────────────────────────────────────────────────────
 
@@ -94,15 +147,18 @@ class GoodinfoFetcher:
         """取得 URL 的 HTML，優先讀快取；被擋時 raise GoodinfoBlockedError。
 
         force=True 略過快取強制打網。
+        快取內容若為 JS init 頁面（上次抓到了重導向前的內容）則視為 cache miss。
         失敗時指數退避重試（5s → 25s → 125s），超過 max_retries 次 reraise。
         """
         cache_path = self._cache_path(url)
 
         if not force and self._is_fresh(cache_path):
-            logger.debug("Cache hit: {}", url)
             html = self._read_cache(cache_path)
-            self._check_blocked(html, url)
-            return html
+            if not self._is_js_init_page(html):
+                self._check_blocked(html, url)
+                logger.debug("Cache hit: {}", url)
+                return html
+            logger.debug("Cached JS init page, refetching: {}", url)
 
         logger.info("Fetching from network: {}", url)
         html = ""

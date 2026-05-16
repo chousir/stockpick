@@ -44,7 +44,7 @@ def build_screener_url(strategy: StrategyConfig, base_url: str) -> str:
 
     filters 對應 FL_ITEM{i} / FL_VAL_S{i} / FL_VAL_E{i}（0-indexed）。
     rules 對應 FL_RULE{i}（0-indexed）。
-    period 若存在，附加在 item name 後以「–」連接（Goodinfo 慣例）。
+    period 欄位是說明用途，不附加到 item name（Goodinfo 的篩選項目名稱為完整字串）。
     """
     params: list[tuple[str, str]] = [
         ("MARKET_CAT", "自訂篩選"),
@@ -52,8 +52,7 @@ def build_screener_url(strategy: StrategyConfig, base_url: str) -> str:
     ]
 
     for i, f in enumerate(strategy.filters):
-        item_name = f"{f.item}–{f.period}" if f.period else f.item
-        params.append((f"FL_ITEM{i}", item_name))
+        params.append((f"FL_ITEM{i}", f.item))
         params.append((f"FL_VAL_S{i}", str(int(f.min)) if f.min is not None else ""))
         params.append((f"FL_VAL_E{i}", str(int(f.max)) if f.max is not None else ""))
 

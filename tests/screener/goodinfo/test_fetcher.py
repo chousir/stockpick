@@ -217,3 +217,55 @@ def test_stale_cache_triggers_network(tmp_path: Path):
 
     fetcher.get(url)
     assert len(http_calls) == 1
+
+
+# ─── JS init page detection ───────────────────────────────────────────────────
+
+_JS_INIT_HTML = """<!DOCTYPE html><html><head></head><body></body>
+<script language='javascript'>
+var arr = []; arr[0]='4.8'; arr[1]='38077'; arr[2]='46966';
+setCookie('CLIENT_KEY', '', -1, '/');
+setTimeout(function(){
+    window.location.replace('StockList.asp?MARKET_CAT=test&REINIT=46158.5');
+}, 100);
+</script></html>"""
+
+
+def test_is_js_init_page_true(tmp_path: Path):
+    fetcher = make_fetcher(tmp_path)
+    assert fetcher._is_js_init_page(_JS_INIT_HTML)
+
+
+def test_is_js_init_page_false(tmp_path: Path):
+    fetcher = make_fetcher(tmp_path)
+    assert not fetcher._is_js_init_page("<html><body>normal page</body></html>")
+
+
+def test_build_client_key_format(tmp_path: Path):
+    fetcher = make_fetcher(tmp_path)
+    key = fetcher._build_client_key(_JS_INIT_HTML)
+    parts = key.split("|")
+    assert len(parts) == 8
+    assert parts[0] == "4.8"
+    assert float(parts[4]) > 0  # Excel date > 0
+
+
+def test_js_init_cache_treated_as_miss(tmp_path: Path):
+    """快取內容是 JS init 頁面時，應重新打網而非直接回傳。"""
+    fetcher = make_fetcher(tmp_path)
+    url = "https://goodinfo.tw/tw/StockList.asp?js=1"
+
+    fetcher._write_cache(fetcher._cache_path(url), _JS_INIT_HTML)
+
+    http_calls: list[str] = []
+    fresh_html = "<html><body>real content</body></html>"
+
+    def mock_http(u: str) -> str:
+        http_calls.append(u)
+        return fresh_html
+
+    fetcher._http_get = mock_http  # type: ignore[method-assign]
+
+    result = fetcher.get(url)
+    assert len(http_calls) == 1
+    assert result == fresh_html

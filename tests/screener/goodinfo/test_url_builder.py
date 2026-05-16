@@ -29,7 +29,7 @@ def test_load_strategy_name():
 
 def test_load_strategy_filters_count():
     s = load_strategy(STRATEGY_PATH)
-    assert len(s.filters) == 3
+    assert len(s.filters) == 2
 
 
 def test_load_strategy_rules_count():
@@ -37,9 +37,10 @@ def test_load_strategy_rules_count():
     assert len(s.rules) == 4
 
 
-def test_load_strategy_filter_period():
+def test_load_strategy_filter_no_period():
+    """period 欄位是選填，a_breakout 的過濾條件不使用 period。"""
     s = load_strategy(STRATEGY_PATH)
-    assert s.filters[0].period == "日"
+    assert s.filters[0].period is None
 
 
 def test_load_strategy_filter_min():
@@ -95,29 +96,29 @@ def test_url_contains_filter_items():
     url = build_screener_url(s, BASE_URL)
     assert "FL_ITEM0" in url
     assert "FL_ITEM1" in url
-    assert "FL_ITEM2" in url
 
 
-def test_url_filter_item_with_period():
+def test_url_filter_item_no_period_suffix():
+    """period 欄位不應附加到 item name（Goodinfo 篩選項目名稱為完整字串）。"""
     s = load_strategy(STRATEGY_PATH)
     url = build_screener_url(s, BASE_URL)
     decoded = unquote(url)
-    # First filter: "成交筆數" + period "日"
     assert "成交筆數" in decoded
+    assert "成交筆數–日" not in decoded  # period 不應附加
 
 
 def test_url_contains_min_value():
     s = load_strategy(STRATEGY_PATH)
     url = build_screener_url(s, BASE_URL)
     decoded = unquote(url)
-    assert "5000" in decoded
+    assert "5000" in decoded  # 成交筆數 min
 
 
 def test_url_contains_max_value():
     s = load_strategy(STRATEGY_PATH)
     url = build_screener_url(s, BASE_URL)
     decoded = unquote(url)
-    assert "300" in decoded
+    assert "300" in decoded  # 股價 max
 
 
 def test_url_contains_rules():
@@ -144,10 +145,9 @@ def test_url_contains_market():
 
 
 def test_url_empty_max_for_min_only_filter():
-    """min-only filter 的 FL_VAL_E 應為空字串。"""
+    """min-only filter 的 FL_VAL_E 應為空字串（FL_VAL_E0 = 成交筆數，無 max）。"""
     s = load_strategy(STRATEGY_PATH)
     url = build_screener_url(s, BASE_URL)
-    # FL_VAL_E0 corresponds to first filter which has no max → empty
     assert "FL_VAL_E0=" in url
 
 

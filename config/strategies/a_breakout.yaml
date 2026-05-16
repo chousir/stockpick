@@ -6,10 +6,7 @@ market: "上市/上櫃"
 
 filters:
   - item: "成交筆數"
-    period: "日"
     min: 5000
-  - item: "月成交均量"
-    min: 1000
   - item: "股價"
     min: 15
     max: 300
