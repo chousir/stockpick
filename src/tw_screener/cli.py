@@ -139,8 +139,16 @@ def screen_run(
         console.print(f"[red]找不到策略檔：{strategy_path}[/red]")
         raise typer.Exit(1)
 
+    from tw_screener.screener.goodinfo.parser import GoodinfoTooManyResultsError
+
     runner = ScreenerRunner(settings)
-    df = runner.run_strategy(strategy_path)
+    try:
+        df = runner.run_strategy(strategy_path)
+    except GoodinfoTooManyResultsError as e:
+        console.print(f"[red]篩選結果 {e.count} 筆超過 Goodinfo 匿名上限（300 筆）[/red]")
+        console.print("[yellow]請縮小篩選條件，例如調高 成交筆數 的 min 值[/yellow]")
+        raise typer.Exit(1)
+
     week_tag = _date.today().strftime("%Y-W%V")
     output = runner.export_csv(df, strategy, week_tag)
 

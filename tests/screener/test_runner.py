@@ -48,7 +48,7 @@ def _empty_html() -> str:
 def test_run_strategy_row_count(tmp_path: Path):
     runner = make_runner(tmp_path)
     df = runner.run_strategy(STRATEGY_PATH)
-    assert len(df) == 3
+    assert len(df) == 61  # fixture: 2026-05-16 actual fetch, 61 results
 
 
 def test_run_strategy_has_strategy_id(tmp_path: Path):
@@ -69,7 +69,8 @@ def test_run_strategy_has_goodinfo_url(tmp_path: Path):
     runner = make_runner(tmp_path)
     df = runner.run_strategy(STRATEGY_PATH)
     assert "goodinfo_url" in df.columns
-    assert "2330" in df["goodinfo_url"][0]
+    # First stock in fixture is 00403A
+    assert "00403A" in df["goodinfo_url"][0]
     assert "StockDetail" in df["goodinfo_url"][0]
 
 

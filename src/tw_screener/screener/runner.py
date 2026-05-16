@@ -8,8 +8,15 @@ import yaml
 from loguru import logger
 
 from tw_screener.screener.goodinfo.fetcher import create_fetcher
-from tw_screener.screener.goodinfo.parser import parse_screener_result
-from tw_screener.screener.goodinfo.url_builder import build_screener_url, load_strategy
+from tw_screener.screener.goodinfo.parser import (
+    GoodinfoTooManyResultsError,
+    parse_screener_result,
+)
+from tw_screener.screener.goodinfo.url_builder import (
+    build_data_url,
+    build_screener_url,
+    load_strategy,
+)
 
 _DETAIL_BASE = "https://goodinfo.tw/tw/StockInfo/StockDetail.asp"
 
@@ -30,36 +37,49 @@ class ScreenerRunner:
 
         0 筆結果視為正常（市場大跌時 A 策略可能篩出 0 檔）。
         超過 100 筆時印警告：條件可能太寬鬆。
+        篩選結果 > 300 筆時 raise GoodinfoTooManyResultsError（Goodinfo 匿名上限）。
         """
         strategy = load_strategy(strategy_path)
-        url = build_screener_url(strategy, self._goodinfo_base)
-        logger.info("Strategy {}: {}", strategy.id, url)
+        display_url = build_screener_url(strategy, self._goodinfo_base)
+        data_url = build_data_url(strategy, self._goodinfo_base)
+        logger.info("Strategy {}: {}", strategy.id, display_url)
 
-        html = self._fetcher.get(url)
-        df = parse_screener_result(html)
+        html = self._fetcher.get(data_url)
+        try:
+            df = parse_screener_result(html)
+        except GoodinfoTooManyResultsError:
+            logger.error(
+                "Strategy {} 篩選結果超過 300 筆（Goodinfo 匿名上限），請縮小篩選條件",
+                strategy.id,
+            )
+            raise
 
         if len(df) > 100:
-            logger.warning(
-                "Strategy {} 篩出 {} 檔，條件可能太寬鬆", strategy.id, len(df)
-            )
+            logger.warning("Strategy {} 篩出 {} 檔，條件可能太寬鬆", strategy.id, len(df))
 
         today = date.today()
 
         if df.is_empty():
-            return df.with_columns([
+            return df.with_columns(
+                [
+                    pl.lit(strategy.id).alias("strategy_id"),
+                    pl.lit(today).alias("screened_at"),
+                    pl.lit("").alias("goodinfo_url"),
+                ]
+            )
+
+        return df.with_columns(
+            [
                 pl.lit(strategy.id).alias("strategy_id"),
                 pl.lit(today).alias("screened_at"),
-                pl.lit("").alias("goodinfo_url"),
-            ])
-
-        return df.with_columns([
-            pl.lit(strategy.id).alias("strategy_id"),
-            pl.lit(today).alias("screened_at"),
-            pl.concat_str([
-                pl.lit(f"{_DETAIL_BASE}?STOCK_ID="),
-                pl.col("stock_id"),
-            ]).alias("goodinfo_url"),
-        ])
+                pl.concat_str(
+                    [
+                        pl.lit(f"{_DETAIL_BASE}?STOCK_ID="),
+                        pl.col("stock_id"),
+                    ]
+                ).alias("goodinfo_url"),
+            ]
+        )
 
     def run_all(self, week_tag: str | None = None) -> dict[str, pl.DataFrame]:
         """跑 strategies_dir 下所有 YAML，輸出 CSV 到 reports/YYYY-Www/。"""

@@ -45,7 +45,7 @@ def test_load_strategy_filter_no_period():
 
 def test_load_strategy_filter_min():
     s = load_strategy(STRATEGY_PATH)
-    assert s.filters[0].min == 5000
+    assert s.filters[0].min == 10000
 
 
 def test_load_strategy_filter_max():
@@ -111,7 +111,7 @@ def test_url_contains_min_value():
     s = load_strategy(STRATEGY_PATH)
     url = build_screener_url(s, BASE_URL)
     decoded = unquote(url)
-    assert "5000" in decoded  # 成交筆數 min
+    assert "10000" in decoded  # 成交筆數 min
 
 
 def test_url_contains_max_value():

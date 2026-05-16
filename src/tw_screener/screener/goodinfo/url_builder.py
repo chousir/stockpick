@@ -39,6 +39,37 @@ def load_strategy(path: Path) -> StrategyConfig:
     return StrategyConfig.model_validate(data)
 
 
+def build_data_url(strategy: StrategyConfig, base_url: str) -> str:
+    """建立 Goodinfo AJAX 資料端點 URL（STEP=DATA）。
+
+    此 URL 直接回傳 HTML fragment 含股票結果表，可傳給 parser.parse_screener_result()。
+    與 build_screener_url() 的差異：加了 STEP=DATA、SHEET、RPT_TIME、RANK_RANGE。
+    驗證日期：2026-05-16
+    """
+    params: list[tuple[str, str]] = [
+        ("STEP", "DATA"),
+        ("MARKET_CAT", "自訂篩選"),
+        ("INDUSTRY_CAT", "我的條件"),
+        ("SHEET", strategy.display_sheet),
+        ("RPT_TIME", "最新資料"),
+        ("RANK_RANGE", "300"),
+        ("FL_SHEET", strategy.display_sheet),
+        ("FL_SHEET2", strategy.display_period),
+        ("FL_MARKET", strategy.market),
+    ]
+
+    for i, f in enumerate(strategy.filters):
+        params.append((f"FL_ITEM{i}", f.item))
+        params.append((f"FL_VAL_S{i}", str(int(f.min)) if f.min is not None else ""))
+        params.append((f"FL_VAL_E{i}", str(int(f.max)) if f.max is not None else ""))
+
+    for i, rule in enumerate(strategy.rules):
+        params.append((f"FL_RULE{i}", rule))
+
+    query = urlencode(params, encoding="utf-8")
+    return f"{base_url}/StockList.asp?{query}"
+
+
 def build_screener_url(strategy: StrategyConfig, base_url: str) -> str:
     """將策略設定轉成 Goodinfo 自訂篩選 URL。
 
@@ -59,12 +90,14 @@ def build_screener_url(strategy: StrategyConfig, base_url: str) -> str:
     for i, rule in enumerate(strategy.rules):
         params.append((f"FL_RULE{i}", rule))
 
-    params.extend([
-        ("FL_SHEET", strategy.display_sheet),
-        ("FL_SHEET2", strategy.display_period),
-        ("FL_MARKET", strategy.market),
-        ("FL_QRY", "查 詢"),
-    ])
+    params.extend(
+        [
+            ("FL_SHEET", strategy.display_sheet),
+            ("FL_SHEET2", strategy.display_period),
+            ("FL_MARKET", strategy.market),
+            ("FL_QRY", "查 詢"),
+        ]
+    )
 
     query = urlencode(params, encoding="utf-8")
     return f"{base_url}/StockList.asp?{query}"

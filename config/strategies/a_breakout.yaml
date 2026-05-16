@@ -6,7 +6,7 @@ market: "上市/上櫃"
 
 filters:
   - item: "成交筆數"
-    min: 5000
+    min: 10000
   - item: "股價"
     min: 15
     max: 300
@@ -21,7 +21,7 @@ display_sheet: "交易狀況"
 display_period: "日"
 
 post_filter_sort:
-  - field: "成交筆數"
+  - field: "漲跌幅"
     order: "desc"
-  - field: "近5日漲幅"
+  - field: "成交張數"
     order: "desc"
