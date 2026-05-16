@@ -8,6 +8,20 @@ from loguru import logger
 _DEFAULT_WEIGHTS: dict[str, float] = {"entry_rate": 0.4, "rs": 0.4, "institutional": 0.2}
 
 
+def is_etf_or_warrant(stock_id: str) -> bool:
+    """Return True if stock_id is an ETF, structured product, or warrant (should skip analysis).
+
+    Filters:
+    - starts with "00": ETF codes (0050, 006208, 00400A, 00631L ...)
+    - contains non-digit: warrant/bond codes (2330Y, 6592A ...)
+    """
+    if stock_id.startswith("00"):
+        return True
+    if not stock_id.isdigit():
+        return True
+    return False
+
+
 def _compute_rs_from_history(
     stock_ids: list[str],
     price_history: pl.DataFrame,
@@ -59,14 +73,18 @@ def group_stocks(
 
     strategy_ids = sorted(screener_results.keys())
 
-    # Build per-stock dict from all strategies
+    # Build per-stock dict from all strategies (skip ETFs and warrants)
     stock_rows: dict[str, dict] = {}
+    skipped_etf = 0
     for sid in strategy_ids:
         df = screener_results.get(sid, pl.DataFrame())
         if df.is_empty():
             continue
         for row in df.iter_rows(named=True):
             stock_id = str(row["stock_id"])
+            if is_etf_or_warrant(stock_id):
+                skipped_etf += 1
+                continue
             if stock_id not in stock_rows:
                 stock_rows[stock_id] = {
                     "stock_id": stock_id,
@@ -79,8 +97,11 @@ def group_stocks(
                 }
             stock_rows[stock_id][f"in_{sid}"] = True
 
+    if skipped_etf:
+        logger.info("group_stocks: 排除 {} 檔 ETF/權證/結構型商品", skipped_etf)
+
     if not stock_rows:
-        logger.warning("group_stocks: 三組 CSV 均為空，無法進行族群分析")
+        logger.warning("group_stocks: 三組 CSV 均為空（或全為 ETF），無法進行族群分析")
         _empty_g: dict[str, type[pl.DataType]] = {
             "industry_code": pl.Utf8,
             "industry_name": pl.Utf8,

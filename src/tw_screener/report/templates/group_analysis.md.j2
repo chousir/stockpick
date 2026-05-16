@@ -4,8 +4,8 @@
 
 ## 1. 入選分布總覽
 
-{% for sid in strategy_ids -%}
-- 策略 {{ strategy_labels[sid] }}（{{ sid }}）共 {{ summary.counts.get(sid, 0) }} 檔
+{% for sid in active_strategy_ids -%}
+- 策略 {{ strategy_names[sid] }}共 {{ summary.counts.get(sid, 0) }} 檔
 {% endfor -%}
 - 三組總聯集：{{ summary.total_union }} 檔（去重後）
 {% for key, stocks in summary.intersections.items() -%}
@@ -16,10 +16,10 @@
 {% endfor %}
 ## 2. 族群強度排名（前 {{ top_groups }}）
 
-| Rank | 族群 | {% for sid in strategy_ids %}{{ strategy_labels[sid] }} 入選 | {% endfor %}族群入選率 | 平均漲跌幅 | 強度分數 |
-|---|---|{% for sid in strategy_ids %}---|{% endfor %}---|---|---|
+| Rank | 族群 | {% for sid in active_strategy_ids %}{{ strategy_names[sid] }}入選 | {% endfor %}族群入選率 | 平均漲跌幅 | 強度分數 |
+|---|---|{% for sid in active_strategy_ids %}---|{% endfor %}---|---|---|
 {% for group in groups -%}
-| {{ group.rank }} | {{ group.industry_name }} | {% for sid in strategy_ids %}{{ group.counts.get(sid, 0) }} | {% endfor %}{{ group.entry_rate_pct_str }} | {{ group.rs_avg_str }} | {{ group.score_str }} |
+| {{ group.rank }} | {{ group.industry_name }} | {% for sid in active_strategy_ids %}{{ group.counts.get(sid, 0) }} | {% endfor %}{{ group.entry_rate_pct_str }} | {{ group.rs_avg_str }} | {{ group.score_str }} |
 {% endfor %}
 
 ## 3. 各族群領頭羊候選
@@ -58,3 +58,25 @@
 {% else -%}
 （無足夠資料產生推薦清單）
 {% endif %}
+
+---
+
+## 6. Claude 族群深度分析請求
+
+> 以下為本週篩選出的前 {{ claude_groups | length }} 大領漲族群，請 Claude 依照每個族群的個股資料，進行以下分析：
+>
+> 1. **細分實際族群**：TWSE 產業分類較粗，請根據個股特性進一步細分（例如半導體可細分為：晶圓代工、IC 設計、封裝測試、記憶體、設備材料等；光電業可細分為：面板、鏡頭模組、LED 等），說明本族群目前哪個細分領域最強。
+> 2. **族群輪動訊號**：觀察各族群入選率、RS 均值、領頭羊漲幅，判斷是否有族群輪動（換手）跡象。
+> 3. **領頭羊確認**：評估每個族群的領頭羊候選是否具代表性（大型股、成交量大、漲幅領先），或是否為假突破。
+> 4. **個股簡評**：針對每檔個股，以一句話點出關鍵看法（利多/利空/需觀察的理由）。
+
+{% for group in claude_groups %}
+### 族群 {{ loop.index }}：{{ group.industry_name }}（強度分數 {{ group.score_str }}、族群入選率 {{ group.entry_rate_pct_str }}）
+
+| 股票代號 | 名稱 | 漲跌幅 | 成交金額（百萬） | 入選策略 | 是否領頭羊 | Goodinfo |
+|---|---|---|---|---|---|---|
+{% for stock in group.stocks -%}
+| {{ stock.stock_id }} | {{ stock.name }} | {{ stock.change_pct_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.strategy_str }} | {{ "✓ 領頭羊" if stock.is_leader else "" }} | [連結]({{ stock.goodinfo_url }}) |
+{% endfor %}
+
+{% endfor %}
