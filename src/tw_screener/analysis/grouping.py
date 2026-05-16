@@ -5,7 +5,12 @@ from __future__ import annotations
 import polars as pl
 from loguru import logger
 
-_DEFAULT_WEIGHTS: dict[str, float] = {"entry_rate": 0.4, "rs": 0.4, "institutional": 0.2}
+_DEFAULT_WEIGHTS: dict[str, float] = {
+    "entry_rate": 0.50,   # 入選率：最主要訊號（多少比例的族群股票被篩出）
+    "size": 0.15,         # 族群規模：log 正規化，避免小族群佔便宜
+    "rs": 0.20,           # 相對強度：用絕對值（只有正 RS 才加分，負 RS 不扣）
+    "institutional": 0.15, # 法人資料（目前為 0，佔位）
+}
 
 
 def is_etf_or_warrant(stock_id: str) -> bool:
@@ -184,23 +189,33 @@ def group_stocks(
     # inst_score: placeholder (would use institutional net in a future enhancement)
     groups = groups.with_columns(pl.lit(0.0).alias("inst_score"))
 
-    # Composite score (normalise RS to 0-1 within this set of groups)
-    rs_series = groups["rs_avg"]
-    rs_max = rs_series.max() or 0.0
-    rs_min = rs_series.min() or 0.0
-    rs_range = float(rs_max - rs_min) if rs_max != rs_min else 1.0
+    # Composite score
+    # - entry_rate: absolute fraction (0–1), already meaningful as-is
+    # - size: log1p-normalised members_count → large sectors score higher than tiny ones
+    # - rs: absolute RS clipped to [0, 10%]; negative RS gets 0 (no penalty, no boost)
+    #   Using absolute values avoids min-max inflation where a 5-stock sector with +3% RS
+    #   beats a 48-stock sector with -1% RS simply because it's the "relative best".
+    # - institutional: placeholder (0 until T86 data is available)
+    max_members = float(groups["members_count"].max() or 1)
+    import math as _math
+    log_max = _math.log1p(max_members)
 
-    w_er = weights.get("entry_rate", 0.4)
-    w_rs = weights.get("rs", 0.4)
-    w_inst = weights.get("institutional", 0.2)
+    w_er = weights.get("entry_rate", 0.50)
+    w_sz = weights.get("size", 0.15)
+    w_rs = weights.get("rs", 0.20)
+    w_inst = weights.get("institutional", 0.15)
 
+    groups = groups.with_columns(
+        (pl.col("members_count").cast(pl.Float64) + 1.0).log(base=_math.e).alias("_log_members")
+    )
     groups = groups.with_columns(
         (
             w_er * pl.col("entry_rate") * 10
-            + w_rs * ((pl.col("rs_avg") - rs_min) / rs_range) * 10
+            + w_sz * (pl.col("_log_members") / log_max) * 10
+            + w_rs * pl.col("rs_avg").clip(lower_bound=0.0, upper_bound=10.0)
             + w_inst * pl.col("inst_score") * 10
         ).alias("score")
-    )
+    ).drop("_log_members")
 
     # Filter and sort
     groups = groups.filter(pl.col("members_count") >= min_group_size).sort(

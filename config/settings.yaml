@@ -27,9 +27,10 @@ report:
 
 group_analysis:
   weights:
-    entry_rate: 0.4
-    rs: 0.4
-    institutional: 0.2
+    entry_rate: 0.50   # 入選率（最主要）
+    size: 0.15         # 族群規模（log 正規化）
+    rs: 0.20           # 絕對 RS，負值不加分
+    institutional: 0.15
   min_group_size: 2
   top_groups: 10
   top_stocks: 10
