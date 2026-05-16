@@ -15,6 +15,9 @@ console = Console()
 data_app = typer.Typer(help="資料抓取指令（TWSE OpenAPI）", no_args_is_help=True)
 app.add_typer(data_app, name="data")
 
+screen_app = typer.Typer(help="選股篩選指令（Goodinfo）", no_args_is_help=True)
+app.add_typer(screen_app, name="screen")
+
 # ─── 頂層指令 ─────────────────────────────────────────────────────────────────
 
 
@@ -78,6 +81,35 @@ def data_fetch_stock(
     console.print(f"  三大法人：{len(institutional)} 日（累積快取中）")
 
     console.print("[green]fetch-stock 完成[/green]")
+
+
+# ─── screen 子指令 ────────────────────────────────────────────────────────────
+
+
+@screen_app.command("dry")
+def screen_dry(
+    strategy: str = typer.Option(..., "--strategy", help="策略 ID，如 a_breakout"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """組出 Goodinfo 篩選 URL（不打網），貼到瀏覽器手動驗證。"""
+    import yaml
+
+    from tw_screener.screener.goodinfo.url_builder import build_screener_url, load_strategy
+
+    with open(settings, encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh)
+
+    strategies_dir = Path(cfg["paths"]["strategies_dir"])
+    strategy_path = strategies_dir / f"{strategy}.yaml"
+    if not strategy_path.exists():
+        console.print(f"[red]找不到策略檔：{strategy_path}[/red]")
+        raise typer.Exit(1)
+
+    strat = load_strategy(strategy_path)
+    url = build_screener_url(strat, cfg["goodinfo"]["base_url"])
+
+    console.print(f"[bold]策略：{strat.name}[/bold]  （{strat.description}）")
+    console.print(f"\n[cyan]{url}[/cyan]")
 
 
 if __name__ == "__main__":

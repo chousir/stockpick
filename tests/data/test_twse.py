@@ -233,7 +233,6 @@ def test_fetch_daily_all_cache_hit(tmp_path: Path):
     save_parquet(sample_df, cache_file)
 
     get_calls: list[str] = []
-    original_get = client._get
 
     def mock_get(endpoint: str) -> list:
         get_calls.append(endpoint)

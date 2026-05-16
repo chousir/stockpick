@@ -1,0 +1,30 @@
+id: a_breakout
+name: "波段啟動"
+description: "技術面剛轉強、量價配合的起漲股候選"
+holding_period: "1-4 weeks"
+market: "上市/上櫃"
+
+filters:
+  - item: "成交筆數"
+    period: "日"
+    min: 5000
+  - item: "月成交均量"
+    min: 1000
+  - item: "股價"
+    min: 15
+    max: 300
+
+rules:
+  - "週MACD ↗–還原權值"
+  - "均線多頭排列–日"
+  - "股價站上月線"
+  - "量增價漲（突破日）"
+
+display_sheet: "交易狀況"
+display_period: "日"
+
+post_filter_sort:
+  - field: "成交筆數"
+    order: "desc"
+  - field: "近5日漲幅"
+    order: "desc"
