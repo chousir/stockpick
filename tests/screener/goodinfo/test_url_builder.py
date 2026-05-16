@@ -29,12 +29,12 @@ def test_load_strategy_name():
 
 def test_load_strategy_filters_count():
     s = load_strategy(STRATEGY_PATH)
-    assert len(s.filters) == 2
+    assert len(s.filters) == 1
 
 
 def test_load_strategy_rules_count():
     s = load_strategy(STRATEGY_PATH)
-    assert len(s.rules) == 4
+    assert len(s.rules) == 2
 
 
 def test_load_strategy_filter_no_period():
@@ -48,10 +48,10 @@ def test_load_strategy_filter_min():
     assert s.filters[0].min == 10000
 
 
-def test_load_strategy_filter_max():
+def test_load_strategy_filter_min_only():
+    """成交筆數 filter 只有 min，沒有 max。"""
     s = load_strategy(STRATEGY_PATH)
-    price_filter = next(f for f in s.filters if f.item == "股價")
-    assert price_filter.max == 300
+    assert s.filters[0].max is None
 
 
 # ─── FilterCondition ──────────────────────────────────────────────────────────
@@ -95,7 +95,6 @@ def test_url_contains_filter_items():
     s = load_strategy(STRATEGY_PATH)
     url = build_screener_url(s, BASE_URL)
     assert "FL_ITEM0" in url
-    assert "FL_ITEM1" in url
 
 
 def test_url_filter_item_no_period_suffix():
@@ -114,20 +113,20 @@ def test_url_contains_min_value():
     assert "10000" in decoded  # 成交筆數 min
 
 
-def test_url_contains_max_value():
-    s = load_strategy(STRATEGY_PATH)
-    url = build_screener_url(s, BASE_URL)
-    decoded = unquote(url)
-    assert "300" in decoded  # 股價 max
-
-
 def test_url_contains_rules():
     s = load_strategy(STRATEGY_PATH)
     url = build_screener_url(s, BASE_URL)
     assert "FL_RULE0" in url
     assert "FL_RULE1" in url
-    assert "FL_RULE2" in url
-    assert "FL_RULE3" in url
+
+
+def test_url_rules_use_goodinfo_format():
+    """Rules must use Goodinfo format: category||value@@display1@@display2."""
+    s = load_strategy(STRATEGY_PATH)
+    url = build_screener_url(s, BASE_URL)
+    decoded = unquote(url)
+    assert "MACD||" in decoded
+    assert "@@" in decoded
 
 
 def test_url_contains_display_sheet():

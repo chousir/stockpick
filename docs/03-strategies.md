@@ -17,6 +17,11 @@
 
 **三組可能的重疊**：A∩B = 強勢成長股（最強候選）、B∩C = 穩定成長配息股（核心持股）。
 
+> **規則格式說明**（2026-05-16 驗證）：
+> Goodinfo FL_RULE 格式為 `category||value@@display1@@display2`。
+> FL_ITEM 為 Goodinfo 可篩選的數值欄位名稱（167 個選項，已從 JS 確認）。
+> 格式錯誤會導致特定條件完全無效但不報錯。
+
 ---
 
 ## 策略 A：波段啟動（breakout）
@@ -26,40 +31,33 @@
 ```yaml
 id: a_breakout
 name: "波段啟動"
-description: "技術面剛轉強、量價配合的起漲股候選"
+description: "週MACD翻多 + 短中期均線多頭排列且走揚的起漲股候選"
 holding_period: "1-4 weeks"
 market: "上市/上櫃"
 
 filters:
   - item: "成交筆數"
-    period: "日"
-    min: 5000
-  - item: "月成交均量"
-    min: 1000      # 張
-  - item: "股價"
-    min: 15
-    max: 300
+    min: 10000
 
 rules:
-  - "週MACD ↗–還原權值"          # 週 MACD 翻多動能初現
-  - "均線多頭排列–日"             # 5/10/20/60 日線多頭排列
-  - "股價站上月線"
-  - "量增價漲（突破日）"
+  - "MACD||週MACD ↗–還原權值@@週MACD走勢@@還原權值–MACD ↗"
+  - "均線位置||5日/10日/20日線多頭排列且走揚@@均價線多頭排列且走揚@@5日/10日/20日"
 
 display_sheet: "交易狀況"
 display_period: "日"
 
-# 用於後續排序與分析
 post_filter_sort:
-  - field: "成交筆數"
+  - field: "漲跌幅"
     order: "desc"
-  - field: "近5日漲幅"
+  - field: "成交張數"
     order: "desc"
 ```
 
 **取捨**：
-- 不加「KD」濾網，避免錯過剛轉強、KD 還沒交叉的票。
-- 不加「外資買超」濾網，這留給策略 B。
+- 不加「股價區間」濾網，避免濾掉大漲後股價偏高但仍有空間的票。
+- 使用還原權值版 MACD，避免除息造成的假跌。
+- 不加「KD 黃金交叉」，避免錯過剛轉強、KD 還沒交叉的票。
+- 不加「外資買超」，這留給策略 B。
 
 ---
 
@@ -70,38 +68,32 @@ post_filter_sort:
 ```yaml
 id: b_growth_institutional
 name: "法人成長"
-description: "營收動能 + 法人連續買超的成長股"
+description: "月累計營收年增 15% 以上 + 外資與投信同步連續買超的成長股"
 holding_period: "1-3 months"
 market: "上市/上櫃"
 
 filters:
-  - item: "近 1 月營收年增率 (%)"
+  - item: "累計月營收年增減率(%)"
     min: 15
-  - item: "最新季 EPS (元)"
-    min: 0.01
-  - item: "毛利率（近4季）年增 (%)"
-    min: 0
 
 rules:
-  - "月累計營收連年增加"                     # ≥ 4 季
-  - "外資連續買超 5 日以上"
-  - "投信連續買超 3 日以上"
-  - "融資 5 日減少"                           # 散戶賣 + 法人買 = 鎖籌
+  - "法人買賣||外資連買 – 日@@外資連續買超@@外資連續買超 – 日"
+  - "法人買賣||投信連買 – 日@@投信連續買超@@投信連續買超 – 日"
 
-display_sheet: "法人買賣"
+display_sheet: "交易狀況"
 display_period: "日"
 
 post_filter_sort:
-  - field: "外資近5日買超張數"
+  - field: "漲跌幅"
     order: "desc"
-  - field: "月營收年增率"
+  - field: "成交張數"
     order: "desc"
 ```
 
 **取捨**：
-- EPS 門檻 0.01 而非 0：剔除微小虧損但避免完全過濾掉轉盈個股。
-- 「外資 5 日 + 投信 3 日」雙條件，門檻嚴格，篩出量會少但品質高。
-- 加「融資減少」是台股獨特訊號：散戶賣、法人買，籌碼結構轉佳。
+- 月累計營收年增 15% 過濾微弱成長，聚焦真正有動能的公司。
+- 外資 + 投信雙確認：雙法人同步連買，籌碼穩定度高於單一法人。
+- FL_RULE 的「連買 – 日」是連續買超（日計），沒有指定最少天數，Goodinfo 預設顯示任何連買天數。
 
 ---
 
@@ -112,44 +104,33 @@ post_filter_sort:
 ```yaml
 id: c_dividend_steady
 name: "穩健存股"
-description: "穩定配息 + 合理估值 + 財務體質佳的長期持有候選"
+description: "連續配息 8 年以上且現金股利持續增加或持平的長期持有候選"
 holding_period: "6+ months"
 market: "上市/上櫃"
 
 filters:
   - item: "連續配發現金股利次數"
-    min: 8                       # 連續配息 8 年以上
-  - item: "近 5 年平均現金殖利率 (%)"
-    min: 4
-  - item: "近 5 年平均盈餘配發率 (%)"
-    min: 40
-    max: 80
-  - item: "ROE (近4季)"
-    min: 10
-  - item: "負債比 (%)"
-    max: 60
-  - item: "日均成交筆數"
-    min: 1000
+    min: 8
 
 rules:
-  - "EPS 連續 8 季為正"
-  - "股價淨值比 (PB) 介於歷史 30~70 百分位"
-  - "近 1 月股價距年線 -10% ~ +15%"
+  - "股利政策||連續配發現金股利@@連續配發股利次數@@連續配發現金股利"
+  - "股利政策||現金股利連續增加或持平@@股利連續增減或持平@@現金股利連續增加或持平"
 
-display_sheet: "獲利狀況"
-display_period: "年"
+display_sheet: "交易狀況"
+display_period: "日"
 
 post_filter_sort:
-  - field: "近5年平均殖利率"
+  - field: "漲跌幅"
     order: "desc"
-  - field: "ROE近4季"
+  - field: "成交張數"
     order: "desc"
 ```
 
 **取捨**：
-- 殖利率不設無上限，避免抓到「殖利率高是因為股價暴跌」的陷阱。
-- 配發率 40-80%：不是把賺的全發掉（沒成長），也不是吝嗇（不發給股東）。
-- 加流動性下限 1000 筆／日：存股也要能進出。
+- 連續配息 8 次（≈8 年）：跨越完整景氣循環（通常 7-10 年），排除一次性配息。
+- 「現金股利連續增加或持平」：排除股利逐年遞減（財務惡化訊號）。
+- 不設殖利率下限：殖利率高低需對比當時利率環境，由人判斷；避免程式鎖死邏輯。
+- display_sheet 統一用「交易狀況」：篩選結果 CSV 欄位一致，個股詳情由報告階段另行抓取。
 
 ---
 
@@ -168,10 +149,22 @@ ls reports/$(date +%Y-W%V)/
 
 輸出格式：`reports/YYYY-Www/screen_result_{id}.csv`
 
-CSV 欄位：
+CSV 欄位（所有策略一致）：
 ```
-stock_id,name,industry,close,volume,strategy_id,screened_at,goodinfo_url
+stock_id,name,market,close,change_pct,volume_lots,amount_million,pe_ratio,pb_ratio,strategy_id,screened_at,goodinfo_url
 ```
+
+## 新增策略的流程
+
+1. 在 `config/strategies/` 加 YAML
+2. 確認 FL_ITEM 名稱在 Goodinfo 167 個選項中（見 JS 驗證）
+3. 確認 FL_RULE 格式為 `category||value@@display1@@display2`（從 StockList_ProtoAsync.js 提取）
+4. 在 `tests/fixtures/goodinfo/` 加一份該策略的真實 HTML
+5. 跑 `make test`
+6. 跑 `make screen STRATEGY=<new_id>` 確認可運作
+7. 在本檔加上策略卡片
+
+**新增策略不需要寫 Python**——這是 YAML-driven 設計的目的。
 
 ## 策略迭代記錄
 
@@ -179,18 +172,3 @@ stock_id,name,industry,close,volume,strategy_id,screened_at,goodinfo_url
 - 三組各篩出幾檔
 - 重疊標的（A∩B, B∩C, A∩C, A∩B∩C）
 - 異常觀察（例如全市場大跌時 A 篩出 0 檔，這是正常的）
-
-三個月後跑 `make backtest-strategies`，產出：
-- 每組策略在過去篩出的標的，後 1/4/12 週的平均報酬
-- 勝率
-- 建議調整方向
-
-## 新增策略的流程
-
-1. 在 `config/strategies/` 加 YAML
-2. 在 `tests/fixtures/goodinfo/` 加一份該策略的真實 HTML（防 HTML 結構變化）
-3. 跑 `make test`
-4. 跑 `make screen STRATEGY=<new_id>` 確認可運作
-5. 在本檔加上策略卡片
-
-**新增策略不需要寫 Python**——這是 YAML-driven 設計的目的。

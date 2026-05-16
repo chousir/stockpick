@@ -1,21 +1,16 @@
 id: a_breakout
 name: "波段啟動"
-description: "技術面剛轉強、量價配合的起漲股候選"
+description: "週MACD翻多 + 短中期均線多頭排列且走揚的起漲股候選"
 holding_period: "1-4 weeks"
 market: "上市/上櫃"
 
 filters:
   - item: "成交筆數"
     min: 10000
-  - item: "股價"
-    min: 15
-    max: 300
 
 rules:
-  - "週MACD ↗–還原權值"
-  - "均線多頭排列–日"
-  - "股價站上月線"
-  - "量增價漲（突破日）"
+  - "MACD||週MACD ↗–還原權值@@週MACD走勢@@還原權值–MACD ↗"
+  - "均線位置||5日/10日/20日線多頭排列且走揚@@均價線多頭排列且走揚@@5日/10日/20日"
 
 display_sheet: "交易狀況"
 display_period: "日"
