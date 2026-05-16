@@ -37,7 +37,9 @@ def _strategy_str(row: dict, strategy_ids: list[str]) -> str:
     return "+".join(labels) if labels else "-"
 
 
-def _build_stock_dict(srow: dict, strategy_ids: list[str], rank_in_group: int, group_size: int) -> dict:
+def _build_stock_dict(
+    srow: dict, strategy_ids: list[str], rank_in_group: int, group_size: int
+) -> dict:
     return {
         "stock_id": srow["stock_id"],
         "name": srow["name"],
@@ -75,10 +77,10 @@ def _build_context(
     if not leaders.is_empty() and len(active_strategy_ids) >= 2:
         for i, sid_a in enumerate(active_strategy_ids):
             for sid_b in active_strategy_ids[i + 1 :]:
-                key = (
-                    f"{_STRATEGY_LABEL.get(sid_a, sid_a[0].upper())}（{_STRATEGY_NAME.get(sid_a, sid_a)}）"
-                    f"∩{_STRATEGY_LABEL.get(sid_b, sid_b[0].upper())}（{_STRATEGY_NAME.get(sid_b, sid_b)}）"
-                )
+                def _lbl(sid: str) -> str:
+                    lbl = _STRATEGY_LABEL.get(sid, sid[0].upper())
+                    return f"{lbl}（{_STRATEGY_NAME.get(sid, sid)}）"
+                key = f"{_lbl(sid_a)}∩{_lbl(sid_b)}"
                 mask = pl.col(f"in_{sid_a}") & pl.col(f"in_{sid_b}")
                 intersections[key] = leaders.filter(mask)["stock_id"].to_list()
 

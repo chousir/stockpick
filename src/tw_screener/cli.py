@@ -21,6 +21,9 @@ app.add_typer(screen_app, name="screen")
 analysis_app = typer.Typer(help="族群分析指令", no_args_is_help=True)
 app.add_typer(analysis_app, name="analysis")
 
+report_app = typer.Typer(help="個股報告指令", no_args_is_help=True)
+app.add_typer(report_app, name="report")
+
 # ─── 頂層指令 ─────────────────────────────────────────────────────────────────
 
 
@@ -335,6 +338,89 @@ def analysis_leaders(
             )
     else:
         console.print("[yellow]無領頭羊資料[/yellow]")
+
+
+# ─── report 子指令 ────────────────────────────────────────────────────────────
+
+
+@report_app.command("stock")
+def report_stock(
+    stock_id: str = typer.Argument(help="股票代號，如 2330"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+    week: str = typer.Option("", "--week", help="週別標籤，如 2026-W20（預設本週）"),
+) -> None:
+    """產出單檔個股深度報告（需設定 ANTHROPIC_API_KEY）。"""
+    import os
+
+    from tw_screener.report.builder import build_stock_report
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        console.print(
+            "[yellow]未設定 ANTHROPIC_API_KEY，將產出資料草稿（Claude 分析段落留空）[/yellow]"
+        )
+
+    week_tag = week if week else None
+    output = build_stock_report(stock_id, settings, week_tag=week_tag, api_key=api_key)
+    console.print(f"[green]報告輸出：[/green][bold]{output}[/bold]")
+
+
+@report_app.command("batch")
+def report_batch(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+    top: int = typer.Option(5, "--top", help="取推薦清單前 N 檔"),
+) -> None:
+    """批次產出本週 group_analysis.md 推薦清單的個股報告。"""
+    import os
+    import re
+
+    import yaml as _yaml
+
+    from tw_screener.report.builder import build_stock_report
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        console.print(
+            "[yellow]未設定 ANTHROPIC_API_KEY，將產出資料草稿[/yellow]"
+        )
+
+    with open(settings, encoding="utf-8") as fh:
+        cfg = _yaml.safe_load(fh)
+
+    rdir = Path(cfg["paths"]["reports_dir"])
+    week_dirs = sorted(
+        [d for d in rdir.iterdir() if d.is_dir()],
+        key=lambda d: d.name,
+        reverse=True,
+    )
+    if not week_dirs:
+        console.print("[red]找不到報告目錄，請先執行 make group[/red]")
+        raise typer.Exit(1)
+
+    week_dir = week_dirs[0]
+    week_tag = week_dir.name
+    report_file = week_dir / "group_analysis.md"
+    if not report_file.exists():
+        console.print(f"[red]找不到 {report_file}，請先執行 make group[/red]")
+        raise typer.Exit(1)
+
+    # Extract stock IDs from priority stocks section
+    text = report_file.read_text(encoding="utf-8")
+    # Pattern: "N. **XXXX 股名**（..." from section 5
+    stock_ids = re.findall(r"\*\*(\d{4,6})\s+[^*]+\*\*", text)[:top]
+
+    if not stock_ids:
+        console.print("[yellow]group_analysis.md 中找不到推薦個股[/yellow]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold]批次報告：{week_tag}，共 {len(stock_ids)} 檔[/bold]")
+    for sid in stock_ids:
+        console.print(f"  產出 {sid}...")
+        try:
+            output = build_stock_report(sid, settings, week_tag=week_tag, api_key=api_key)
+            console.print(f"    [green]→ {output.name}[/green]")
+        except Exception as e:
+            console.print(f"    [red]失敗：{e}[/red]")
 
 
 if __name__ == "__main__":
