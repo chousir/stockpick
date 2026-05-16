@@ -250,10 +250,21 @@ def analysis_group(
 
     client = create_client(settings)
 
-    console.print("  載入產業別資料（TWSE）...")
-    industry_df = client.fetch_listed_industry()
+    console.print("  載入產業別資料（TWSE 上市 + 上櫃）...")
+    listed_df = client.fetch_listed_industry()
+    otc_df = client.fetch_otc_industry()
+    if not listed_df.is_empty() and not otc_df.is_empty():
+        industry_df = _pl.concat([listed_df, otc_df])
+    elif not listed_df.is_empty():
+        industry_df = listed_df
+    elif not otc_df.is_empty():
+        industry_df = otc_df
+    else:
+        industry_df = _pl.DataFrame()
     if industry_df.is_empty():
         console.print("[yellow]  產業別資料無法取得，以「未分類」處理[/yellow]")
+    else:
+        console.print(f"  上市 {len(listed_df)} 檔、上櫃 {len(otc_df)} 檔")
 
     console.print("  載入日線快取...")
     price_history = client.fetch_daily_all()

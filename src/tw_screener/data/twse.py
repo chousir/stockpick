@@ -1,5 +1,6 @@
 """證交所 OpenAPI 資料抓取（sync，httpx）。"""
 
+import re
 import time
 from datetime import date
 from pathlib import Path
@@ -274,6 +275,76 @@ def _parse_listed_industry(data: list[dict[str, Any]]) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=schema)
 
 
+# OTC industry names from ISIN → (code, canonical_name)
+# Same code as listed where the industry matches; new codes (42-46) for OTC-only categories
+_OTC_INDUSTRY_MAP: dict[str, tuple[str, str]] = {
+    "半導體業":       ("24", "半導體業"),
+    "電子零組件業":   ("28", "電子零組件業"),
+    "生技醫療業":     ("22", "生技醫療業"),
+    "電機機械":       ("05", "電機機械"),
+    "其他電子業":     ("31", "其他電子業"),
+    "光電業":         ("26", "光電業"),
+    "電腦及週邊設備業": ("25", "電腦及周邊設備業"),
+    "通信網路業":     ("27", "通信網路業"),
+    "電子通路業":     ("29", "電子通路業"),
+    "資訊服務業":     ("30", "資訊服務業"),
+    "其他業":         ("20", "其他"),
+    "化學工業":       ("21", "化學工業"),
+    "油電燃氣業":     ("23", "油電燃氣業"),
+    "建材營造業":     ("14", "建材營造"),
+    "航運業":         ("15", "航運業"),
+    "觀光餐旅":       ("16", "觀光餐旅業"),
+    "金融保險業":     ("17", "金融保險"),
+    "食品工業":       ("02", "食品工業"),
+    "塑膠工業":       ("03", "塑膠工業"),
+    "紡織纖維":       ("04", "紡織纖維"),
+    "電器電纜":       ("06", "電器電纜"),
+    "鋼鐵工業":       ("10", "鋼鐵工業"),
+    "運動休閒":       ("37", "運動休閒業"),
+    "居家生活":       ("42", "居家生活"),
+    "數位雲端":       ("43", "數位雲端"),
+    "文化創意業":     ("44", "文化創意業"),
+    "綠能環保":       ("45", "綠能環保"),
+    "農業科技業":     ("46", "農業科技業"),
+}
+
+_ISIN_OTC_URL = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"
+
+
+def _parse_otc_industry(html: str) -> pl.DataFrame:
+    """解析 ISIN 上櫃一覽表 HTML → stock_id / industry_code / industry_name。"""
+    schema = {
+        "stock_id": pl.Utf8,
+        "stock_name": pl.Utf8,
+        "industry_code": pl.Utf8,
+        "industry_name": pl.Utf8,
+    }
+    rows = []
+    for row in re.findall(r"<tr>(.*?)</tr>", html, re.DOTALL):
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
+        if len(cells) != 7:
+            continue
+        code_name = re.sub(r"<[^>]+>", "", cells[0]).strip()
+        market = re.sub(r"<[^>]+>", "", cells[3]).strip()
+        ind_raw = re.sub(r"<[^>]+>", "", cells[4]).strip()
+        parts = code_name.split("　")  # full-width space
+        if len(parts) < 2 or market != "上櫃" or not ind_raw:
+            continue
+        stock_id = parts[0].strip()
+        if not stock_id.isdigit():
+            continue
+        code, name = _OTC_INDUSTRY_MAP.get(ind_raw, ("otc", ind_raw))
+        rows.append(
+            {
+                "stock_id": stock_id,
+                "stock_name": parts[1].strip(),
+                "industry_code": code,
+                "industry_name": name,
+            }
+        )
+    return pl.DataFrame(rows, schema=schema) if rows else pl.DataFrame(schema=schema)
+
+
 # ─── 月份計算工具 ─────────────────────────────────────────────────────────────
 
 
@@ -386,6 +457,35 @@ class TWSEClient:
             save_parquet(df, cache_file)
         else:
             logger.warning("t187ap03_L 回傳空資料，產業別分類無法取得")
+        return df
+
+    def fetch_otc_industry(self) -> pl.DataFrame:
+        """抓上櫃公司產業別（ISIN 一覽表），快取到 otc_industry_YYYYMM.parquet（月更新）。"""
+        ym = date.today().strftime("%Y%m")
+        cache_file = self.cache_dir / f"otc_industry_{ym}.parquet"
+        if is_fresh(cache_file, self.ttl_hours * 30):
+            logger.info(f"命中快取 {cache_file}")
+            return load_parquet(cache_file)
+        try:
+            elapsed = time.monotonic() - self._last_req
+            if elapsed < self.interval_sec:
+                time.sleep(self.interval_sec - elapsed)
+            r = httpx.get(_ISIN_OTC_URL, headers={"User-Agent": self.user_agent}, timeout=20)
+            self._last_req = time.monotonic()
+            html = r.content.decode("ms950", errors="replace")
+        except Exception as e:
+            logger.warning(f"fetch_otc_industry 網路錯誤：{e}")
+            _empty: dict[str, type[pl.DataType]] = {
+                "stock_id": pl.Utf8, "stock_name": pl.Utf8,
+                "industry_code": pl.Utf8, "industry_name": pl.Utf8,
+            }
+            return pl.DataFrame(schema=_empty)
+        df = _parse_otc_industry(html)
+        if not df.is_empty():
+            save_parquet(df, cache_file)
+            logger.info(f"上櫃產業別：{len(df)} 檔")
+        else:
+            logger.warning("ISIN 上櫃一覽表解析結果為空")
         return df
 
     def fetch_stock_ohlcv(self, stock_id: str, n_days: int = 60) -> pl.DataFrame:
