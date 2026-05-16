@@ -31,9 +31,12 @@ class ScreenerRunner:
 
 ## 輸出 CSV 規格
 
+> **注意**：欄位依據 Goodinfo 交易狀況篩選結果實際回傳欄位更新（2026-05-16 驗證）。
+> Goodinfo 篩選結果不提供 industry/concept，那些在個股詳情頁，由使用者自行判斷。
+
 ```
-stock_id,name,industry,concept,close,volume,amount,strategy_id,screened_at,goodinfo_url
-2330,台積電,半導體,AI/HPC,1075.0,18500,19.8B,a_breakout,2026-05-15,https://goodinfo.tw/tw/StockInfo/StockDetail.asp?STOCK_ID=2330
+stock_id,name,market,close,change_pct,volume_lots,amount_million,pe_ratio,pb_ratio,strategy_id,screened_at,goodinfo_url
+2330,台積電,市,2265.0,-0.22,18560,42.5,,1.2,a_breakout,2026-05-16,https://goodinfo.tw/tw/StockInfo/StockDetail.asp?STOCK_ID=2330
 ...
 ```
 
@@ -41,13 +44,15 @@ stock_id,name,industry,concept,close,volume,amount,strategy_id,screened_at,goodi
 
 | 欄位 | 型別 | 來源 | 說明 |
 |---|---|---|---|
-| `stock_id` | str | Goodinfo | 4 位股號（必填） |
+| `stock_id` | str | Goodinfo | 股號（必填） |
 | `name` | str | Goodinfo | 股票簡稱 |
-| `industry` | str | Goodinfo | 證交所產業分類 |
-| `concept` | str | Goodinfo | 概念股標籤（可空，逗號分隔） |
-| `close` | float | Goodinfo | 篩選當日收盤 |
-| `volume` | int | Goodinfo | 篩選當日成交張數 |
-| `amount` | str | Goodinfo | 成交金額（保留原格式） |
+| `market` | str | Goodinfo | 市場別（市=上市, 櫃=上櫃, 興=興櫃） |
+| `close` | float | Goodinfo | 篩選當日收盤價 |
+| `change_pct` | float | Goodinfo | 漲跌幅（%） |
+| `volume_lots` | int | Goodinfo | 成交張數 |
+| `amount_million` | float | Goodinfo | 成交額（百萬元） |
+| `pe_ratio` | float | Goodinfo | 本益比（可空，ETF 無此值） |
+| `pb_ratio` | float | Goodinfo | 股價淨值比（可空） |
 | `strategy_id` | str | Runner | 策略識別碼（a_breakout 等） |
 | `screened_at` | date | Runner | 執行日期 |
 | `goodinfo_url` | str | Runner | 個股詳情頁連結（拼接） |
