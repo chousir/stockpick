@@ -86,30 +86,84 @@ def data_fetch_stock(
 # ─── screen 子指令 ────────────────────────────────────────────────────────────
 
 
-@screen_app.command("dry")
-def screen_dry(
-    strategy: str = typer.Option(..., "--strategy", help="策略 ID，如 a_breakout"),
-    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
-) -> None:
-    """組出 Goodinfo 篩選 URL（不打網），貼到瀏覽器手動驗證。"""
-    import yaml
+def _print_strategy_url(strategy: str, settings: Path) -> None:
+    import yaml as _yaml
 
     from tw_screener.screener.goodinfo.url_builder import build_screener_url, load_strategy
 
     with open(settings, encoding="utf-8") as fh:
-        cfg = yaml.safe_load(fh)
+        cfg = _yaml.safe_load(fh)
 
-    strategies_dir = Path(cfg["paths"]["strategies_dir"])
-    strategy_path = strategies_dir / f"{strategy}.yaml"
+    strategy_path = Path(cfg["paths"]["strategies_dir"]) / f"{strategy}.yaml"
     if not strategy_path.exists():
         console.print(f"[red]找不到策略檔：{strategy_path}[/red]")
         raise typer.Exit(1)
 
     strat = load_strategy(strategy_path)
     url = build_screener_url(strat, cfg["goodinfo"]["base_url"])
-
     console.print(f"[bold]策略：{strat.name}[/bold]  （{strat.description}）")
     console.print(f"\n[cyan]{url}[/cyan]")
+
+
+@screen_app.command("dry")
+def screen_dry(
+    strategy: str = typer.Option(..., "--strategy", help="策略 ID，如 a_breakout"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """組出 Goodinfo 篩選 URL（不打網），貼到瀏覽器手動驗證。"""
+    _print_strategy_url(strategy, settings)
+
+
+@screen_app.command("run")
+def screen_run(
+    strategy: str = typer.Argument(help="策略 ID，如 a_breakout"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="只組 URL，不打網"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """執行篩選策略，輸出 CSV 到 reports/YYYY-Www/。--dry-run 只組 URL 不打網。"""
+    if dry_run:
+        _print_strategy_url(strategy, settings)
+        return
+
+    from datetime import date as _date
+
+    import yaml as _yaml
+
+    from tw_screener.screener.runner import ScreenerRunner
+
+    with open(settings, encoding="utf-8") as fh:
+        cfg = _yaml.safe_load(fh)
+
+    strategy_path = Path(cfg["paths"]["strategies_dir"]) / f"{strategy}.yaml"
+    if not strategy_path.exists():
+        console.print(f"[red]找不到策略檔：{strategy_path}[/red]")
+        raise typer.Exit(1)
+
+    runner = ScreenerRunner(settings)
+    df = runner.run_strategy(strategy_path)
+    week_tag = _date.today().strftime("%Y-W%V")
+    output = runner.export_csv(df, strategy, week_tag)
+
+    console.print(f"[green]篩出 {len(df)} 檔[/green]，結果存於 [bold]{output}[/bold]")
+
+
+@screen_app.command("run-all")
+def screen_run_all(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """執行全部策略（config/strategies/ 下所有 YAML），輸出 CSV。"""
+    from datetime import date as _date
+
+    from tw_screener.screener.runner import ScreenerRunner
+
+    runner = ScreenerRunner(settings)
+    results = runner.run_all()
+
+    for strategy_id, df in results.items():
+        console.print(f"  {strategy_id}: [green]{len(df)} 檔[/green]")
+
+    week_tag = _date.today().strftime("%Y-W%V")
+    console.print(f"\n[bold]報告目錄：reports/{week_tag}/[/bold]")
 
 
 if __name__ == "__main__":

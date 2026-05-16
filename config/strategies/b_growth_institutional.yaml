@@ -1,0 +1,28 @@
+id: b_growth_institutional
+name: "法人成長"
+description: "營收動能 + 法人連續買超的成長股"
+holding_period: "1-3 months"
+market: "上市/上櫃"
+
+filters:
+  - item: "近 1 月營收年增率 (%)"
+    min: 15
+  - item: "最新季 EPS (元)"
+    min: 0.01
+  - item: "毛利率（近4季）年增 (%)"
+    min: 0
+
+rules:
+  - "月累計營收連年增加"
+  - "外資連續買超 5 日以上"
+  - "投信連續買超 3 日以上"
+  - "融資 5 日減少"
+
+display_sheet: "法人買賣"
+display_period: "日"
+
+post_filter_sort:
+  - field: "外資近5日買超張數"
+    order: "desc"
+  - field: "月營收年增率"
+    order: "desc"

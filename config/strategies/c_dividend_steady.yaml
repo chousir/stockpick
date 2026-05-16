@@ -1,0 +1,34 @@
+id: c_dividend_steady
+name: "穩健存股"
+description: "穩定配息 + 合理估值 + 財務體質佳的長期持有候選"
+holding_period: "6+ months"
+market: "上市/上櫃"
+
+filters:
+  - item: "連續配發現金股利次數"
+    min: 8
+  - item: "近 5 年平均現金殖利率 (%)"
+    min: 4
+  - item: "近 5 年平均盈餘配發率 (%)"
+    min: 40
+    max: 80
+  - item: "ROE (近4季)"
+    min: 10
+  - item: "負債比 (%)"
+    max: 60
+  - item: "日均成交筆數"
+    min: 1000
+
+rules:
+  - "EPS 連續 8 季為正"
+  - "股價淨值比 (PB) 介於歷史 30~70 百分位"
+  - "近 1 月股價距年線 -10% ~ +15%"
+
+display_sheet: "獲利狀況"
+display_period: "年"
+
+post_filter_sort:
+  - field: "近5年平均殖利率"
+    order: "desc"
+  - field: "ROE近4季"
+    order: "desc"
