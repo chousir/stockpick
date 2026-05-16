@@ -11,11 +11,13 @@ import pytest
 from tw_screener.data.cache import find_latest, is_fresh, load_parquet, save_parquet
 from tw_screener.data.twse import (
     TWSEClient,
+    _TWSE_INDUSTRY_NAMES,
     _clean_float,
     _clean_int,
     _months_back,
     _parse_daily_all,
     _parse_institutional,
+    _parse_listed_industry,
     _parse_revenue,
     _parse_stock_day,
     _roc_compact_to_date,
@@ -154,6 +156,33 @@ def test_parse_revenue_empty():
     df = _parse_revenue([])
     assert df.is_empty()
     assert "stock_id" in df.columns
+
+
+def test_parse_listed_industry():
+    with open(FIXTURE_DIR / "industry_sample.json") as f:
+        data = json.load(f)
+    df = _parse_listed_industry(data)
+    assert len(df) == 8
+    row_2330 = df.filter(pl.col("stock_id") == "2330").to_dicts()[0]
+    assert row_2330["industry_code"] == "24"
+    assert row_2330["industry_name"] == "半導體業"
+
+
+def test_parse_listed_industry_unknown_code():
+    """未知產業碼應 fallback 為「其他」。"""
+    data = [{"公司代號": "9999X", "公司名稱": "測試", "產業別": "99"}]
+    df = _parse_listed_industry(data)
+    assert df["industry_name"][0] == "其他"
+
+
+def test_parse_listed_industry_empty():
+    df = _parse_listed_industry([])
+    assert df.is_empty()
+    assert "industry_code" in df.columns
+
+
+def test_twse_industry_names_has_semiconductor():
+    assert _TWSE_INDUSTRY_NAMES["24"] == "半導體業"
 
 
 # ─── Cache 工具 ──────────────────────────────────────────────────────────────

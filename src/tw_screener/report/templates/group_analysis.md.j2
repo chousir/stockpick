@@ -1,0 +1,60 @@
+# {{ week_tag }} 族群分析報告
+
+生成時間：{{ generated_at }}
+
+## 1. 入選分布總覽
+
+{% for sid in strategy_ids -%}
+- 策略 {{ strategy_labels[sid] }}（{{ sid }}）共 {{ summary.counts.get(sid, 0) }} 檔
+{% endfor -%}
+- 三組總聯集：{{ summary.total_union }} 檔（去重後）
+{% for key, stocks in summary.intersections.items() -%}
+{% if stocks -%}
+- {{ key }}：{{ stocks | length }} 檔{% if stocks | length <= 5 %}（{{ stocks | join("、") }}）{% endif %}
+
+{% endif -%}
+{% endfor %}
+## 2. 族群強度排名（前 {{ top_groups }}）
+
+| Rank | 族群 | {% for sid in strategy_ids %}{{ strategy_labels[sid] }} 入選 | {% endfor %}族群入選率 | 平均漲跌幅 | 強度分數 |
+|---|---|{% for sid in strategy_ids %}---|{% endfor %}---|---|---|
+{% for group in groups -%}
+| {{ group.rank }} | {{ group.industry_name }} | {% for sid in strategy_ids %}{{ group.counts.get(sid, 0) }} | {% endfor %}{{ group.entry_rate_pct_str }} | {{ group.rs_avg_str }} | {{ group.score_str }} |
+{% endfor %}
+
+## 3. 各族群領頭羊候選
+
+{% for group in groups %}
+### {{ group.rank }}. {{ group.industry_name }}（共 {{ group.members_count }} 檔入選）
+
+{% for stock in group.stocks -%}
+{% if stock.is_leader -%}
+- **領頭羊候選：{{ stock.stock_id }} {{ stock.name }}**
+  - 漲跌幅：{{ stock.change_pct_str }}
+  - 成交金額：{{ "%.0f" | format(stock.amount_million) }} 百萬元
+  - 入選策略：{{ stock.strategy_str }}
+  - 在族群中：成交金額排名 {{ stock.amount_rank_in_group }}/{{ stock.group_size }}、漲幅排名 {{ stock.rs_rank_in_group }}/{{ stock.group_size }}
+  - Goodinfo: {{ stock.goodinfo_url }}
+{% endif -%}
+{% endfor -%}
+{% set followers = [] %}
+{% for stock in group.stocks %}{% if not stock.is_leader %}{% set _ = followers.append(stock) %}{% endif %}{% endfor %}
+{% if followers -%}
+- 跟漲候選：{% for s in followers[:4] %}{{ s.stock_id }} {{ s.name }}{% if not loop.last %}、{% endif %}{% endfor %}{% if followers | length > 4 %} 等 {{ followers | length }} 檔{% endif %}
+
+{% endif %}
+{% endfor %}
+
+## 4. 觀察
+
+<!-- TODO: Claude 補寫 -->
+
+## 5. 推薦個股深度分析優先順序
+
+{% if priority_stocks -%}
+{% for stock in priority_stocks -%}
+{{ stock.rank }}. **{{ stock.stock_id }} {{ stock.name }}**（族群 #{{ stock.group_rank }} {{ stock.industry_name }}{% if stock.is_leader %}・領頭羊{% endif %}{% if stock.strategy_count >= 2 %}・{{ stock.strategy_str }}{% endif %}）
+{% endfor %}
+{% else -%}
+（無足夠資料產生推薦清單）
+{% endif %}

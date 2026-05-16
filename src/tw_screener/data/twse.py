@@ -68,6 +68,45 @@ def _roc_ym_to_ym(roc_ym: str) -> str:
     return f"{roc_year + 1911}{month}"
 
 
+# ─── 產業別對照表 ─────────────────────────────────────────────────────────────
+
+_TWSE_INDUSTRY_NAMES: dict[str, str] = {
+    "01": "水泥工業",
+    "02": "食品工業",
+    "03": "塑膠工業",
+    "04": "紡織纖維",
+    "05": "電機機械",
+    "06": "電器電纜",
+    "08": "玻璃陶瓷",
+    "09": "造紙工業",
+    "10": "鋼鐵工業",
+    "11": "橡膠工業",
+    "12": "汽車工業",
+    "14": "建材營造",
+    "15": "航運業",
+    "16": "觀光事業",
+    "17": "金融保險",
+    "18": "貿易百貨",
+    "20": "其他",
+    "21": "化學工業",
+    "22": "生技醫療業",
+    "23": "油電燃氣業",
+    "24": "半導體業",
+    "25": "電腦及周邊設備業",
+    "26": "光電業",
+    "27": "通信網路業",
+    "28": "電子零組件業",
+    "29": "電子通路業",
+    "30": "資訊服務業",
+    "31": "其他電子業",
+    "35": "電力供應業",
+    "36": "軟體工業",
+    "37": "運動休閒業",
+    "38": "其他製造業",
+    "91": "存託憑證",
+}
+
+
 # ─── Parse 函數（純 function，不含 I/O，方便測試）──────────────────────────────
 
 
@@ -210,6 +249,31 @@ def _parse_revenue(data: list[dict[str, Any]]) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=schema)
 
 
+def _parse_listed_industry(data: list[dict[str, Any]]) -> pl.DataFrame:
+    """解析 t187ap03_L（上市公司基本資料）→ stock_id / industry_code / industry_name。"""
+    schema = {
+        "stock_id": pl.Utf8,
+        "stock_name": pl.Utf8,
+        "industry_code": pl.Utf8,
+        "industry_name": pl.Utf8,
+    }
+    rows = []
+    for r in data:
+        try:
+            code = r.get("產業別", "").strip()
+            rows.append(
+                {
+                    "stock_id": r["公司代號"].strip(),
+                    "stock_name": r["公司名稱"].strip(),
+                    "industry_code": code,
+                    "industry_name": _TWSE_INDUSTRY_NAMES.get(code, "其他"),
+                }
+            )
+        except (KeyError, ValueError) as e:
+            logger.warning(f"略過無效產業資料：{r.get('公司代號', '?')} — {e}")
+    return pl.DataFrame(rows, schema=schema)
+
+
 # ─── 月份計算工具 ─────────────────────────────────────────────────────────────
 
 
@@ -307,6 +371,21 @@ class TWSEClient:
         df = _parse_revenue(data)
         if not df.is_empty():
             save_parquet(df, cache_file)
+        return df
+
+    def fetch_listed_industry(self) -> pl.DataFrame:
+        """抓上市公司基本資料（產業別），快取到 industry_YYYYMM.parquet（月更新）。"""
+        ym = date.today().strftime("%Y%m")
+        cache_file = self.cache_dir / f"industry_{ym}.parquet"
+        if is_fresh(cache_file, self.ttl_hours * 30):  # 30 倍 TTL ≈ 每月更新
+            logger.info(f"命中快取 {cache_file}")
+            return load_parquet(cache_file)
+        data = self._get("/opendata/t187ap03_L")
+        df = _parse_listed_industry(data)
+        if not df.is_empty():
+            save_parquet(df, cache_file)
+        else:
+            logger.warning("t187ap03_L 回傳空資料，產業別分類無法取得")
         return df
 
     def fetch_stock_ohlcv(self, stock_id: str, n_days: int = 60) -> pl.DataFrame:

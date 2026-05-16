@@ -24,3 +24,12 @@ twse:
 
 report:
   default_top_n: 10
+
+group_analysis:
+  weights:
+    entry_rate: 0.4
+    rs: 0.4
+    institutional: 0.2
+  min_group_size: 2
+  top_groups: 10
+  top_stocks: 10

@@ -18,6 +18,9 @@ app.add_typer(data_app, name="data")
 screen_app = typer.Typer(help="選股篩選指令（Goodinfo）", no_args_is_help=True)
 app.add_typer(screen_app, name="screen")
 
+analysis_app = typer.Typer(help="族群分析指令", no_args_is_help=True)
+app.add_typer(analysis_app, name="analysis")
+
 # ─── 頂層指令 ─────────────────────────────────────────────────────────────────
 
 
@@ -172,6 +175,155 @@ def screen_run_all(
 
     week_tag = _date.today().strftime("%Y-W%V")
     console.print(f"\n[bold]報告目錄：reports/{week_tag}/[/bold]")
+
+
+# ─── analysis 子指令 ──────────────────────────────────────────────────────────
+
+
+def _load_latest_screener_results(
+    settings: Path,
+) -> "tuple[str, dict]":
+    """找最新一週的 screen_result_*.csv，回傳 (week_tag, {strategy_id: DataFrame})。"""
+    import polars as _pl
+    import yaml as _yaml
+
+    with open(settings, encoding="utf-8") as fh:
+        cfg = _yaml.safe_load(fh)
+
+    rdir = Path(cfg["paths"]["reports_dir"])
+    if not rdir.exists():
+        return "", {}
+
+    week_dirs = sorted(
+        [d for d in rdir.iterdir() if d.is_dir()],
+        key=lambda d: d.name,
+        reverse=True,
+    )
+    if not week_dirs:
+        return "", {}
+
+    week_dir = week_dirs[0]
+    week_tag = week_dir.name
+
+    results: dict = {}
+    for csv_file in sorted(week_dir.glob("screen_result_*.csv")):
+        sid = csv_file.stem.replace("screen_result_", "")
+        try:
+            df = _pl.read_csv(str(csv_file), infer_schema_length=1000)
+            results[sid] = df
+        except Exception as exc:
+            console.print(f"[yellow]讀取 {csv_file.name} 失敗：{exc}[/yellow]")
+
+    return week_tag, results
+
+
+@analysis_app.command("group")
+def analysis_group(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """讀最新一週的篩選 CSV + TWSE 快取，產出 group_analysis.md。"""
+    import yaml as _yaml
+
+    from tw_screener.analysis.grouping import group_stocks
+    from tw_screener.analysis.leader import find_leaders
+    from tw_screener.data.twse import create_client
+    from tw_screener.report.group_report import render_group_report
+
+    with open(settings, encoding="utf-8") as fh:
+        cfg = _yaml.safe_load(fh)
+
+    ga_cfg = cfg.get("group_analysis", {})
+    weights = ga_cfg.get("weights", {"entry_rate": 0.4, "rs": 0.4, "institutional": 0.2})
+    min_group_size = int(ga_cfg.get("min_group_size", 2))
+    top_groups = int(ga_cfg.get("top_groups", 10))
+    top_stocks = int(ga_cfg.get("top_stocks", 10))
+
+    week_tag, screener_results = _load_latest_screener_results(settings)
+    if not screener_results:
+        console.print("[red]找不到篩選 CSV，請先執行 make screen-all[/red]")
+        raise typer.Exit(1)
+
+    total_rows = sum(len(df) for df in screener_results.values())
+    console.print(f"[bold]族群分析：{week_tag}，共 {total_rows} 筆篩選結果[/bold]")
+
+    import polars as _pl
+
+    client = create_client(settings)
+
+    console.print("  載入產業別資料（TWSE）...")
+    industry_df = client.fetch_listed_industry()
+    if industry_df.is_empty():
+        console.print("[yellow]  產業別資料無法取得，以「未分類」處理[/yellow]")
+
+    console.print("  載入日線快取...")
+    price_history = client.fetch_daily_all()
+    institutional = client.fetch_institutional()
+
+    console.print("  計算族群強度分數...")
+    groups, enriched_stocks = group_stocks(
+        screener_results,
+        price_history,
+        _pl.DataFrame(),  # benchmark: skip for now
+        industry_df=industry_df if not industry_df.is_empty() else None,
+        weights=weights,
+        min_group_size=min_group_size,
+    )
+
+    if groups.is_empty():
+        console.print("[yellow]無符合條件的族群（需 ≥ 2 檔同族群），產出空報告[/yellow]")
+
+    console.print("  判斷領頭羊...")
+    leaders = find_leaders(enriched_stocks, price_history, institutional)
+
+    output_path = Path(cfg["paths"]["reports_dir"]) / week_tag / "group_analysis.md"
+    render_group_report(
+        groups, leaders, screener_results, week_tag, output_path, top_groups, top_stocks
+    )
+
+    console.print(f"[green]報告輸出：{output_path}[/green]")
+    console.print(f"  族群數：{len(groups)}，推薦分析：前 {top_stocks} 檔")
+
+
+@analysis_app.command("leaders")
+def analysis_leaders(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """只顯示各族群領頭羊候選（不重新計算族群分數）。"""
+    from tw_screener.analysis.grouping import group_stocks
+    from tw_screener.analysis.leader import find_leaders
+    from tw_screener.data.twse import create_client
+
+    week_tag, screener_results = _load_latest_screener_results(settings)
+    if not screener_results:
+        console.print("[red]找不到篩選 CSV，請先執行 make screen-all[/red]")
+        raise typer.Exit(1)
+
+    import polars as _pl
+
+    client = create_client(settings)
+    industry_df = client.fetch_listed_industry()
+    price_history = client.fetch_daily_all()
+    institutional = client.fetch_institutional()
+
+    _, enriched_stocks = group_stocks(
+        screener_results,
+        price_history,
+        _pl.DataFrame(),
+        industry_df=industry_df if not industry_df.is_empty() else None,
+    )
+
+    leaders = find_leaders(enriched_stocks, price_history, institutional)
+
+    if not leaders.is_empty() and "is_leader" in leaders.columns:
+        leader_df = leaders.filter(_pl.col("is_leader")).sort("leader_score", descending=True)
+        console.print("[bold]各族群領頭羊候選：[/bold]")
+        for row in leader_df.iter_rows(named=True):
+            console.print(
+                f"  {row['industry_name']:15s}  {row['stock_id']} {row['name']:10s}  "
+                f"漲跌幅 {row.get('change_pct', 0):+.2f}%  分數 {row.get('leader_score', 0):.2f}"
+            )
+    else:
+        console.print("[yellow]無領頭羊資料[/yellow]")
 
 
 if __name__ == "__main__":
