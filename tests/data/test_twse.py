@@ -10,8 +10,8 @@ import pytest
 
 from tw_screener.data.cache import find_latest, is_fresh, load_parquet, save_parquet
 from tw_screener.data.twse import (
-    TWSEClient,
     _TWSE_INDUSTRY_NAMES,
+    TWSEClient,
     _clean_float,
     _clean_int,
     _months_back,
@@ -512,3 +512,98 @@ def test_model_monthly_revenue_nulls():
         yoy_pct=None,
     )
     assert m.prev_year_revenue is None
+
+
+# ─── Legacy 解析器補充測試 ─────────────────────────────────────────────────────
+
+
+def test_parse_stock_day_bad_stat():
+    """stat 非 OK 時應回傳空 DataFrame（schema 完整）。"""
+    df = _parse_stock_day({"stat": "很抱歉，沒有符合條件的資料!"}, "2330")
+    assert df.is_empty()
+    assert "close" in df.columns
+
+
+def test_parse_stock_day_empty_payload():
+    df = _parse_stock_day({}, "2330")
+    assert df.is_empty()
+
+
+def test_parse_institutional_combines_foreign_and_dealer():
+    """foreign_net = 外陸資買賣超(不含外資自營商) + 外資自營商買賣超。"""
+    payload = {
+        "stat": "OK",
+        "date": "20260515",
+        "fields": [
+            "證券代號",
+            "證券名稱",
+            "外陸資買賣超股數(不含外資自營商)",
+            "外資自營商買賣超股數",
+            "投信買賣超股數",
+            "自營商買賣超股數",
+            "三大法人買賣超股數",
+        ],
+        "data": [["2330", "台積電", "1,000", "500", "100", "-50", "1,550"]],
+    }
+    df = _parse_institutional(payload)
+    assert len(df) == 1
+    assert df["foreign_net"][0] == 1500  # 1000 + 500
+    assert df["trust_net"][0] == 100
+    assert df["total_net"][0] == 1550
+
+
+def test_parse_institutional_missing_date():
+    """無 date 欄位時應視為空（避免寫錯日期到快取）。"""
+    payload = {"stat": "OK", "fields": [], "data": []}
+    df = _parse_institutional(payload)
+    assert df.is_empty()
+
+
+def test_fetch_stock_ohlcv_prefers_stock_day_cache(tmp_path: Path):
+    """有 stock_day_*.parquet 時優先讀，並去重日期。"""
+    client = TWSEClient(
+        base_url="https://test.invalid",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+    # stock_day 月快取（精準歷史）
+    stock_day_df = pl.DataFrame(
+        {
+            "date": [date(2026, 5, 1), date(2026, 5, 2)],
+            "stock_id": ["2330", "2330"],
+            "trade_volume": [1000, 1100],
+            "trade_value": [1000000, 1100000],
+            "open": [1070.0, 1080.0],
+            "high": [1075.0, 1085.0],
+            "low": [1065.0, 1075.0],
+            "close": [1070.0, 1080.0],
+            "change": [10.0, 10.0],
+            "transaction": [500, 550],
+        }
+    )
+    save_parquet(stock_day_df, tmp_path / "stock_day_2330_202605.parquet")
+
+    # daily 全市場快取（同一天）
+    daily_df = pl.DataFrame(
+        {
+            "date": [date(2026, 5, 2)],
+            "stock_id": ["2330"],
+            "name": ["台積電"],
+            "trade_volume": [9999],
+            "trade_value": [9999],
+            "open": [1080.0],
+            "high": [1085.0],
+            "low": [1075.0],
+            "close": [1080.0],
+            "change": [10.0],
+            "transaction": [550],
+        }
+    )
+    save_parquet(daily_df, tmp_path / "daily_20260502.parquet")
+
+    df = client.fetch_stock_ohlcv("2330", n_days=60)
+    # 兩個來源合併、去重後仍是 2 筆
+    assert len(df) == 2
+    assert df["close"].to_list() == [1070.0, 1080.0]

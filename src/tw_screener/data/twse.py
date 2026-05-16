@@ -152,8 +152,13 @@ def _parse_daily_all(data: list[dict[str, Any]]) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=schema)
 
 
-def _parse_institutional(data: list[dict[str, Any]]) -> pl.DataFrame:
-    """解析 T86 三大法人買賣超 → DataFrame。"""
+def _parse_institutional(payload: dict[str, Any]) -> pl.DataFrame:
+    """
+    解析 legacy T86 三大法人買賣超回應 → DataFrame。
+
+    Input: {"stat": "OK", "date": "20260515", "fields": [...], "data": [[...], ...]}
+    fields 為中文欄名清單，data 為 row list。
+    """
     schema = {
         "date": pl.Date,
         "stock_id": pl.Utf8,
@@ -163,27 +168,57 @@ def _parse_institutional(data: list[dict[str, Any]]) -> pl.DataFrame:
         "dealer_net": pl.Int64,
         "total_net": pl.Int64,
     }
+    if not payload or payload.get("stat") != "OK":
+        return pl.DataFrame(schema=schema)
+    fields: list[str] = payload.get("fields", [])
+    data_rows: list[list[Any]] = payload.get("data", [])
+    date_str: str = payload.get("date", "")  # YYYYMMDD
+    if not date_str or len(date_str) != 8:
+        logger.warning("T86 回應缺 date 欄位，略過")
+        return pl.DataFrame(schema=schema)
+    trade_date = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+
+    idx = {name: i for i, name in enumerate(fields)}
+
+    def col(row: list[Any], *candidates: str) -> str:
+        for name in candidates:
+            if name in idx:
+                v = row[idx[name]]
+                return v.strip() if isinstance(v, str) else str(v)
+        return ""
+
     rows = []
-    for r in data:
+    for r in data_rows:
         try:
+            # foreign = 外陸資買賣超(不含外資自營商) + 外資自營商買賣超
+            foreign_main = col(r, "外陸資買賣超股數(不含外資自營商)", "外資買賣超股數")
+            foreign_dealer = col(r, "外資自營商買賣超股數")
+            foreign_net = _clean_int(foreign_main) + (
+                _clean_int(foreign_dealer) if foreign_dealer else 0
+            )
             rows.append(
                 {
-                    "date": _roc_to_date(r["Date"]),
-                    "stock_id": r["StockID"].strip(),
-                    "stock_name": r["StockName"].strip(),
-                    "foreign_net": _clean_int(r.get("ForeignInvestmentNetBuyOrSell", "0")),
-                    "trust_net": _clean_int(r.get("ForeignInvestmentTrustNetBuyOrSell", "0")),
-                    "dealer_net": _clean_int(r.get("DealersNetBuyOrSell", "0")),
-                    "total_net": _clean_int(r.get("TotalInstitutionalInvestors", "0")),
+                    "date": trade_date,
+                    "stock_id": col(r, "證券代號").strip(),
+                    "stock_name": col(r, "證券名稱").strip(),
+                    "foreign_net": foreign_net,
+                    "trust_net": _clean_int(col(r, "投信買賣超股數")),
+                    "dealer_net": _clean_int(col(r, "自營商買賣超股數")),
+                    "total_net": _clean_int(col(r, "三大法人買賣超股數")),
                 }
             )
-        except (KeyError, ValueError) as e:
-            logger.warning(f"略過無效法人資料：{r.get('StockID', '?')} — {e}")
+        except (KeyError, ValueError, IndexError) as e:
+            logger.warning(f"略過無效法人資料：{r[:2] if r else '?'} — {e}")
     return pl.DataFrame(rows, schema=schema)
 
 
-def _parse_stock_day(data: list[dict[str, Any]], stock_id: str) -> pl.DataFrame:
-    """解析單檔月 OHLCV（STOCK_DAY）→ DataFrame。"""
+def _parse_stock_day(payload: dict[str, Any], stock_id: str) -> pl.DataFrame:
+    """
+    解析 legacy STOCK_DAY 單檔月 OHLCV 回應 → DataFrame。
+
+    Input: {"stat": "OK", "date": "20260501", "fields": [...], "data": [[...], ...]}
+    fields 為中文欄名（如「日期」、「成交股數」），data 為 row list。
+    """
     schema = {
         "date": pl.Date,
         "stock_id": pl.Utf8,
@@ -196,25 +231,37 @@ def _parse_stock_day(data: list[dict[str, Any]], stock_id: str) -> pl.DataFrame:
         "change": pl.Float64,
         "transaction": pl.Int64,
     }
+    if not payload or payload.get("stat") != "OK":
+        return pl.DataFrame(schema=schema)
+    fields: list[str] = payload.get("fields", [])
+    data_rows: list[list[Any]] = payload.get("data", [])
+    idx = {name: i for i, name in enumerate(fields)}
+
+    def col(row: list[Any], name: str) -> str:
+        if name not in idx:
+            return ""
+        v = row[idx[name]]
+        return v.strip() if isinstance(v, str) else str(v)
+
     rows = []
-    for r in data:
+    for r in data_rows:
         try:
             rows.append(
                 {
-                    "date": _roc_to_date(r["Date"]),
+                    "date": _roc_to_date(col(r, "日期")),
                     "stock_id": stock_id,
-                    "trade_volume": _clean_int(r["TradeVolume"]),
-                    "trade_value": _clean_int(r["TradeValue"]),
-                    "open": _clean_float(r["OpeningPrice"]),
-                    "high": _clean_float(r["HighestPrice"]),
-                    "low": _clean_float(r["LowestPrice"]),
-                    "close": _clean_float(r["ClosingPrice"]),
-                    "change": _clean_float(r["Change"]),
-                    "transaction": _clean_int(r["Transaction"]),
+                    "trade_volume": _clean_int(col(r, "成交股數")),
+                    "trade_value": _clean_int(col(r, "成交金額")),
+                    "open": _clean_float(col(r, "開盤價")),
+                    "high": _clean_float(col(r, "最高價")),
+                    "low": _clean_float(col(r, "最低價")),
+                    "close": _clean_float(col(r, "收盤價")),
+                    "change": _clean_float(col(r, "漲跌價差")),
+                    "transaction": _clean_int(col(r, "成交筆數")),
                 }
             )
-        except (KeyError, ValueError) as e:
-            logger.warning(f"略過無效 OHLCV 資料：{r.get('Date', '?')} — {e}")
+        except (KeyError, ValueError, IndexError) as e:
+            logger.warning(f"略過無效 OHLCV 資料：{r[:1] if r else '?'} — {e}")
     return pl.DataFrame(rows, schema=schema)
 
 
@@ -379,11 +426,15 @@ class TWSEClient:
         self.interval_sec = interval_sec
         self._last_req: float = 0.0
 
-    def _get(self, endpoint: str) -> list[dict[str, Any]]:
-        """限速後發 GET，回傳 JSON list；若回傳 HTML 則視為端點不可用。"""
+    def _throttle(self) -> None:
+        """限速：確保連續請求間隔 ≥ interval_sec。"""
         elapsed = time.monotonic() - self._last_req
         if elapsed < self.interval_sec:
             time.sleep(self.interval_sec - elapsed)
+
+    def _get(self, endpoint: str) -> list[dict[str, Any]]:
+        """限速後發 GET 到 base_url + endpoint，回傳 JSON list。"""
+        self._throttle()
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         logger.info(f"HTTP GET {url}")
         resp = httpx.get(
@@ -401,6 +452,27 @@ class TWSEClient:
         data = resp.json()
         return data if isinstance(data, list) else []
 
+    def _get_legacy(self, url: str) -> dict[str, Any]:
+        """
+        限速後發 GET 到完整 URL（legacy TWSE 端點），回傳整個 JSON dict
+        （含 stat / fields / data / date 等鍵）。
+        """
+        self._throttle()
+        logger.info(f"HTTP GET {url}")
+        resp = httpx.get(
+            url,
+            headers={"User-Agent": self.user_agent},
+            timeout=30.0,
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+        self._last_req = time.monotonic()
+        content_type = resp.headers.get("content-type", "")
+        if "json" not in content_type.lower():
+            logger.warning(f"{url} 回傳非 JSON（{content_type[:40]}），略過")
+            return {}
+        return resp.json()
+
     def fetch_daily_all(self) -> pl.DataFrame:
         """抓全市場日線，快取到 daily_YYYYMMDD.parquet。"""
         today = date.today().strftime("%Y%m%d")
@@ -417,18 +489,22 @@ class TWSEClient:
         return df
 
     def fetch_institutional(self) -> pl.DataFrame:
-        """抓三大法人，快取到 institutional_YYYYMMDD.parquet。"""
-        today = date.today().strftime("%Y%m%d")
-        cache_file = self.cache_dir / f"institutional_{today}.parquet"
+        """抓三大法人（legacy T86，含歷史日期支援），快取到 institutional_YYYYMMDD.parquet。"""
+        today_str = date.today().strftime("%Y%m%d")
+        cache_file = self.cache_dir / f"institutional_{today_str}.parquet"
         if is_fresh(cache_file, self.ttl_hours):
             logger.info(f"命中快取 {cache_file}")
             return load_parquet(cache_file)
-        data = self._get("/fund/T86")
-        df = _parse_institutional(data)
+        url = (
+            f"https://www.twse.com.tw/fund/T86?response=json"
+            f"&date={today_str}&selectType=ALLBUT0999"
+        )
+        payload = self._get_legacy(url)
+        df = _parse_institutional(payload)
         if not df.is_empty():
             save_parquet(df, cache_file)
         else:
-            logger.warning("T86 回傳空資料或端點不可用，法人資料略過")
+            logger.warning("T86 回傳空資料（今日可能非交易日，或 selectType 無資料）")
         return df
 
     def fetch_revenue(self) -> pl.DataFrame:
@@ -488,10 +564,12 @@ class TWSEClient:
             logger.warning("ISIN 上櫃一覽表解析結果為空")
         return df
 
-    def fetch_stock_ohlcv(self, stock_id: str, n_days: int = 60) -> pl.DataFrame:
+    def fetch_stock_history(self, stock_id: str, months: int = 3) -> pl.DataFrame:
         """
-        從累積的全市場日線快取（daily_*.parquet）取特定股票近 n_days 個交易日。
-        需先執行 fetch_daily_all 累積快取；每多一天就多一筆歷史。
+        抓單檔近 N 個月的 OHLCV 歷史（legacy STOCK_DAY 端點）。
+        快取到 stock_day_{stock_id}_{YYYYMM}.parquet：
+          - 過去月份永久快取（資料不再變動）
+          - 當月用 ttl_hours 過期（資料每日新增）
         """
         _empty_schema = {
             "date": pl.Date,
@@ -505,24 +583,84 @@ class TWSEClient:
             "change": pl.Float64,
             "transaction": pl.Int64,
         }
-        files = sorted(self.cache_dir.glob("daily_*.parquet"))
-        if not files:
-            logger.warning("無日線快取，請先執行 fetch-twse")
-            return pl.DataFrame(schema=_empty_schema)
+        today = date.today()
+        current_ym = today.strftime("%Y%m")
         frames: list[pl.DataFrame] = []
-        for f in files:
-            try:
-                df = pl.read_parquet(f)
-                if "stock_id" not in df.columns or "date" not in df.columns:
-                    continue
-                filtered = df.filter(pl.col("stock_id") == stock_id)
-                if not filtered.is_empty():
-                    frames.append(filtered)
-            except Exception as e:
-                logger.warning(f"讀取 {f} 失敗：{e}")
+
+        for n in range(months):
+            target = _months_back(today, n)
+            ym = target.strftime("%Y%m")
+            cache_file = self.cache_dir / f"stock_day_{stock_id}_{ym}.parquet"
+
+            # 過去月份永久快取；當月用 ttl 控制
+            if cache_file.exists() and (ym != current_ym or is_fresh(cache_file, self.ttl_hours)):
+                logger.info(f"命中快取 {cache_file}")
+                frames.append(load_parquet(cache_file))
+                continue
+
+            url = (
+                f"https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json"
+                f"&date={ym}01&stockNo={stock_id}"
+            )
+            payload = self._get_legacy(url)
+            df = _parse_stock_day(payload, stock_id)
+            if not df.is_empty():
+                save_parquet(df, cache_file)
+                frames.append(df)
+            else:
+                logger.warning(f"STOCK_DAY {stock_id} {ym} 空資料（可能未上市或休市）")
+
         if not frames:
             return pl.DataFrame(schema=_empty_schema)
-        return pl.concat(frames).sort("date").tail(n_days)
+        return pl.concat(frames).unique(subset=["date"]).sort("date")
+
+    def fetch_stock_ohlcv(self, stock_id: str, n_days: int = 60) -> pl.DataFrame:
+        """
+        取單檔近 n_days 個交易日的 OHLCV。
+        優先讀 stock_day_{stock_id}_*.parquet（由 fetch_stock_history 累積），
+        缺資料時 fallback 到 daily_*.parquet（全市場快取，由 fetch_daily_all 累積）。
+        """
+        _empty_schema = {
+            "date": pl.Date,
+            "stock_id": pl.Utf8,
+            "trade_volume": pl.Int64,
+            "trade_value": pl.Int64,
+            "open": pl.Float64,
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "change": pl.Float64,
+            "transaction": pl.Int64,
+        }
+        # 優先：單檔月快取
+        stock_day_files = sorted(self.cache_dir.glob(f"stock_day_{stock_id}_*.parquet"))
+        stock_day_frames: list[pl.DataFrame] = []
+        for f in stock_day_files:
+            try:
+                stock_day_frames.append(pl.read_parquet(f))
+            except Exception as e:
+                logger.warning(f"讀取 {f} 失敗：{e}")
+
+        # 補充：全市場日快取（包含 name 等欄位）
+        daily_files = sorted(self.cache_dir.glob("daily_*.parquet"))
+        daily_frames: list[pl.DataFrame] = []
+        for f in daily_files:
+            try:
+                df = pl.read_parquet(f)
+                if "stock_id" in df.columns and "date" in df.columns:
+                    filtered = df.filter(pl.col("stock_id") == stock_id)
+                    if not filtered.is_empty():
+                        # daily_*.parquet 多了 name 欄位，drop 後合併
+                        if "name" in filtered.columns:
+                            filtered = filtered.drop("name")
+                        daily_frames.append(filtered)
+            except Exception as e:
+                logger.warning(f"讀取 {f} 失敗：{e}")
+
+        all_frames = stock_day_frames + daily_frames
+        if not all_frames:
+            return pl.DataFrame(schema=_empty_schema)
+        return pl.concat(all_frames).unique(subset=["date"]).sort("date").tail(n_days)
 
     def fetch_stock_institutional(self, stock_id: str, n_days: int = 20) -> pl.DataFrame:
         """從累積的法人快取讀取特定股票近 n_days 筆。"""

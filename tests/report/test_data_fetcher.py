@@ -1,17 +1,14 @@
 """tests/report/test_data_fetcher.py — data_fetcher 單元測試（全離線）。"""
 
 from datetime import date, timedelta
-from pathlib import Path
 
 import polars as pl
-import pytest
 
 from tw_screener.report.data_fetcher import (
     _format_institutional_summary,
     _format_price_summary,
     _format_revenue_summary,
 )
-
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
 

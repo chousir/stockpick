@@ -16,7 +16,9 @@ _INDUSTRY_DF = pl.DataFrame(
 )
 
 
-def _make_screener_df(stock_ids: list[str], change_pcts: list[float], strategy_id: str) -> pl.DataFrame:
+def _make_screener_df(
+    stock_ids: list[str], change_pcts: list[float], strategy_id: str
+) -> pl.DataFrame:
     return pl.DataFrame(
         {
             "stock_id": stock_ids,
@@ -47,7 +49,8 @@ def test_group_stocks_basic_groups():
         industry_df=_INDUSTRY_DF,
         min_group_size=2,
     )
-    # 2330+2454 (半導體 code=24) = 2; 2317 (其他電子 code=31) = 1 → filtered; 2382 (電腦 code=25) = 1 → filtered
+    # 2330+2454 (半導體 24) = 2;
+    # 2317 (其他電子 31) = 1 → filtered; 2382 (電腦 25) = 1 → filtered
     assert len(groups) == 1
     assert groups["industry_name"][0] == "半導體業"
 

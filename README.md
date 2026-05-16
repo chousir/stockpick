@@ -7,6 +7,27 @@
 
 每週把 1800 檔台股 → 30 檔候選 → 5-10 檔個股深度報告 → 你下決策。
 
+## Quick Start
+
+```bash
+# 首次：環境初始化
+make sync && make init
+
+# 每週：抓資料 + 選股 + 族群分析
+make week
+
+# 看推薦清單，挑感興趣的個股
+cat reports/$(date +%Y-W%V)/group_analysis.md
+
+# 產個股資料草稿（含 60 日 OHLCV、月營收、法人）
+make report STOCK_ID=2330
+
+# 把 reports/YYYY-Www/stocks/2330_台積電.md 整份貼到 Claude 對話
+# 範本 prompt 與完整 SOP 見 ↓
+```
+
+**每週使用流程詳解 → [docs/10-sop.md](./docs/10-sop.md)**
+
 ## 核心設計原則
 
 1. **半自動，不全自動**：資料抓取、選股、報告骨架自動化；下單決策保留給人。
@@ -38,6 +59,7 @@
 | [`docs/07-cli-spec.md`](./docs/07-cli-spec.md) | Makefile 指令、CLI 介面 |
 | [`docs/08-milestones.md`](./docs/08-milestones.md) | 7 個 milestone + 各自驗收 criteria |
 | [`docs/09-coding-conventions.md`](./docs/09-coding-conventions.md) | 程式碼風格、命名、測試規範 |
+| [`docs/10-sop.md`](./docs/10-sop.md) | **每週使用 SOP**（手動 Claude 對話模式、含範本 prompt） |
 
 ## 給 Claude Code 的使用指示
 

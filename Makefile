@@ -70,7 +70,7 @@ leaders:  ## 只跑領頭羊判斷
 
 # ─── 報告 ────────────────────────────────────────────────────────────────────
 
-report:  ## 產單檔個股報告（STOCK_ID=2330）
+report:  ## 產單檔個股報告（STOCK_ID=2330，首次跑該檔會花 5-10 秒補 3 個月歷史 OHLCV）
 	uv run tw-screener report stock $(STOCK_ID)
 
 report-batch:  ## 批次產本週推薦清單報告

@@ -148,6 +148,10 @@ def fetch_stock_bundle(stock_id: str, settings_path: Path) -> dict:
     logger.info("抓取 {} 個股資料包", stock_id)
     client = create_client(settings_path)
 
+    # 先補 60 日 OHLCV 歷史（首次跑會打 3 次 STOCK_DAY，每月一次；後續吃快取）
+    logger.info("確保 {} 近 3 個月 OHLCV 歷史已存（第一次跑約 5-10 秒）", stock_id)
+    client.fetch_stock_history(stock_id, months=3)
+
     price_history = client.fetch_stock_ohlcv(stock_id, n_days=60)
     monthly_revenue = client.fetch_stock_revenue(stock_id, n_months=12)
     institutional = client.fetch_stock_institutional(stock_id, n_days=20)
