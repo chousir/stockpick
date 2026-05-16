@@ -78,28 +78,35 @@ def _parse_daily_all(data: list[dict[str, Any]]) -> pl.DataFrame:
     """
     schema = {
         "date": pl.Date,
-        "stock_id": pl.Utf8, "name": pl.Utf8,
-        "trade_volume": pl.Int64, "trade_value": pl.Int64,
-        "open": pl.Float64, "high": pl.Float64,
-        "low": pl.Float64, "close": pl.Float64,
-        "change": pl.Float64, "transaction": pl.Int64,
+        "stock_id": pl.Utf8,
+        "name": pl.Utf8,
+        "trade_volume": pl.Int64,
+        "trade_value": pl.Int64,
+        "open": pl.Float64,
+        "high": pl.Float64,
+        "low": pl.Float64,
+        "close": pl.Float64,
+        "change": pl.Float64,
+        "transaction": pl.Int64,
     }
     rows = []
     for r in data:
         try:
-            rows.append({
-                "date": _roc_compact_to_date(r["Date"]),
-                "stock_id": r["Code"].strip(),
-                "name": r["Name"].strip(),
-                "trade_volume": _clean_int(r["TradeVolume"]),
-                "trade_value": _clean_int(r["TradeValue"]),
-                "open": _clean_float(r["OpeningPrice"]),
-                "high": _clean_float(r["HighestPrice"]),
-                "low": _clean_float(r["LowestPrice"]),
-                "close": _clean_float(r["ClosingPrice"]),
-                "change": _clean_float(r["Change"]),
-                "transaction": _clean_int(r["Transaction"]),
-            })
+            rows.append(
+                {
+                    "date": _roc_compact_to_date(r["Date"]),
+                    "stock_id": r["Code"].strip(),
+                    "name": r["Name"].strip(),
+                    "trade_volume": _clean_int(r["TradeVolume"]),
+                    "trade_value": _clean_int(r["TradeValue"]),
+                    "open": _clean_float(r["OpeningPrice"]),
+                    "high": _clean_float(r["HighestPrice"]),
+                    "low": _clean_float(r["LowestPrice"]),
+                    "close": _clean_float(r["ClosingPrice"]),
+                    "change": _clean_float(r["Change"]),
+                    "transaction": _clean_int(r["Transaction"]),
+                }
+            )
         except (KeyError, ValueError) as e:
             logger.warning(f"略過無效行情資料：{r.get('Code', '?')} — {e}")
     return pl.DataFrame(rows, schema=schema)
@@ -108,22 +115,28 @@ def _parse_daily_all(data: list[dict[str, Any]]) -> pl.DataFrame:
 def _parse_institutional(data: list[dict[str, Any]]) -> pl.DataFrame:
     """解析 T86 三大法人買賣超 → DataFrame。"""
     schema = {
-        "date": pl.Date, "stock_id": pl.Utf8, "stock_name": pl.Utf8,
-        "foreign_net": pl.Int64, "trust_net": pl.Int64,
-        "dealer_net": pl.Int64, "total_net": pl.Int64,
+        "date": pl.Date,
+        "stock_id": pl.Utf8,
+        "stock_name": pl.Utf8,
+        "foreign_net": pl.Int64,
+        "trust_net": pl.Int64,
+        "dealer_net": pl.Int64,
+        "total_net": pl.Int64,
     }
     rows = []
     for r in data:
         try:
-            rows.append({
-                "date": _roc_to_date(r["Date"]),
-                "stock_id": r["StockID"].strip(),
-                "stock_name": r["StockName"].strip(),
-                "foreign_net": _clean_int(r.get("ForeignInvestmentNetBuyOrSell", "0")),
-                "trust_net": _clean_int(r.get("ForeignInvestmentTrustNetBuyOrSell", "0")),
-                "dealer_net": _clean_int(r.get("DealersNetBuyOrSell", "0")),
-                "total_net": _clean_int(r.get("TotalInstitutionalInvestors", "0")),
-            })
+            rows.append(
+                {
+                    "date": _roc_to_date(r["Date"]),
+                    "stock_id": r["StockID"].strip(),
+                    "stock_name": r["StockName"].strip(),
+                    "foreign_net": _clean_int(r.get("ForeignInvestmentNetBuyOrSell", "0")),
+                    "trust_net": _clean_int(r.get("ForeignInvestmentTrustNetBuyOrSell", "0")),
+                    "dealer_net": _clean_int(r.get("DealersNetBuyOrSell", "0")),
+                    "total_net": _clean_int(r.get("TotalInstitutionalInvestors", "0")),
+                }
+            )
         except (KeyError, ValueError) as e:
             logger.warning(f"略過無效法人資料：{r.get('StockID', '?')} — {e}")
     return pl.DataFrame(rows, schema=schema)
@@ -132,27 +145,34 @@ def _parse_institutional(data: list[dict[str, Any]]) -> pl.DataFrame:
 def _parse_stock_day(data: list[dict[str, Any]], stock_id: str) -> pl.DataFrame:
     """解析單檔月 OHLCV（STOCK_DAY）→ DataFrame。"""
     schema = {
-        "date": pl.Date, "stock_id": pl.Utf8,
-        "trade_volume": pl.Int64, "trade_value": pl.Int64,
-        "open": pl.Float64, "high": pl.Float64,
-        "low": pl.Float64, "close": pl.Float64,
-        "change": pl.Float64, "transaction": pl.Int64,
+        "date": pl.Date,
+        "stock_id": pl.Utf8,
+        "trade_volume": pl.Int64,
+        "trade_value": pl.Int64,
+        "open": pl.Float64,
+        "high": pl.Float64,
+        "low": pl.Float64,
+        "close": pl.Float64,
+        "change": pl.Float64,
+        "transaction": pl.Int64,
     }
     rows = []
     for r in data:
         try:
-            rows.append({
-                "date": _roc_to_date(r["Date"]),
-                "stock_id": stock_id,
-                "trade_volume": _clean_int(r["TradeVolume"]),
-                "trade_value": _clean_int(r["TradeValue"]),
-                "open": _clean_float(r["OpeningPrice"]),
-                "high": _clean_float(r["HighestPrice"]),
-                "low": _clean_float(r["LowestPrice"]),
-                "close": _clean_float(r["ClosingPrice"]),
-                "change": _clean_float(r["Change"]),
-                "transaction": _clean_int(r["Transaction"]),
-            })
+            rows.append(
+                {
+                    "date": _roc_to_date(r["Date"]),
+                    "stock_id": stock_id,
+                    "trade_volume": _clean_int(r["TradeVolume"]),
+                    "trade_value": _clean_int(r["TradeValue"]),
+                    "open": _clean_float(r["OpeningPrice"]),
+                    "high": _clean_float(r["HighestPrice"]),
+                    "low": _clean_float(r["LowestPrice"]),
+                    "close": _clean_float(r["ClosingPrice"]),
+                    "change": _clean_float(r["Change"]),
+                    "transaction": _clean_int(r["Transaction"]),
+                }
+            )
         except (KeyError, ValueError) as e:
             logger.warning(f"略過無效 OHLCV 資料：{r.get('Date', '?')} — {e}")
     return pl.DataFrame(rows, schema=schema)
@@ -164,22 +184,27 @@ def _parse_revenue(data: list[dict[str, Any]]) -> pl.DataFrame:
     實際欄位名稱：「資料年月」、「營業收入-當月營收」等。
     """
     schema = {
-        "stock_id": pl.Utf8, "company_name": pl.Utf8,
-        "year_month": pl.Utf8, "revenue": pl.Int64,
-        "prev_year_revenue": pl.Int64, "yoy_pct": pl.Float64,
+        "stock_id": pl.Utf8,
+        "company_name": pl.Utf8,
+        "year_month": pl.Utf8,
+        "revenue": pl.Int64,
+        "prev_year_revenue": pl.Int64,
+        "yoy_pct": pl.Float64,
     }
     rows = []
     for r in data:
         try:
             prev_raw = r.get("營業收入-去年當月營收", "")
-            rows.append({
-                "stock_id": r["公司代號"].strip(),
-                "company_name": r["公司名稱"].strip(),
-                "year_month": _roc_ym_to_ym(r["資料年月"]),
-                "revenue": _clean_int(r["營業收入-當月營收"]),
-                "prev_year_revenue": _clean_int(prev_raw) if prev_raw.strip() else None,
-                "yoy_pct": _clean_float(r.get("營業收入-去年同月增減(%)", "")),
-            })
+            rows.append(
+                {
+                    "stock_id": r["公司代號"].strip(),
+                    "company_name": r["公司名稱"].strip(),
+                    "year_month": _roc_ym_to_ym(r["資料年月"]),
+                    "revenue": _clean_int(r["營業收入-當月營收"]),
+                    "prev_year_revenue": _clean_int(prev_raw) if prev_raw.strip() else None,
+                    "yoy_pct": _clean_float(r.get("營業收入-去年同月增減(%)", "")),
+                }
+            )
         except (KeyError, ValueError) as e:
             logger.warning(f"略過無效營收資料：{r.get('公司代號', '?')} — {e}")
     return pl.DataFrame(rows, schema=schema)
@@ -290,11 +315,16 @@ class TWSEClient:
         需先執行 fetch_daily_all 累積快取；每多一天就多一筆歷史。
         """
         _empty_schema = {
-            "date": pl.Date, "stock_id": pl.Utf8,
-            "trade_volume": pl.Int64, "trade_value": pl.Int64,
-            "open": pl.Float64, "high": pl.Float64,
-            "low": pl.Float64, "close": pl.Float64,
-            "change": pl.Float64, "transaction": pl.Int64,
+            "date": pl.Date,
+            "stock_id": pl.Utf8,
+            "trade_volume": pl.Int64,
+            "trade_value": pl.Int64,
+            "open": pl.Float64,
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "change": pl.Float64,
+            "transaction": pl.Int64,
         }
         files = sorted(self.cache_dir.glob("daily_*.parquet"))
         if not files:
@@ -318,27 +348,29 @@ class TWSEClient:
     def fetch_stock_institutional(self, stock_id: str, n_days: int = 20) -> pl.DataFrame:
         """從累積的法人快取讀取特定股票近 n_days 筆。"""
         _empty_schema = {
-            "date": pl.Date, "stock_id": pl.Utf8, "stock_name": pl.Utf8,
-            "foreign_net": pl.Int64, "trust_net": pl.Int64,
-            "dealer_net": pl.Int64, "total_net": pl.Int64,
+            "date": pl.Date,
+            "stock_id": pl.Utf8,
+            "stock_name": pl.Utf8,
+            "foreign_net": pl.Int64,
+            "trust_net": pl.Int64,
+            "dealer_net": pl.Int64,
+            "total_net": pl.Int64,
         }
         files = list(self.cache_dir.glob("institutional_*.parquet"))
         if not files:
             return pl.DataFrame(schema=_empty_schema)
         frames = [pl.read_parquet(f) for f in files]
-        return (
-            pl.concat(frames)
-            .filter(pl.col("stock_id") == stock_id)
-            .sort("date")
-            .tail(n_days)
-        )
+        return pl.concat(frames).filter(pl.col("stock_id") == stock_id).sort("date").tail(n_days)
 
     def fetch_stock_revenue(self, stock_id: str, n_months: int = 12) -> pl.DataFrame:
         """從累積的月營收快取讀取特定股票近 n_months 筆。"""
         _empty_schema = {
-            "stock_id": pl.Utf8, "company_name": pl.Utf8,
-            "year_month": pl.Utf8, "revenue": pl.Int64,
-            "prev_year_revenue": pl.Int64, "yoy_pct": pl.Float64,
+            "stock_id": pl.Utf8,
+            "company_name": pl.Utf8,
+            "year_month": pl.Utf8,
+            "revenue": pl.Int64,
+            "prev_year_revenue": pl.Int64,
+            "yoy_pct": pl.Float64,
         }
         files = list(self.cache_dir.glob("revenue_*.parquet"))
         if not files:

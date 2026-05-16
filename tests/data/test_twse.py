@@ -226,10 +226,20 @@ def test_fetch_daily_all_cache_hit(tmp_path: Path):
     # 預先放快取
     today = date.today().strftime("%Y%m%d")
     cache_file = tmp_path / f"daily_{today}.parquet"
-    sample_df = pl.DataFrame({"stock_id": ["2330"], "name": ["台積電"],
-                               "trade_volume": [1000], "trade_value": [1000000],
-                               "open": [1075.0], "high": [1080.0], "low": [1070.0],
-                               "close": [1075.0], "change": [5.0], "transaction": [500]})
+    sample_df = pl.DataFrame(
+        {
+            "stock_id": ["2330"],
+            "name": ["台積電"],
+            "trade_volume": [1000],
+            "trade_value": [1000000],
+            "open": [1075.0],
+            "high": [1080.0],
+            "low": [1070.0],
+            "close": [1075.0],
+            "change": [5.0],
+            "transaction": [500],
+        }
+    )
     save_parquet(sample_df, cache_file)
 
     get_calls: list[str] = []
@@ -255,12 +265,17 @@ def test_fetch_institutional_cache_hit(tmp_path: Path):
     )
     today = date.today().strftime("%Y%m%d")
     cache_file = tmp_path / f"institutional_{today}.parquet"
-    sample_df = pl.DataFrame({
-        "date": [date(2026, 5, 15)],
-        "stock_id": ["2330"], "stock_name": ["台積電"],
-        "foreign_net": [2000], "trust_net": [500],
-        "dealer_net": [-100], "total_net": [2400],
-    })
+    sample_df = pl.DataFrame(
+        {
+            "date": [date(2026, 5, 15)],
+            "stock_id": ["2330"],
+            "stock_name": ["台積電"],
+            "foreign_net": [2000],
+            "trust_net": [500],
+            "dealer_net": [-100],
+            "total_net": [2400],
+        }
+    )
     save_parquet(sample_df, cache_file)
 
     get_calls: list[str] = []
@@ -292,12 +307,17 @@ def test_fetch_stock_institutional_filters(tmp_path: Path):
         user_agent="test",
         interval_sec=0.0,
     )
-    sample = pl.DataFrame({
-        "date": [date(2026, 5, 15), date(2026, 5, 15)],
-        "stock_id": ["2330", "2317"], "stock_name": ["台積電", "鴻海"],
-        "foreign_net": [2000, 200], "trust_net": [500, 0],
-        "dealer_net": [-100, 0], "total_net": [2400, 200],
-    })
+    sample = pl.DataFrame(
+        {
+            "date": [date(2026, 5, 15), date(2026, 5, 15)],
+            "stock_id": ["2330", "2317"],
+            "stock_name": ["台積電", "鴻海"],
+            "foreign_net": [2000, 200],
+            "trust_net": [500, 0],
+            "dealer_net": [-100, 0],
+            "total_net": [2400, 200],
+        }
+    )
     save_parquet(sample, tmp_path / "institutional_20260515.parquet")
 
     df = client.fetch_stock_institutional("2330")
@@ -335,11 +355,16 @@ def test_fetch_revenue_cache_hit(tmp_path: Path):
     )
     ym = date.today().strftime("%Y%m")
     cache_file = tmp_path / f"revenue_{ym}.parquet"
-    sample = pl.DataFrame({
-        "stock_id": ["2330"], "company_name": ["台積電"],
-        "year_month": ["202504"], "revenue": [260040059],
-        "prev_year_revenue": [216087780], "yoy_pct": [20.34],
-    })
+    sample = pl.DataFrame(
+        {
+            "stock_id": ["2330"],
+            "company_name": ["台積電"],
+            "year_month": ["202504"],
+            "revenue": [260040059],
+            "prev_year_revenue": [216087780],
+            "yoy_pct": [20.34],
+        }
+    )
     save_parquet(sample, cache_file)
 
     get_calls: list[str] = []
@@ -392,10 +417,16 @@ from tw_screener.data.models import DailyPrice, InstitutionalTrade, MonthlyReven
 
 def test_model_daily_price():
     m = DailyPrice(
-        stock_id="2330", name="台積電",
-        trade_volume=18560, trade_value=19924200000,
-        open=1075.0, high=1080.0, low=1070.0, close=1075.0,
-        change=5.0, transaction=12345,
+        stock_id="2330",
+        name="台積電",
+        trade_volume=18560,
+        trade_value=19924200000,
+        open=1075.0,
+        high=1080.0,
+        low=1070.0,
+        close=1075.0,
+        change=5.0,
+        transaction=12345,
     )
     assert m.stock_id == "2330"
     assert m.close == 1075.0
@@ -403,10 +434,16 @@ def test_model_daily_price():
 
 def test_model_daily_price_null_change():
     m = DailyPrice(
-        stock_id="0050", name="元大台灣50",
-        trade_volume=5000, trade_value=875000000,
-        open=175.0, high=176.0, low=174.0, close=175.0,
-        change=None, transaction=3000,
+        stock_id="0050",
+        name="元大台灣50",
+        trade_volume=5000,
+        trade_value=875000000,
+        open=175.0,
+        high=176.0,
+        low=174.0,
+        close=175.0,
+        change=None,
+        transaction=3000,
     )
     assert m.change is None
 
@@ -414,25 +451,35 @@ def test_model_daily_price_null_change():
 def test_model_institutional_trade():
     m = InstitutionalTrade(
         date=date(2026, 5, 15),
-        stock_id="2330", stock_name="台積電",
-        foreign_net=2000, trust_net=500, dealer_net=-100, total_net=2400,
+        stock_id="2330",
+        stock_name="台積電",
+        foreign_net=2000,
+        trust_net=500,
+        dealer_net=-100,
+        total_net=2400,
     )
     assert m.total_net == 2400
 
 
 def test_model_monthly_revenue():
     m = MonthlyRevenue(
-        stock_id="2330", company_name="台積電",
-        year_month="202504", revenue=260040059,
-        prev_year_revenue=216087780, yoy_pct=20.34,
+        stock_id="2330",
+        company_name="台積電",
+        year_month="202504",
+        revenue=260040059,
+        prev_year_revenue=216087780,
+        yoy_pct=20.34,
     )
     assert m.year_month == "202504"
 
 
 def test_model_monthly_revenue_nulls():
     m = MonthlyRevenue(
-        stock_id="9999", company_name="新創公司",
-        year_month="202504", revenue=1000000,
-        prev_year_revenue=None, yoy_pct=None,
+        stock_id="9999",
+        company_name="新創公司",
+        year_month="202504",
+        revenue=1000000,
+        prev_year_revenue=None,
+        yoy_pct=None,
     )
     assert m.prev_year_revenue is None
