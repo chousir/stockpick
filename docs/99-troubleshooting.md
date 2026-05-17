@@ -268,26 +268,92 @@ weekend:
 ### 症狀
 ```
 group_analysis.md 排名第 1 的族群只有 5 檔，半導體 48 檔卻排第 3
-領頭羊推薦集中在冷門族群
+（舊版）領頭羊推薦集中在冷門族群
 ```
 
 ### 原因
-舊版分數用 RS min-max normalization，導致**任何**有最高 RS 的族群拿滿分，跟絕對值無關。
+- 舊版（≤W19）：min-max normalization 導致**任何**有最高 RS 的族群拿滿分，跟絕對值無關
+- 過渡版（W20）：50% entry_rate + 20% RS clip(0,10) 仍被入選率主導，遇到 200+ 檔的 C 策略
+  會把金融/水泥這類入選率高但週報酬負的族群灌到前列
 
 ### 解法
-已改為「絕對 RS clip(0,10) + log 規模因子」（見 [docs/05-group-analysis.md](./05-group-analysis.md) 5.2）：
+2026-W21 起改為動能主導（見 [docs/05-group-analysis.md](./05-group-analysis.md) 5.2）：
 
 ```yaml
 # config/settings.yaml
 group_analysis:
   weights:
-    entry_rate: 0.50   # 族群入選率（主要訊號）
-    size: 0.15         # log1p(members)：避免小族群佔先
-    rs: 0.20           # 絕對 RS, clip 0-10
+    momentum: 0.50      # 5 日累計漲幅 sigmoid 校準（主要訊號）
+    entry_rate: 0.25
     institutional: 0.15
+    size: 0.10          # log1p(members)：避免小族群佔先
 ```
 
-可在 settings.yaml 微調比重。
+---
+
+## 11. 5 日動能顯示為「1 日資料」星號
+
+### 症狀
+```
+group_analysis.md 第 2 節「5 日均漲」欄全部標 *，第 3 節族群標題顯示「（1 日資料）」
+所有 momentum_5d 都跟 change_pct 一樣
+```
+
+### 原因
+`data/cache/twse/daily_*.parquet` 是「跑 fetch-twse 才累積一筆」，而且 STOCK_DAY_ALL 不支援
+歷史日期，所以每週只有 1 筆。第 1 週跑 `make week` 時不會有真正的 5 日資料。
+
+### 解法
+跑 `make week` 時 Makefile 已自動串入 `fetch-candidates-history`，這會對本週入選股聯集去重
+個股逐檔抓 STOCK_DAY 2 個月歷史（每檔 ~4 秒，首次 5–10 分鐘）。
+
+第 2 週起過去月份永久快取，只多抓當月份 → 加速到 1–2 分鐘。
+
+```bash
+# 手動觸發（不跑整個 make week）
+make fetch-candidates-history
+
+# 確認 stock_day 快取
+ls data/cache/twse/stock_day_*.parquet | wc -l
+# 預期：本週入選股聯集 × 2 個月
+
+# 確認動能正確
+grep -c "本週族群表現前" reports/$(date +%Y-W%V)/group_analysis.md
+```
+
+`fetch-candidates-history` 也可獨立呼叫 `--months 6` 給 C3 策略的 post_filter 用。
+
+---
+
+## 12. C3「低基期成長」首次跑很慢
+
+### 症狀
+```
+make screen STRATEGY=c_low_base_growth 卡 5-10 分鐘無輸出
+log 訊息：post_filter pct_from_52w_high: 30 檔候選股補抓 6 個月歷史
+```
+
+### 原因
+C3 的「距 6 個月高 -20% 以下」過濾條件 Goodinfo 沒有對應 FL_ITEM，所以本地用
+`stock_day_*.parquet` 算。首次跑該檔每股要 6 次 STOCK_DAY 呼叫（每月 1 次），共 ~9 秒。
+
+### 解法
+**正常現象，等就好**。後續每週只多抓當月份，10–20 秒可完成。
+
+如果想加速首次跑，可先用 `make fetch-candidates-history` 預熱（會把所有 3 策略候選股的歷史
+都抓完，包括 C3 會用到的）：
+
+```bash
+make fetch-twse
+make screen STRATEGY=a_breakout
+make screen STRATEGY=b_growth_institutional
+# 此時 C3 還沒跑，但可預熱
+uv run tw-screener data fetch-candidates-history --months 6
+# 然後 C3 會大部分 cache hit
+make screen STRATEGY=c_low_base_growth
+```
+
+C3 過濾結果預計 10–40 檔（不再像舊 C 的 200+ 檔灌票）。
 
 ---
 
