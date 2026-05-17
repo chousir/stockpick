@@ -14,6 +14,8 @@ goodinfo:
   request_interval_jitter_sec: 1
   cache_ttl_hours: 24
   max_retries: 3
+  backoff_base: 5
+  referer: "https://goodinfo.tw/tw/index.asp"
   concurrency: 1
 
 twse:

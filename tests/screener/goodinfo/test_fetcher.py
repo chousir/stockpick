@@ -18,8 +18,10 @@ def make_fetcher(tmp_path: Path, **kwargs: object) -> GoodinfoFetcher:
         "jitter_sec": 0.0,
         "ttl_hours": 24.0,
         "max_retries": 1,
+        "backoff_base": 5.0,
         "user_agent": "test/1.0",
         "base_url": "https://goodinfo.tw/tw",
+        "referer": "https://goodinfo.tw/tw/index.asp",
     }
     defaults.update(kwargs)
     return GoodinfoFetcher(**defaults)

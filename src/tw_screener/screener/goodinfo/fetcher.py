@@ -33,16 +33,20 @@ class GoodinfoFetcher:
         jitter_sec: float,
         ttl_hours: float,
         max_retries: int,
+        backoff_base: float,
         user_agent: str,
         base_url: str,
+        referer: str,
     ) -> None:
         self._cache_dir = cache_dir / "goodinfo" / "screener"
         self._interval = interval_sec
         self._jitter = jitter_sec
         self._ttl_hours = ttl_hours
         self._max_retries = max_retries
+        self._backoff_base = backoff_base
         self._user_agent = user_agent
         self._base_url = base_url
+        self._referer = referer
         self._last_request: float = 0.0
 
     # ── Cache ────────────────────────────────────────────────────────────────
@@ -119,7 +123,7 @@ class GoodinfoFetcher:
         self._rate_limit()
         headers = {
             "User-Agent": self._user_agent,
-            "Referer": f"{self._base_url}/index.asp",
+            "Referer": self._referer,
         }
         with httpx.Client(follow_redirects=True, timeout=30.0) as client:
             resp = client.get(url, headers=headers)
@@ -164,7 +168,11 @@ class GoodinfoFetcher:
         html = ""
         for attempt in Retrying(
             stop=stop_after_attempt(self._max_retries),
-            wait=wait_exponential(multiplier=5, min=5, max=125),
+            wait=wait_exponential(
+                multiplier=self._backoff_base,
+                min=self._backoff_base,
+                max=self._backoff_base ** 3,
+            ),
             reraise=True,
         ):
             with attempt:
@@ -184,6 +192,8 @@ def create_fetcher(settings: dict, cache_dir: Path) -> GoodinfoFetcher:
         jitter_sec=float(gi["request_interval_jitter_sec"]),
         ttl_hours=float(gi["cache_ttl_hours"]),
         max_retries=int(gi["max_retries"]),
+        backoff_base=float(gi["backoff_base"]),
         user_agent=gi["user_agent"],
         base_url=gi["base_url"],
+        referer=gi["referer"],
     )
