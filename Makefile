@@ -87,8 +87,11 @@ week:  ## 完整週流程：fetch-twse + screen-all + group
 weekend:  ## 完整週流程並 commit 結果
 	$(MAKE) week
 	git add reports/ watchlist/
-	git commit -m "Weekly analysis $$(date +%Y-W%V)"
-	git push
+	@if git diff --staged --quiet; then \
+	  echo "無新檔可 commit，跳過 git commit/push"; \
+	else \
+	  git commit -m "Weekly analysis $$(date +%Y-W%V)" && git push; \
+	fi
 
 # ─── 回測（預留，三個月後實作）───────────────────────────────────────────────
 

@@ -234,7 +234,8 @@ cat reports/$(date +%Y-W%V)/stocks/2330_台積電.md
 `make week` 一鍵跑完前面所有，並建立 backtest 模組骨架（先不實作，預留位置）。
 
 ### 可動檔案範圍
-- `Makefile`（加 `week`, `weekend`, `backtest-strategies`）
+- `Makefile`（加 `backtest-strategies`；`week`, `weekend` 在 M5 已加）
+- `.gitignore`（移除 `/watchlist/` 以便 `make weekend` 能 commit watchlist）
 - `src/tw_screener/backtest/__init__.py`（skeleton）
 - `src/tw_screener/backtest/strategies.py`（skeleton + docstring）
 - `watchlist/active.md`, `watchlist/waiting.md`, `watchlist/closed.md`（範例）
@@ -245,16 +246,18 @@ cat reports/$(date +%Y-W%V)/stocks/2330_台積電.md
 - [ ] 整個流程在沒被擋的前提下 < 10 分鐘
 - [ ] e2e 測試（用 fixture）通過
 - [ ] backtest 模組有 placeholder（function 簽名 + raise NotImplementedError），三個月後才實作
+- [ ] `make backtest-strategies` 印出未實作提示並 exit 1
 
 ### 驗收指令
 ```bash
 make week
 ls -la reports/$(date +%Y-W%V)/
 # 應該看到：
-#   screen_result_a.csv
-#   screen_result_b.csv
-#   screen_result_c.csv
+#   screen_result_a_breakout.csv
+#   screen_result_b_growth_institutional.csv
+#   screen_result_c_dividend_steady.csv
 #   group_analysis.md
+#   stocks/                          # 由 make report 產生
 ```
 
 ### 注意
