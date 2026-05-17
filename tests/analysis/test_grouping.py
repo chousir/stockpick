@@ -119,12 +119,31 @@ def test_group_stocks_sorted_by_score():
     results = {
         "a_breakout": _make_screener_df(
             ["2330", "2454", "2317", "2382"],
-            [5.0, 4.0, 0.1, 0.2],  # 半導體 RS 高，電腦 RS 低
+            [5.0, 4.0, 0.1, 0.2],
             "a_breakout",
         )
     }
+    # 加上「其他電子 + 電腦」各 2 檔以便兩族群並存
+    industry = pl.concat(
+        [
+            _INDUSTRY_DF,
+            pl.DataFrame(
+                {
+                    "stock_id": ["2376", "6669"],
+                    "industry_code": ["31", "25"],
+                    "industry_name": ["其他電子業", "電腦及周邊設備業"],
+                }
+            ),
+        ]
+    )
+    results["a_breakout"] = pl.concat(
+        [
+            results["a_breakout"],
+            _make_screener_df(["2376", "6669"], [0.5, 0.3], "a_breakout"),
+        ]
+    )
     groups, _ = group_stocks(
-        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=industry, min_group_size=2
     )
     scores = groups["score"].to_list()
     assert scores == sorted(scores, reverse=True)
@@ -136,7 +155,7 @@ def test_group_stocks_multi_strategy_count():
         "a_breakout": _make_screener_df(["2330", "2454"], [3.5, 2.8], "a_breakout"),
         "b_growth_institutional": _make_screener_df(["2330"], [3.5], "b_growth_institutional"),
     }
-    groups, members = group_stocks(
+    groups, _ = group_stocks(
         results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2
     )
     sc = groups.filter(pl.col("industry_code") == "24")
@@ -168,7 +187,7 @@ def test_group_stocks_no_industry_df():
 
 
 def test_group_stocks_rs_from_change_pct():
-    """無 price_history 時，RS 應等於 change_pct。"""
+    """無 price_history 時，rs（5 日 momentum 欄位）應 fallback 到 change_pct。"""
     results = {
         "a_breakout": _make_screener_df(["2330", "2454"], [3.5, 2.8], "a_breakout")
     }
@@ -180,41 +199,77 @@ def test_group_stocks_rs_from_change_pct():
     assert rs_map["2454"] == pytest.approx(2.8)
 
 
-# ─── _compute_rs_from_history ─────────────────────────────────────────────────
+def test_group_stocks_has_momentum_columns():
+    """新欄位 momentum_5d / momentum_5d_days_used 應存在。"""
+    results = {
+        "a_breakout": _make_screener_df(["2330", "2454"], [3.5, 2.8], "a_breakout")
+    }
+    groups, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2
+    )
+    assert "momentum_5d" in groups.columns
+    assert "momentum_5d_days_used" in groups.columns
+    assert "momentum_5d" in members.columns
+    assert "momentum_days_used" in members.columns
+
+
+def test_group_stocks_uses_5_day_momentum():
+    """提供 6 筆 OHLCV → momentum_5d 應為 5 日累計報酬。"""
+    from datetime import date
+
+    history = pl.DataFrame(
+        {
+            "stock_id": ["2330"] * 6,
+            "date": [date(2026, 5, i) for i in range(11, 17)],
+            "close": [100.0, 101.0, 102.0, 103.0, 104.0, 110.0],
+        }
+    )
+    results = {
+        "a_breakout": _make_screener_df(
+            ["2330", "2454"], [0.0, 0.0], "a_breakout"
+        )
+    }
+    _, members = group_stocks(
+        results, history, pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2
+    )
+    row = members.filter(pl.col("stock_id") == "2330").to_dicts()[0]
+    assert row["momentum_5d"] == pytest.approx(10.0)
+    assert row["momentum_days_used"] == 5
+
+
+# ─── _compute_rs_from_history（back-compat wrapper）─────────────────────────
 
 
 def test_compute_rs_empty_history():
     assert _compute_rs_from_history(["2330"], pl.DataFrame(), pl.DataFrame()) == {}
 
 
-def test_compute_rs_not_enough_days():
-    """少於 7 天資料時應跳過。"""
+def test_compute_rs_full_5_days():
+    """6 筆 → 5 日報酬。"""
     from datetime import date
 
     history = pl.DataFrame(
         {
-            "stock_id": ["2330"] * 5,
-            "date": [date(2026, 5, i) for i in range(1, 6)],
-            "close": [100.0, 101.0, 102.0, 103.0, 104.0],
+            "stock_id": ["2330"] * 6,
+            "date": [date(2026, 5, i) for i in range(1, 7)],
+            "close": [100.0, 101.0, 102.0, 103.0, 104.0, 110.0],
         }
     )
     result = _compute_rs_from_history(["2330"], history, pl.DataFrame())
-    assert "2330" not in result
+    assert result["2330"] == pytest.approx(10.0)
 
 
-def test_compute_rs_seven_days():
-    """7 天以上的資料應計算 RS。"""
+def test_compute_rs_partial_data():
+    """只有 3 筆 → 2 日累計報酬（partial fallback）。"""
     from datetime import date
 
-    closes = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 110.0]
     history = pl.DataFrame(
         {
-            "stock_id": ["2330"] * 7,
-            "date": [date(2026, 5, i) for i in range(1, 8)],
-            "close": closes,
+            "stock_id": ["2330"] * 3,
+            "date": [date(2026, 5, i) for i in range(1, 4)],
+            "close": [100.0, 105.0, 110.0],
         }
     )
     result = _compute_rs_from_history(["2330"], history, pl.DataFrame())
-    # RS = (110 - 100) / 100 * 100 - 0 = 10.0
     assert "2330" in result
     assert result["2330"] == pytest.approx(10.0)

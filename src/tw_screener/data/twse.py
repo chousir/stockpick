@@ -662,6 +662,61 @@ class TWSEClient:
             return pl.DataFrame(schema=_empty_schema)
         return pl.concat(all_frames).unique(subset=["date"]).sort("date").tail(n_days)
 
+    def load_candidate_history(
+        self, stock_ids: list[str], n_days: int = 60
+    ) -> pl.DataFrame:
+        """
+        合併多檔候選股的歷史 OHLCV，給族群動能計算用。
+
+        資料來源優先序：
+          1. stock_day_{stock_id}_*.parquet（個股月線，需先呼叫 fetch_stock_history 補抓）
+          2. daily_*.parquet（全市場日線累積；含所有股票，可能只有少數幾天）
+
+        回傳：含 stock_id / date / close 三欄，按 (stock_id, date) 排序、去重。
+        """
+        _empty_schema = {"stock_id": pl.Utf8, "date": pl.Date, "close": pl.Float64}
+        if not stock_ids:
+            return pl.DataFrame(schema=_empty_schema)
+
+        stock_id_set = set(stock_ids)
+        frames: list[pl.DataFrame] = []
+
+        # 1. stock_day caches (one file per stock per month)
+        for sid in stock_ids:
+            for f in sorted(self.cache_dir.glob(f"stock_day_{sid}_*.parquet")):
+                try:
+                    df = pl.read_parquet(f)
+                    if {"stock_id", "date", "close"}.issubset(df.columns):
+                        frames.append(df.select(["stock_id", "date", "close"]))
+                except Exception as e:
+                    logger.warning(f"讀取 {f} 失敗：{e}")
+
+        # 2. daily caches (all stocks; filter to candidates)
+        for f in sorted(self.cache_dir.glob("daily_*.parquet")):
+            try:
+                df = pl.read_parquet(f)
+                if not {"stock_id", "date", "close"}.issubset(df.columns):
+                    continue
+                df = df.filter(pl.col("stock_id").is_in(list(stock_id_set))).select(
+                    ["stock_id", "date", "close"]
+                )
+                if not df.is_empty():
+                    frames.append(df)
+            except Exception as e:
+                logger.warning(f"讀取 {f} 失敗：{e}")
+
+        if not frames:
+            return pl.DataFrame(schema=_empty_schema)
+
+        merged = (
+            pl.concat(frames)
+            .unique(subset=["stock_id", "date"])
+            .sort(["stock_id", "date"])
+        )
+        # 限制每檔最多 n_days 日（用 tail 在每檔內取最近 n_days）
+        merged = merged.group_by("stock_id", maintain_order=True).tail(n_days)
+        return merged
+
     def fetch_stock_institutional(self, stock_id: str, n_days: int = 20) -> pl.DataFrame:
         """從累積的法人快取讀取特定股票近 n_days 筆。"""
         _empty_schema = {

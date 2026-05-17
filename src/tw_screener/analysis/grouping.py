@@ -1,16 +1,29 @@
-"""族群分析：把篩選結果按 TWSE 產業別分組，計算族群強度分數。"""
+"""族群分析：把篩選結果按 TWSE 產業別分組，計算族群強度分數。
+
+強度公式（2026-W21 起改為動能主導）：
+  score = 50 * sigmoid(momentum_5d / 5)   # 動能主導
+        + 25 * entry_rate                 # 入選率（仍保留訊號）
+        + 15 * inst_score                 # 法人佔位
+        + 10 * (log1p(members) / log1p(max))   # 規模
+"""
 
 from __future__ import annotations
+
+import math
 
 import polars as pl
 from loguru import logger
 
+from tw_screener.analysis.momentum import compute_n_day_return
+
 _DEFAULT_WEIGHTS: dict[str, float] = {
-    "entry_rate": 0.50,   # 入選率：最主要訊號（多少比例的族群股票被篩出）
-    "size": 0.15,         # 族群規模：log 正規化，避免小族群佔便宜
-    "rs": 0.20,           # 相對強度：用絕對值（只有正 RS 才加分，負 RS 不扣）
-    "institutional": 0.15, # 法人資料（目前為 0，佔位）
+    "momentum": 0.50,
+    "entry_rate": 0.25,
+    "institutional": 0.15,
+    "size": 0.10,
 }
+
+_MOMENTUM_DAYS = 5
 
 
 def is_etf_or_warrant(stock_id: str) -> bool:
@@ -30,48 +43,45 @@ def is_etf_or_warrant(stock_id: str) -> bool:
 def _compute_rs_from_history(
     stock_ids: list[str],
     price_history: pl.DataFrame,
-    benchmark: pl.DataFrame,
+    benchmark: pl.DataFrame,  # noqa: ARG001 — kept for backward compatibility
+    n: int = _MOMENTUM_DAYS,
 ) -> dict[str, float]:
-    """Try to compute 7-day RS from price history. Returns empty dict if not enough data."""
-    if price_history.is_empty() or "close" not in price_history.columns:
-        return {}
+    """回傳 {stock_id: n_day_return_pct}（純絕對動能，不再減大盤）。
 
-    bench_7d = 0.0
-    if not benchmark.is_empty() and "close" in benchmark.columns:
-        bench_sorted = benchmark.sort("date")
-        if len(bench_sorted) >= 7:
-            c_now = bench_sorted["close"][-1]
-            c_7d = bench_sorted["close"][-7]
-            if c_now is not None and c_7d is not None and c_7d != 0:
-                bench_7d = (c_now - c_7d) / c_7d * 100
+    用 momentum.compute_n_day_return；若該股可用天數不足 n，仍會回傳實際可算的報酬。
+    無資料的股票不在回傳 dict 中。
+    """
+    momentum_map = compute_n_day_return(stock_ids, price_history, n=n)
+    return {sid: ret for sid, (ret, _days) in momentum_map.items()}
 
-    rs_map: dict[str, float] = {}
-    ph_sorted = price_history.sort("date")
-    for stock_id in stock_ids:
-        stock_price = ph_sorted.filter(pl.col("stock_id") == stock_id)
-        if len(stock_price) >= 7:
-            c_now = stock_price["close"][-1]
-            c_7d = stock_price["close"][-7]
-            if c_now is not None and c_7d is not None and c_7d != 0:
-                rs_map[stock_id] = (c_now - c_7d) / c_7d * 100 - bench_7d
 
-    return rs_map
+def _sigmoid(x: float) -> float:
+    """logistic sigmoid; saturates to [0, 1]."""
+    if x >= 0:
+        z = math.exp(-x)
+        return 1.0 / (1.0 + z)
+    z = math.exp(x)
+    return z / (1.0 + z)
 
 
 def group_stocks(
     screener_results: dict[str, pl.DataFrame],
     price_history: pl.DataFrame,
-    benchmark: pl.DataFrame,
+    benchmark: pl.DataFrame,  # noqa: ARG001 — kept for backward compatibility
     industry_df: pl.DataFrame | None = None,
     weights: dict[str, float] | None = None,
     min_group_size: int = 2,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
-    Group screened stocks by industry and compute group strength scores.
+    Group screened stocks by industry and compute group strength scores (動能主導).
 
     Returns (groups_df, enriched_stocks_df):
     - groups_df: industry-level stats sorted by score desc (filtered by min_group_size)
-    - enriched_stocks_df: per-stock data with industry, RS, strategy flags
+        欄位：industry_code / industry_name / members_count / total_in_industry /
+              entry_rate / momentum_5d / momentum_5d_days_used / rs_avg(alias) /
+              inst_score / count_{sid} / score
+    - enriched_stocks_df: per-stock data with industry, rs (= n_day_return), strategy flags,
+        momentum_5d, momentum_days_used
     """
     if weights is None:
         weights = _DEFAULT_WEIGHTS
@@ -113,6 +123,8 @@ def group_stocks(
             "members_count": pl.Int32,
             "total_in_industry": pl.Int32,
             "entry_rate": pl.Float64,
+            "momentum_5d": pl.Float64,
+            "momentum_5d_days_used": pl.Int32,
             "rs_avg": pl.Float64,
             "inst_score": pl.Float64,
             "score": pl.Float64,
@@ -127,14 +139,27 @@ def group_stocks(
         strategy_count_expr = strategy_count_expr + pl.col(f"in_{sid}").cast(pl.Int32)
     stock_df = stock_df.with_columns(strategy_count_expr.alias("strategy_count"))
 
-    # RS: prefer 7-day history, fall back to change_pct
+    # 5-day momentum: prefer price_history; fallback to change_pct
     stock_ids = stock_df["stock_id"].to_list()
-    rs_from_history = _compute_rs_from_history(stock_ids, price_history, benchmark)
-    rs_values = [
-        rs_from_history.get(sid, float(row.get("change_pct") or 0))
-        for sid, row in zip(stock_ids, stock_df.iter_rows(named=True))
-    ]
-    stock_df = stock_df.with_columns(pl.Series("rs", rs_values, dtype=pl.Float64))
+    momentum_map = compute_n_day_return(stock_ids, price_history, n=_MOMENTUM_DAYS)
+
+    rs_values: list[float] = []
+    days_values: list[int] = []
+    for sid, row in zip(stock_ids, stock_df.iter_rows(named=True)):
+        entry = momentum_map.get(sid)
+        if entry is not None:
+            rs_values.append(entry[0])
+            days_values.append(entry[1])
+        else:
+            rs_values.append(float(row.get("change_pct") or 0))
+            days_values.append(1)
+    stock_df = stock_df.with_columns(
+        [
+            pl.Series("rs", rs_values, dtype=pl.Float64),  # 5-day return (alias kept)
+            pl.Series("momentum_5d", rs_values, dtype=pl.Float64),
+            pl.Series("momentum_days_used", days_values, dtype=pl.Int32),
+        ]
+    )
 
     # Join with industry classification
     if industry_df is not None and not industry_df.is_empty():
@@ -158,7 +183,8 @@ def group_stocks(
     # Group-level aggregation
     agg_exprs: list[pl.Expr] = [
         pl.col("stock_id").count().alias("members_count"),
-        pl.col("rs").mean().alias("rs_avg"),
+        pl.col("momentum_5d").mean().alias("momentum_5d"),
+        pl.col("momentum_days_used").min().alias("momentum_5d_days_used"),
     ]
     for sid in strategy_ids:
         agg_exprs.append(
@@ -166,6 +192,9 @@ def group_stocks(
         )
 
     groups = stock_df.group_by(["industry_code", "industry_name"]).agg(agg_exprs)
+
+    # alias for backward compatibility (rs_avg now = 5-day mean return)
+    groups = groups.with_columns(pl.col("momentum_5d").alias("rs_avg"))
 
     # total_in_industry and entry_rate
     if industry_df is not None and not industry_df.is_empty():
@@ -186,36 +215,38 @@ def group_stocks(
         ).alias("entry_rate")
     )
 
-    # inst_score: placeholder (would use institutional net in a future enhancement)
+    # inst_score: placeholder (T86 data not aggregated to group-level yet)
     groups = groups.with_columns(pl.lit(0.0).alias("inst_score"))
 
-    # Composite score
-    # - entry_rate: absolute fraction (0–1), already meaningful as-is
-    # - size: log1p-normalised members_count → large sectors score higher than tiny ones
-    # - rs: absolute RS clipped to [0, 10%]; negative RS gets 0 (no penalty, no boost)
-    #   Using absolute values avoids min-max inflation where a 5-stock sector with +3% RS
-    #   beats a 48-stock sector with -1% RS simply because it's the "relative best".
-    # - institutional: placeholder (0 until T86 data is available)
+    # Composite score (動能主導)
     max_members = float(groups["members_count"].max() or 1)
-    import math as _math
-    log_max = _math.log1p(max_members)
+    log_max = math.log1p(max_members)
 
-    w_er = weights.get("entry_rate", 0.50)
-    w_sz = weights.get("size", 0.15)
-    w_rs = weights.get("rs", 0.20)
-    w_inst = weights.get("institutional", 0.15)
+    w_mom = weights.get("momentum", _DEFAULT_WEIGHTS["momentum"])
+    w_er = weights.get("entry_rate", _DEFAULT_WEIGHTS["entry_rate"])
+    w_inst = weights.get("institutional", _DEFAULT_WEIGHTS["institutional"])
+    w_sz = weights.get("size", _DEFAULT_WEIGHTS["size"])
 
+    # sigmoid: 5 日漲 5% → 0.5；漲 10% → 0.73；漲 20% → 0.88（避免大漲撞天花板）
+    momentum_score_vals = [_sigmoid(v / 5.0) for v in groups["momentum_5d"].to_list()]
     groups = groups.with_columns(
-        (pl.col("members_count").cast(pl.Float64) + 1.0).log(base=_math.e).alias("_log_members")
+        pl.Series("_momentum_score", momentum_score_vals, dtype=pl.Float64)
     )
+
     groups = groups.with_columns(
         (
-            w_er * pl.col("entry_rate") * 10
-            + w_sz * (pl.col("_log_members") / log_max) * 10
-            + w_rs * pl.col("rs_avg").clip(lower_bound=0.0, upper_bound=10.0)
-            + w_inst * pl.col("inst_score") * 10
+            (pl.col("members_count").cast(pl.Float64) + 1.0).log(base=math.e) / log_max
+        ).alias("_size_score")
+    )
+
+    groups = groups.with_columns(
+        (
+            w_mom * 100.0 * pl.col("_momentum_score")
+            + w_er * 100.0 * pl.col("entry_rate")
+            + w_inst * 100.0 * pl.col("inst_score")
+            + w_sz * 100.0 * pl.col("_size_score")
         ).alias("score")
-    ).drop("_log_members")
+    ).drop(["_momentum_score", "_size_score"])
 
     # Filter and sort
     groups = groups.filter(pl.col("members_count") >= min_group_size).sort(

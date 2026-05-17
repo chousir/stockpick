@@ -1,4 +1,4 @@
-"""族群分析報告產生器：把 groups / leaders DataFrame 渲染成 group_analysis.md。"""
+"""族群分析報告產生器：把 groups / members DataFrame 渲染成 group_analysis.md。"""
 
 from __future__ import annotations
 
@@ -15,15 +15,25 @@ _STRATEGY_LABEL: dict[str, str] = {
     "a_breakout": "A",
     "b_growth_institutional": "B",
     "c_dividend_steady": "C",
+    "c_low_base_growth": "C",
 }
 
 _STRATEGY_NAME: dict[str, str] = {
     "a_breakout": "波段啟動",
     "b_growth_institutional": "法人成長",
     "c_dividend_steady": "穩健存股",
+    "c_low_base_growth": "低基期成長",
+}
+
+_STRATEGY_DESCRIPTION: dict[str, str] = {
+    "a_breakout": "週 MACD 翻多 + 5/10/20 均線多頭排列且走揚（短線 1–4 週）",
+    "b_growth_institutional": "月累計營收 YoY ≥ 15% + 外資與投信同步連續買超（中線 1–3 月）",
+    "c_dividend_steady": "連續配息 8 年 + 殖利率 ≥ 4% + 股利持續成長（長線 6 月以上）",
+    "c_low_base_growth": "月營收 YoY ≥ 10% + 股價距 1 年高點 -20% 以下 + 外資連續買超（中線）",
 }
 
 _UNCATEGORIZED = "未分類"
+_TOP_PER_GROUP = 3
 
 
 def _fmt_pct(v: float) -> str:
@@ -37,9 +47,10 @@ def _strategy_str(row: dict, strategy_ids: list[str]) -> str:
     return "+".join(labels) if labels else "-"
 
 
-def _build_stock_dict(
-    srow: dict, strategy_ids: list[str], rank_in_group: int, group_size: int
-) -> dict:
+def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> dict:
+    momentum_5d = float(srow.get("momentum_5d", srow.get("rs", 0)) or 0)
+    days_used = int(srow.get("momentum_days_used", 0) or 0)
+    rank_in_group = int(srow.get("rank_in_group", 0) or 0)
     return {
         "stock_id": srow["stock_id"],
         "name": srow["name"],
@@ -47,11 +58,14 @@ def _build_stock_dict(
         "strategy_count": int(srow.get("strategy_count", 1)),
         "change_pct": float(srow.get("change_pct", 0) or 0),
         "change_pct_str": _fmt_pct(float(srow.get("change_pct", 0) or 0)),
+        "momentum_5d": momentum_5d,
+        "momentum_5d_str": _fmt_pct(momentum_5d),
+        "momentum_days_used": days_used,
+        "momentum_partial": days_used > 0 and days_used < 5,
         "amount_million": float(srow.get("amount_million", 0) or 0),
-        "amount_rank_in_group": int(srow.get("amount_rank", rank_in_group)),
-        "rs_rank_in_group": int(srow.get("rs_rank", rank_in_group)),
-        "leader_score": float(srow.get("leader_score", 0)),
-        "is_leader": bool(srow.get("is_leader", False)),
+        "leader_score": float(srow.get("leader_score", 0) or 0),
+        "rank_in_group": rank_in_group,
+        "is_top_in_group": rank_in_group == 1,
         "goodinfo_url": str(srow.get("goodinfo_url", "")),
         "group_size": group_size,
     }
@@ -59,7 +73,7 @@ def _build_stock_dict(
 
 def _build_context(
     groups: pl.DataFrame,
-    leaders: pl.DataFrame,
+    members: pl.DataFrame,
     screener_results: dict[str, pl.DataFrame],
     week_tag: str,
     top_groups: int,
@@ -71,10 +85,10 @@ def _build_context(
 
     # --- summary ---
     counts: dict[str, int] = {sid: len(df) for sid, df in screener_results.items()}
-    total_union = len(leaders) if not leaders.is_empty() else 0
+    total_union = len(members) if not members.is_empty() else 0
 
     intersections: dict[str, list[str]] = {}
-    if not leaders.is_empty() and len(active_strategy_ids) >= 2:
+    if not members.is_empty() and len(active_strategy_ids) >= 2:
         for i, sid_a in enumerate(active_strategy_ids):
             for sid_b in active_strategy_ids[i + 1 :]:
                 def _lbl(sid: str) -> str:
@@ -82,7 +96,7 @@ def _build_context(
                     return f"{lbl}（{_STRATEGY_NAME.get(sid, sid)}）"
                 key = f"{_lbl(sid_a)}∩{_lbl(sid_b)}"
                 mask = pl.col(f"in_{sid_a}") & pl.col(f"in_{sid_b}")
-                intersections[key] = leaders.filter(mask)["stock_id"].to_list()
+                intersections[key] = members.filter(mask)["stock_id"].to_list()
 
         if len(active_strategy_ids) >= 3:
             mask_all = pl.lit(True)
@@ -91,9 +105,19 @@ def _build_context(
             key_all = "∩".join(
                 _STRATEGY_LABEL.get(sid, sid[0].upper()) for sid in active_strategy_ids
             )
-            intersections[key_all] = leaders.filter(mask_all)["stock_id"].to_list()
+            intersections[key_all] = members.filter(mask_all)["stock_id"].to_list()
 
     summary = {"counts": counts, "total_union": total_union, "intersections": intersections}
+
+    # --- strategy legend (Section 0) ---
+    strategy_legend = [
+        {
+            "label": _STRATEGY_LABEL.get(sid, sid[0].upper()),
+            "name": _STRATEGY_NAME.get(sid, sid),
+            "description": _STRATEGY_DESCRIPTION.get(sid, ""),
+        }
+        for sid in active_strategy_ids
+    ]
 
     # --- groups table (top N) ---
     top_groups_df = groups.head(top_groups)
@@ -106,18 +130,24 @@ def _build_context(
 
         counts_per_sid = {sid: int(row.get(f"count_{sid}", 0)) for sid in strategy_ids}
 
-        if not leaders.is_empty():
-            group_stocks_df = leaders.filter(pl.col("industry_code") == industry_code).sort(
+        if not members.is_empty():
+            group_stocks_df = members.filter(pl.col("industry_code") == industry_code).sort(
                 "leader_score", descending=True
             )
         else:
             group_stocks_df = pl.DataFrame()
 
         n = len(group_stocks_df)
-        stock_list = [
-            _build_stock_dict(srow, strategy_ids, i, n)
-            for i, srow in enumerate(group_stocks_df.iter_rows(named=True), start=1)
+        all_stocks = [
+            _build_stock_dict(srow, strategy_ids, n)
+            for srow in group_stocks_df.iter_rows(named=True)
         ]
+
+        top_stocks_in_group = all_stocks[:_TOP_PER_GROUP]
+        rest_stocks = all_stocks[_TOP_PER_GROUP:]
+
+        momentum_5d = float(row.get("momentum_5d", row.get("rs_avg", 0)) or 0)
+        days_used = int(row.get("momentum_5d_days_used", 0) or 0)
 
         group_list.append(
             {
@@ -129,20 +159,23 @@ def _build_context(
                 "members_count": members_count,
                 "total_in_industry": total_in,
                 "entry_rate_pct_str": f"{float(row['entry_rate']) * 100:.1f}%",
-                "rs_avg_str": _fmt_pct(float(row["rs_avg"])),
+                "momentum_5d": momentum_5d,
+                "momentum_5d_str": _fmt_pct(momentum_5d),
+                "momentum_5d_days_used": days_used,
+                "momentum_partial": days_used > 0 and days_used < 5,
                 "score_str": f"{float(row['score']):.1f}",
-                "stocks": stock_list,
+                "stocks": all_stocks,
+                "top_stocks": top_stocks_in_group,
+                "rest_stocks": rest_stocks,
             }
         )
 
     # --- priority stocks (skip 未分類) ---
-    if not leaders.is_empty() and not groups.is_empty():
+    if not members.is_empty() and not groups.is_empty():
         max_score = float(groups["score"].max() or 1.0)
         group_score_map: dict[str, float] = {}
-        group_name_map: dict[str, str] = {}
         for g_row in groups.iter_rows(named=True):
             group_score_map[g_row["industry_code"]] = float(g_row["score"]) / max_score
-            group_name_map[g_row["industry_code"]] = g_row["industry_name"]
 
         group_rank_map = {
             g_row["industry_code"]: rank + 1
@@ -150,19 +183,23 @@ def _build_context(
         }
 
         priority_rows = []
-        for srow in leaders.iter_rows(named=True):
+        for srow in members.iter_rows(named=True):
             ind_code = srow["industry_code"]
             ind_name = srow.get("industry_name", _UNCATEGORIZED)
             # Skip 未分類 from priority recommendations
             if ind_name == _UNCATEGORIZED:
                 continue
             g_score_norm = group_score_map.get(ind_code, 0.0)
-            is_leader = bool(srow.get("is_leader", False))
+            rank_in_group = int(srow.get("rank_in_group", 99) or 99)
             strategy_count = int(srow.get("strategy_count", 1))
+
+            # 個股加分：族群內排名第 1 → 1.0；第 2 → 0.7；第 3 → 0.5；其餘 → 0.3
+            rank_bonus_map = {1: 1.0, 2: 0.7, 3: 0.5}
+            rank_bonus = rank_bonus_map.get(rank_in_group, 0.3)
 
             p_score = (
                 g_score_norm * 0.6
-                + (1.0 if is_leader else 0.5) * 0.3
+                + rank_bonus * 0.3
                 + (1.0 if strategy_count >= 2 else 0.0) * 0.1
             )
             priority_rows.append(
@@ -171,7 +208,7 @@ def _build_context(
                     "name": srow["name"],
                     "industry_name": ind_name,
                     "group_rank": group_rank_map.get(ind_code, 99),
-                    "is_leader": is_leader,
+                    "rank_in_group": rank_in_group,
                     "strategy_count": strategy_count,
                     "strategy_str": _strategy_str(srow, strategy_ids),
                     "priority_score": p_score,
@@ -200,6 +237,7 @@ def _build_context(
             sid: f"{_STRATEGY_LABEL.get(sid, sid[0].upper())}（{_STRATEGY_NAME.get(sid, sid)}）"
             for sid in strategy_ids
         },
+        "strategy_legend": strategy_legend,
         "summary": summary,
         "groups": group_list,
         "top_groups": top_groups,
@@ -210,15 +248,18 @@ def _build_context(
 
 def render_group_report(
     groups: pl.DataFrame,
-    leaders: pl.DataFrame,
+    members: pl.DataFrame,
     screener_results: dict[str, pl.DataFrame],
     week_tag: str,
     output_path: Path,
     top_groups: int = 10,
     top_stocks: int = 10,
 ) -> None:
-    """Render group_analysis.md to output_path using Jinja2 template."""
-    context = _build_context(groups, leaders, screener_results, week_tag, top_groups, top_stocks)
+    """Render group_analysis.md to output_path using Jinja2 template.
+
+    members: rank_within_groups 的回傳；含 rank_in_group / leader_score / momentum_5d。
+    """
+    context = _build_context(groups, members, screener_results, week_tag, top_groups, top_stocks)
 
     env = Environment(
         loader=FileSystemLoader(str(_TEMPLATE_DIR)),

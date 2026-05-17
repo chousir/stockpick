@@ -1,6 +1,6 @@
 .PHONY: init sync test test-unit test-integration lint typecheck fmt clean clean-cache deep-clean \
-        fetch-twse fetch-stock screen screen-all screen-dry group leaders report report-batch \
-        week weekend backtest-strategies
+        fetch-twse fetch-stock fetch-candidates-history screen screen-all screen-dry \
+        group leaders report report-batch week weekend backtest-strategies
 
 # ─── 環境 ────────────────────────────────────────────────────────────────────
 
@@ -50,6 +50,9 @@ fetch-twse:  ## 增量抓 TWSE 日線、法人、月營收
 fetch-stock:  ## 抓單檔個股完整資料（STOCK_ID=2330）
 	uv run tw-screener data fetch-stock $(STOCK_ID)
 
+fetch-candidates-history:  ## 對本週篩選結果聯集個股補抓 STOCK_DAY 歷史（5 日動能用，首次 5-15 分鐘）
+	uv run tw-screener data fetch-candidates-history
+
 # ─── 選股 ────────────────────────────────────────────────────────────────────
 
 screen:  ## 跑單一策略（STRATEGY=a_breakout）
@@ -79,9 +82,10 @@ report-batch:  ## 批次產本週推薦清單報告
 
 # ─── 完整流程 ─────────────────────────────────────────────────────────────────
 
-week:  ## 完整週流程：fetch-twse + screen-all + group
+week:  ## 完整週流程：fetch-twse + screen-all + fetch-candidates-history + group
 	$(MAKE) fetch-twse
 	$(MAKE) screen-all
+	$(MAKE) fetch-candidates-history
 	$(MAKE) group
 
 weekend:  ## 完整週流程並 commit 結果

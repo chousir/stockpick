@@ -2,6 +2,14 @@
 
 生成時間：{{ generated_at }}
 
+## 0. 策略代號說明
+
+{% for s in strategy_legend -%}
+- **{{ s.label }} {{ s.name }}**：{{ s.description }}
+{% endfor %}
+> 標籤 `[A] [B] [C]` 代表命中策略；同檔多策略以 `+` 連接（如 `A+C`）。
+> 漲幅顯示「5 日累計報酬」（標 `*` 代表本地快取資料不足 5 日）。
+
 ## 1. 入選分布總覽
 
 {% for sid in active_strategy_ids -%}
@@ -16,32 +24,29 @@
 {% endfor %}
 ## 2. 族群強度排名（前 {{ top_groups }}）
 
-| Rank | 族群 | {% for sid in active_strategy_ids %}{{ strategy_names[sid] }}入選 | {% endfor %}族群入選率 | 平均漲跌幅 | 強度分數 |
+| Rank | 族群 | {% for sid in active_strategy_ids %}{{ strategy_names[sid] }}入選 | {% endfor %}族群入選率 | 5 日均漲 | 強度分數 |
 |---|---|{% for sid in active_strategy_ids %}---|{% endfor %}---|---|---|
 {% for group in groups -%}
-| {{ group.rank }} | {{ group.industry_name }} | {% for sid in active_strategy_ids %}{{ group.counts.get(sid, 0) }} | {% endfor %}{{ group.entry_rate_pct_str }} | {{ group.rs_avg_str }} | {{ group.score_str }} |
+| {{ group.rank }} | {{ group.industry_name }} | {% for sid in active_strategy_ids %}{{ group.counts.get(sid, 0) }} | {% endfor %}{{ group.entry_rate_pct_str }} | {{ group.momentum_5d_str }}{% if group.momentum_partial %}*{% endif %} | {{ group.score_str }} |
 {% endfor %}
 
-## 3. 各族群領頭羊候選
+> 強度分數 = 50 × sigmoid(5 日均漲/5) + 25 × 入選率 + 15 × 法人 + 10 × log 規模
+
+## 3. 各族群本週表現
 
 {% for group in groups %}
-### {{ group.rank }}. {{ group.industry_name }}（共 {{ group.members_count }} 檔入選）
+### {{ group.rank }}. {{ group.industry_name }}（共 {{ group.members_count }} 檔入選・5 日均漲 {{ group.momentum_5d_str }}{% if group.momentum_partial %}*（{{ group.momentum_5d_days_used }} 日資料）{% endif %}）
 
-{% for stock in group.stocks -%}
-{% if stock.is_leader -%}
-- **領頭羊候選：{{ stock.stock_id }} {{ stock.name }}**
-  - 漲跌幅：{{ stock.change_pct_str }}
-  - 成交金額：{{ "%.0f" | format(stock.amount_million) }} 百萬元
-  - 入選策略：{{ stock.strategy_str }}
-  - 在族群中：成交金額排名 {{ stock.amount_rank_in_group }}/{{ stock.group_size }}、漲幅排名 {{ stock.rs_rank_in_group }}/{{ stock.group_size }}
-  - Goodinfo: {{ stock.goodinfo_url }}
-{% endif -%}
-{% endfor -%}
-{% set followers = [] %}
-{% for stock in group.stocks %}{% if not stock.is_leader %}{% set _ = followers.append(stock) %}{% endif %}{% endfor %}
-{% if followers -%}
-- 跟漲候選：{% for s in followers[:4] %}{{ s.stock_id }} {{ s.name }}{% if not loop.last %}、{% endif %}{% endfor %}{% if followers | length > 4 %} 等 {{ followers | length }} 檔{% endif %}
+本週族群表現前 {{ group.top_stocks | length }} 名：
 
+| # | 股號 | 名稱 | 5 日漲幅 | 當日 | 成交金額（百萬） | 命中策略 | Goodinfo |
+|---|---|---|---|---|---|---|---|
+{% for stock in group.top_stocks -%}
+| {{ stock.rank_in_group }} | {{ stock.stock_id }} | {{ stock.name }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.strategy_str }} | [連結]({{ stock.goodinfo_url }}) |
+{% endfor %}
+{% if group.rest_stocks -%}
+
+其他入選股：{% for s in group.rest_stocks[:6] %}{{ s.stock_id }} {{ s.name }}{% if not loop.last %}、{% endif %}{% endfor %}{% if group.rest_stocks | length > 6 %} 等 {{ group.rest_stocks | length }} 檔{% endif %}
 {% endif %}
 {% endfor %}
 
@@ -53,7 +58,7 @@
 
 {% if priority_stocks -%}
 {% for stock in priority_stocks -%}
-{{ stock.rank }}. **{{ stock.stock_id }} {{ stock.name }}**（族群 #{{ stock.group_rank }} {{ stock.industry_name }}{% if stock.is_leader %}・領頭羊{% endif %}{% if stock.strategy_count >= 2 %}・{{ stock.strategy_str }}{% endif %}）
+{{ stock.rank }}. **{{ stock.stock_id }} {{ stock.name }}**（族群 #{{ stock.group_rank }} {{ stock.industry_name }}・族群內 #{{ stock.rank_in_group }}{% if stock.strategy_count >= 2 %}・{{ stock.strategy_str }}{% endif %}）
 {% endfor %}
 {% else -%}
 （無足夠資料產生推薦清單）
@@ -66,17 +71,17 @@
 > 以下為本週篩選出的前 {{ claude_groups | length }} 大領漲族群，請 Claude 依照每個族群的個股資料，進行以下分析：
 >
 > 1. **細分實際族群**：TWSE 產業分類較粗，請根據個股特性進一步細分（例如半導體可細分為：晶圓代工、IC 設計、封裝測試、記憶體、設備材料等；光電業可細分為：面板、鏡頭模組、LED 等），說明本族群目前哪個細分領域最強。
-> 2. **族群輪動訊號**：觀察各族群入選率、RS 均值、領頭羊漲幅，判斷是否有族群輪動（換手）跡象。
-> 3. **領頭羊確認**：評估每個族群的領頭羊候選是否具代表性（大型股、成交量大、漲幅領先），或是否為假突破。
+> 2. **族群輪動訊號**：觀察各族群 5 日均漲、入選率、領先個股漲幅，判斷是否有族群輪動（換手）跡象。
+> 3. **漲幅領先個股的合理性檢查**：評估每個族群內排名前 3 的個股，其漲勢是否有量能、法人、籌碼支撐，或為單日急拉的假突破。
 > 4. **個股簡評**：針對每檔個股，以一句話點出關鍵看法（利多/利空/需觀察的理由）。
 
 {% for group in claude_groups %}
-### 族群 {{ loop.index }}：{{ group.industry_name }}（強度分數 {{ group.score_str }}、族群入選率 {{ group.entry_rate_pct_str }}）
+### 族群 {{ loop.index }}：{{ group.industry_name }}（強度分數 {{ group.score_str }}、5 日均漲 {{ group.momentum_5d_str }}、族群入選率 {{ group.entry_rate_pct_str }}）
 
-| 股票代號 | 名稱 | 漲跌幅 | 成交金額（百萬） | 入選策略 | 是否領頭羊 | Goodinfo |
-|---|---|---|---|---|---|---|
+| 股票代號 | 名稱 | 5 日漲幅 | 當日 | 成交金額（百萬） | 入選策略 | 族群內排名 | Goodinfo |
+|---|---|---|---|---|---|---|---|
 {% for stock in group.stocks -%}
-| {{ stock.stock_id }} | {{ stock.name }} | {{ stock.change_pct_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.strategy_str }} | {{ "✓ 領頭羊" if stock.is_leader else "" }} | [連結]({{ stock.goodinfo_url }}) |
+| {{ stock.stock_id }} | {{ stock.name }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.strategy_str }} | #{{ stock.rank_in_group }} | [連結]({{ stock.goodinfo_url }}) |
 {% endfor %}
 
 {% endfor %}
