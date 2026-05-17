@@ -109,7 +109,7 @@ uv run tw-screener screen dry --strategy a_breakout  # 看組出的 URL
 # 手動把 URL 貼到瀏覽器確認有結果
 # 然後跑實打：
 make screen STRATEGY=a_breakout
-cat reports/$(date +%Y-W%V)/screen_result_a.csv
+cat reports/$(date +%Y-W%V)/screen_result_a_breakout.csv
 ```
 
 ### 注意（**最重要**）
@@ -136,7 +136,7 @@ cat reports/$(date +%Y-W%V)/screen_result_a.csv
 
 ### 成功標準
 - [ ] 三個 YAML 完全照 `docs/03-strategies.md` 規格
-- [ ] `make screen STRATEGY=a_breakout` 產出 `reports/YYYY-Www/screen_result_a.csv`
+- [ ] `make screen STRATEGY=a_breakout` 產出 `reports/YYYY-Www/screen_result_a_breakout.csv`
 - [ ] `make screen-all` 跑完三組，產出 3 個 CSV，總耗時 < 5 分鐘
 - [ ] CSV 欄位符合 `docs/04-screener-spec.md` 規格
 - [ ] `make screen-dry STRATEGY=a_breakout` 只組 URL 不打網
@@ -147,7 +147,7 @@ make screen-dry STRATEGY=a_breakout
 make screen STRATEGY=a_breakout
 make screen-all
 ls -la reports/$(date +%Y-W%V)/
-head reports/$(date +%Y-W%V)/screen_result_a.csv
+head reports/$(date +%Y-W%V)/screen_result_a_breakout.csv
 ```
 
 ### 注意

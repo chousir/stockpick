@@ -7,26 +7,29 @@
 
 每週把 1800 檔台股 → 30 檔候選 → 5-10 檔個股深度報告 → 你下決策。
 
-## Quick Start
+## Quick Start（5 步）
 
 ```bash
-# 首次：環境初始化
+# Step 1：首次 clone 後做一次
 make sync && make init
 
-# 每週：抓資料 + 選股 + 族群分析
+# Step 2：每週跑一次（抓資料 → 三組篩選 → 族群分析）
 make week
 
-# 看推薦清單，挑感興趣的個股
+# Step 3：讀族群分析報告，挑 5-10 檔感興趣的
 cat reports/$(date +%Y-W%V)/group_analysis.md
 
-# 產個股資料草稿（含 60 日 OHLCV、月營收、法人）
+# Step 4：產個股資料草稿（單檔，5-10 秒）
 make report STOCK_ID=2330
+# 或批次產前 5 檔
+make report-batch
 
-# 把 reports/YYYY-Www/stocks/2330_台積電.md 整份貼到 Claude 對話
-# 範本 prompt 與完整 SOP 見 ↓
+# Step 5：把 reports/YYYY-Www/stocks/2330_台積電.md 貼到 Claude 對話
+# Claude 補完分析後，貼回覆蓋原檔
 ```
 
-**每週使用流程詳解 → [docs/10-sop.md](./docs/10-sop.md)**
+**每週使用流程詳解 → [docs/10-sop.md](./docs/10-sop.md)**  
+**遇到問題（被擋、空資料、未分類等）→ [docs/99-troubleshooting.md](./docs/99-troubleshooting.md)**
 
 ## 核心設計原則
 
@@ -60,6 +63,7 @@ make report STOCK_ID=2330
 | [`docs/08-milestones.md`](./docs/08-milestones.md) | 7 個 milestone + 各自驗收 criteria |
 | [`docs/09-coding-conventions.md`](./docs/09-coding-conventions.md) | 程式碼風格、命名、測試規範 |
 | [`docs/10-sop.md`](./docs/10-sop.md) | **每週使用 SOP**（手動 Claude 對話模式、含範本 prompt） |
+| [`docs/99-troubleshooting.md`](./docs/99-troubleshooting.md) | 開發與使用過程的常見問題與解法 |
 
 ## 給 Claude Code 的使用指示
 
