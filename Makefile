@@ -1,5 +1,6 @@
 .PHONY: init sync test test-unit test-integration lint typecheck fmt clean clean-cache deep-clean \
-        fetch-twse screen screen-all screen-dry group leaders report report-batch week weekend
+        fetch-twse fetch-stock screen screen-all screen-dry group leaders report report-batch \
+        week weekend backtest-strategies
 
 # ─── 環境 ────────────────────────────────────────────────────────────────────
 
@@ -88,3 +89,9 @@ weekend:  ## 完整週流程並 commit 結果
 	git add reports/ watchlist/
 	git commit -m "Weekly analysis $$(date +%Y-W%V)"
 	git push
+
+# ─── 回測（預留，三個月後實作）───────────────────────────────────────────────
+
+backtest-strategies:  ## ⚠️ 回測三組策略勝率（需 3 個月以上歷史資料，功能尚未實作）
+	@echo "backtest-strategies 尚未實作，需累積至少 3 個月的 reports/ 歷史資料（預計 2026-08 後）"
+	@exit 1
