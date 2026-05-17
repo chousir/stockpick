@@ -111,15 +111,6 @@ def _print_strategy_url(strategy: str, settings: Path) -> None:
     console.print(f"\n[cyan]{url}[/cyan]")
 
 
-@screen_app.command("dry")
-def screen_dry(
-    strategy: str = typer.Option(..., "--strategy", help="策略 ID，如 a_breakout"),
-    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
-) -> None:
-    """組出 Goodinfo 篩選 URL（不打網），貼到瀏覽器手動驗證。"""
-    _print_strategy_url(strategy, settings)
-
-
 @screen_app.command("run")
 def screen_run(
     strategy: str = typer.Argument(help="策略 ID，如 a_breakout"),

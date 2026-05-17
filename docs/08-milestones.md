@@ -105,7 +105,7 @@ uv run python -c "import polars as pl; print(pl.read_parquet('data/cache/twse/da
 ### 驗收指令
 ```bash
 make test-unit                          # 必過
-uv run tw-screener screen dry --strategy a_breakout  # 看組出的 URL
+uv run tw-screener screen run a_breakout --dry-run  # 看組出的 URL
 # 手動把 URL 貼到瀏覽器確認有結果
 # 然後跑實打：
 make screen STRATEGY=a_breakout
