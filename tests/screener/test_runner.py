@@ -193,11 +193,18 @@ def test_write_blocked_log_appends(tmp_path: Path):
     assert content.count("blocked") == 2
 
 
+class _BlockedFetcher:
+    def get(self, url: str, *, force: bool = False) -> str:
+        from tw_screener.screener.goodinfo.fetcher import GoodinfoBlockedError
+
+        raise GoodinfoBlockedError(url)
+
+
 def test_run_all_writes_blocked_log_on_error(tmp_path: Path):
     from tw_screener.screener.goodinfo.fetcher import GoodinfoBlockedError
 
     runner = make_runner(tmp_path)
-    runner._fetcher = type("B", (), {"get": lambda self, u, *, force=False: (_ for _ in ()).throw(GoodinfoBlockedError(u))})()
+    runner._fetcher = _BlockedFetcher()
 
     with pytest.raises(GoodinfoBlockedError):
         runner.run_all(week_tag="2026-W20")
@@ -210,7 +217,7 @@ def test_run_all_reraises_blocked_error(tmp_path: Path):
     from tw_screener.screener.goodinfo.fetcher import GoodinfoBlockedError
 
     runner = make_runner(tmp_path)
-    runner._fetcher = type("B", (), {"get": lambda self, u, *, force=False: (_ for _ in ()).throw(GoodinfoBlockedError(u))})()
+    runner._fetcher = _BlockedFetcher()
 
     with pytest.raises(GoodinfoBlockedError):
         runner.run_all(week_tag="2026-W20")

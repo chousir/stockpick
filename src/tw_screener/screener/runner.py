@@ -17,6 +17,8 @@ from tw_screener.screener.goodinfo.url_builder import (
     build_screener_url,
     load_strategy,
 )
+from tw_screener.screener.log_writer import write_screen_log
+
 
 class ScreenerRunner:
     def __init__(self, settings_path: Path = Path("config/settings.yaml")) -> None:
@@ -85,8 +87,10 @@ class ScreenerRunner:
             week_tag = date.today().strftime("%Y-W%V")
 
         results: dict[str, pl.DataFrame] = {}
+        strategy_names: dict[str, str] = {}
         for yaml_path in sorted(self._strategies_dir.glob("*.yaml")):
             strategy = load_strategy(yaml_path)
+            strategy_names[strategy.id] = strategy.name
             logger.info("Running strategy: {}", strategy.id)
             try:
                 df = self.run_strategy(yaml_path)
@@ -95,6 +99,9 @@ class ScreenerRunner:
                 raise
             results[strategy.id] = df
             self.export_csv(df, strategy.id, week_tag)
+
+        if results:
+            write_screen_log(results, strategy_names, week_tag, self._reports_dir)
 
         return results
 

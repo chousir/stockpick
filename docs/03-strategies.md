@@ -169,7 +169,10 @@ stock_id,name,market,close,change_pct,volume_lots,amount_million,pe_ratio,pb_rat
 
 ## 策略迭代記錄
 
-每週執行後，由 Claude Code 在 `reports/YYYY-Www/screen_log.md` 寫一段：
-- 三組各篩出幾檔
-- 重疊標的（A∩B, B∩C, A∩C, A∩B∩C）
-- 異常觀察（例如全市場大跌時 A 篩出 0 檔，這是正常的）
+`screen run-all` / `make screen-all` 跑完後，`ScreenerRunner.run_all` 會自動產出
+`reports/YYYY-Www/screen_log.md`，純機械統計：
+- 各策略篩出檔數表
+- 兩兩交集（A∩B、A∩C、B∩C）
+- 三方交集（A∩B∩C）
+
+不含觀察判斷段——觀察由互動式 session 或 `make report-batch` 後 Claude 補。

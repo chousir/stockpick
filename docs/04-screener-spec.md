@@ -29,6 +29,8 @@ class ScreenerRunner:
     def run_all(self, week_tag: str | None = None) -> dict[str, pl.DataFrame]:
         """跑所有 config/strategies/ 下的 YAML，輸出到 reports/YYYY-Www/。
         遇到 GoodinfoBlockedError 時：呼叫 write_blocked_log() 後 re-raise，停止執行。
+        跑完後（results 非空時）自動呼叫 log_writer.write_screen_log()
+        產出 screen_log.md（純機械統計，含交集）。
         """
 
     def export_csv(self, df: pl.DataFrame, strategy_id: str, week_tag: str) -> Path:

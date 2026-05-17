@@ -256,6 +256,7 @@ ls -la reports/$(date +%Y-W%V)/
 #   screen_result_a_breakout.csv
 #   screen_result_b_growth_institutional.csv
 #   screen_result_c_dividend_steady.csv
+#   screen_log.md                    # 由 run_all 自動產生（統計 + 交集）
 #   group_analysis.md
 #   stocks/                          # 由 make report 產生
 ```
