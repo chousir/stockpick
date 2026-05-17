@@ -4,9 +4,10 @@
 
 | 來源 | 用途 | 取得方式 | 合規狀態 |
 |---|---|---|---|
-| Goodinfo!台灣股市資訊網 | 自訂篩選、產業/概念分類 | 爬蟲（合規限速） | 灰色，需自律 |
-| 證交所 OpenAPI (openapi.twse.com.tw) | 日 K 線、法人買賣、月營收 | REST API | 完全合法 |
-| 櫃買中心 (otc.org.tw) | 上櫃股票資料 | REST API | 完全合法 |
+| Goodinfo!台灣股市資訊網 | 自訂條件篩選 | 爬蟲（合規限速） | 灰色，需自律 |
+| TWSE OpenAPI (`openapi.twse.com.tw/v1`) | 全市場當日日 K、月營收、上市公司產業 | REST API | 完全合法 |
+| TWSE Legacy (`www.twse.com.tw`) | 歷史 OHLCV (`STOCK_DAY`)、三大法人 (`T86`) | REST API（response=json） | 完全合法 |
+| TWSE ISIN (`isin.twse.com.tw/isin/C_public.jsp?strMode=4`) | 上櫃公司產業分類 | HTML（MS950 編碼） | 完全合法 |
 
 ## Goodinfo 爬蟲規範（重要，違反會被擋）
 
@@ -70,8 +71,7 @@ src/tw_screener/screener/goodinfo/
 │       def get(url) -> str       # 含 rate limit + cache + retry
 │
 └── parser.py
-    def parse_stock_list(html: str) -> pl.DataFrame
-    def parse_stock_detail(html: str) -> dict
+    def parse_screener_result(html: str) -> pl.DataFrame
 ```
 
 ### 快取設計
@@ -90,7 +90,7 @@ data/cache/goodinfo/
 - 解析器測試**禁止打網**，用 `tests/fixtures/goodinfo/*.html` 離線檔。
 - 加新策略時，跑一次抓真實 HTML 存進 fixtures，作為回歸測試基準。
 
-## 證交所 OpenAPI
+## 證交所 OpenAPI + Legacy
 
 文件：https://openapi.twse.com.tw/
 
@@ -98,13 +98,17 @@ data/cache/goodinfo/
 
 ### 常用 endpoints
 
-| 用途 | URL |
-|---|---|
-| 上市公司基本資料 | `/v1/opendata/t187ap03_L` |
-| 每日收盤行情（全市場） | `/v1/exchangeReport/STOCK_DAY_ALL` |
-| 三大法人買賣超 | `/v1/fund/T86` |
-| 融資融券餘額 | `/v1/exchangeReport/MI_MARGN` |
-| 個股月營收 | `/v1/opendata/t187ap05_L` |
+| 用途 | 端點 | 備註 |
+|---|---|---|
+| 上市公司產業 | OpenAPI `/v1/opendata/t187ap03_L` | 只含上市股 |
+| 上櫃公司產業 | ISIN `isin.twse.com.tw/isin/C_public.jsp?strMode=4` | MS950 編碼，需 HTML 解析 |
+| 全市場當日 OHLCV | OpenAPI `/v1/exchangeReport/STOCK_DAY_ALL` | **`date` 參數被無視，永遠回今天** |
+| 單檔月份 OHLCV | Legacy `www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=YYYYMM01&stockNo=XXXX` | 支援歷史，按需回補 3 個月 |
+| 三大法人買賣超 | Legacy `www.twse.com.tw/fund/T86?response=json&date=YYYYMMDD&selectType=ALLBUT0999` | OpenAPI 版已失效（回 HTML）|
+| 個股月營收 | OpenAPI `/v1/opendata/t187ap05_L` | |
+| 融資融券餘額 | OpenAPI `/v1/exchangeReport/MI_MARGN` | |
+
+> 已知陷阱見 `docs/99-troubleshooting.md` #1（T86 endpoint 變化）與 #2（STOCK_DAY_ALL 不支援歷史日期）。
 
 櫃買中心 OpenAPI: https://www.tpex.org.tw/openapi/
 
@@ -121,7 +125,7 @@ Goodinfo 主要用在「條件組合篩選」這個它真正強的地方。
 
 | 資料 | 更新頻率 | 處理方式 |
 |---|---|---|
-| Goodinfo 篩選結果 | 每週一次（週末手動 `make screen`） | 24h 內讀 cache |
+| Goodinfo 篩選結果 | 每週一次（週末手動 `make week`） | 24h 內讀 cache |
 | TWSE 日線 | 收盤後抓增量 | 累積 parquet |
 | 月營收 | 每月 10 號前 | cron 或手動 |
 | 三大法人 | 每日收盤後 1 小時 | 累積 parquet |

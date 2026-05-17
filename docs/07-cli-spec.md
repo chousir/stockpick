@@ -25,9 +25,8 @@ typecheck:      ## mypy
 fmt:            ## ruff format
 
 # ─── 資料 ───────────────────────────────────────
-fetch-twse:     ## 增量抓 TWSE 日線、法人、月營收
+fetch-twse:     ## 增量抓 TWSE 日線、法人、月營收、產業分類
 fetch-stock STOCK_ID=2330:  ## 抓單檔個股完整資料
-update-all:     ## 跑 fetch-twse + 補抓本週需要的個股
 
 # ─── 選股 ───────────────────────────────────────
 screen STRATEGY=a_breakout: ## 跑單一策略
@@ -39,18 +38,20 @@ group:          ## 跑族群分析，產出 group_analysis.md（觀察段留空�
 leaders:        ## 只跑領頭羊判斷
 
 # ─── 報告 ───────────────────────────────────────
-report STOCK_ID=2330:        ## 產單檔個股報告（用 Claude API）
-report-batch:                ## 讀本週 group_analysis 推薦清單批次產
-report-list STOCKS="2330,3034": ## 產指定清單
+report STOCK_ID=2330:        ## 產單檔個股報告（有 API key 完整分析，否則資料草稿）
+report-batch:                ## 讀本週 group_analysis 推薦清單前 5 檔批次產
 
 # ─── 完整流程 ────────────────────────────────────
 week:           ## 完整週流程：fetch-twse + screen-all + group
-weekend:        ## 等同 week，但會 commit 結果到 git
+weekend:        ## 等同 week，但會 commit 結果到 git（無新檔時跳過 commit）
 
-# ─── 回測 / 績效 ─────────────────────────────────
-backtest-strategies: ## 三個月後跑：看三組策略的歷史勝率
-review-watchlist:    ## 列出觀察清單目前績效
+# ─── 回測（骨架） ────────────────────────────────
+backtest-strategies: ## ⚠️ 三個月後實作，目前 exit 1 + 提示
 ```
+
+> `update-all`、`report-list`、`review-watchlist`、`tw-screener backtest` CLI 子指令**未實作**，
+> 對應功能可用既有指令組合替代（多檔報告 → 多次 `make report STOCK_ID=XXXX`；
+> watchlist 維護 → 手動編輯 `watchlist/*.md`）。
 
 ## 典型使用情境
 
@@ -62,21 +63,23 @@ git pull                       # 若用 git 同步多機
 
 make week                      # 一鍵：抓 TWSE + 三策略選股 + 族群分析
 
-# 30 秒後完成，打開：
+# 完成後打開：
 open reports/2026-W21/group_analysis.md
 
-# 看完族群分析，挑出 5-10 檔
-claude                         # 開 Claude Code session
-> 分析本週 2330, 3034, 2454, 8069, 6505
-# Claude Code 自動產出 5 份報告
+# 從第 5 節「推薦個股深度分析優先順序」挑 5-10 檔，逐檔產資料草稿
+make report STOCK_ID=2330
+make report STOCK_ID=3034
+# 或一次跑前 5 檔
+make report-batch
+
+# 若有 ANTHROPIC_API_KEY：上面指令會直接產完整分析。
+# 若無：產資料草稿，依 docs/10-sop.md 手動貼到 Claude 對話補寫。
 
 # 看報告，決定 watchlist
 $EDITOR watchlist/active.md
 
 # commit
-git add reports/ watchlist/
-git commit -m "W21 weekly analysis"
-git push
+make weekend                   # 等同：make week + git add + commit + push（已含空 commit 守衛）
 ```
 
 ### 情境 B：盤中發現一檔有興趣，深度分析
@@ -88,12 +91,13 @@ claude
 > 分析 2330
 ```
 
-### 情境 C：三個月後檢驗策略
+### 情境 C：三個月後檢驗策略（功能尚未實作）
 
 ```bash
 make backtest-strategies
-# 輸出：
-# reports/_meta/strategy_performance_2026Q2.md
+# 目前：印「尚未實作」提示並 exit 1
+# 預計 2026-08（累積 12+ 週歷史後）實作，產出範例：
+# reports/_meta/strategy_performance_2026Q3.md
 # - 策略 A：勝率 58%，平均 4 週報酬 +3.2%
 # - 策略 B：勝率 64%，平均 8 週報酬 +5.8%
 # - 策略 C：勝率 71%，平均 24 週報酬 +8.4%（含股息）
@@ -104,18 +108,21 @@ make backtest-strategies
 `tw-screener` 命令支援的子命令：
 
 ```bash
-tw-screener init
-tw-screener data fetch-twse [--from DATE] [--to DATE]
+tw-screener hello
+tw-screener version
+tw-screener data fetch-twse
 tw-screener data fetch-stock STOCK_ID
-tw-screener screen run STRATEGY [--dry-run] [--force]
+tw-screener screen run STRATEGY [--dry-run]
 tw-screener screen run-all
+tw-screener screen dry STRATEGY
 tw-screener analysis group [--week WEEK]
 tw-screener analysis leaders [--week WEEK]
 tw-screener report stock STOCK_ID [--week WEEK]
 tw-screener report batch [--week WEEK] [--top N]
-tw-screener cache clean [--days N]
-tw-screener backtest strategies [--from DATE] [--to DATE]
 ```
+
+> `init`、`cache clean`、`backtest strategies` 子指令未實作（對應功能用 `make init`、
+> `make clean-cache`、`make backtest-strategies` 即可）。
 
 每個指令都有 `--help` 顯示參數。
 
@@ -144,7 +151,7 @@ $ make screen-all
 │ URL 組裝完成                                │
 │ 讀快取... 命中（剩 18h 過期）               │
 │ 解析中... 找到 18 檔                        │
-│ 寫入 reports/2026-W21/screen_result_a.csv  │
+│ 寫入 reports/2026-W21/screen_result_a_breakout.csv │
 └────────────────────────────────────────────┘
 
 ┌─ 跑策略 b_growth_institutional ────────────┐
@@ -152,7 +159,7 @@ $ make screen-all
 │ Sleep 3.4s (rate limit)                    │
 │ HTTP GET... 200 OK (1.2s)                  │
 │ 解析中... 找到 12 檔                        │
-│ 寫入 reports/2026-W21/screen_result_b.csv  │
+│ 寫入 reports/2026-W21/screen_result_b_growth_institutional.csv │
 └────────────────────────────────────────────┘
 ...
 ```

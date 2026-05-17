@@ -6,9 +6,10 @@
 ┌──────────────────────────────────────────────────────────────┐
 │  Layer 1：資料層                                              │
 │  ─────────────                                                │
-│  Goodinfo 自訂篩選 ─┐                                         │
-│                     ├──→ Fetcher ──→ Parser ──→ Polars DF     │
-│  證交所 OpenAPI ────┘                                         │
+│  Goodinfo 自訂篩選 ──┐                                        │
+│  TWSE OpenAPI ───────┤                                        │
+│  TWSE Legacy（STOCK_DAY、T86）─┤→ Fetcher → Parser → Polars   │
+│  ISIN 頁面（OTC 產業）─────────┘                              │
 │                                       │                       │
 │                                       ▼                       │
 │                          data/cache/*.parquet                 │
@@ -20,14 +21,15 @@
 │  ─────────────                                                │
 │  config/strategies/*.yaml ──→ ScreenerRunner ──→ 3 個 CSV     │
 │                                                               │
-│  輸出：reports/YYYY-Www/screen_result_{a,b,c}.csv             │
+│  輸出：reports/YYYY-Www/screen_result_{strategy_id}.csv       │
+│        e.g. screen_result_a_breakout.csv                      │
 └──────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  Layer 3：族群分析層                                          │
 │  ──────────────                                               │
-│  選股結果 + 產業/概念對照表 ──→ GroupAnalyzer                 │
+│  選股結果 + TWSE/TPEX 產業對照表 ──→ GroupAnalyzer            │
 │                                       │                       │
 │                                       ▼                       │
 │           reports/YYYY-Www/group_analysis.md                  │
@@ -36,10 +38,11 @@
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  Layer 4：個股深度報告（Claude Code 互動）                    │
+│  Layer 4：個股深度報告                                        │
 │  ──────────────                                              │
-│  使用者：「分析本週候選股 2330, 2454」                         │
-│  Claude Code：讀 CLAUDE.md + fetch 個股資料 + 套報告框架       │
+│  make report STOCK_ID=2330 → data_fetcher → builder           │
+│    ├─ 有 ANTHROPIC_API_KEY：呼叫 Claude API 產完整分析        │
+│    └─ 無 API key：產資料草稿，手動貼到 Claude 對話補寫        │
 │                                                               │
 │  輸出：reports/YYYY-Www/stocks/{股號}_{簡稱}.md               │
 └──────────────────────────────────────────────────────────────┘
@@ -58,13 +61,16 @@
 
 | 模組 | 職責 | 依賴 |
 |---|---|---|
-| `src/tw_screener/data/twse.py` | 證交所 OpenAPI 抓價量 | httpx |
+| `src/tw_screener/data/twse.py` | 證交所 OpenAPI + Legacy + ISIN 抓價量、法人、月營收、產業分類 | httpx |
 | `src/tw_screener/screener/goodinfo/` | Goodinfo 爬蟲三件套（URL/Fetch/Parse） | httpx, beautifulsoup4, lxml |
 | `src/tw_screener/screener/runner.py` | 讀 YAML、跑策略、輸出 CSV | polars |
-| `src/tw_screener/analysis/grouping.py` | 按產業/概念分組統計 | polars |
+| `src/tw_screener/analysis/grouping.py` | 按官方產業分組計分 | polars |
 | `src/tw_screener/analysis/leader.py` | 相對強度、領頭羊判斷 | polars |
 | `src/tw_screener/analysis/indicators/` | 技術指標（MACD/KD/RSI 等），預埋 Rust 替換空間 | polars |
-| `src/tw_screener/report/` | Claude Code 用的 prompt 模板與報告骨架 | jinja2 |
+| `src/tw_screener/report/group_report.py` | 族群分析 Markdown 渲染 | jinja2 |
+| `src/tw_screener/report/data_fetcher.py` | 個股報告資料打包（OHLCV + 營收 + 法人 + 族群資訊） | polars |
+| `src/tw_screener/report/builder.py` | 個股報告 builder（API 模式 / 草稿模式） | anthropic, jinja2 |
+| `src/tw_screener/backtest/` | 策略勝率回測（骨架，2026-08 後實作） | polars |
 | `src/tw_screener/cli.py` | CLI 入口（Typer） | typer |
 
 ## 為什麼這樣分層

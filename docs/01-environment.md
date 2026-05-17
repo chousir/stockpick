@@ -99,6 +99,7 @@ dependencies = [
     "jinja2>=3.1",
     "tenacity>=8.0",
     "pyarrow>=15.0",
+    "anthropic>=0.102.0",   # M5 個股報告 Claude API
 ]
 
 [dependency-groups]

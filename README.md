@@ -24,8 +24,9 @@ make report STOCK_ID=2330
 # 或批次產前 5 檔
 make report-batch
 
-# Step 5：把 reports/YYYY-Www/stocks/2330_台積電.md 貼到 Claude 對話
-# Claude 補完分析後，貼回覆蓋原檔
+# Step 5：完成分析（依是否有 API key 分兩種模式）
+#   有 ANTHROPIC_API_KEY → Step 4 已產出完整分析報告，直接讀
+#   無 API key → Step 4 產出資料草稿；把整份貼到 Claude 對話，依範本 prompt 補寫後貼回
 ```
 
 **每週使用流程詳解 → [docs/10-sop.md](./docs/10-sop.md)**  
