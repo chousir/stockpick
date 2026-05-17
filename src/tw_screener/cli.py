@@ -145,8 +145,10 @@ def screen_run(
         console.print(f"[red]找不到策略檔：{strategy_path}[/red]")
         raise typer.Exit(1)
 
+    from tw_screener.screener.goodinfo.fetcher import GoodinfoBlockedError
     from tw_screener.screener.goodinfo.parser import GoodinfoTooManyResultsError
 
+    week_tag = _date.today().strftime("%Y-W%V")
     runner = ScreenerRunner(settings)
     try:
         df = runner.run_strategy(strategy_path)
@@ -154,11 +156,16 @@ def screen_run(
         console.print(f"[red]篩選結果 {e.count} 筆超過 Goodinfo 匿名上限（300 筆）[/red]")
         console.print("[yellow]請縮小篩選條件，例如調高 成交筆數 的 min 值[/yellow]")
         raise typer.Exit(1)
+    except GoodinfoBlockedError:
+        runner.write_blocked_log(strategy, week_tag)
+        console.print(f"[red]Goodinfo 封鎖，已記錄到 reports/{week_tag}/blocked.log[/red]")
+        raise typer.Exit(1)
 
-    week_tag = _date.today().strftime("%Y-W%V")
     output = runner.export_csv(df, strategy, week_tag)
 
     console.print(f"[green]篩出 {len(df)} 檔[/green]，結果存於 [bold]{output}[/bold]")
+    if len(df) > 100:
+        console.print(f"[yellow]⚠ {len(df)} 檔 > 100，條件可能太寬鬆[/yellow]")
 
 
 @screen_app.command("run-all")
@@ -174,7 +181,10 @@ def screen_run_all(
     results = runner.run_all()
 
     for strategy_id, df in results.items():
-        console.print(f"  {strategy_id}: [green]{len(df)} 檔[/green]")
+        line = f"  {strategy_id}: [green]{len(df)} 檔[/green]"
+        if len(df) > 100:
+            line += "  [yellow]⚠ 條件可能太寬鬆[/yellow]"
+        console.print(line)
 
     week_tag = _date.today().strftime("%Y-W%V")
     console.print(f"\n[bold]報告目錄：reports/{week_tag}/[/bold]")

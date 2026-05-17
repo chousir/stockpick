@@ -81,6 +81,13 @@ def test_run_strategy_goodinfo_url_format(tmp_path: Path):
     assert df["goodinfo_url"][0].startswith(expected_prefix)
 
 
+def test_goodinfo_url_derived_from_base_url(tmp_path: Path):
+    """goodinfo_url 應從 settings base_url 衍生，而非寫死。"""
+    runner = make_runner(tmp_path)
+    base = runner._goodinfo_base
+    assert runner._detail_base == f"{base}/StockInfo/StockDetail.asp"
+
+
 def test_run_strategy_calls_fetcher(tmp_path: Path):
     runner = make_runner(tmp_path)
     mock = _MockFetcher(_screener_html())
@@ -158,6 +165,55 @@ def test_export_csv_returns_path(tmp_path: Path):
     df = pl.DataFrame({"stock_id": ["2330"]})
     output = runner.export_csv(df, "a_breakout", "2026-W20")
     assert isinstance(output, Path)
+
+
+# ─── write_blocked_log ────────────────────────────────────────────────────────
+
+
+def test_write_blocked_log_creates_file(tmp_path: Path):
+    runner = make_runner(tmp_path)
+    log_path = runner.write_blocked_log("a_breakout", "2026-W20")
+    assert log_path.exists()
+    assert log_path.name == "blocked.log"
+
+
+def test_write_blocked_log_content(tmp_path: Path):
+    runner = make_runner(tmp_path)
+    runner.write_blocked_log("a_breakout", "2026-W20")
+    content = (tmp_path / "reports" / "2026-W20" / "blocked.log").read_text(encoding="utf-8")
+    assert "strategy=a_breakout" in content
+    assert "blocked" in content
+
+
+def test_write_blocked_log_appends(tmp_path: Path):
+    runner = make_runner(tmp_path)
+    runner.write_blocked_log("a_breakout", "2026-W20")
+    runner.write_blocked_log("b_growth_institutional", "2026-W20")
+    content = (tmp_path / "reports" / "2026-W20" / "blocked.log").read_text(encoding="utf-8")
+    assert content.count("blocked") == 2
+
+
+def test_run_all_writes_blocked_log_on_error(tmp_path: Path):
+    from tw_screener.screener.goodinfo.fetcher import GoodinfoBlockedError
+
+    runner = make_runner(tmp_path)
+    runner._fetcher = type("B", (), {"get": lambda self, u, *, force=False: (_ for _ in ()).throw(GoodinfoBlockedError(u))})()
+
+    with pytest.raises(GoodinfoBlockedError):
+        runner.run_all(week_tag="2026-W20")
+
+    log_path = tmp_path / "reports" / "2026-W20" / "blocked.log"
+    assert log_path.exists()
+
+
+def test_run_all_reraises_blocked_error(tmp_path: Path):
+    from tw_screener.screener.goodinfo.fetcher import GoodinfoBlockedError
+
+    runner = make_runner(tmp_path)
+    runner._fetcher = type("B", (), {"get": lambda self, u, *, force=False: (_ for _ in ()).throw(GoodinfoBlockedError(u))})()
+
+    with pytest.raises(GoodinfoBlockedError):
+        runner.run_all(week_tag="2026-W20")
 
 
 # ─── run_all ──────────────────────────────────────────────────────────────────
