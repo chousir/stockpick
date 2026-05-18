@@ -33,13 +33,13 @@ _STRATEGY_DESCRIPTION: dict[str, str] = {
         "（短線 1–4 週・攻擊）"
     ),
     "b_growth_institutional": (
-        "月營收 YoY ≥ 15% + 最新季 EPS YoY ≥ 20% + 外資連買"
+        "月營收 YoY ≥ 15% + 連續 2 季稅後淨利成長 + 外資連買"
         "（中線 1–3 月・主力）"
     ),
     "c_dividend_steady": "連續配息 8 年 + 殖利率 ≥ 4% + 股利持續成長（長線 6 月以上）",
     "c_low_base_growth": "月營收 YoY ≥ 10% + 外資連續買超（中線 1–3 月）",
     "c_quality_value": (
-        "ROE ≥ 15% + 連續配息 5 年以上 + PB ≤ 3.0（長線・品質防守）"
+        "近 4 季 ROE ≥ 15% + 連續配息 5 年以上（長線・品質防守）"
     ),
 }
 
