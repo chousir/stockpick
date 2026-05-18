@@ -56,7 +56,7 @@ _STRATEGY_DESCRIPTION: dict[str, str] = {
         "（中線成長動能・ProPicks Tech Titans 風格）"
     ),
     "f_value_rebound": (
-        "市值 ≥ 100 億 + 本益比 ≤ 15 + 殖利率 ≥ 3% + 營收仍正成長"
+        "市值 ≥ 100 億 + 本益比 ≤ 15 + 殖利率 ≥ 3% + 累計營收 YoY ≥ 10%"
         "（中線價值反彈・ProPicks Top Value 風格）"
     ),
 }

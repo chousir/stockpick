@@ -158,7 +158,7 @@ A/B/C 與 D/E/F **不會同時跑**，透過 `make week GROUP=abc` / `make week 
 | **代號** | d_quality_leader | e_growth_momentum | f_value_rebound |
 | **中文名** | 品質龍頭 | 成長動能 | 價值反彈 |
 | **對標 ProPicks** | TWCH15（台灣晶片冠軍） | Tech Titans | Top Value Stocks |
-| **核心邏輯** | 市值 + ROE + 配息 + 淨利連增 | 市值 + 強成長 YoY + 均線動能 | 市值 + 低 PER + 殖利率 + 反陷阱 |
+| **核心邏輯** | 市值 + ROE + 配息 + 淨利連增 | 市值 + 強成長 YoY + 均線動能 | 市值 + 低 PER + 殖利率 + YoY≥10 |
 | **持有時間** | 6 個月以上 | 1–3 個月 | 3–6 個月 |
 | **預期篩出數** | 15-40 檔 | 10-30 檔 | 20-50 檔 |
 
@@ -171,7 +171,7 @@ A/B/C 與 D/E/F **不會同時跑**，透過 `make week GROUP=abc` / `make week 
 
 ```yaml
 filters:
-  - item: "市值(億)"
+  - item: "市值 (億元)"
     min: 100
   - item: "近四季–ROE(%)–本季度"   # ⚠ EN DASH U+2013
     min: 15
@@ -195,7 +195,7 @@ rules: []
 
 ```yaml
 filters:
-  - item: "市值(億)"
+  - item: "市值 (億元)"
     min: 100
   - item: "累計月營收年增減率(%)"
     min: 20
@@ -216,20 +216,20 @@ rules:
 
 ```yaml
 filters:
-  - item: "市值(億)"
+  - item: "市值 (億元)"
     min: 100
   - item: "本益比 (PER)"
     max: 15
   - item: "成交價現金殖利率 (%)"
     min: 3
   - item: "累計月營收年增減率(%)"
-    min: 0
+    min: 10
 
 rules: []
 ```
 
 **取捨**：
-- 「累計月營收 YoY ≥ 0」是**價值陷阱過濾器**：低估的股至少不能還在衰退
+- 「累計月營收 YoY ≥ 10」是**價值陷阱過濾器**：低估的股要有實質成長（早期版本 ≥ 0 太寬鬆）
 - 殖利率 ≥ 3%（C 是 ≥ 4%）：寬鬆版價值；本組與 C 不會同時跑（GROUP 互斥）
 - 不放技術 rule
 
@@ -247,18 +247,18 @@ rules: []
 - E ∩ F（戴維斯雙擊候選）：0–5 檔
 - D ∩ E ∩ F：理論接近 0
 
-## L3 高風險欄位（部署前必校正）
+## D/E/F 欄位校正記錄
 
-D/E/F 中以下欄位未經 Goodinfo URL 驗證，**錯誤名稱會被 Goodinfo 靜默忽略**，必須手動到
-Goodinfo「自訂篩選 - 我的條件」UI 校正：
+新增 D/E/F 時手動到 Goodinfo UI 校正過的欄位（**正式名稱已固定**）：
 
-| 欄位 | YAML 中名稱 | 備案 |
+| 欄位 | 原推測 | Goodinfo 真實名稱 |
 |---|---|---|
-| 市值 | `市值(億)` | `公司市值(億)`、`公司總市值(億)`、`市值（億元）` |
-| 本益比 | `本益比 (PER)` | `本益比`、`本益比(PER)` |
+| 市值 | `市值(億)` | `市值 (億元)`（半形空格 + 億元） |
+| 本益比 | `本益比 (PER)` | `本益比 (PER)`（推測即正確） |
 
-校正流程：跑 `--dry-run` → 把 URL 貼到瀏覽器 → 開 Goodinfo 自訂篩選頁 → 看 filter
-是否真有被勾起 → 不對就找正確的 dropdown 字串改 YAML → 重跑 `--dry-run`。
+校正流程（新增策略時都該跑一遍）：跑 `--dry-run` → 把 URL 貼到瀏覽器 → 開 Goodinfo
+自訂篩選頁 → 看 filter 是否真有被勾起（**錯誤名稱會被 Goodinfo 靜默忽略**）→ 不對
+就找正確的 dropdown 字串改 YAML → 重跑 `--dry-run`。
 
 ---
 
