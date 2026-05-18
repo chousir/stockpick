@@ -325,43 +325,10 @@ grep -c "本週族群表現前" reports/$(date +%Y-W%V)/group_analysis.md
 
 ---
 
-## 12. C3「低基期成長」CSV 行數異常多/少
+## 12. （保留位）
 
-### 症狀
-```
-ls -la reports/2026-W20/screen_result_c_low_base_growth.csv
-# 行數跟 Goodinfo 直接給的一樣（80+ 行）→ post_filter 沒套到
-# 或 0 行 → 過濾條件太緊
-```
-
-### 原因
-2026-W21 起 `screen run` / `screen run-all` **不再自動套 post_filter**。
-post_filter 拆到 `apply-post-filters` 這個獨立 step 跑。
-
-如果只跑 `make screen STRATEGY=c_low_base_growth`，會拿到 Goodinfo 純結果（未過濾）。
-要看到 C3 最終結果，必須跑 `make enrich-candidates` 或 `make apply-post-filters`。
-
-### 解法
-
-**正常流程（建議）**：
-```bash
-make week    # 內含 fetch-twse → screen-all → enrich-candidates → group
-```
-
-**只重跑 C3**：
-```bash
-make screen STRATEGY=c_low_base_growth      # 純 Goodinfo 結果（CSV 較多行）
-make apply-post-filters                      # 套距高過濾，CSV 縮減
-wc -l reports/2026-W20/screen_result_c_low_base_growth.csv  # 看最終
-```
-
-**完全沒有過濾結果（CSV 0 行）**：可能 `stock_day` 快取未備齊。先跑 fetch：
-```bash
-make fetch-candidates-history    # 預熱 stock_day 快取
-make apply-post-filters          # 套過濾
-```
-
-C3 過濾結果預期 10–40 檔。
+之前這個位置記錄 C3 距高過濾相關問題；2026-W21 起 `post_filter` 機制整個移除，
+所有 A/B/C CSV 一律是純 Goodinfo 結果快照，不再有本地後處理。
 
 ---
 

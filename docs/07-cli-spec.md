@@ -27,9 +27,7 @@ fmt:            ## ruff format
 # ─── 資料 ───────────────────────────────────────
 fetch-twse:     ## 增量抓 TWSE 日線、法人、月營收、產業分類
 fetch-stock STOCK_ID=2330:  ## 抓單檔個股完整資料
-fetch-candidates-history:   ## 對本週入選股聯集補抓 STOCK_DAY 歷史
-apply-post-filters:         ## 對本週 CSV 套策略 post_filter（C 的距高過濾）
-enrich-candidates:          ## fetch-candidates-history + apply-post-filters 合一
+fetch-candidates-history:   ## 對本週入選股聯集補抓 STOCK_DAY 歷史（5 日動能用）
 
 # ─── 選股 ───────────────────────────────────────
 screen STRATEGY=a_breakout: ## 跑單一策略
@@ -45,7 +43,7 @@ report STOCK_ID=2330:        ## 產單檔個股報告（有 API key 完整分析
 report-batch:                ## 讀本週 group_analysis 推薦清單前 5 檔批次產
 
 # ─── 完整流程 ────────────────────────────────────
-week:           ## 完整週流程：fetch-twse → screen-all → enrich-candidates → group
+week:           ## 完整週流程：fetch-twse → screen-all → fetch-candidates-history → group
 weekend:        ## 等同 week，但會 commit 結果到 git（無新檔時跳過 commit）
 
 # ─── 回測（骨架） ────────────────────────────────
@@ -116,7 +114,6 @@ tw-screener version
 tw-screener data fetch-twse
 tw-screener data fetch-stock STOCK_ID
 tw-screener data fetch-candidates-history [--week WEEK] [--months 2]
-tw-screener screen apply-post-filters [--week WEEK]
 tw-screener screen run STRATEGY [--dry-run]
 tw-screener screen run-all
 tw-screener screen dry STRATEGY

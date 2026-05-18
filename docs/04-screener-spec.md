@@ -20,28 +20,18 @@ class ScreenerRunner:
         ...
 
     def run_strategy(self, strategy_path: Path) -> pl.DataFrame:
-        """跑單一策略，回傳純 Goodinfo 結果 DataFrame（不套 post_filter）。
+        """跑單一策略，回傳純 Goodinfo 結果 DataFrame。
         - 0 筆結果為正常（市場大跌時可能無符合條件標的）
         - > 100 筆：logger.warning（條件太寬鬆）
         - > 300 筆：raise GoodinfoTooManyResultsError（Goodinfo 匿名上限）
-        - post_filter（如 C3 的距高過濾）不在此跑，由 apply_post_filters_for_week() 處理
+        - 設計原則：CSV 一律是 Goodinfo 結果快照，不做本地後處理
         """
 
     def run_all(self, week_tag: str | None = None) -> dict[str, pl.DataFrame]:
         """跑所有 config/strategies/ 下的 YAML，輸出到 reports/YYYY-Www/。
-        同樣不套 post_filter；只是 Goodinfo 結果快照。
         遇到 GoodinfoBlockedError 時：呼叫 write_blocked_log() 後 re-raise，停止執行。
         跑完後（results 非空時）自動呼叫 log_writer.write_screen_log()
         產出 screen_log.md（純機械統計，含交集）。
-        """
-
-    def apply_post_filters_for_week(
-        self, week_tag: str
-    ) -> dict[str, tuple[int, int]]:
-        """對本週每個有 post_filter 的策略 CSV 套過濾，覆寫原檔。
-        前提：stock_day_*.parquet 已備齊（建議跑完 fetch-candidates-history 再呼叫）。
-        回傳 {strategy_id: (before_count, after_count)}。
-        由 CLI `screen apply-post-filters` 觸發；`make week` 內由 enrich-candidates 串。
         """
 
     def export_csv(self, df: pl.DataFrame, strategy_id: str, week_tag: str) -> Path:
@@ -106,19 +96,6 @@ class StrategyConfig(BaseModel):
     display_period: str
     holding_period: str | None = None        # 選填，參考用
     post_filter_sort: list[...] | None = None  # 選填，後處理排序
-    post_filter: list[PostFilterRule] | None = None  # 選填，本地過濾規則
-
-class PostFilterRule(BaseModel):
-    """跑完 Goodinfo 之後在本地端做的數值過濾（需 stock_day_*.parquet 歷史）。
-
-    field: 目前只支援 "pct_from_52w_high"（距 N 月內最高價的百分比）
-    months: 觀察期月份（預設 6）
-    max / min: 保留條件
-    """
-    field: str
-    months: int = 6
-    max: float | None = None
-    min: float | None = None
 
 def build_screener_url(strategy: StrategyConfig, base_url: str) -> str:
     """

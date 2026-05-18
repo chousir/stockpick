@@ -104,7 +104,7 @@ sigmoid 而非 clip：避免 5 日大漲 20% 仍只拿到 clip(10) 的天花板�
 ```
 
 **動能資料來源（X+Y 混合策略）**：
-- **X**：`make week` 流程中跑 `make enrich-candidates`（內含 fetch-candidates-history），對本週入選股
+- **X**：`make week` 流程中跑 `make fetch-candidates-history`，對本週入選股
   聯集去重個股批次補抓 STOCK_DAY 2 個月歷史。過去月份永久快取，首次 ~5–10 分鐘
 - **Y**：`data/cache/twse/daily_*.parquet` 每週累積一筆，第 5 週起累積成完整 5 日窗
 - 兩者由 `TWSEClient.load_candidate_history()` 合併，按 (stock_id, date) 去重後算 5 日 gap
@@ -113,13 +113,14 @@ sigmoid 而非 clip：避免 5 日大漲 20% 仍只拿到 clip(10) 的天花板�
 ```
 1. fetch-twse              → daily / T86 / revenue / industry
 2. screen-all              → A/B/C 純跑 Goodinfo，三份 CSV 為純結果快照
-3. enrich-candidates       → ① fetch-candidates-history：抓聯集 stock_day
-                             ② apply-post-filters：對 C 套距高過濾，覆寫 C CSV
+3. fetch-candidates-history → 對聯集個股抓 stock_day（純加工資料層）
 4. group                   → 讀 stock_day 算 5 日動能 → group_analysis.md
 ```
 
-A/B CSV 為純 Goodinfo 結果不被改寫；C CSV 在 step 3 被 post_filter 縮減後覆寫一次。
+**A/B/C CSV 一律是純 Goodinfo 結果快照**，不被任何後處理覆寫。
 5 日動能值**只在 group_analysis.md 顯示**，CSV 維持 Goodinfo 原 schema（含當日 change_pct）。
+
+設計原則：策略可換來換去，但 CSV schema 與後處理機制保持單純，避免特定策略綁住整體流程。
 
 ### 5.3 族群內排名（取代「領頭羊」概念）
 

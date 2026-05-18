@@ -107,7 +107,7 @@ post_filter_sort:
 ```yaml
 id: c_low_base_growth
 name: "低基期成長"
-description: "月營收成長 + 股價自高檔回落但法人布局中的中線標的"
+description: "月營收成長 + 外資連買的中線成長股（不含距高過濾）"
 holding_period: "1-3 months"
 market: "上市/上櫃"
 
@@ -126,29 +126,17 @@ post_filter_sort:
     order: "desc"
   - field: "成交張數"
     order: "desc"
-
-# 本地過濾：距 6 個月內最高價 -20% 以下
-post_filter:
-  - field: "pct_from_52w_high"
-    months: 6
-    max: -20.0
 ```
 
 **取捨**：
 - 月累計營收年增 ≥ 10%：比 B 策略寬鬆（B 是 15%），讓回檔成長股有機會入選。
 - 外資連買：基本面 + 籌碼雙確認；不加投信，因低基期股投信常還沒進場。
-- 距 3 個月高 -20% 以下：用本地 `stock_day_*.parquet` 算「目前股價 / 過去 3 個月最高 - 1」，
-  保留跌幅夠深的成長股，排除追高股。**Goodinfo FL_ITEM 暫無等效項目**，所以走 post_filter。
+- **沒有本地距高過濾**：策略本身只用 Goodinfo 可表達的條件。
+  「低基期」語意比較鬆，本質上是 B 策略的寬鬆版（含投信尚未跟進的成長股）。
+  若日後想加距高條件，等 Goodinfo 自己有對應 FL_ITEM 再說，不另外做本地後處理。
 
-**post_filter 機制**（2026-W21 起改為獨立 step）：
-- `screen run` / `screen run-all` **不再**自動套 post_filter，CSV 為純 Goodinfo 結果快照
-- `make enrich-candidates`（或拆開的 `apply-post-filters`）才會：
-  1. 讀 `screen_result_{strategy}.csv`
-  2. 對有 `post_filter` 欄的策略，用本地 `stock_day_*.parquet` 計算 `pct_from_Nm_high`
-  3. 刪掉超出 `max` / `min` 範圍的列，**覆寫回原 CSV**
-  4. CSV 本身不新增欄位，保持與 A/B 一致的純 Goodinfo schema
-- 過濾結果只在 **CSV 行數** 與 `group_analysis.md` 上反映；具體 pct 數值看 log
-- 資料不足的股票會**保留**並記 warning，不強制 filter（避免漏掉新上市股）
+> 設計原則：A/B/C CSV 一律是「純 Goodinfo 結果快照」。策略可以換來換去，
+> 但 CSV schema 與後處理機制保持單純，避免特定策略綁住整體流程。
 
 ---
 

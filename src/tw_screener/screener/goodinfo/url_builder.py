@@ -19,20 +19,6 @@ class PostFilterSort(BaseModel):
     order: str
 
 
-class PostFilterRule(BaseModel):
-    """Goodinfo 結果回傳後在本地端做的數值過濾規則。
-
-    field: 目前僅支援 "pct_from_52w_high"（距 N 月內最高價的百分比，負值代表回落）。
-    months: 觀察期月份（預設 6）。
-    max: 保留條件，例如 max=-20 → 只留下距高點 -20% 以下的股票。
-    min: 對稱保留條件。
-    """
-    field: str
-    months: int = 6
-    max: float | None = None
-    min: float | None = None
-
-
 class StrategyConfig(BaseModel):
     id: str
     name: str
@@ -44,7 +30,6 @@ class StrategyConfig(BaseModel):
     display_period: str
     holding_period: str | None = None
     post_filter_sort: list[PostFilterSort] | None = None
-    post_filter: list[PostFilterRule] | None = None
 
 
 def load_strategy(path: Path) -> StrategyConfig:
