@@ -585,6 +585,28 @@ class TWSEClient:
         }
         today = date.today()
         current_ym = today.strftime("%Y%m")
+
+        # Fast path：所有月份的 cache 都齊全 → 一次讀完，靜默回傳
+        expected_files: list[Path] = []
+        all_cached = True
+        for n in range(months):
+            target = _months_back(today, n)
+            ym = target.strftime("%Y%m")
+            cf = self.cache_dir / f"stock_day_{stock_id}_{ym}.parquet"
+            if cf.exists() and (ym != current_ym or is_fresh(cf, self.ttl_hours)):
+                expected_files.append(cf)
+            else:
+                all_cached = False
+                break
+
+        if all_cached and expected_files:
+            logger.debug(
+                "stock_day {} cache hit ({} months)", stock_id, len(expected_files)
+            )
+            frames = [pl.read_parquet(f) for f in expected_files]
+            return pl.concat(frames).unique(subset=["date"]).sort("date")
+
+        # Slow path：逐月檢查 + 必要時打網
         frames: list[pl.DataFrame] = []
         consecutive_empty = 0
 

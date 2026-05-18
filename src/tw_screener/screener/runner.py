@@ -138,6 +138,16 @@ class ScreenerRunner:
                 if idx % 20 == 0:
                     logger.info("  post_filter 進度 {}/{}", idx, len(stock_ids))
 
+            # 把 pct 值寫成新欄位，CSV 輸出時就看得到「距高 -25%」之類的數字
+            col_name = f"pct_from_{months}m_high"
+            df = df.with_columns(
+                pl.Series(
+                    col_name,
+                    [pcts.get(str(s).strip()) for s in df["stock_id"].cast(pl.Utf8).to_list()],
+                    dtype=pl.Float64,
+                )
+            )
+
             # 保留：pct=None 視為資料不足，預設保留（不在 filter 範圍內）
             def _judge(sid: str) -> bool:
                 v = pcts.get(str(sid).strip())
@@ -149,8 +159,22 @@ class ScreenerRunner:
                     return False
                 return True
 
+            before = len(df)
             mask = [_judge(s) for s in df["stock_id"].cast(pl.Utf8).to_list()]
             df = df.filter(pl.Series(mask, dtype=pl.Boolean))
+
+            # Summary log（保留 N/M 檔 + pct 範圍）
+            valid_pcts = [v for v in pcts.values() if v is not None]
+            if valid_pcts:
+                lo, hi = min(valid_pcts), max(valid_pcts)
+                logger.info(
+                    "post_filter {}: 保留 {}/{} 檔（pct 範圍 {:.1f}% ~ {:.1f}%）",
+                    col_name,
+                    len(df),
+                    before,
+                    lo,
+                    hi,
+                )
 
         return df
 
