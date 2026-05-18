@@ -325,35 +325,43 @@ grep -c "本週族群表現前" reports/$(date +%Y-W%V)/group_analysis.md
 
 ---
 
-## 12. C3「低基期成長」首次跑很慢
+## 12. C3「低基期成長」CSV 行數異常多/少
 
 ### 症狀
 ```
-make screen STRATEGY=c_low_base_growth 卡 5-10 分鐘無輸出
-log 訊息：post_filter pct_from_52w_high: 30 檔候選股補抓 6 個月歷史
+ls -la reports/2026-W20/screen_result_c_low_base_growth.csv
+# 行數跟 Goodinfo 直接給的一樣（80+ 行）→ post_filter 沒套到
+# 或 0 行 → 過濾條件太緊
 ```
 
 ### 原因
-C3 的「距 6 個月高 -20% 以下」過濾條件 Goodinfo 沒有對應 FL_ITEM，所以本地用
-`stock_day_*.parquet` 算。首次跑該檔每股要 6 次 STOCK_DAY 呼叫（每月 1 次），共 ~9 秒。
+2026-W21 起 `screen run` / `screen run-all` **不再自動套 post_filter**。
+post_filter 拆到 `apply-post-filters` 這個獨立 step 跑。
+
+如果只跑 `make screen STRATEGY=c_low_base_growth`，會拿到 Goodinfo 純結果（未過濾）。
+要看到 C3 最終結果，必須跑 `make enrich-candidates` 或 `make apply-post-filters`。
 
 ### 解法
-**正常現象，等就好**。後續每週只多抓當月份，10–20 秒可完成。
 
-如果想加速首次跑，可先用 `make fetch-candidates-history` 預熱（會把所有 3 策略候選股的歷史
-都抓完，包括 C3 會用到的）：
-
+**正常流程（建議）**：
 ```bash
-make fetch-twse
-make screen STRATEGY=a_breakout
-make screen STRATEGY=b_growth_institutional
-# 此時 C3 還沒跑，但可預熱
-uv run tw-screener data fetch-candidates-history --months 6
-# 然後 C3 會大部分 cache hit
-make screen STRATEGY=c_low_base_growth
+make week    # 內含 fetch-twse → screen-all → enrich-candidates → group
 ```
 
-C3 過濾結果預計 10–40 檔（不再像舊 C 的 200+ 檔灌票）。
+**只重跑 C3**：
+```bash
+make screen STRATEGY=c_low_base_growth      # 純 Goodinfo 結果（CSV 較多行）
+make apply-post-filters                      # 套距高過濾，CSV 縮減
+wc -l reports/2026-W20/screen_result_c_low_base_growth.csv  # 看最終
+```
+
+**完全沒有過濾結果（CSV 0 行）**：可能 `stock_day` 快取未備齊。先跑 fetch：
+```bash
+make fetch-candidates-history    # 預熱 stock_day 快取
+make apply-post-filters          # 套過濾
+```
+
+C3 過濾結果預期 10–40 檔。
 
 ---
 

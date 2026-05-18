@@ -137,13 +137,17 @@ post_filter:
 **取捨**：
 - 月累計營收年增 ≥ 10%：比 B 策略寬鬆（B 是 15%），讓回檔成長股有機會入選。
 - 外資連買：基本面 + 籌碼雙確認；不加投信，因低基期股投信常還沒進場。
-- 距 6 個月高 -20% 以下：用本地 `stock_day_*.parquet` 算「目前股價 / 過去 6 個月最高 - 1」，
+- 距 3 個月高 -20% 以下：用本地 `stock_day_*.parquet` 算「目前股價 / 過去 3 個月最高 - 1」，
   保留跌幅夠深的成長股，排除追高股。**Goodinfo FL_ITEM 暫無等效項目**，所以走 post_filter。
 
-**post_filter 機制**：
-- 在 `runner.py` 解析 Goodinfo CSV 後跑，欄位 `pct_from_52w_high` 用 TWSE `STOCK_DAY` 6 個月歷史計算
-- 首次跑 C3：30–50 檔候選 × 6 個月 × 1.5s ≈ 5–8 分鐘
-- 之後過去月份永久快取，每週只多抓當月（10–20 秒）
+**post_filter 機制**（2026-W21 起改為獨立 step）：
+- `screen run` / `screen run-all` **不再**自動套 post_filter，CSV 為純 Goodinfo 結果快照
+- `make enrich-candidates`（或拆開的 `apply-post-filters`）才會：
+  1. 讀 `screen_result_{strategy}.csv`
+  2. 對有 `post_filter` 欄的策略，用本地 `stock_day_*.parquet` 計算 `pct_from_Nm_high`
+  3. 刪掉超出 `max` / `min` 範圍的列，**覆寫回原 CSV**
+  4. CSV 本身不新增欄位，保持與 A/B 一致的純 Goodinfo schema
+- 過濾結果只在 **CSV 行數** 與 `group_analysis.md` 上反映；具體 pct 數值看 log
 - 資料不足的股票會**保留**並記 warning，不強制 filter（避免漏掉新上市股）
 
 ---

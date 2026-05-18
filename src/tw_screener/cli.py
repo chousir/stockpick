@@ -272,6 +272,38 @@ def screen_run(
         console.print(f"[yellow]⚠ {len(df)} 檔 > 100，條件可能太寬鬆[/yellow]")
 
 
+@screen_app.command("apply-post-filters")
+def screen_apply_post_filters(
+    week: str = typer.Option("", "--week", help="週別標籤，預設取最新一週"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """對本週 screen_result_*.csv 套用各策略的 post_filter（如 C3 距 N 月高過濾）。
+
+    前提：stock_day_*.parquet 已備齊（請先跑 make fetch-candidates-history）。
+    沒備齊時 post_filter 會自動補抓，但首次跑會慢。
+    """
+    from datetime import date as _date
+
+    from tw_screener.screener.runner import ScreenerRunner
+
+    week_tag = week if week else _date.today().strftime("%Y-W%V")
+    runner = ScreenerRunner(settings)
+
+    console.print(f"[bold]套用 post_filter 於 {week_tag} 各策略 CSV...[/bold]")
+    result = runner.apply_post_filters_for_week(week_tag)
+
+    if not result:
+        console.print("[yellow]沒有任何策略定義 post_filter，或當週無 CSV[/yellow]")
+        return
+
+    for strategy_id, (before, after) in result.items():
+        delta = before - after
+        console.print(
+            f"  {strategy_id}: {before} → [green]{after}[/green] 檔"
+            f"（過濾 {delta} 檔）"
+        )
+
+
 @screen_app.command("run-all")
 def screen_run_all(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),

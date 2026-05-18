@@ -58,10 +58,9 @@ class ScreenerRunner:
         if len(df) > 100:
             logger.warning("Strategy {} 篩出 {} 檔，條件可能太寬鬆", strategy.id, len(df))
 
-        # 套用本地 post_filter（如有），這會打 TWSE STOCK_DAY 補抓必要歷史
-        if strategy.post_filter and not df.is_empty():
-            df = self._apply_post_filter(df, strategy.post_filter)
-            logger.info("Strategy {} post_filter 後剩 {} 檔", strategy.id, len(df))
+        # 注意：post_filter 不在這裡跑，移到 apply_post_filters_for_week()，
+        # 由 `make enrich-candidates` 在 stock_day 快取備齊後統一處理。
+        # 這樣 screen-all 階段純粹是 Goodinfo 結果快照，不會觸發 TWSE 批次抓取。
 
         today = date.today()
 
@@ -138,17 +137,7 @@ class ScreenerRunner:
                 if idx % 20 == 0:
                     logger.info("  post_filter 進度 {}/{}", idx, len(stock_ids))
 
-            # 把 pct 值寫成新欄位，CSV 輸出時就看得到「距高 -25%」之類的數字
-            col_name = f"pct_from_{months}m_high"
-            df = df.with_columns(
-                pl.Series(
-                    col_name,
-                    [pcts.get(str(s).strip()) for s in df["stock_id"].cast(pl.Utf8).to_list()],
-                    dtype=pl.Float64,
-                )
-            )
-
-            # 保留：pct=None 視為資料不足，預設保留（不在 filter 範圍內）
+            # 保留：pct=None 視為資料不足，預設保留（不在 filter 範圍內，避免誤殺新上市股）
             def _judge(sid: str) -> bool:
                 v = pcts.get(str(sid).strip())
                 if v is None:
@@ -163,13 +152,14 @@ class ScreenerRunner:
             mask = [_judge(s) for s in df["stock_id"].cast(pl.Utf8).to_list()]
             df = df.filter(pl.Series(mask, dtype=pl.Boolean))
 
-            # Summary log（保留 N/M 檔 + pct 範圍）
+            # Summary log（保留 N/M 檔 + pct 範圍）；CSV 本身不寫 pct 欄，保持純 Goodinfo 快照
             valid_pcts = [v for v in pcts.values() if v is not None]
             if valid_pcts:
                 lo, hi = min(valid_pcts), max(valid_pcts)
                 logger.info(
-                    "post_filter {}: 保留 {}/{} 檔（pct 範圍 {:.1f}% ~ {:.1f}%）",
-                    col_name,
+                    "post_filter {} (months={}): 保留 {}/{} 檔（pct 範圍 {:.1f}% ~ {:.1f}%）",
+                    rule.field,
+                    months,
                     len(df),
                     before,
                     lo,
@@ -177,6 +167,48 @@ class ScreenerRunner:
                 )
 
         return df
+
+    def apply_post_filters_for_week(self, week_tag: str) -> dict[str, tuple[int, int]]:
+        """對本週 reports/{week_tag}/ 內所有有 post_filter 的策略 CSV 套過濾。
+
+        會把過濾後的 DataFrame 覆寫回原 CSV。回傳 {strategy_id: (before, after)}。
+        前提：stock_day_*.parquet 已備齊（透過 fetch-candidates-history 預熱）。
+        """
+        from tw_screener.screener.goodinfo.url_builder import load_strategy
+
+        report_dir = self._reports_dir / week_tag
+        if not report_dir.exists():
+            logger.warning("apply_post_filters_for_week: {} 不存在", report_dir)
+            return {}
+
+        result: dict[str, tuple[int, int]] = {}
+        for yaml_path in sorted(self._strategies_dir.glob("*.yaml")):
+            strategy = load_strategy(yaml_path)
+            if not strategy.post_filter:
+                continue
+
+            csv_path = report_dir / f"screen_result_{strategy.id}.csv"
+            if not csv_path.exists():
+                logger.warning(
+                    "apply_post_filters_for_week: {} 不存在，跳過 {}",
+                    csv_path,
+                    strategy.id,
+                )
+                continue
+
+            df = pl.read_csv(str(csv_path), infer_schema_length=1000)
+            before = len(df)
+            df = self._apply_post_filter(df, strategy.post_filter)
+            df.write_csv(csv_path)
+            result[strategy.id] = (before, len(df))
+            logger.info(
+                "{}: post_filter {} → {} 檔，覆寫 {}",
+                strategy.id,
+                before,
+                len(df),
+                csv_path.name,
+            )
+        return result
 
     def run_all(self, week_tag: str | None = None) -> dict[str, pl.DataFrame]:
         """跑 strategies_dir 下所有 YAML，輸出 CSV 到 reports/YYYY-Www/。"""
