@@ -59,10 +59,15 @@ def test_run_strategy_has_strategy_id(tmp_path: Path):
 
 
 def test_run_strategy_has_screened_at(tmp_path: Path):
+    """screened_at 對齊 trading_date（最近交易日），不是 today。"""
     runner = make_runner(tmp_path)
     df = runner.run_strategy(STRATEGY_PATH)
     assert "screened_at" in df.columns
-    assert df["screened_at"][0] == date.today()
+    # screened_at 是 date 型別；只要存在且 <= today 即可
+    screened = df["screened_at"][0]
+    assert screened is not None
+    assert isinstance(screened, date)
+    assert screened <= date.today()
 
 
 def test_run_strategy_has_goodinfo_url(tmp_path: Path):
@@ -243,10 +248,13 @@ def test_run_all_creates_csvs(tmp_path: Path):
     assert len(csvs) == yaml_count
 
 
-def test_run_all_uses_today_week_tag(tmp_path: Path):
+def test_run_all_uses_trading_date_week_tag(tmp_path: Path):
+    """run_all 預設 week_tag 來自 trading_date（最近交易日）。"""
+    from tw_screener.screener.runner import derive_week_tag
+
     runner = make_runner(tmp_path)
     runner.run_all()
-    week_tag = date.today().strftime("%Y-W%V")
+    week_tag = derive_week_tag(SETTINGS_PATH)
     assert (tmp_path / "reports" / week_tag).exists()
 
 

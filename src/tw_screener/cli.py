@@ -235,8 +235,6 @@ def screen_run(
         _print_strategy_url(strategy, settings)
         return
 
-    from datetime import date as _date
-
     import yaml as _yaml
 
     from tw_screener.screener.runner import ScreenerRunner
@@ -251,8 +249,9 @@ def screen_run(
 
     from tw_screener.screener.goodinfo.fetcher import GoodinfoBlockedError
     from tw_screener.screener.goodinfo.parser import GoodinfoTooManyResultsError
+    from tw_screener.screener.runner import derive_week_tag
 
-    week_tag = _date.today().strftime("%Y-W%V")
+    week_tag = derive_week_tag(settings)
     runner = ScreenerRunner(settings)
     try:
         df = runner.run_strategy(strategy_path)
@@ -277,9 +276,7 @@ def screen_run_all(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
     """執行全部策略（config/strategies/ 下所有 YAML），輸出 CSV。"""
-    from datetime import date as _date
-
-    from tw_screener.screener.runner import ScreenerRunner
+    from tw_screener.screener.runner import ScreenerRunner, derive_week_tag
 
     runner = ScreenerRunner(settings)
     results = runner.run_all()
@@ -290,7 +287,7 @@ def screen_run_all(
             line += "  [yellow]⚠ 條件可能太寬鬆[/yellow]"
         console.print(line)
 
-    week_tag = _date.today().strftime("%Y-W%V")
+    week_tag = derive_week_tag(settings)
     console.print(f"\n[bold]報告目錄：reports/{week_tag}/[/bold]")
 
 

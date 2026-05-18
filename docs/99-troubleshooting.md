@@ -332,6 +332,44 @@ grep -c "本週族群表現前" reports/$(date +%Y-W%V)/group_analysis.md
 
 ---
 
+## 13. 「週一早上跑為什麼還是上週的資料？」
+
+### 症狀
+```
+2026-05-18（週一）09:00 跑 make week
+→ reports/2026-W20/ 多了新的 group_analysis.md（不是 2026-W21）
+→ daily_20260515.parquet（不是 daily_20260518）
+→ 報告內容大部分跟 W20 之前的版本一樣
+```
+
+### 原因（這是設計，不是 bug）
+
+系統以「**最近一個交易日**」（`latest_trading_date()`）為 trading_date 錨點。
+週一收盤前跑 → TWSE 還沒發 5/18 的資料 → trading_date = 5/15 → 落到 W20。
+
+這樣設計避免：
+- 週日週一連跑各疊出檔名不同但內容同的 cache
+- 週一早上錯誤建出空的 `reports/2026-W21/`（內容其實是上週的）
+
+### 解法
+
+**正常**：等本週收盤後 15:00 起再跑，就會看到新的 `reports/2026-W21/`。
+
+**如果你想用本週剛收盤後的最新資料**：
+```bash
+# 例如 0518 (一) 15:30 後跑
+make week
+# 系統會偵測到 TWSE 有 5/18 資料 → 落到 W21
+```
+
+**驗證 trading_date 對齊**：
+```bash
+ls -la data/cache/twse/daily_*.parquet | tail -3
+# 看最新一個檔名就是 trading_date
+```
+
+---
+
 ## 一般檢查清單
 
 每週跑完後若發現異常，按順序檢查：

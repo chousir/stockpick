@@ -20,8 +20,25 @@ from tw_screener.screener.goodinfo.url_builder import (
 from tw_screener.screener.log_writer import write_screen_log
 
 
+def derive_week_tag(settings_path: Path = Path("config/settings.yaml")) -> str:
+    """用 TWSE 最近交易日推 ISO 週標籤；無 trading_date 時 fallback 到 today。
+
+    這是 trading_date 錨點的唯一入口；CLI / runner / builder 預設 week_tag 都走這裡。
+    """
+    from tw_screener.data.twse import create_client
+
+    try:
+        client = create_client(settings_path)
+        td = client.latest_trading_date()
+    except Exception as exc:
+        logger.warning("derive_week_tag fallback to today: {}", exc)
+        td = None
+    return (td or date.today()).strftime("%Y-W%V")
+
+
 class ScreenerRunner:
     def __init__(self, settings_path: Path = Path("config/settings.yaml")) -> None:
+        self._settings_path = settings_path
         with open(settings_path, encoding="utf-8") as fh:
             self._settings = yaml.safe_load(fh)
 
@@ -31,6 +48,21 @@ class ScreenerRunner:
         self._reports_dir = Path(self._settings["paths"]["reports_dir"])
         self._goodinfo_base: str = self._settings["goodinfo"]["base_url"]
         self._detail_base = f"{self._goodinfo_base}/StockInfo/StockDetail.asp"
+        # screened_at 用 trading_date 對齊整批執行；取一次避免每個策略各別查
+        self._trading_date: date | None = None
+
+    def _resolve_trading_date(self) -> date:
+        """Lazily resolve trading_date once per runner instance."""
+        if self._trading_date is None:
+            from tw_screener.data.twse import create_client
+
+            try:
+                client = create_client(self._settings_path)
+                self._trading_date = client.latest_trading_date() or date.today()
+            except Exception as exc:
+                logger.warning("_resolve_trading_date fallback to today: {}", exc)
+                self._trading_date = date.today()
+        return self._trading_date
 
     def run_strategy(self, strategy_path: Path) -> pl.DataFrame:
         """跑單一策略，回傳附有 metadata 欄位的結果 DataFrame。
@@ -57,13 +89,13 @@ class ScreenerRunner:
         if len(df) > 100:
             logger.warning("Strategy {} 篩出 {} 檔，條件可能太寬鬆", strategy.id, len(df))
 
-        today = date.today()
+        screened_at = self._resolve_trading_date()
 
         if df.is_empty():
             return df.with_columns(
                 [
                     pl.lit(strategy.id).alias("strategy_id"),
-                    pl.lit(today).alias("screened_at"),
+                    pl.lit(screened_at).alias("screened_at"),
                     pl.lit("").alias("goodinfo_url"),
                 ]
             )
@@ -71,7 +103,7 @@ class ScreenerRunner:
         return df.with_columns(
             [
                 pl.lit(strategy.id).alias("strategy_id"),
-                pl.lit(today).alias("screened_at"),
+                pl.lit(screened_at).alias("screened_at"),
                 pl.concat_str(
                     [
                         pl.lit(f"{self._detail_base}?STOCK_ID="),
@@ -84,7 +116,7 @@ class ScreenerRunner:
     def run_all(self, week_tag: str | None = None) -> dict[str, pl.DataFrame]:
         """跑 strategies_dir 下所有 YAML，輸出 CSV 到 reports/YYYY-Www/。"""
         if week_tag is None:
-            week_tag = date.today().strftime("%Y-W%V")
+            week_tag = derive_week_tag(self._settings_path)
 
         results: dict[str, pl.DataFrame] = {}
         strategy_names: dict[str, str] = {}

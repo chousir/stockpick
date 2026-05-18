@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from datetime import date
 from pathlib import Path
 
 import yaml
@@ -134,7 +133,8 @@ def build_stock_report(
         cfg = yaml.safe_load(fh)
 
     if week_tag is None:
-        week_tag = date.today().strftime("%Y-W%V")
+        from tw_screener.screener.runner import derive_week_tag
+        week_tag = derive_week_tag(settings_path)
 
     if api_key is None:
         api_key = os.environ.get("ANTHROPIC_API_KEY")

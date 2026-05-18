@@ -7,6 +7,14 @@
 
 每週把 1800 檔台股 → 30 檔候選 → 5-10 檔個股深度報告 → 你下決策。
 
+## 何時跑 `make week`
+
+- **推薦時段**：交易日收盤後 **15:00 起**（TWSE T86 法人 ~15:00 穩定，Goodinfo 也同步更新完成）
+- **週六/日 / 週一早上跑也 OK**：系統會自動對齊「最近一個交易日」（trading_date 錨點），
+  報告會落在上週的 `reports/YYYY-Www/`，不會建空週目錄
+- **跨日重複跑**：第二次走 cache，不會重抓
+- 詳見 [docs/02-data-sources.md](./docs/02-data-sources.md) 的「最早可用時點」表
+
 ## Quick Start（5 步）
 
 ```bash

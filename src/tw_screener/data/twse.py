@@ -474,38 +474,93 @@ class TWSEClient:
         return resp.json()
 
     def fetch_daily_all(self) -> pl.DataFrame:
-        """抓全市場日線，快取到 daily_YYYYMMDD.parquet。"""
-        today = date.today().strftime("%Y%m%d")
-        cache_file = self.cache_dir / f"daily_{today}.parquet"
-        if is_fresh(cache_file, self.ttl_hours):
-            logger.info(f"命中快取 {cache_file}")
-            return load_parquet(cache_file)
+        """
+        抓全市場日線，快取到 daily_{trading_date}.parquet。
+
+        檔名以「資料內 max(date)」為錨點（TWSE 自帶交易日判斷，會回最近一個
+        交易日的全市場資料），而非執行當下的 today。週末跑會落到上週五的檔名，
+        週一收盤前跑也仍是上週五，避免疊出多個檔名不同但內容相同的 cache。
+        """
+        # 先用 mtime 找最新的 daily_*.parquet；TTL 內就用，不打網
+        latest_cache = self._latest_cache_file("daily_*.parquet")
+        if latest_cache is not None and is_fresh(latest_cache, self.ttl_hours):
+            logger.info(f"命中快取 {latest_cache}")
+            return load_parquet(latest_cache)
+
         data = self._get("/exchangeReport/STOCK_DAY_ALL")
         df = _parse_daily_all(data)
-        if not df.is_empty():
-            save_parquet(df, cache_file)
-        else:
-            logger.warning("STOCK_DAY_ALL 回傳空資料（今日可能非交易日）")
+        if df.is_empty():
+            logger.warning("STOCK_DAY_ALL 回傳空資料")
+            return df
+
+        max_date = df["date"].max()
+        date_str = max_date.strftime("%Y%m%d")
+        cache_file = self.cache_dir / f"daily_{date_str}.parquet"
+        save_parquet(df, cache_file)
         return df
 
     def fetch_institutional(self) -> pl.DataFrame:
-        """抓三大法人（legacy T86，含歷史日期支援），快取到 institutional_YYYYMMDD.parquet。"""
-        today_str = date.today().strftime("%Y%m%d")
-        cache_file = self.cache_dir / f"institutional_{today_str}.parquet"
+        """
+        抓三大法人（legacy T86）。query date 與檔名都以 latest_trading_date() 為錨點。
+
+        非交易日跑會自動對齊上一個交易日，避免空查詢與檔名混亂。
+        """
+        trading_date = self.latest_trading_date()
+        if trading_date is None:
+            logger.warning("fetch_institutional: 無法取得 trading_date，跳過 T86 抓取")
+            return pl.DataFrame(
+                schema={
+                    "date": pl.Date,
+                    "stock_id": pl.Utf8,
+                    "stock_name": pl.Utf8,
+                    "foreign_net": pl.Int64,
+                    "trust_net": pl.Int64,
+                    "dealer_net": pl.Int64,
+                    "total_net": pl.Int64,
+                }
+            )
+
+        date_str = trading_date.strftime("%Y%m%d")
+        cache_file = self.cache_dir / f"institutional_{date_str}.parquet"
         if is_fresh(cache_file, self.ttl_hours):
             logger.info(f"命中快取 {cache_file}")
             return load_parquet(cache_file)
+
         url = (
             f"https://www.twse.com.tw/fund/T86?response=json"
-            f"&date={today_str}&selectType=ALLBUT0999"
+            f"&date={date_str}&selectType=ALLBUT0999"
         )
         payload = self._get_legacy(url)
         df = _parse_institutional(payload)
         if not df.is_empty():
             save_parquet(df, cache_file)
         else:
-            logger.warning("T86 回傳空資料（今日可能非交易日，或 selectType 無資料）")
+            logger.warning(
+                "T86 {} 回傳空資料（可能 TWSE 該日無資料，或 T86 尚未發布）",
+                date_str,
+            )
         return df
+
+    def latest_trading_date(self) -> date | None:
+        """
+        回傳最近一個交易日（從 fetch_daily_all 的 max(date) 推）。
+
+        供其他模組做為 trading_date 唯一錨點：檔名 / week_tag / screened_at 都來自此。
+        若無法取得（沒網又沒 cache，或 TWSE 回空）回 None，呼叫端決定 fallback。
+        """
+        df = self.fetch_daily_all()
+        if df.is_empty() or "date" not in df.columns:
+            return None
+        return df["date"].max()
+
+    def _latest_cache_file(self, pattern: str) -> Path | None:
+        """回傳 cache_dir 內符合 pattern 的最新 mtime 檔案；無則 None。"""
+        files = sorted(
+            self.cache_dir.glob(pattern),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        return files[0] if files else None
 
     def fetch_revenue(self) -> pl.DataFrame:
         """抓月營收（全市場），快取到 revenue_YYYYMM.parquet。"""

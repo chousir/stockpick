@@ -244,7 +244,7 @@ def test_client_init(tmp_path: Path):
 
 
 def test_fetch_daily_all_cache_hit(tmp_path: Path):
-    """第二次呼叫命中快取，不呼叫 _get。"""
+    """命中快取時不呼叫 _get；檔名用內容 max(date)，不再用 today。"""
     client = TWSEClient(
         base_url="https://test.invalid",
         cache_dir=tmp_path,
@@ -252,11 +252,11 @@ def test_fetch_daily_all_cache_hit(tmp_path: Path):
         user_agent="test",
         interval_sec=0.0,
     )
-    # 預先放快取
-    today = date.today().strftime("%Y%m%d")
-    cache_file = tmp_path / f"daily_{today}.parquet"
+    # 預先放快取（用 trading_date 而非 today 當檔名，模擬週末跑後的狀態）
+    cache_file = tmp_path / "daily_20260515.parquet"
     sample_df = pl.DataFrame(
         {
+            "date": [date(2026, 5, 15)],
             "stock_id": ["2330"],
             "name": ["台積電"],
             "trade_volume": [1000],
@@ -284,7 +284,44 @@ def test_fetch_daily_all_cache_hit(tmp_path: Path):
     assert len(df) == 1
 
 
-def test_fetch_institutional_cache_hit(tmp_path: Path):
+def test_fetch_daily_all_saves_with_max_date(tmp_path: Path):
+    """新抓時，檔名要用回傳資料的 max(date)，不是 today。"""
+    client = TWSEClient(
+        base_url="https://openapi.twse.com.tw/v1",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+
+    def mock_get(endpoint: str) -> list:
+        return [
+            {
+                "Date": "1150515",  # ROC 民國 115/05/15 → 西元 2026-05-15
+                "Code": "2330",
+                "Name": "台積電",
+                "TradeVolume": "1000",
+                "TradeValue": "1000000",
+                "OpeningPrice": "1075.0",
+                "HighestPrice": "1080.0",
+                "LowestPrice": "1070.0",
+                "ClosingPrice": "1075.0",
+                "Change": "5.0",
+                "Transaction": "500",
+            }
+        ]
+
+    client._get = mock_get  # type: ignore[method-assign]
+
+    df = client.fetch_daily_all()
+    assert not df.is_empty()
+    # 檔名應該是 daily_20260515.parquet（max date），不是 today
+    expected_file = tmp_path / "daily_20260515.parquet"
+    assert expected_file.exists(), f"預期建立 {expected_file}"
+
+
+def test_latest_trading_date_from_cache(tmp_path: Path):
+    """latest_trading_date 應從 cache 內容取 max(date)。"""
     client = TWSEClient(
         base_url="https://test.invalid",
         cache_dir=tmp_path,
@@ -292,26 +329,151 @@ def test_fetch_institutional_cache_hit(tmp_path: Path):
         user_agent="test",
         interval_sec=0.0,
     )
-    today = date.today().strftime("%Y%m%d")
-    cache_file = tmp_path / f"institutional_{today}.parquet"
+    cache_file = tmp_path / "daily_20260515.parquet"
     sample_df = pl.DataFrame(
         {
-            "date": [date(2026, 5, 15)],
-            "stock_id": ["2330"],
-            "stock_name": ["台積電"],
-            "foreign_net": [2000],
-            "trust_net": [500],
-            "dealer_net": [-100],
-            "total_net": [2400],
+            "date": [date(2026, 5, 14), date(2026, 5, 15)],
+            "stock_id": ["2330", "2330"],
+            "name": ["台積電", "台積電"],
+            "trade_volume": [1000, 1000],
+            "trade_value": [1000000, 1000000],
+            "open": [1070.0, 1075.0],
+            "high": [1080.0, 1080.0],
+            "low": [1065.0, 1070.0],
+            "close": [1075.0, 1078.0],
+            "change": [5.0, 3.0],
+            "transaction": [500, 500],
         }
     )
     save_parquet(sample_df, cache_file)
 
-    get_calls: list[str] = []
-    client._get = lambda ep: get_calls.append(ep) or []  # type: ignore[method-assign]
+    client._get = lambda ep: []  # type: ignore[method-assign]
+    td = client.latest_trading_date()
+    assert td == date(2026, 5, 15)
+
+
+def test_latest_trading_date_returns_none_when_no_data(tmp_path: Path):
+    """完全無 cache 又抓不到資料時，latest_trading_date 回 None。"""
+    client = TWSEClient(
+        base_url="https://test.invalid",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+    client._get = lambda ep: []  # type: ignore[method-assign]
+    assert client.latest_trading_date() is None
+
+
+def test_fetch_institutional_cache_hit(tmp_path: Path):
+    """T86 cache 用 trading_date 為檔名，不是 today。"""
+    client = TWSEClient(
+        base_url="https://test.invalid",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+    # 先放 daily cache 才能讓 latest_trading_date 拿到 5/15
+    daily_cache = tmp_path / "daily_20260515.parquet"
+    save_parquet(
+        pl.DataFrame(
+            {
+                "date": [date(2026, 5, 15)],
+                "stock_id": ["2330"],
+                "name": ["台積電"],
+                "trade_volume": [1],
+                "trade_value": [1],
+                "open": [1.0],
+                "high": [1.0],
+                "low": [1.0],
+                "close": [1.0],
+                "change": [0.0],
+                "transaction": [1],
+            }
+        ),
+        daily_cache,
+    )
+
+    # 預放 institutional cache（用 trading_date 命名）
+    inst_cache = tmp_path / "institutional_20260515.parquet"
+    save_parquet(
+        pl.DataFrame(
+            {
+                "date": [date(2026, 5, 15)],
+                "stock_id": ["2330"],
+                "stock_name": ["台積電"],
+                "foreign_net": [2000],
+                "trust_net": [500],
+                "dealer_net": [-100],
+                "total_net": [2400],
+            }
+        ),
+        inst_cache,
+    )
+
+    legacy_calls: list[str] = []
+    client._get_legacy = (  # type: ignore[method-assign]
+        lambda url: legacy_calls.append(url) or {}
+    )
+    client._get = lambda ep: []  # type: ignore[method-assign]
 
     df = client.fetch_institutional()
-    assert len(get_calls) == 0
+    assert len(legacy_calls) == 0, "trading_date cache hit 時不應再打 T86 API"
+    assert len(df) == 1
+
+
+def test_fetch_institutional_uses_trading_date_in_query(tmp_path: Path):
+    """T86 query date 與檔名用 trading_date（從 latest_trading_date 取），不是 today。"""
+    client = TWSEClient(
+        base_url="https://test.invalid",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+    # daily cache → trading_date = 5/14
+    daily_cache = tmp_path / "daily_20260514.parquet"
+    save_parquet(
+        pl.DataFrame(
+            {
+                "date": [date(2026, 5, 14)],
+                "stock_id": ["2330"],
+                "name": ["台積電"],
+                "trade_volume": [1],
+                "trade_value": [1],
+                "open": [1.0],
+                "high": [1.0],
+                "low": [1.0],
+                "close": [1.0],
+                "change": [0.0],
+                "transaction": [1],
+            }
+        ),
+        daily_cache,
+    )
+
+    legacy_calls: list[str] = []
+    client._get_legacy = (  # type: ignore[method-assign]
+        lambda url: legacy_calls.append(url)
+        or {
+            "stat": "OK",
+            "date": "20260514",
+            "fields": [
+                "證券代號", "證券名稱",
+                "外陸資買賣超股數(不含外資自營商)", "外資自營商買賣超股數",
+                "投信買賣超股數", "自營商買賣超股數", "三大法人買賣超股數",
+            ],
+            "data": [["2330", "台積電", "1000", "0", "200", "100", "1300"]],
+        }
+    )
+    client._get = lambda ep: []  # type: ignore[method-assign]
+
+    df = client.fetch_institutional()
+    assert len(legacy_calls) == 1
+    assert "date=20260514" in legacy_calls[0], "query date 應為 trading_date"
+    # 檔名也應用 trading_date
+    assert (tmp_path / "institutional_20260514.parquet").exists()
     assert len(df) == 1
 
 
@@ -417,8 +579,8 @@ def test_fetch_daily_all_empty_response(tmp_path: Path):
 
     df = client.fetch_daily_all()
     assert df.is_empty()
-    today = date.today().strftime("%Y%m%d")
-    assert not (tmp_path / f"daily_{today}.parquet").exists()
+    # 空 response → 不應建任何 daily_*.parquet
+    assert list(tmp_path.glob("daily_*.parquet")) == []
 
 
 # ─── _months_back ─────────────────────────────────────────────────────────────

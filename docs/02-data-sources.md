@@ -121,14 +121,37 @@ data/cache/goodinfo/
 
 Goodinfo 主要用在「條件組合篩選」這個它真正強的地方。
 
-## 資料更新頻率
+## 資料更新頻率與最早可用時點
 
-| 資料 | 更新頻率 | 處理方式 |
-|---|---|---|
-| Goodinfo 篩選結果 | 每週一次（週末手動 `make week`） | 24h 內讀 cache |
-| TWSE 日線 | 收盤後抓增量 | 累積 parquet |
-| 月營收 | 每月 10 號前 | cron 或手動 |
-| 三大法人 | 每日收盤後 1 小時 | 累積 parquet |
+| 資料 | 最早可用時點 | 更新頻率 | 處理方式 |
+|---|---|---|---|
+| Goodinfo 篩選結果 | 收盤後 30–60 分鐘 | 每週一次或更頻繁 | 24h 內讀 cache |
+| TWSE 日線（STOCK_DAY_ALL）| 收盤後 ~30 分鐘 | 每交易日 | 累積 parquet |
+| TWSE T86 三大法人 | 收盤後約 90 分鐘（**15:00 起穩定**）| 每交易日 | 累積 parquet |
+| 月營收（t187ap05_L） | 每月 10 號前 | 每月 | cron 或手動 |
+| 上市產業分類（t187ap03_L）| 月內穩定 | 每月 | 月更新 |
+| 上櫃產業分類（ISIN）| 月內穩定 | 每月 | 月更新 |
+
+**建議跑 `make week` 的時段**：交易日 **15:00 起**。在此之前 T86 可能還沒發布，
+Goodinfo 漲跌幅資料也可能不完整。
+
+## trading_date 錨點
+
+為了支援「任意時段跑」（週末、週一早上、收盤前），所有交易日相關的檔名與週標籤
+**不再使用執行當下的 `date.today()`**，而是統一以 `TWSEClient.latest_trading_date()`
+回傳的「最近一個交易日」為錨點。
+
+| 觸發點 | 錨點來源 |
+|---|---|
+| `daily_{YYYYMMDD}.parquet` 檔名 | 解析後 `df["date"].max()` |
+| `institutional_{YYYYMMDD}.parquet` 檔名 + T86 query date | `latest_trading_date()` |
+| `screen_result_*.csv` 的 `screened_at` 欄 | `latest_trading_date()` |
+| `reports/YYYY-Www/` 週目錄名 | `latest_trading_date().strftime("%Y-W%V")` |
+
+範例：
+- 2026-05-17（週日）下午跑 → TWSE 回 5/15 → 全部檔名 / 週標籤對齊 `2026-05-15` / `W20`
+- 2026-05-18（週一）09:00 跑 → 同上（5/18 T86 還沒發） → 仍對齊 W20
+- 2026-05-18（週一）15:30 跑 → TWSE 回 5/18 → 對齊 `2026-05-18` / `W21`，新建 reports/2026-W21/
 
 ## 合法性聲明
 
