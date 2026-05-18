@@ -9,7 +9,7 @@
 | **代號** | a_breakout | b_growth_institutional | c_quality_value |
 | **中文名** | 動能突破 | 成長主力 | 品質價值 |
 | **核心邏輯** | 技術面動能 | 基本面 + 籌碼 | 高 ROE + 配息 + 估值 |
-| **核心條件** | 週 MACD + 均線多頭 + 流動性 | 營收 YoY + 連續季淨利成長 + 外資連買 | ROE ≥ 15% + 連續配息 |
+| **核心條件** | 週 MACD + 均線多頭 + 流動性 | 營收 YoY + 連續季淨利成長 + 外資連買 | ROE ≥ 15% + 連續配息 + 殖利率 |
 | **進場時機** | 已啟動，追強勢 | 已啟動，跟法人 | 不擇時，分批 |
 | **持有時間** | 1-4 週 | 1-3 個月 | 6 個月以上 |
 | **市場適用** | 多頭 | 多頭 / 盤整 | 任何市場（防守） |
@@ -111,31 +111,29 @@ rules:
 ```yaml
 id: c_quality_value
 name: "品質價值"
-description: "高 ROE + 連續配息的長線品質股（防守 / 壓艙石）"
+description: "高 ROE + 長年連續配息 + 殖利率合理的長線品質股（防守 / 壓艙石）"
 holding_period: "6+ months"
 market: "上市/上櫃"
 
 filters:
-  - item: "近四季-ROE(%)-本季度"   # ⚠️ FL_ITEM 名稱待 Goodinfo URL 實測校正
+  - item: "近四季–ROE(%)–本季度"   # ⚠️ EN DASH「–」(U+2013) 非 ASCII hyphen
     min: 15
   - item: "連續配發現金股利次數"
-    min: 5
+    min: 8
+  - item: "成交價現金殖利率 (%)"
+    min: 3
 
 rules: []
 ```
 
 **取捨**：
 - 近 4 季 ROE ≥ 15%：高品質公司（巴菲特標準的低標）。能在多種市場條件下持續產生回報。
-- 連續配發現金股利 ≥ 5 年：穩定獲利的證明，過濾掉一次性配息股
-- **沒有 PB / 估值條件**：Goodinfo「自訂篩選」的 FL_ITEM 沒有「股價淨值比」對應項
-  （只有「每股淨值創新高/低」這類 rule）。ROE + 連續配息已能描述「品質」屬性
+  FL_ITEM 名稱使用 EN DASH（U+2013），ASCII hyphen 不會匹配
+- 連續配發現金股利 ≥ 8 年：跨完整景氣循環，過濾掉一次性配息與假成長股
+- 成交價現金殖利率 ≥ 3%：**取代 PB 的價值屬性**，確保不在估值高點
+  （Goodinfo 沒有「股價淨值比」filter，只能用殖利率反推「不貴」訊號）
 - 不設技術 rule：品質股不擇時，何時進場都能慢慢累積部位
-- 預期撈出 30–60 檔
-
-**⚠️ ROE FL_ITEM 名稱校正**：「近四季-ROE(%)-本季度」是從 Goodinfo UI 推測的格式
-（圖 2 顯示 dropdown 結構），實際 Goodinfo URL 內部 FL_ITEM 字串可能不同。**第一次跑
-`make screen STRATEGY=c_quality_value` 若 0 筆或結果異常，請到 Goodinfo 自訂篩選
-UI 設好「近 4 季 ROE ≥ 15%」條件、按查詢，把產生的 URL 貼進 issue 校正。**
+- 預期撈出 30–80 檔（不像舊版「ROE + 配息 5 年」單條件撈 300+ 灌爆篩選上限）
 
 > 設計原則：A/B/C CSV 一律是「純 Goodinfo 結果快照」。策略可以換來換去，
 > 但 CSV schema 保持單純（純 Goodinfo 12 欄），避免特定策略綁住整體流程。

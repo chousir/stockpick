@@ -39,7 +39,7 @@ _STRATEGY_DESCRIPTION: dict[str, str] = {
     "c_dividend_steady": "連續配息 8 年 + 殖利率 ≥ 4% + 股利持續成長（長線 6 月以上）",
     "c_low_base_growth": "月營收 YoY ≥ 10% + 外資連續買超（中線 1–3 月）",
     "c_quality_value": (
-        "近 4 季 ROE ≥ 15% + 連續配息 5 年以上（長線・品質防守）"
+        "近 4 季 ROE ≥ 15% + 連續配息 8 年以上 + 殖利率 ≥ 3%（長線・品質防守）"
     ),
 }
 
