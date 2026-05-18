@@ -17,6 +17,9 @@ _STRATEGY_LABEL: dict[str, str] = {
     "c_dividend_steady": "C",
     "c_low_base_growth": "C",
     "c_quality_value": "C",
+    "d_quality_leader": "D",
+    "e_growth_momentum": "E",
+    "f_value_rebound": "F",
 }
 
 _STRATEGY_NAME: dict[str, str] = {
@@ -25,6 +28,9 @@ _STRATEGY_NAME: dict[str, str] = {
     "c_dividend_steady": "穩健存股",
     "c_low_base_growth": "低基期成長",
     "c_quality_value": "品質價值",
+    "d_quality_leader": "品質龍頭",
+    "e_growth_momentum": "成長動能",
+    "f_value_rebound": "價值反彈",
 }
 
 _STRATEGY_DESCRIPTION: dict[str, str] = {
@@ -40,6 +46,18 @@ _STRATEGY_DESCRIPTION: dict[str, str] = {
     "c_low_base_growth": "月營收 YoY ≥ 10% + 外資連續買超（中線 1–3 月）",
     "c_quality_value": (
         "近 4 季 ROE ≥ 20% + 連續配息 10 年以上 + 殖利率 ≥ 4%（長線・頂尖品質）"
+    ),
+    "d_quality_leader": (
+        "市值 ≥ 100 億 + 近 4 季 ROE ≥ 15% + 連續配息 8 年 + 連 2 季淨利"
+        "（長線品質龍頭・ProPicks TWCH15 風格）"
+    ),
+    "e_growth_momentum": (
+        "市值 ≥ 100 億 + 月營收 YoY ≥ 20% + 連 2 季淨利 + 均線多頭排列"
+        "（中線成長動能・ProPicks Tech Titans 風格）"
+    ),
+    "f_value_rebound": (
+        "市值 ≥ 100 億 + 本益比 ≤ 15 + 殖利率 ≥ 3% + 營收仍正成長"
+        "（中線價值反彈・ProPicks Top Value 風格）"
     ),
 }
 

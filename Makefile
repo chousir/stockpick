@@ -58,8 +58,12 @@ fetch-candidates-history:  ## 對本週篩選結果聯集個股補抓 STOCK_DAY 
 screen:  ## 跑單一策略（STRATEGY=a_breakout）
 	uv run tw-screener screen run $(STRATEGY)
 
-screen-all:  ## 跑全部三組策略
-	uv run tw-screener screen run-all
+screen-all:  ## 跑指定組策略（GROUP=abc 或 GROUP=def）
+ifndef GROUP
+	@echo "❌ 請指定 GROUP=abc 或 GROUP=def"
+	@exit 1
+endif
+	uv run tw-screener screen run-all --group $(GROUP)
 
 screen-dry:  ## 預演（不打網，只組 URL）（STRATEGY=a_breakout）
 	uv run tw-screener screen run $(STRATEGY) --dry-run
@@ -82,14 +86,22 @@ report-batch:  ## 批次產本週推薦清單報告
 
 # ─── 完整流程 ─────────────────────────────────────────────────────────────────
 
-week:  ## 完整週流程：fetch-twse → screen-all → fetch-candidates-history → group
+week:  ## 完整週流程（GROUP=abc 或 GROUP=def）：fetch-twse → screen-all → fetch-candidates-history → group
+ifndef GROUP
+	@echo "❌ 請指定 GROUP=abc 或 GROUP=def"
+	@exit 1
+endif
 	$(MAKE) fetch-twse
-	$(MAKE) screen-all
+	$(MAKE) screen-all GROUP=$(GROUP)
 	$(MAKE) fetch-candidates-history
 	$(MAKE) group
 
-weekend:  ## 完整週流程並 commit 結果
-	$(MAKE) week
+weekend:  ## 完整週流程並 commit 結果（GROUP=abc 或 GROUP=def）
+ifndef GROUP
+	@echo "❌ 請指定 GROUP=abc 或 GROUP=def"
+	@exit 1
+endif
+	$(MAKE) week GROUP=$(GROUP)
 	git add reports/ watchlist/
 	@if git diff --staged --quiet; then \
 	  echo "無新檔可 commit，跳過 git commit/push"; \

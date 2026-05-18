@@ -144,14 +144,154 @@ rules: []
 
 ---
 
+# Part B：ProPicks 復刻組（D/E/F）
+
+A/B/C 是「經典三角」（互不重疊、每組單維度主導）；D/E/F 是 ProPicks 復刻組，
+**每組混合多個 ProPicks 因子**（財務/成長/估值/動能），目標是逼近 Investing.com
+ProPicks AI 在台股的選股風格。
+
+A/B/C 與 D/E/F **不會同時跑**，透過 `make week GROUP=abc` / `make week GROUP=def`
+二選一切換（見下方「GROUP 機制」）。
+
+| | 策略 D | 策略 E | 策略 F |
+|---|---|---|---|
+| **代號** | d_quality_leader | e_growth_momentum | f_value_rebound |
+| **中文名** | 品質龍頭 | 成長動能 | 價值反彈 |
+| **對標 ProPicks** | TWCH15（台灣晶片冠軍） | Tech Titans | Top Value Stocks |
+| **核心邏輯** | 市值 + ROE + 配息 + 淨利連增 | 市值 + 強成長 YoY + 均線動能 | 市值 + 低 PER + 殖利率 + 反陷阱 |
+| **持有時間** | 6 個月以上 | 1–3 個月 | 3–6 個月 |
+| **預期篩出數** | 15-40 檔 | 10-30 檔 | 20-50 檔 |
+
+**三組共用「市值 ≥ 100 億」**：D/E/F 風格的識別記號，鎖定中大型權值，剔除小型雜訊
+（A/B/C 是全市場視角）。
+
+## 策略 D：品質龍頭（quality_leader）
+
+`config/strategies/d_quality_leader.yaml`：
+
+```yaml
+filters:
+  - item: "市值(億)"
+    min: 100
+  - item: "近四季–ROE(%)–本季度"   # ⚠ EN DASH U+2013
+    min: 15
+  - item: "連續配發現金股利次數"
+    min: 8
+  - item: "連續增加季數–單季稅後淨利"  # ⚠ EN DASH U+2013
+    min: 2
+
+rules: []
+```
+
+**取捨**：
+- ROE ≥ 15%（C 是 ≥ 20%，D 故意放寬以差異化）
+- ProPicks TWCH15 的 ROIC + 低 D/E + 穩定 FCF 在 Goodinfo 找不到對應 filter，
+  用「連續配息 8 年 + 連 2 季淨利」做現金流質量的間接證明
+- 不放技術 rule：品質股不擇時
+
+## 策略 E：成長動能（growth_momentum）
+
+`config/strategies/e_growth_momentum.yaml`：
+
+```yaml
+filters:
+  - item: "市值(億)"
+    min: 100
+  - item: "累計月營收年增減率(%)"
+    min: 20
+  - item: "連續增加季數–單季稅後淨利"  # ⚠ EN DASH U+2013
+    min: 2
+
+rules:
+  - "均線位置||5日/10日/20日線多頭排列且走揚@@均價線多頭排列且走揚@@5日/10日/20日"
+```
+
+**取捨**：
+- 月營收 YoY ≥ 20%（高於 B 的 15%）：E 抓「強成長」、B 抓「中成長 + 外資」
+- 動能訊號用「均線多頭排列」（A 已驗證）；刻意不用 MACD 或外資連買，避免變 A/B 的子集
+
+## 策略 F：價值反彈（value_rebound）
+
+`config/strategies/f_value_rebound.yaml`：
+
+```yaml
+filters:
+  - item: "市值(億)"
+    min: 100
+  - item: "本益比 (PER)"
+    max: 15
+  - item: "成交價現金殖利率 (%)"
+    min: 3
+  - item: "累計月營收年增減率(%)"
+    min: 0
+
+rules: []
+```
+
+**取捨**：
+- 「累計月營收 YoY ≥ 0」是**價值陷阱過濾器**：低估的股至少不能還在衰退
+- 殖利率 ≥ 3%（C 是 ≥ 4%）：寬鬆版價值；本組與 C 不會同時跑（GROUP 互斥）
+- 不放技術 rule
+
+## D/E/F 內部互補
+
+| | 獨有條件 | ProPicks 維度 |
+|---|---|---|
+| D | ROE + 配息 | 財務面 |
+| E | 均線 rule + YoY ≥ 20 | 成長面 + 市場面 |
+| F | PE max + YoY ≥ 0 | 估值面 |
+
+**預期交集**：
+- D ∩ E（品質+成長）：稀有但最有意義，0–5 檔
+- D ∩ F（高 ROE + 低 PE）：巴菲特核心持股，5–15 檔
+- E ∩ F（戴維斯雙擊候選）：0–5 檔
+- D ∩ E ∩ F：理論接近 0
+
+## L3 高風險欄位（部署前必校正）
+
+D/E/F 中以下欄位未經 Goodinfo URL 驗證，**錯誤名稱會被 Goodinfo 靜默忽略**，必須手動到
+Goodinfo「自訂篩選 - 我的條件」UI 校正：
+
+| 欄位 | YAML 中名稱 | 備案 |
+|---|---|---|
+| 市值 | `市值(億)` | `公司市值(億)`、`公司總市值(億)`、`市值（億元）` |
+| 本益比 | `本益比 (PER)` | `本益比`、`本益比(PER)` |
+
+校正流程：跑 `--dry-run` → 把 URL 貼到瀏覽器 → 開 Goodinfo 自訂篩選頁 → 看 filter
+是否真有被勾起 → 不對就找正確的 dropdown 字串改 YAML → 重跑 `--dry-run`。
+
+---
+
+## GROUP 機制
+
+`make week` 強制要求 `GROUP=abc` 或 `GROUP=def`，無預設值。
+
+```bash
+make week GROUP=abc        # 跑 A/B/C 經典三角
+make week GROUP=def        # 跑 D/E/F ProPicks 復刻組
+make week                  # ❌ 報錯：請指定 GROUP=abc 或 GROUP=def
+make weekend GROUP=abc     # 含 commit/push
+make screen-all GROUP=def  # 只跑 screen-all 部分
+make screen STRATEGY=d_quality_leader  # 單策略仍可（不需 GROUP）
+```
+
+**實作**：
+- `config/strategies/` 平鋪 6 個 yaml，不用子目錄
+- `tw-screener screen run-all --group abc|def`：runner 依 `strategy.id` 首字母過濾
+  （a_*/b_*/c_* 屬 abc；d_*/e_*/f_* 屬 def）
+- 兩組互斥語意：本週跑了 ABC，reports/Www/ 不會有 D/E/F CSV，反之亦然
+
+---
+
 ## 策略執行
 
 ```bash
-# 跑單一策略
+# 跑單一策略（不需 GROUP）
 make screen STRATEGY=a_breakout
 
-# 跑全部三組
-make screen-all
+# 跑指定組（GROUP 必填）
+make screen-all GROUP=abc
+make screen-all GROUP=def
 
 # 看本週結果
 ls reports/$(date +%Y-W%V)/
@@ -173,6 +313,9 @@ stock_id,name,market,close,change_pct,volume_lots,amount_million,pe_ratio,pb_rat
 | `a_*` | `A` | 攻擊型短線 |
 | `b_*` | `B` | 法人 / 基本面中線 |
 | `c_*` | `C` | 反彈 / 逆向中線 |
+| `d_*` | `D` | ProPicks 品質龍頭 |
+| `e_*` | `E` | ProPicks 成長動能 |
+| `f_*` | `F` | ProPicks 價值反彈 |
 
 替換同代號策略（如本次 `c_dividend_steady` → `c_low_base_growth`）時，**`group_report.py` 的
 `_STRATEGY_LABEL` / `_STRATEGY_NAME` / `_STRATEGY_DESCRIPTION` 三個 dict 需同步加新項**，否則

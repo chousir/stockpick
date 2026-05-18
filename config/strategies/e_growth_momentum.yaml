@@ -1,0 +1,29 @@
+id: e_growth_momentum
+name: "成長動能"
+description: "市值≥100億 + 月營收YoY≥20% + 連2季淨利成長 + 均線多頭排列（ProPicks Tech Titans 風格）"
+holding_period: "1-3 months"
+market: "上市/上櫃"
+
+# ProPicks 復刻組第二支：Tech Titans 成長動能
+# - YoY ≥ 20%（高於 B 的 15%）讓 E 抓「強成長」、B 抓「中成長+外資」
+# - 動能：均線多頭排列（A 已驗證），刻意不用 MACD 或外資連買避免變 A/B 子集
+# - 市值 100 億：剔除小型暴漲股，避免假突破
+filters:
+  - item: "市值(億)"                       # ⚠ L3 候選：需校正
+    min: 100
+  - item: "累計月營收年增減率(%)"          # ✅ L1 已驗證（B 用過）
+    min: 20
+  - item: "連續增加季數–單季稅後淨利"      # ✅ L1 已驗證（B 用過；EN DASH U+2013）
+    min: 2
+
+rules:
+  - "均線位置||5日/10日/20日線多頭排列且走揚@@均價線多頭排列且走揚@@5日/10日/20日"  # ✅ L1 已驗證（A 用過）
+
+display_sheet: "交易狀況"
+display_period: "日"
+
+post_filter_sort:
+  - field: "漲跌幅"
+    order: "desc"
+  - field: "成交張數"
+    order: "desc"

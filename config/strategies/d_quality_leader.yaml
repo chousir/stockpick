@@ -1,0 +1,29 @@
+id: d_quality_leader
+name: "品質龍頭"
+description: "市值≥100億 + 近四季ROE≥15% + 連續配息≥8年 + 連2季淨利增加（ProPicks TWCH15 風格）"
+holding_period: "6+ months"
+market: "上市/上櫃"
+
+# ProPicks 復刻組第一支：TWCH15 台灣晶片冠軍的台股廣義版
+# - TWCH15 強調高 ROIC + 低 D/E + 穩定 FCF + EPS 成長
+# - Goodinfo 沒有 ROIC，用 ROE ≥ 15%（比 C 的 20% 寬，差異化）
+# - 連續配息 8 年 + 連 2 季淨利 = FCF 質量的間接指標
+# - 市值 100 億：鎖中大型龍頭，剔除小型品質股
+filters:
+  - item: "市值(億)"                      # ⚠ L3 候選：需手動到 Goodinfo UI 校正
+    min: 100
+  - item: "近四季–ROE(%)–本季度"          # ✅ L1 已驗證（C 用過；EN DASH U+2013）
+    min: 15
+  - item: "連續配發現金股利次數"          # ✅ L1 已驗證（C 用過）
+    min: 8
+  - item: "連續增加季數–單季稅後淨利"     # ✅ L1 已驗證（B 用過；EN DASH U+2013）
+    min: 2
+
+rules: []
+
+display_sheet: "交易狀況"
+display_period: "日"
+
+post_filter_sort:
+  - field: "成交額(百萬)"
+    order: "desc"

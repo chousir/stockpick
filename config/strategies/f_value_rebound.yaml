@@ -1,0 +1,30 @@
+id: f_value_rebound
+name: "價值反彈"
+description: "市值≥100億 + 本益比≤15 + 殖利率≥3% + 累計營收YoY≥0（ProPicks Top Value 風格）"
+holding_period: "3-6 months"
+market: "上市/上櫃"
+
+# ProPicks 復刻組第三支：Top Value Stocks 低估值反彈
+# - 「累計月營收 YoY ≥ 0」是價值陷阱過濾器：低估的股至少不能還在衰退
+# - PE ≤ 15 + 殖利率 ≥ 3：低估 + 現金回報
+# - 殖利率門檻比 C（≥ 4%）寬，避免重疊；本組與 C 不會同時跑（GROUP 互斥）
+filters:
+  - item: "市值(億)"                       # ⚠ L3 候選：需校正
+    min: 100
+  - item: "本益比 (PER)"                   # ⚠ L3 候選：需校正（半形空格 + 全大寫 PER）
+    max: 15
+  - item: "成交價現金殖利率 (%)"           # ✅ L1 已驗證（C 用過）
+    min: 3
+  - item: "累計月營收年增減率(%)"          # ✅ L1 已驗證（B 用過）
+    min: 0
+
+rules: []
+
+display_sheet: "交易狀況"
+display_period: "日"
+
+post_filter_sort:
+  - field: "成交價現金殖利率 (%)"
+    order: "desc"
+  - field: "成交額(百萬)"
+    order: "desc"

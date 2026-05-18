@@ -19,6 +19,11 @@ from tw_screener.screener.goodinfo.url_builder import (
 )
 from tw_screener.screener.log_writer import write_screen_log
 
+_GROUP_PREFIX: dict[str, set[str]] = {
+    "abc": {"a", "b", "c"},
+    "def": {"d", "e", "f"},
+}
+
 
 def derive_week_tag(settings_path: Path = Path("config/settings.yaml")) -> str:
     """用 TWSE 最近交易日推 ISO 週標籤；無 trading_date 時 fallback 到 today。
@@ -113,14 +118,24 @@ class ScreenerRunner:
             ]
         )
 
-    def run_all(self, week_tag: str | None = None) -> dict[str, pl.DataFrame]:
-        """跑 strategies_dir 下所有 YAML，輸出 CSV 到 reports/YYYY-Www/。"""
+    def run_all(
+        self, week_tag: str | None = None, group: str | None = None
+    ) -> dict[str, pl.DataFrame]:
+        """跑 strategies_dir 下 YAML，輸出 CSV 到 reports/YYYY-Www/。
+
+        group: "abc" 只跑 id 開頭 a/b/c；"def" 只跑 d/e/f；None 跑全部。
+        """
         if week_tag is None:
             week_tag = derive_week_tag(self._settings_path)
 
+        yaml_paths = sorted(self._strategies_dir.glob("*.yaml"))
+        if group is not None:
+            prefixes = _GROUP_PREFIX[group]
+            yaml_paths = [p for p in yaml_paths if p.stem[:1].lower() in prefixes]
+
         results: dict[str, pl.DataFrame] = {}
         strategy_names: dict[str, str] = {}
-        for yaml_path in sorted(self._strategies_dir.glob("*.yaml")):
+        for yaml_path in yaml_paths:
             strategy = load_strategy(yaml_path)
             strategy_names[strategy.id] = strategy.name
             logger.info("Running strategy: {}", strategy.id)
