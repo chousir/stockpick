@@ -586,6 +586,7 @@ class TWSEClient:
         today = date.today()
         current_ym = today.strftime("%Y%m")
         frames: list[pl.DataFrame] = []
+        consecutive_empty = 0
 
         for n in range(months):
             target = _months_back(today, n)
@@ -596,6 +597,7 @@ class TWSEClient:
             if cache_file.exists() and (ym != current_ym or is_fresh(cache_file, self.ttl_hours)):
                 logger.info(f"命中快取 {cache_file}")
                 frames.append(load_parquet(cache_file))
+                consecutive_empty = 0
                 continue
 
             url = (
@@ -607,8 +609,17 @@ class TWSEClient:
             if not df.is_empty():
                 save_parquet(df, cache_file)
                 frames.append(df)
+                consecutive_empty = 0
             else:
                 logger.warning(f"STOCK_DAY {stock_id} {ym} 空資料（可能未上市或休市）")
+                consecutive_empty += 1
+                # 連續 2 個月空 → 該股很可能是上櫃股或下市，TWSE STOCK_DAY 不收
+                # 提早終止，避免每檔浪費 4-5 次無效 API 呼叫
+                if consecutive_empty >= 2:
+                    logger.info(
+                        f"STOCK_DAY {stock_id} 連續 {consecutive_empty} 月空資料，跳過剩餘月份"
+                    )
+                    break
 
         if not frames:
             return pl.DataFrame(schema=_empty_schema)

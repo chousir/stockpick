@@ -20,11 +20,12 @@ post_filter_sort:
   - field: "成交張數"
     order: "desc"
 
-# 距 1 年高點 -20% 以下（本地過濾，需 stock_day_*.parquet 歷史）
+# 距 3 個月內最高價 -20% 以下（本地過濾，需 stock_day_*.parquet 歷史）
 # Goodinfo FL_ITEM 中暫無等效項目，故走本地 post_filter；
-# 首次跑會慢（每檔約 4 秒抓 6 個月歷史，C3 預計 30-50 檔），
+# months=3 平衡時間 vs 訊號：3 個月高點足以代表「近期回檔」，
+# 每檔約 3-4 秒抓滿，C3 候選 30-100 檔 → 首次 2-7 分鐘。
 # 之後過去月份永久快取，每週只多抓當月。
 post_filter:
   - field: "pct_from_52w_high"
-    months: 6
+    months: 3
     max: -20.0
