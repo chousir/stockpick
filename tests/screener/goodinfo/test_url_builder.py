@@ -24,7 +24,7 @@ def test_load_strategy_id():
 
 def test_load_strategy_name():
     s = load_strategy(STRATEGY_PATH)
-    assert s.name == "波段啟動"
+    assert s.name == "動能突破"
 
 
 def test_load_strategy_filters_count():
@@ -45,7 +45,7 @@ def test_load_strategy_filter_no_period():
 
 def test_load_strategy_filter_min():
     s = load_strategy(STRATEGY_PATH)
-    assert s.filters[0].min == 10000
+    assert s.filters[0].min == 15000
 
 
 def test_load_strategy_filter_min_only():
@@ -110,7 +110,7 @@ def test_url_contains_min_value():
     s = load_strategy(STRATEGY_PATH)
     url = build_screener_url(s, BASE_URL)
     decoded = unquote(url)
-    assert "10000" in decoded  # 成交筆數 min
+    assert "15000" in decoded  # 成交筆數 min
 
 
 def test_url_contains_rules():

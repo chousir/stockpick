@@ -1,0 +1,29 @@
+id: c_quality_value
+name: "品質價值"
+description: "高 ROE + 連續配息 + 估值合理的長線品質股（防守 / 壓艙石）"
+holding_period: "6+ months"
+market: "上市/上櫃"
+
+# 經典三角第三角：品質防守（長線壓艙石）
+# - 近 4 季 ROE ≥ 15%：高品質公司（巴菲特標準的低標）
+# - 連續配發現金股利次數 ≥ 5：穩定獲利的證明
+# - 股價淨值比 ≤ 3.0：估值不在頂端（避免追高）
+# - 不設技術 rule：品質股不擇時，分批佈局即可
+filters:
+  - item: "近4季ROE(%)"
+    min: 15
+  - item: "連續配發現金股利次數"
+    min: 5
+  - item: "股價淨值比"
+    max: 3.0
+
+rules: []
+
+display_sheet: "交易狀況"
+display_period: "日"
+
+post_filter_sort:
+  - field: "漲跌幅"
+    order: "desc"
+  - field: "成交張數"
+    order: "desc"

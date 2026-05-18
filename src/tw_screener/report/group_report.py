@@ -16,20 +16,31 @@ _STRATEGY_LABEL: dict[str, str] = {
     "b_growth_institutional": "B",
     "c_dividend_steady": "C",
     "c_low_base_growth": "C",
+    "c_quality_value": "C",
 }
 
 _STRATEGY_NAME: dict[str, str] = {
-    "a_breakout": "波段啟動",
-    "b_growth_institutional": "法人成長",
+    "a_breakout": "動能突破",
+    "b_growth_institutional": "成長主力",
     "c_dividend_steady": "穩健存股",
     "c_low_base_growth": "低基期成長",
+    "c_quality_value": "品質價值",
 }
 
 _STRATEGY_DESCRIPTION: dict[str, str] = {
-    "a_breakout": "週 MACD 翻多 + 5/10/20 均線多頭排列且走揚（短線 1–4 週）",
-    "b_growth_institutional": "月累計營收 YoY ≥ 15% + 外資與投信同步連續買超（中線 1–3 月）",
+    "a_breakout": (
+        "週 MACD 翻多 + 5/10/20 均線多頭排列且走揚 + 流動性過濾"
+        "（短線 1–4 週・攻擊）"
+    ),
+    "b_growth_institutional": (
+        "月營收 YoY ≥ 15% + 最新季 EPS YoY ≥ 20% + 外資連買"
+        "（中線 1–3 月・主力）"
+    ),
     "c_dividend_steady": "連續配息 8 年 + 殖利率 ≥ 4% + 股利持續成長（長線 6 月以上）",
-    "c_low_base_growth": "月營收 YoY ≥ 10% + 股價距 1 年高點 -20% 以下 + 外資連續買超（中線）",
+    "c_low_base_growth": "月營收 YoY ≥ 10% + 外資連續買超（中線 1–3 月）",
+    "c_quality_value": (
+        "ROE ≥ 15% + 連續配息 5 年以上 + PB ≤ 3.0（長線・品質防守）"
+    ),
 }
 
 _UNCATEGORIZED = "未分類"

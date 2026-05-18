@@ -1,12 +1,17 @@
 id: a_breakout
-name: "波段啟動"
-description: "週MACD翻多 + 短中期均線多頭排列且走揚的起漲股候選"
+name: "動能突破"
+description: "週MACD翻多 + 5/10/20 均線多頭排列且走揚 + 流動性過濾的攻擊型短線股"
 holding_period: "1-4 weeks"
 market: "上市/上櫃"
 
+# 經典三角第一角：技術面動能（短線攻擊）
+# - 流動性門檻提高至 15000 筆，過濾冷門股
+# - 週 MACD + 均線多頭排列為 Goodinfo 端唯一可靠的「動能突破」rule 組合
+# - 額外的「創 60 日新高」概念 Goodinfo FL_RULE 沒有對應項目，留給 group_analysis
+#   階段以 5 日累計動能 + 族群排名來補強
 filters:
   - item: "成交筆數"
-    min: 10000
+    min: 15000
 
 rules:
   - "MACD||週MACD ↗–還原權值@@週MACD走勢@@還原權值–MACD ↗"
