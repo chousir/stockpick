@@ -183,12 +183,19 @@ def _parse_institutional(payload: dict[str, Any]) -> pl.DataFrame:
     def col(row: list[Any], *candidates: str) -> str:
         for name in candidates:
             if name in idx:
-                v = row[idx[name]]
+                i = idx[name]
+                if i >= len(row):
+                    # TWSE 偶爾在 data 中放欄位數少於 fields 的 placeholder row
+                    return ""
+                v = row[i]
                 return v.strip() if isinstance(v, str) else str(v)
         return ""
 
     rows = []
     for r in data_rows:
+        # 跳過明顯不完整的 row（TWSE 偶有 placeholder 行只含 stock_id + name 約 2-3 欄）
+        if not r or len(r) < len(fields) // 2:
+            continue
         try:
             # foreign = 外陸資買賣超(不含外資自營商) + 外資自營商買賣超
             foreign_main = col(r, "外陸資買賣超股數(不含外資自營商)", "外資買賣超股數")
@@ -554,26 +561,56 @@ class TWSEClient:
         data = resp.json()
         return data if isinstance(data, list) else []
 
-    def _get_legacy(self, url: str) -> dict[str, Any]:
+    def _get_legacy(self, url: str, max_retries: int = 2) -> dict[str, Any]:
         """
-        限速後發 GET 到完整 URL（legacy TWSE 端點），回傳整個 JSON dict
-        （含 stat / fields / data / date 等鍵）。
+        限速後發 GET 到完整 URL（legacy TWSE / TPEX 端點），回傳整個 JSON dict。
+
+        對「回傳非 JSON」（TWSE 偶發限速時回 HTML 錯誤頁）做指數退避重試
+        max_retries 次（預設 2 → 共 3 次嘗試，退避 5s / 10s）。
+        最終仍非 JSON 則記 warning 並回空 dict。
+
+        HTTP 4xx/5xx 同樣會 retry；timeout 也會。
         """
-        self._throttle()
-        logger.info(f"HTTP GET {url}")
-        resp = httpx.get(
-            url,
-            headers={"User-Agent": self.user_agent},
-            timeout=30.0,
-            follow_redirects=True,
-        )
-        resp.raise_for_status()
-        self._last_req = time.monotonic()
-        content_type = resp.headers.get("content-type", "")
-        if "json" not in content_type.lower():
-            logger.warning(f"{url} 回傳非 JSON（{content_type[:40]}），略過")
+        for attempt in range(max_retries + 1):
+            self._throttle()
+            if attempt == 0:
+                logger.info(f"HTTP GET {url}")
+            else:
+                logger.info(f"HTTP GET {url} (retry {attempt}/{max_retries})")
+            try:
+                resp = httpx.get(
+                    url,
+                    headers={"User-Agent": self.user_agent},
+                    timeout=30.0,
+                    follow_redirects=True,
+                )
+                resp.raise_for_status()
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                logger.warning(f"{url} HTTP error: {e}")
+                if attempt < max_retries:
+                    wait = 5 * (2 ** attempt)
+                    time.sleep(wait)
+                    continue
+                return {}
+
+            self._last_req = time.monotonic()
+            content_type = resp.headers.get("content-type", "")
+            if "json" in content_type.lower():
+                return resp.json()
+
+            # 非 JSON：TWSE 限速時回 HTML 錯誤頁；退避重試
+            if attempt < max_retries:
+                wait = 5 * (2 ** attempt)
+                logger.warning(
+                    f"{url} 回傳非 JSON（{content_type[:40]}），{wait}s 後重試"
+                )
+                time.sleep(wait)
+                continue
+            logger.warning(
+                f"{url} 回傳非 JSON（{content_type[:40]}），多次重試失敗，略過"
+            )
             return {}
-        return resp.json()
+        return {}
 
     def fetch_daily_all(self) -> pl.DataFrame:
         """

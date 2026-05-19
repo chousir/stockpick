@@ -769,3 +769,114 @@ def test_fetch_stock_ohlcv_prefers_stock_day_cache(tmp_path: Path):
     # 兩個來源合併、去重後仍是 2 筆
     assert len(df) == 2
     assert df["close"].to_list() == [1070.0, 1080.0]
+
+
+# ─── _parse_institutional 邊界檢查（W21 修補）─────────────────────────────────
+
+
+def test_parse_institutional_skip_short_rows():
+    """T86 中 row 欄位數少於 fields 一半時應跳過（TWSE 偶有 placeholder row）。"""
+    payload = {
+        "stat": "OK",
+        "date": "20260518",
+        "fields": [
+            "證券代號", "證券名稱",
+            "外陸資買賣超股數(不含外資自營商)", "外資自營商買賣超股數",
+            "投信買賣超股數", "自營商買賣超股數", "三大法人買賣超股數",
+        ],
+        "data": [
+            # 正常 row（7 欄）
+            ["2330", "台積電", "1000", "0", "200", "100", "1300"],
+            # 異常 row（只有 2 欄，應該被略過而不是 IndexError）
+            ["2615", "萬海"],
+            # 異常 row（3 欄）
+            ["3708", "上緯投控", "500"],
+            # 正常 row
+            ["2454", "聯發科", "500", "0", "100", "50", "650"],
+        ],
+    }
+    df = _parse_institutional(payload)
+    # 應該只保留 2 個正常 row
+    assert len(df) == 2
+    stocks = df["stock_id"].to_list()
+    assert "2330" in stocks
+    assert "2454" in stocks
+    assert "2615" not in stocks
+    assert "3708" not in stocks
+
+
+# ─── _get_legacy retry 邏輯（W21 修補）────────────────────────────────────────
+
+
+def test_get_legacy_retries_on_non_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """TWSE 回 HTML（非 JSON）時，_get_legacy 應退避重試。"""
+    client = TWSEClient(
+        base_url="https://test.invalid",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+
+    call_count = [0]
+
+    class FakeResp:
+        def __init__(self, content_type: str, payload: dict):
+            self.headers = {"content-type": content_type}
+            self._payload = payload
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._payload
+
+    def mock_get(url, **kw):
+        call_count[0] += 1
+        # 前兩次回 HTML，第三次回 JSON
+        if call_count[0] <= 2:
+            return FakeResp("text/html; charset=utf-8", {})
+        return FakeResp("application/json", {"stat": "OK", "data": []})
+
+    import httpx
+    monkeypatch.setattr(httpx, "get", mock_get)
+    # 退避時間用 monkeypatch sleep 加速測試
+    import time as _time
+    monkeypatch.setattr(_time, "sleep", lambda s: None)
+
+    result = client._get_legacy("https://test.invalid/foo")
+    assert call_count[0] == 3, f"預期 3 次 HTTP（兩次 HTML + 一次 JSON），實際 {call_count[0]}"
+    assert result == {"stat": "OK", "data": []}
+
+
+def test_get_legacy_gives_up_after_max_retries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """retry 用盡仍回非 JSON → 回空 dict（不拋例外）。"""
+    client = TWSEClient(
+        base_url="https://test.invalid",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+
+    call_count = [0]
+
+    class FakeResp:
+        headers = {"content-type": "text/html"}
+        def raise_for_status(self): pass
+        def json(self): return {}
+
+    def mock_get(url, **kw):
+        call_count[0] += 1
+        return FakeResp()
+
+    import time as _time
+
+    import httpx
+    monkeypatch.setattr(httpx, "get", mock_get)
+    monkeypatch.setattr(_time, "sleep", lambda s: None)
+
+    result = client._get_legacy("https://test.invalid/foo")
+    # max_retries=2 → 共 3 次嘗試
+    assert call_count[0] == 3
+    assert result == {}
