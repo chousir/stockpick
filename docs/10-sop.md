@@ -33,37 +33,57 @@
 ### Step 1：抓資料 + 跑篩選 + 族群分析
 
 ```bash
-make week
+make week GROUP=abc    # 跑 A/B/C 經典三角
+# 或
+make week GROUP=def    # 跑 D/E/F ProPicks 復刻組
 ```
 
 等同於：
 
 ```bash
 make fetch-twse     # 抓 TWSE 全市場日線、法人、月營收
-make screen-all     # 跑三組策略，產 screen_result_*.csv
-make group          # 族群分析，產 group_analysis.md
+make screen-all GROUP=abc      # 跑指定組三策略，產 screen_result_*.csv
+make fetch-candidates-history  # 補抓候選股 3 個月歷史 OHLCV
+make group                     # 族群分析，產 group_analysis.md
 ```
 
 **產出**：
 
 ```
 reports/YYYY-Www/
-  ├─ screen_result_a_breakout.csv
-  ├─ screen_result_b_growth_institutional.csv
-  ├─ screen_result_c_dividend_steady.csv
-  └─ group_analysis.md         ← Step 2 看這個
+  ├─ screen_result_*.csv  ← 3 個 CSV（依 GROUP 決定 a/b/c 或 d/e/f）
+  └─ group_analysis.md    ← Step 2 看這個
 ```
 
-### Step 2：讀 group_analysis.md 挑股
+### Step 2：產出進場清單（兩種模式擇一）
 
-`group_analysis.md` 結構：
+**模式 2a（推薦）：ProPicks 風格全清單分析**
+
+把 `group_analysis.md` + 3 個 `screen_result_*.csv` 貼到 Claude Opus 網頁
+對話，配合範本 prompt 讓 AI 在「完整候選宇宙」（不只 top 10）中挑：
+
+- 5-7 檔進場清單 + 為何入選 + 進場思路 + 主要風險
+- 訊號交集（D∩E、E∩F、D∩E∩F）
+- 本週市場節奏 + 居安思危訊號 + 異常崛起個股
+- 觀察名單（追蹤但不進場）
+
+完整 prompt + 流程 → [`docs/11-propicks-analysis.md`](./11-propicks-analysis.md)
+
+Claude 回覆存到 `reports/YYYY-Www/picks.md`。
+
+**模式 2b：純人工**
+
+讀 `group_analysis.md`：
 
 - **第 1-2 節**：入選統計、族群強度排名
 - **第 3 節**：各族群領頭羊
-- **第 5 節**：**推薦個股深度分析優先順序（前 10 檔）** ← 重點看這
-- **第 6 節**：給 Claude 的族群深度分析請求（前 4 大領漲族群）
+- **第 5 節**：推薦個股深度分析優先順序（前 10 檔）
+- **第 6 節**：前 4 大領漲族群完整名單
 
 從第 5 節挑 5-10 檔有興趣的，記下股號（如 `2330`、`3008`、`6147`...）。
+
+> 模式 2b 簡單快，但只看 top 10 機械排名（5 日漲幅 + 族群強度），會漏
+> 「逆勢佈局」「低基期反轉」這類 setup。建議用 2a。
 
 ### Step 3：逐檔產資料草稿
 

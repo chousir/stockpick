@@ -27,10 +27,14 @@ make week GROUP=abc
 # 或
 make week GROUP=def
 
-# Step 3：讀族群分析報告，挑 5-10 檔感興趣的
+# Step 3：ProPicks 風格全清單分析（推薦，需要 Claude Opus 網頁對話）
+#   把 group_analysis.md + 3 個 screen_result_*.csv 貼到 claude.ai
+#   配合 docs/11-propicks-analysis.md 的範本 prompt
+#   產出 reports/Www/picks.md（5-7 檔進場清單 + 為何入選 + 風險 + 居安思危）
+#   或：純人工讀 group_analysis.md 挑股（快但只看 top 10 機械排名）
 cat reports/$(date +%Y-W%V)/group_analysis.md
 
-# Step 4：產個股資料草稿（單檔，5-10 秒）
+# Step 4：對 picks.md 內每檔產個股深度報告（5-10 秒/檔）
 make report STOCK_ID=2330
 # 或批次產前 5 檔
 make report-batch
@@ -111,6 +115,7 @@ make report-batch
 | [`docs/08-milestones.md`](./docs/08-milestones.md) | 7 個 milestone + 各自驗收 criteria |
 | [`docs/09-coding-conventions.md`](./docs/09-coding-conventions.md) | 程式碼風格、命名、測試規範 |
 | [`docs/10-sop.md`](./docs/10-sop.md) | **每週使用 SOP**（手動 Claude 對話模式、含範本 prompt） |
+| [`docs/11-propicks-analysis.md`](./docs/11-propicks-analysis.md) | **ProPicks 風格全清單分析**（推薦的 Step 3，含完整 prompt + 流程） |
 | [`docs/99-troubleshooting.md`](./docs/99-troubleshooting.md) | 開發與使用過程的常見問題與解法 |
 
 ## 給 Claude Code 的使用指示

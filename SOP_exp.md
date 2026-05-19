@@ -100,15 +100,32 @@ fetch-twse  →  screen-all (GROUP)  →  fetch-candidates-history  →  group
 
 ---
 
-## Step 3 — 人工判斷
+## Step 3 — 人工判斷（兩種模式擇一）
+
+### 3a. 純人工挑股
 
 ```bash
 cat reports/2026-W20/group_analysis.md
 ```
 
-讀第 4 節「推薦深度分析優先順序」，挑出 5–10 檔感興趣的股號。
+讀第 5 節「推薦個股深度分析優先順序」，挑出 5–10 檔感興趣的股號。
 
-> 這步沒有程式產出，是人腦決策。
+> 簡單快，但只看 top 10 機械排名，會漏「逆勢佈局」「低基期反轉」這類 setup。
+
+### 3b. ProPicks 風格全清單分析（推薦）
+
+把 `group_analysis.md` + 3 個 `screen_result_*.csv` 整批貼到 Claude Opus
+網頁對話（[claude.ai](https://claude.ai)），用範本 prompt 讓 AI 在
+**完整候選宇宙**中挑（不只 top 10），輸出 ProPicks 風格進場清單：
+
+- 5-7 檔精選 + 為何入選 + 進場思路 + 主要風險
+- 訊號交集判讀（D∩E、E∩F、D∩E∩F）
+- 本週市場節奏 + 居安思危訊號 + 異常崛起個股
+- 觀察名單（追蹤但不進場）
+
+**完整 prompt + 步驟** → [docs/11-propicks-analysis.md](docs/11-propicks-analysis.md)
+
+存 Claude 回覆到 `reports/YYYY-Www/picks.md`。
 
 ---
 
@@ -146,12 +163,14 @@ make report-batch
 ## 今日時間線（0517 週日早上）
 
 ```
-08:00  make week GROUP=abc   → 約 3–8 分鐘（含 Goodinfo rate limit sleep）
-                              # 想跑 ProPicks 風：make week GROUP=def
-08:10  讀 group_analysis.md，挑 5 檔
-08:15  make report-batch     → 跑前 5 檔，每檔 5–15 秒
-08:20  讀 5 份個股報告，決定本週 watchlist
-08:30  make weekend GROUP=abc → commit + push 結果到 git（GROUP 必填）
+08:00  make week GROUP=abc    → 約 3–8 分鐘（含 Goodinfo rate limit sleep）
+                               # 想跑 ProPicks 風：make week GROUP=def
+08:10  貼 group_analysis.md + 3 CSV 到 Claude Opus，用 Phase 1 prompt
+       → 拿到 picks.md（5-7 檔進場清單，含為何入選/進場/風險/居安思危）
+       完整流程 → docs/11-propicks-analysis.md
+08:20  對 picks.md 內每檔跑 make report STOCK_ID=XXXX → 深度報告
+08:35  讀深度報告，決定本週 watchlist
+08:45  make weekend GROUP=abc → commit + push 結果到 git（GROUP 必填）
 ```
 
 今天是 W20 最後一天。**下週六重複 Step 2–5。**

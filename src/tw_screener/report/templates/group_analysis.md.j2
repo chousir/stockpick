@@ -7,7 +7,7 @@
 {% for s in strategy_legend -%}
 - **{{ s.label }} {{ s.name }}**：{{ s.description }}
 {% endfor %}
-> 標籤 `[A] [B] [C]` 代表命中策略；同檔多策略以 `+` 連接（如 `A+C`）。
+> 標籤 {% for s in strategy_legend %}`[{{ s.label }}]`{% if not loop.last %} {% endif %}{% endfor %} 代表命中策略；同檔多策略以 `+` 連接（如 `{{ strategy_legend[0].label }}+{{ strategy_legend[-1].label }}`）。
 > 漲幅顯示「5 日累計報酬」（標 `*` 代表本地快取資料不足 5 日）。
 
 ## 1. 入選分布總覽

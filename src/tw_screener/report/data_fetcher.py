@@ -12,9 +12,13 @@ from loguru import logger
 from tw_screener.data.twse import create_client
 
 _STRATEGY_LABEL: dict[str, str] = {
-    "a_breakout": "A（波段啟動）",
-    "b_growth_institutional": "B（法人成長）",
+    "a_breakout": "A（動能突破）",
+    "b_growth_institutional": "B（成長主力）",
     "c_dividend_steady": "C（穩健存股）",
+    "c_quality_value": "C（品質價值）",
+    "d_quality_leader": "D（品質龍頭）",
+    "e_growth_momentum": "E（成長動能）",
+    "f_value_rebound": "F（價值反彈）",
 }
 
 
