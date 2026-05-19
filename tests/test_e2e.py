@@ -38,10 +38,10 @@ _SCREENER_A = pl.DataFrame(
         "change_pct": [4.5, 3.8, 5.2, 1.1],
         "amount_million": [5000.0, 3000.0, 1500.0, 4000.0],
         "goodinfo_url": [
-            "https://goodinfo.tw/tw/StockInfo/StockDetail.asp?STOCK_ID=2330",
-            "https://goodinfo.tw/tw/StockInfo/StockDetail.asp?STOCK_ID=2454",
-            "https://goodinfo.tw/tw/StockInfo/StockDetail.asp?STOCK_ID=3034",
-            "https://goodinfo.tw/tw/StockInfo/StockDetail.asp?STOCK_ID=2317",
+            "https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID=2330",
+            "https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID=2454",
+            "https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID=3034",
+            "https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID=2317",
         ],
         "strategy_id": ["a_breakout"] * 4,
     }
@@ -55,8 +55,8 @@ _SCREENER_B = pl.DataFrame(
         "change_pct": [4.5, 2.1],
         "amount_million": [5000.0, 1800.0],
         "goodinfo_url": [
-            "https://goodinfo.tw/tw/StockInfo/StockDetail.asp?STOCK_ID=2330",
-            "https://goodinfo.tw/tw/StockInfo/StockDetail.asp?STOCK_ID=2382",
+            "https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID=2330",
+            "https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID=2382",
         ],
         "strategy_id": ["b_growth_institutional"] * 2,
     }

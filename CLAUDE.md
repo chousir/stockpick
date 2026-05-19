@@ -171,7 +171,7 @@ tw-stock-screener/
 ### 3.3 資料來源原則
 - 所有數字必須來自 `src/` 抓回的資料或 `data/cache/`，**不可從記憶估算**。
 - 沒抓到的資料要明說「未取得」，不要編。
-- Goodinfo 連結 URL 用 `https://goodinfo.tw/tw/StockInfo/StockDetail.asp?STOCK_ID={股號}` 固定模板。
+- Goodinfo 連結 URL 用 `https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={股號}` 固定模板。
 
 ### 3.4 輸出風格
 - 繁體中文，台股術語（不寫「市值」用 market cap 這種混用）。

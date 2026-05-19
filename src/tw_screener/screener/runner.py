@@ -52,7 +52,7 @@ class ScreenerRunner:
         self._strategies_dir = Path(self._settings["paths"]["strategies_dir"])
         self._reports_dir = Path(self._settings["paths"]["reports_dir"])
         self._goodinfo_base: str = self._settings["goodinfo"]["base_url"]
-        self._detail_base = f"{self._goodinfo_base}/StockInfo/StockDetail.asp"
+        self._detail_base = f"{self._goodinfo_base}/StockDetail.asp"
         # screened_at 用 trading_date 對齊整批執行；取一次避免每個策略各別查
         self._trading_date: date | None = None
 

@@ -82,7 +82,7 @@ def test_run_strategy_has_goodinfo_url(tmp_path: Path):
 def test_run_strategy_goodinfo_url_format(tmp_path: Path):
     runner = make_runner(tmp_path)
     df = runner.run_strategy(STRATEGY_PATH)
-    expected_prefix = "https://goodinfo.tw/tw/StockInfo/StockDetail.asp?STOCK_ID="
+    expected_prefix = "https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID="
     assert df["goodinfo_url"][0].startswith(expected_prefix)
 
 
@@ -90,7 +90,7 @@ def test_goodinfo_url_derived_from_base_url(tmp_path: Path):
     """goodinfo_url 應從 settings base_url 衍生，而非寫死。"""
     runner = make_runner(tmp_path)
     base = runner._goodinfo_base
-    assert runner._detail_base == f"{base}/StockInfo/StockDetail.asp"
+    assert runner._detail_base == f"{base}/StockDetail.asp"
 
 
 def test_run_strategy_calls_fetcher(tmp_path: Path):

@@ -27,7 +27,7 @@ reports/YYYY-Www/stocks/{stock_id}_{name_zh}.md
 > 入選策略：A（波段啟動）/ B（法人成長）  
 > 族群：半導體業  
 > 族群排名：1/5（領頭羊候選）  
-> Goodinfo: https://goodinfo.tw/tw/StockInfo/StockDetail.asp?STOCK_ID={stock_id}
+> Goodinfo: https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={stock_id}
 
 ## 基本資訊
 產業 | 市值 | 近一年股價區間

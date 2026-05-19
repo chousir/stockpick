@@ -51,7 +51,7 @@ class ScreenerRunner:
 
 ```
 stock_id,name,market,close,change_pct,volume_lots,amount_million,pe_ratio,pb_ratio,strategy_id,screened_at,goodinfo_url
-2330,台積電,市,2265.0,-0.22,18560,42.5,,1.2,a_breakout,2026-05-16,https://goodinfo.tw/tw/StockInfo/StockDetail.asp?STOCK_ID=2330
+2330,台積電,市,2265.0,-0.22,18560,42.5,,1.2,a_breakout,2026-05-16,https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID=2330
 ...
 ```
 
