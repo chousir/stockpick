@@ -24,6 +24,14 @@ twse:
   request_interval_sec: 1
   cache_ttl_hours: 6
 
+# TPEX（櫃買中心）上櫃股 OHLCV 來源，僅作說明用途
+# 目前 TWSEClient 透過 _load_otc_ids() 自動分派；TPEX 與 TWSE 共用 _get_legacy 的 throttle
+# 設定值寫在這裡是為了文件清楚，未來若分 client 再生效
+tpex:
+  base_url: "https://www.tpex.org.tw"
+  stock_day_path: "/www/zh-tw/afterTrading/tradingStock"
+  notes: "單位仟股 / 仟元（parser 自動 ×1000 對齊 TWSE）"
+
 report:
   default_top_n: 10
 

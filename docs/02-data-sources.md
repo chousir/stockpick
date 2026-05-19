@@ -135,6 +135,50 @@ Goodinfo 主要用在「條件組合篩選」這個它真正強的地方。
 **建議跑 `make week` 的時段**：交易日 **15:00 起**。在此之前 T86 可能還沒發布，
 Goodinfo 漲跌幅資料也可能不完整。
 
+## TPEX 上櫃個股歷史（2026-W21 新增）
+
+上市股的 OHLCV 歷史走 TWSE `STOCK_DAY`，上櫃股原本沒有對應來源 →
+W20 觀察到 OTC 股的 5 日動能 fallback 到當日 change_pct（誤差）。
+2026-W21 起新增 TPEX 來源。
+
+### 端點
+`https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock?code={sid}&date=YYYY/MM/01`
+
+回 JSON，結構：
+```json
+{
+  "stat": "ok",
+  "code": "3293",
+  "tables": [{
+    "fields": ["日 期", "成交張數", "成交仟元", "開盤", "最高", "最低", "收盤", "漲跌", "筆數"],
+    "data": [["115/05/01", "1,234", "987,654", ...], ...]
+  }]
+}
+```
+
+### 與 TWSE STOCK_DAY 差異
+| 項目 | TWSE | TPEX |
+|---|---|---|
+| 日期格式（請求）| `YYYYMM01`（如 `20260501`）| `YYYY/MM/01`（如 `2026/05/01`）|
+| 日期格式（回應）| 民國年 `115/05/01` | 民國年 `115/05/01` |
+| 量單位 | 股 | 仟股（parser 自動 ×1000）|
+| 金額單位 | 元 | 仟元（parser 自動 ×1000）|
+| fields 位置 | 頂層 | `tables[0]` 內 |
+| 成交筆數欄名 | `成交筆數` | `筆數` |
+| stat 值 | `OK` | `ok` |
+
+### 自動分派
+`TWSEClient.fetch_stock_history(stock_id)`：
+1. lazy load `otc_industry_*.parquet`，取 OTC stock_id 集合
+2. stock_id 在集合內 → 走 TPEX
+3. 否則 → 走 TWSE
+Cache 命名共用 `stock_day_{stock_id}_{YYYYMM}.parquet`，下游 `load_candidate_history()`、
+`fetch_stock_ohlcv()`、`momentum.compute_n_day_return()` 一律無感。
+
+`fetch_stock_history_tpex()` 也對外公開，可單獨呼叫（測試或除錯用）。
+
+---
+
 ## trading_date 錨點
 
 為了支援「任意時段跑」（週末、週一早上、收盤前），所有交易日相關的檔名與週標籤

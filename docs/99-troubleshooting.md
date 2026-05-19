@@ -300,28 +300,28 @@ group_analysis.md 第 2 節「5 日均漲」欄全部標 *，第 3 節族群標�
 ```
 
 ### 原因
-`data/cache/twse/daily_*.parquet` 是「跑 fetch-twse 才累積一筆」，而且 STOCK_DAY_ALL 不支援
-歷史日期，所以每週只有 1 筆。第 1 週跑 `make week` 時不會有真正的 5 日資料。
+個股的 stock_day 快取尚未建立。`make week` 流程內含 `fetch-candidates-history`，
+會對本週入選股聯集去重個股逐檔抓 stock_day 2 個月歷史。
+
+2026-W21 起 OTC 股也透過 TPEX 抓 stock_day（自動分派，下游無感），不再 fallback。
+若仍標 `*`：可能是新上市股或 TPEX 無收錄。
 
 ### 解法
-跑 `make week` 時 Makefile 已自動串入 `fetch-candidates-history`，這會對本週入選股聯集去重
-個股逐檔抓 STOCK_DAY 2 個月歷史（每檔 ~4 秒，首次 5–10 分鐘）。
-
-第 2 週起過去月份永久快取，只多抓當月份 → 加速到 1–2 分鐘。
-
 ```bash
 # 手動觸發（不跑整個 make week）
 make fetch-candidates-history
 
-# 確認 stock_day 快取
+# 確認 stock_day 快取（含 OTC 走 TPEX 抓的）
 ls data/cache/twse/stock_day_*.parquet | wc -l
-# 預期：本週入選股聯集 × 2 個月
 
-# 確認動能正確
-grep -c "本週族群表現前" reports/$(date +%Y-W%V)/group_analysis.md
+# 確認分派正常
+uv run python3 -c "
+from pathlib import Path
+from tw_screener.data.twse import create_client
+c = create_client(Path('config/settings.yaml'))
+print('OTC count:', len(c._load_otc_ids()))
+"
 ```
-
-`fetch-candidates-history` 也可獨立呼叫 `--months 6` 給 C3 策略的 post_filter 用。
 
 ---
 

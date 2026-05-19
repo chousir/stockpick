@@ -212,6 +212,88 @@ def _parse_institutional(payload: dict[str, Any]) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=schema)
 
 
+_TPEX_BASE = "https://www.tpex.org.tw"
+_TPEX_STOCK_DAY_PATH = "/www/zh-tw/afterTrading/tradingStock"
+
+# 共用 schema：TWSE STOCK_DAY 與 TPEX tradingStock 對齊（11 欄、單位皆為股 / 元）
+_STOCK_DAY_SCHEMA: dict[str, type[pl.DataType]] = {
+    "date": pl.Date,
+    "stock_id": pl.Utf8,
+    "trade_volume": pl.Int64,
+    "trade_value": pl.Int64,
+    "open": pl.Float64,
+    "high": pl.Float64,
+    "low": pl.Float64,
+    "close": pl.Float64,
+    "change": pl.Float64,
+    "transaction": pl.Int64,
+}
+
+
+def _parse_tpex_stock_day(payload: dict[str, Any], stock_id: str) -> pl.DataFrame:
+    """
+    解析 TPEX tradingStock 回應 → 與 _parse_stock_day 相同 schema。
+
+    與 TWSE STOCK_DAY 的差異：
+    - fields/data 在 payload["tables"][0]，不在頂層
+    - 單位「成交張數」/「成交仟元」是仟（千），需 ×1000 轉成股 / 元
+    - 「日 期」欄名中間有空格（標準化後比對）
+    - 「成交筆數」欄名為「筆數」
+    """
+    schema = {
+        "date": pl.Date,
+        "stock_id": pl.Utf8,
+        "trade_volume": pl.Int64,
+        "trade_value": pl.Int64,
+        "open": pl.Float64,
+        "high": pl.Float64,
+        "low": pl.Float64,
+        "close": pl.Float64,
+        "change": pl.Float64,
+        "transaction": pl.Int64,
+    }
+    if not payload or payload.get("stat") != "ok":
+        return pl.DataFrame(schema=schema)
+    tables = payload.get("tables") or []
+    if not tables or not isinstance(tables, list):
+        return pl.DataFrame(schema=schema)
+    table = tables[0]
+    fields: list[str] = [str(f).replace(" ", "") for f in table.get("fields", [])]
+    data_rows: list[list[Any]] = table.get("data", [])
+    idx = {name: i for i, name in enumerate(fields)}
+
+    def col(row: list[Any], *candidates: str) -> str:
+        for name in candidates:
+            normalized = name.replace(" ", "")
+            if normalized in idx:
+                v = row[idx[normalized]]
+                return v.strip() if isinstance(v, str) else str(v)
+        return ""
+
+    rows = []
+    for r in data_rows:
+        try:
+            volume_lots = _clean_int(col(r, "成交張數"))  # 仟股
+            value_lots = _clean_int(col(r, "成交仟元"))  # 仟元
+            rows.append(
+                {
+                    "date": _roc_to_date(col(r, "日期", "日 期")),
+                    "stock_id": stock_id,
+                    "trade_volume": volume_lots * 1000,
+                    "trade_value": value_lots * 1000,
+                    "open": _clean_float(col(r, "開盤")),
+                    "high": _clean_float(col(r, "最高")),
+                    "low": _clean_float(col(r, "最低")),
+                    "close": _clean_float(col(r, "收盤")),
+                    "change": _clean_float(col(r, "漲跌")),
+                    "transaction": _clean_int(col(r, "筆數", "成交筆數")),
+                }
+            )
+        except (KeyError, ValueError, IndexError) as e:
+            logger.warning(f"略過無效 TPEX OHLCV 資料：{r[:1] if r else '?'} — {e}")
+    return pl.DataFrame(rows, schema=schema)
+
+
 def _parse_stock_day(payload: dict[str, Any], stock_id: str) -> pl.DataFrame:
     """
     解析 legacy STOCK_DAY 單檔月 OHLCV 回應 → DataFrame。
@@ -425,6 +507,26 @@ class TWSEClient:
         self.user_agent = user_agent
         self.interval_sec = interval_sec
         self._last_req: float = 0.0
+        # 上櫃股 stock_id 集合 lazy load（讀 otc_industry_*.parquet）
+        self._otc_ids: set[str] | None = None
+
+    def _load_otc_ids(self) -> set[str]:
+        """讀 otc_industry_*.parquet 取得 OTC stock_id 集合；instance-level cache。
+
+        若 cache 還沒建立，會自動呼叫 fetch_otc_industry() 抓 ISIN（首次 ~2 秒）。
+        失敗 / 空資料時回空集合，下游 fetch_stock_history 會 fallback 走 TWSE。
+        """
+        if self._otc_ids is None:
+            try:
+                otc_df = self.fetch_otc_industry()
+            except Exception as exc:
+                logger.warning("_load_otc_ids 抓 OTC 清單失敗：{}", exc)
+                otc_df = pl.DataFrame()
+            if otc_df.is_empty() or "stock_id" not in otc_df.columns:
+                self._otc_ids = set()
+            else:
+                self._otc_ids = set(otc_df["stock_id"].cast(pl.Utf8).to_list())
+        return self._otc_ids
 
     def _throttle(self) -> None:
         """限速：確保連續請求間隔 ≥ interval_sec。"""
@@ -621,23 +723,25 @@ class TWSEClient:
 
     def fetch_stock_history(self, stock_id: str, months: int = 3) -> pl.DataFrame:
         """
-        抓單檔近 N 個月的 OHLCV 歷史（legacy STOCK_DAY 端點）。
+        抓單檔近 N 個月的 OHLCV 歷史，自動分派 TWSE / TPEX。
+
+        - OTC 股（in `_load_otc_ids()`）走 TPEX `tradingStock` 端點
+        - 其餘走 TWSE `STOCK_DAY` 端點
+        - 兩者共用 cache：stock_day_{stock_id}_{YYYYMM}.parquet（下游無感）
+        - 兩者共用 schema：11 欄、單位皆為股 / 元（TPEX 抓回後 ×1000 對齊）
+        """
+        if stock_id in self._load_otc_ids():
+            return self.fetch_stock_history_tpex(stock_id, months)
+        return self._fetch_stock_history_twse(stock_id, months)
+
+    def _fetch_stock_history_twse(self, stock_id: str, months: int = 3) -> pl.DataFrame:
+        """
+        TWSE 上市股 OHLCV 歷史（legacy STOCK_DAY 端點）。
         快取到 stock_day_{stock_id}_{YYYYMM}.parquet：
           - 過去月份永久快取（資料不再變動）
           - 當月用 ttl_hours 過期（資料每日新增）
         """
-        _empty_schema = {
-            "date": pl.Date,
-            "stock_id": pl.Utf8,
-            "trade_volume": pl.Int64,
-            "trade_value": pl.Int64,
-            "open": pl.Float64,
-            "high": pl.Float64,
-            "low": pl.Float64,
-            "close": pl.Float64,
-            "change": pl.Float64,
-            "transaction": pl.Int64,
-        }
+        _empty_schema = _STOCK_DAY_SCHEMA
         today = date.today()
         current_ym = today.strftime("%Y%m")
 
@@ -695,6 +799,74 @@ class TWSEClient:
                 if consecutive_empty >= 2:
                     logger.info(
                         f"STOCK_DAY {stock_id} 連續 {consecutive_empty} 月空資料，跳過剩餘月份"
+                    )
+                    break
+
+        if not frames:
+            return pl.DataFrame(schema=_empty_schema)
+        return pl.concat(frames).unique(subset=["date"]).sort("date")
+
+    def fetch_stock_history_tpex(self, stock_id: str, months: int = 3) -> pl.DataFrame:
+        """
+        TPEX 上櫃股 OHLCV 歷史（tradingStock 端點）。
+
+        - URL: https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock?code={sid}&date=YYYY/MM/01
+        - Cache 共用 stock_day_{stock_id}_{YYYYMM}.parquet（與 TWSE 同 schema）
+        - 同樣有「連續 2 月空就 break」邏輯
+        """
+        _empty_schema = _STOCK_DAY_SCHEMA
+        today = date.today()
+        current_ym = today.strftime("%Y%m")
+
+        # Fast path：所有月份 cache 齊全 → 一次讀完
+        expected_files: list[Path] = []
+        all_cached = True
+        for n in range(months):
+            target = _months_back(today, n)
+            ym = target.strftime("%Y%m")
+            cf = self.cache_dir / f"stock_day_{stock_id}_{ym}.parquet"
+            if cf.exists() and (ym != current_ym or is_fresh(cf, self.ttl_hours)):
+                expected_files.append(cf)
+            else:
+                all_cached = False
+                break
+
+        if all_cached and expected_files:
+            logger.debug(
+                "stock_day {} cache hit ({} months, TPEX)", stock_id, len(expected_files)
+            )
+            frames = [pl.read_parquet(f) for f in expected_files]
+            return pl.concat(frames).unique(subset=["date"]).sort("date")
+
+        # Slow path
+        frames: list[pl.DataFrame] = []
+        consecutive_empty = 0
+
+        for n in range(months):
+            target = _months_back(today, n)
+            ym = target.strftime("%Y%m")
+            cache_file = self.cache_dir / f"stock_day_{stock_id}_{ym}.parquet"
+
+            if cache_file.exists() and (ym != current_ym or is_fresh(cache_file, self.ttl_hours)):
+                logger.info(f"命中快取 {cache_file}")
+                frames.append(load_parquet(cache_file))
+                consecutive_empty = 0
+                continue
+
+            date_param = target.strftime("%Y/%m/01")
+            url = f"{_TPEX_BASE}{_TPEX_STOCK_DAY_PATH}?code={stock_id}&date={date_param}"
+            payload = self._get_legacy(url)
+            df = _parse_tpex_stock_day(payload, stock_id)
+            if not df.is_empty():
+                save_parquet(df, cache_file)
+                frames.append(df)
+                consecutive_empty = 0
+            else:
+                logger.warning(f"TPEX tradingStock {stock_id} {ym} 空資料")
+                consecutive_empty += 1
+                if consecutive_empty >= 2:
+                    logger.info(
+                        f"TPEX {stock_id} 連續 {consecutive_empty} 月空資料，跳過剩餘月份"
                     )
                     break
 

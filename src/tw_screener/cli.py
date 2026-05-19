@@ -274,7 +274,11 @@ def screen_run(
 @screen_app.command("run-all")
 def screen_run_all(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
-    group: str = typer.Option(..., "--group", help="策略組：abc（A/B/C 經典三角）或 def（D/E/F ProPicks 復刻組）"),
+    group: str = typer.Option(
+        ...,
+        "--group",
+        help="策略組：abc（A/B/C 經典三角）或 def（D/E/F ProPicks 復刻組）",
+    ),
 ) -> None:
     """執行指定組策略（--group abc 跑 a_*/b_*/c_*，--group def 跑 d_*/e_*/f_*）。"""
     if group not in ("abc", "def"):
