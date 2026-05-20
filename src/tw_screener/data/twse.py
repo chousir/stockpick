@@ -236,6 +236,16 @@ _STOCK_DAY_SCHEMA: dict[str, type[pl.DataType]] = {
     "transaction": pl.Int64,
 }
 
+_INSTITUTIONAL_SCHEMA: dict[str, type[pl.DataType]] = {
+    "date": pl.Date,
+    "stock_id": pl.Utf8,
+    "stock_name": pl.Utf8,
+    "foreign_net": pl.Int64,
+    "trust_net": pl.Int64,
+    "dealer_net": pl.Int64,
+    "total_net": pl.Int64,
+}
+
 
 def _parse_tpex_stock_day(payload: dict[str, Any], stock_id: str) -> pl.DataFrame:
     """
@@ -679,6 +689,76 @@ class TWSEClient:
                 date_str,
             )
         return df
+
+    def fetch_institutional_history(self, days: int = 20) -> pl.DataFrame:
+        """回補近 days 個交易日的三大法人（T86），逐日存 institutional_{date}.parquet。
+
+        從 latest_trading_date() 往回走日曆日：週末直接跳過（不打網），非交易日
+        （payload 空）不計入 days，已有快取的日期直接讀檔（過去資料不再變動）。
+        analysis 端用 load_institutional_history 純讀快取，不在分析流程打網。
+        """
+        from datetime import timedelta
+
+        latest = self.latest_trading_date()
+        if latest is None:
+            logger.warning("fetch_institutional_history: 無法取得 trading_date，略過")
+            return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+
+        frames: list[pl.DataFrame] = []
+        collected = 0
+        steps = 0
+        max_lookback = days * 2 + 14  # 日曆日上限，避免連假時無限往回
+        cur = latest
+        while collected < days and steps < max_lookback:
+            steps += 1
+            if cur.weekday() >= 5:  # 週六/日 TWSE 無資料，不浪費請求
+                cur -= timedelta(days=1)
+                continue
+            date_str = cur.strftime("%Y%m%d")
+            cache_file = self.cache_dir / f"institutional_{date_str}.parquet"
+            if cache_file.exists():
+                frames.append(load_parquet(cache_file))
+                collected += 1
+                cur -= timedelta(days=1)
+                continue
+            url = (
+                f"https://www.twse.com.tw/fund/T86?response=json"
+                f"&date={date_str}&selectType=ALLBUT0999"
+            )
+            df = _parse_institutional(self._get_legacy(url))
+            if not df.is_empty():
+                save_parquet(df, cache_file)
+                frames.append(df)
+                collected += 1
+            else:
+                logger.info("T86 {} 無資料（非交易日 / 未發布），略過", date_str)
+            cur -= timedelta(days=1)
+
+        logger.info("fetch_institutional_history: 取得 {} 個交易日法人資料", collected)
+        if not frames:
+            return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+        return (
+            pl.concat(frames)
+            .unique(subset=["date", "stock_id"])
+            .sort(["date", "stock_id"])
+        )
+
+    def load_institutional_history(self, n_days: int = 20) -> pl.DataFrame:
+        """純讀本地所有 institutional_*.parquet，回傳近 n_days 個交易日（不打網）。
+
+        供族群法人強度與報告用；快取由 fetch_institutional /
+        fetch_institutional_history 累積。無快取時回空 DataFrame。
+        """
+        files = sorted(self.cache_dir.glob("institutional_*.parquet"))
+        if not files:
+            return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+        merged = (
+            pl.concat([pl.read_parquet(f) for f in files])
+            .unique(subset=["date", "stock_id"])
+            .sort("date")
+        )
+        recent_dates = merged["date"].unique().sort(descending=True).head(n_days).to_list()
+        return merged.filter(pl.col("date").is_in(recent_dates))
 
     def latest_trading_date(self) -> date | None:
         """

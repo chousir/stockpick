@@ -1,5 +1,5 @@
 .PHONY: init sync test test-unit test-integration lint typecheck fmt clean clean-cache deep-clean \
-        fetch-twse fetch-stock fetch-candidates-history screen screen-all screen-dry \
+        fetch-twse fetch-stock fetch-candidates-history fetch-institutional-history screen screen-all screen-dry \
         group leaders report report-batch week weekend backtest-strategies
 
 # ─── 環境 ────────────────────────────────────────────────────────────────────
@@ -52,6 +52,9 @@ fetch-stock:  ## 抓單檔個股完整資料（STOCK_ID=2330）
 
 fetch-candidates-history:  ## 對本週篩選結果聯集個股補抓 STOCK_DAY 歷史（5 日動能用，首次 5-15 分鐘）
 	uv run tw-screener data fetch-candidates-history
+
+fetch-institutional-history:  ## 回補近 N 個交易日三大法人（DAYS=20 可調，族群法人強度用）
+	uv run tw-screener data fetch-institutional-history --days $(or $(DAYS),20)
 
 # ─── 選股 ────────────────────────────────────────────────────────────────────
 

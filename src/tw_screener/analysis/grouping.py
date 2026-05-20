@@ -3,7 +3,7 @@
 強度公式（2026-W21 起改為動能主導）：
   score = 50 * sigmoid(momentum_5d / 5)   # 動能主導（momentum_5d = 族群中位數，抗單檔灌水）
         + 25 * entry_rate                 # 入選率（仍保留訊號）
-        + 15 * inst_score                 # 法人佔位
+        + 15 * inst_score                 # 法人買超家數比（inst_net > 0 家數 / 成員數）
         + 10 * (log1p(members) / log1p(max))   # 規模
 
 另回傳 up_count（族群內 5 日漲幅 > 0 的家數），供報告計算上漲家數比（breadth），
@@ -74,17 +74,22 @@ def group_stocks(
     industry_df: pl.DataFrame | None = None,
     weights: dict[str, float] | None = None,
     min_group_size: int = 2,
+    institutional: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
     Group screened stocks by industry and compute group strength scores (動能主導).
 
+    institutional: 近 N 日三大法人（含 stock_id / total_net）；提供時計入族群法人強度。
+        個股層聚合為 inst_net（近 N 日合計淨買超股數），族群層 inst_score =
+        法人買超家數比（inst_net > 0 的家數 / 成員數）。未提供 → inst_net = 0、inst_score = 0。
+
     Returns (groups_df, enriched_stocks_df):
     - groups_df: industry-level stats sorted by score desc (filtered by min_group_size)
         欄位：industry_code / industry_name / members_count / total_in_industry /
-              entry_rate / momentum_5d / momentum_5d_days_used / rs_avg(alias) /
-              inst_score / count_{sid} / score
+              entry_rate / momentum_5d（族群中位數）/ up_count / momentum_5d_days_used /
+              rs_avg(alias) / inst_buy_count / inst_score / count_{sid} / score
     - enriched_stocks_df: per-stock data with industry, rs (= n_day_return), strategy flags,
-        momentum_5d, momentum_days_used
+        momentum_5d, momentum_days_used, inst_net
     """
     if weights is None:
         weights = _DEFAULT_WEIGHTS
@@ -130,6 +135,7 @@ def group_stocks(
             "up_count": pl.Int32,
             "momentum_5d_days_used": pl.Int32,
             "rs_avg": pl.Float64,
+            "inst_buy_count": pl.Int32,
             "inst_score": pl.Float64,
             "score": pl.Float64,
         }
@@ -165,6 +171,21 @@ def group_stocks(
         ]
     )
 
+    # 法人淨買超：近 N 日 total_net 合計 → 個股層 inst_net（只算一次，下游共用）
+    if (
+        institutional is not None
+        and not institutional.is_empty()
+        and {"stock_id", "total_net"}.issubset(institutional.columns)
+    ):
+        inst_agg = institutional.group_by("stock_id").agg(
+            pl.col("total_net").sum().alias("inst_net")
+        )
+        stock_df = stock_df.join(inst_agg, on="stock_id", how="left").with_columns(
+            pl.col("inst_net").fill_null(0.0).cast(pl.Float64)
+        )
+    else:
+        stock_df = stock_df.with_columns(pl.lit(0.0).alias("inst_net"))
+
     # Join with industry classification
     if industry_df is not None and not industry_df.is_empty():
         stock_df = stock_df.join(
@@ -189,6 +210,7 @@ def group_stocks(
         pl.col("stock_id").count().alias("members_count"),
         pl.col("momentum_5d").median().alias("momentum_5d"),  # 中位數：抗單檔小型股灌水
         (pl.col("momentum_5d") > 0).cast(pl.Int32).sum().alias("up_count"),  # 上漲家數
+        (pl.col("inst_net") > 0).cast(pl.Int32).sum().alias("inst_buy_count"),  # 法人買超家數
         pl.col("momentum_days_used").min().alias("momentum_5d_days_used"),
     ]
     for sid in strategy_ids:
@@ -220,8 +242,13 @@ def group_stocks(
         ).alias("entry_rate")
     )
 
-    # inst_score: placeholder (T86 data not aggregated to group-level yet)
-    groups = groups.with_columns(pl.lit(0.0).alias("inst_score"))
+    # inst_score = 法人買超家數比（族群內 inst_net > 0 家數 / 成員數），落在 [0,1]
+    groups = groups.with_columns(
+        (
+            pl.col("inst_buy_count").cast(pl.Float64)
+            / pl.col("members_count").cast(pl.Float64)
+        ).alias("inst_score")
+    )
 
     # Composite score (動能主導)
     max_members = float(groups["members_count"].max() or 1)

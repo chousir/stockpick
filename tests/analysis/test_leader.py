@@ -160,6 +160,33 @@ def test_rank_within_groups_assigns_distinct_ranks():
     assert ranks == [1, 2, 3]
 
 
+def test_rank_within_groups_uses_existing_inst_net():
+    """df 已含 inst_net（grouping 已算）→ 直接用、不重複 join，無 inst_net_right。"""
+    from datetime import date
+
+    members = _make_members(
+        ["A", "B"], ["14", "14"], [2.0, 2.0], [1000.0, 1000.0], [1, 1]
+    ).with_columns(pl.Series("inst_net", [5000.0, -500.0]))
+    # 傳入「相反」的法人資料，確認不會覆蓋既有 inst_net
+    other_inst = pl.DataFrame(
+        {
+            "date": [date(2026, 5, 19), date(2026, 5, 19)],
+            "stock_id": ["A", "B"],
+            "stock_name": ["A", "B"],
+            "foreign_net": [-9999, 9999],
+            "trust_net": [0, 0],
+            "dealer_net": [0, 0],
+            "total_net": [-9999, 9999],
+        }
+    )
+    result = rank_within_groups(members, pl.DataFrame(), other_inst)
+    assert "inst_net_right" not in result.columns
+    inst_map = {r["stock_id"]: r["inst_net"] for r in result.iter_rows(named=True)}
+    assert inst_map["A"] == pytest.approx(5000.0)  # 用既有值，非 -9999
+    # A 既有法人買超高於 B → A 排前
+    assert result.filter(pl.col("rank_in_group") == 1)["stock_id"][0] == "A"
+
+
 # ─── back-compat alias ────────────────────────────────────────────────────────
 
 

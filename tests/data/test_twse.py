@@ -477,6 +477,116 @@ def test_fetch_institutional_uses_trading_date_in_query(tmp_path: Path):
     assert len(df) == 1
 
 
+def _seed_daily(client_dir: Path, d: date) -> None:
+    save_parquet(
+        pl.DataFrame(
+            {
+                "date": [d], "stock_id": ["2330"], "name": ["台積電"],
+                "trade_volume": [1], "trade_value": [1], "open": [1.0],
+                "high": [1.0], "low": [1.0], "close": [1.0],
+                "change": [0.0], "transaction": [1],
+            }
+        ),
+        client_dir / f"daily_{d.strftime('%Y%m%d')}.parquet",
+    )
+
+
+def test_fetch_institutional_history_skips_weekends(tmp_path: Path):
+    """回補：週末直接跳過不打網、收滿 days 即停，逐日存快取。"""
+    import re
+
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    # latest_trading_date = 2026-05-18（週一）→ 往回會經過週末 5/17、5/16
+    assert date(2026, 5, 18).weekday() == 0
+    _seed_daily(tmp_path, date(2026, 5, 18))
+    client._get = lambda ep: []  # type: ignore[method-assign]
+
+    called: list[str] = []
+
+    def fake_legacy(url: str) -> dict:
+        called.append(url)
+        d = re.search(r"date=(\d{8})", url).group(1)  # type: ignore[union-attr]
+        return {
+            "stat": "OK", "date": d,
+            "fields": [
+                "證券代號", "證券名稱",
+                "外陸資買賣超股數(不含外資自營商)", "外資自營商買賣超股數",
+                "投信買賣超股數", "自營商買賣超股數", "三大法人買賣超股數",
+            ],
+            "data": [["2330", "台積電", "1000", "0", "200", "100", "1300"]],
+        }
+
+    client._get_legacy = fake_legacy  # type: ignore[method-assign]
+
+    df = client.fetch_institutional_history(days=3)
+    dates = sorted(str(d) for d in df["date"].unique().to_list())
+    assert dates == ["2026-05-14", "2026-05-15", "2026-05-18"]
+    # 週末（5/16 六、5/17 日）不該被打
+    assert not any("20260516" in u or "20260517" in u for u in called)
+    assert (tmp_path / "institutional_20260518.parquet").exists()
+
+
+def test_fetch_institutional_history_reuses_cache(tmp_path: Path):
+    """已有快取的日期直接讀檔、不重打網。"""
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    _seed_daily(tmp_path, date(2026, 5, 18))
+    # 預放 5/18 法人快取
+    save_parquet(
+        pl.DataFrame(
+            {
+                "date": [date(2026, 5, 18)], "stock_id": ["2330"],
+                "stock_name": ["台積電"], "foreign_net": [1],
+                "trust_net": [0], "dealer_net": [0], "total_net": [1],
+            }
+        ),
+        tmp_path / "institutional_20260518.parquet",
+    )
+    client._get = lambda ep: []  # type: ignore[method-assign]
+    called: list[str] = []
+    client._get_legacy = lambda url: called.append(url) or {}  # type: ignore[method-assign]
+
+    client.fetch_institutional_history(days=1)
+    assert called == [], "已有快取的日期不應重打 T86"
+
+
+def test_load_institutional_history_reads_recent(tmp_path: Path):
+    """純讀快取，回最近 n_days 個交易日（不打網）。"""
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    for d in [date(2026, 5, 15), date(2026, 5, 18), date(2026, 5, 19)]:
+        save_parquet(
+            pl.DataFrame(
+                {
+                    "date": [d], "stock_id": ["2330"], "stock_name": ["台積電"],
+                    "foreign_net": [1], "trust_net": [0],
+                    "dealer_net": [0], "total_net": [1],
+                }
+            ),
+            tmp_path / f"institutional_{d.strftime('%Y%m%d')}.parquet",
+        )
+    df = client.load_institutional_history(n_days=2)
+    got = sorted(str(d) for d in df["date"].unique().to_list())
+    assert got == ["2026-05-18", "2026-05-19"]
+
+
+def test_load_institutional_history_empty(tmp_path: Path):
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    df = client.load_institutional_history()
+    assert df.is_empty()
+    assert "total_net" in df.columns
+
+
 def test_fetch_stock_institutional_empty(tmp_path: Path):
     client = TWSEClient(
         base_url="https://test.invalid",

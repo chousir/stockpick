@@ -80,6 +80,7 @@ def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> d
     momentum_5d = float(srow.get("momentum_5d", srow.get("rs", 0)) or 0)
     days_used = int(srow.get("momentum_days_used", 0) or 0)
     rank_in_group = int(srow.get("rank_in_group", 0) or 0)
+    inst_net_lots = float(srow.get("inst_net", 0) or 0) / 1000.0  # 股 → 張
     return {
         "stock_id": srow["stock_id"],
         "name": srow["name"],
@@ -95,6 +96,8 @@ def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> d
         "leader_score": float(srow.get("leader_score", 0) or 0),
         "rank_in_group": rank_in_group,
         "is_top_in_group": rank_in_group == 1,
+        "inst_net_lots": inst_net_lots,
+        "inst_net_str": f"{inst_net_lots:+,.0f}",
         "goodinfo_url": str(srow.get("goodinfo_url", "")),
         "group_size": group_size,
     }
@@ -162,6 +165,8 @@ def _build_context(
             if members_count
             else "0/0"
         )
+        inst_buy_count = int(row.get("inst_buy_count", 0) or 0)
+        inst_breadth_str = f"{inst_buy_count}/{members_count}" if members_count else "0/0"
 
         counts_per_sid = {sid: int(row.get(f"count_{sid}", 0)) for sid in strategy_ids}
 
@@ -194,6 +199,8 @@ def _build_context(
                 "members_count": members_count,
                 "up_count": up_count,
                 "breadth_str": breadth_str,
+                "inst_buy_count": inst_buy_count,
+                "inst_breadth_str": inst_breadth_str,
                 "total_in_industry": total_in,
                 "entry_rate_pct_str": f"{float(row['entry_rate']) * 100:.1f}%",
                 "momentum_5d": momentum_5d,

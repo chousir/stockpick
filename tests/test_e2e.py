@@ -231,7 +231,7 @@ def test_e2e_render_report_has_5day_momentum(tmp_path: Path):
     output = tmp_path / "group_analysis.md"
     render_group_report(groups, ranked, results, "2026-W21", output)
     content = output.read_text(encoding="utf-8")
-    assert "5 日均漲" in content
+    assert "5 日中位" in content  # 群組層由「均漲」改中位數（M1）
     assert "5 日漲幅" in content
 
 

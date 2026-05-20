@@ -45,8 +45,10 @@ def rank_within_groups(
 
     df = group_members.clone()
 
-    # Add institutional net buy (sum across cached dates)
-    if (
+    # inst_net：grouping 已聚合過就直接用，避免重複 join（inst_net_right 欄位衝突）
+    if "inst_net" in df.columns:
+        df = df.with_columns(pl.col("inst_net").fill_null(0.0).cast(pl.Float64))
+    elif (
         not institutional.is_empty()
         and "stock_id" in institutional.columns
         and "total_net" in institutional.columns

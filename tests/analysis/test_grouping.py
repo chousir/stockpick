@@ -259,6 +259,62 @@ def test_group_stocks_uses_5_day_momentum():
     assert row["momentum_days_used"] == 5
 
 
+# ─── 法人接進族群強度（M2）─────────────────────────────────────────────────
+
+
+def _make_institutional(stock_ids: list[str], total_nets: list[int]) -> pl.DataFrame:
+    from datetime import date
+
+    return pl.DataFrame(
+        {
+            "date": [date(2026, 5, 19)] * len(stock_ids),
+            "stock_id": stock_ids,
+            "stock_name": [f"公司{sid}" for sid in stock_ids],
+            "foreign_net": total_nets,
+            "trust_net": [0] * len(stock_ids),
+            "dealer_net": [0] * len(stock_ids),
+            "total_net": total_nets,
+        }
+    )
+
+
+def test_group_stocks_inst_score_is_buy_breadth():
+    """inst_score = 族群內法人買超家數 / 成員數；inst_net 帶入個股。"""
+    results = {
+        "a_breakout": _make_screener_df(
+            ["2330", "2454", "3034"], [3.0, 2.0, 1.0], "a_breakout"
+        )
+    }
+    # 3 檔中 2 檔法人買超（2330, 2454），1 檔賣超（3034）
+    institutional = _make_institutional(["2330", "2454", "3034"], [1000, 500, -800])
+    groups, members = group_stocks(
+        results,
+        pl.DataFrame(),
+        pl.DataFrame(),
+        industry_df=_INDUSTRY_DF,
+        min_group_size=2,
+        institutional=institutional,
+    )
+    row = groups.filter(pl.col("industry_code") == "24")
+    assert row["inst_buy_count"][0] == 2
+    assert row["inst_score"][0] == pytest.approx(2 / 3)
+    inst_map = {r["stock_id"]: r["inst_net"] for r in members.iter_rows(named=True)}
+    assert inst_map["2330"] == pytest.approx(1000.0)
+    assert inst_map["3034"] == pytest.approx(-800.0)
+
+
+def test_group_stocks_no_institutional_inst_score_zero():
+    """未提供法人資料 → inst_score = 0、inst_net = 0（不破壞）。"""
+    results = {
+        "a_breakout": _make_screener_df(["2330", "2454"], [3.0, 2.0], "a_breakout")
+    }
+    groups, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2
+    )
+    assert groups.filter(pl.col("industry_code") == "24")["inst_score"][0] == 0.0
+    assert all(r["inst_net"] == 0.0 for r in members.iter_rows(named=True))
+
+
 # ─── _compute_rs_from_history（back-compat wrapper）─────────────────────────
 
 

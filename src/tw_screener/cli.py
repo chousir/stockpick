@@ -89,6 +89,21 @@ def data_fetch_stock(
     console.print("[green]fetch-stock 完成[/green]")
 
 
+@data_app.command("fetch-institutional-history")
+def data_fetch_institutional_history(
+    days: int = typer.Option(20, "--days", help="回補的交易日數，預設 20"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """回補近 N 個交易日的三大法人買賣超（T86），供族群法人強度與報告使用。"""
+    from tw_screener.data.twse import create_client
+
+    client = create_client(settings)
+    console.print(f"[bold]回補近 {days} 個交易日法人資料（T86）...[/bold]")
+    df = client.fetch_institutional_history(days=days)
+    n_days = df["date"].n_unique() if not df.is_empty() else 0
+    console.print(f"[green]完成：{n_days} 個交易日、{len(df)} 筆[/green]")
+
+
 @data_app.command("fetch-candidates-history")
 def data_fetch_candidates_history(
     week: str = typer.Option("", "--week", help="週別標籤，預設取最新一週"),
@@ -419,7 +434,14 @@ def analysis_group(
                 f"歷史覆蓋 min={per_stock_days.min()}、median={per_stock_days.median()} 日"
             )
 
-    institutional = client.fetch_institutional()
+    institutional = client.load_institutional_history(n_days=20)
+    if institutional.is_empty():
+        console.print(
+            "[yellow]  無法人快取，族群法人強度將為 0[/yellow]"
+            "（建議先跑 make fetch-institutional-history）"
+        )
+    else:
+        console.print(f"  法人快取：{institutional['date'].n_unique()} 個交易日")
 
     console.print("  計算族群強度分數...")
     groups, enriched_stocks = group_stocks(
@@ -429,6 +451,7 @@ def analysis_group(
         industry_df=industry_df if not industry_df.is_empty() else None,
         weights=weights,
         min_group_size=min_group_size,
+        institutional=institutional,
     )
 
     if groups.is_empty():
@@ -476,13 +499,14 @@ def analysis_leaders(
                 seen.add(sid)
                 candidate_ids.append(sid)
     price_history = client.load_candidate_history(candidate_ids, n_days=60)
-    institutional = client.fetch_institutional()
+    institutional = client.load_institutional_history(n_days=20)
 
     _, enriched_stocks = group_stocks(
         screener_results,
         price_history,
         _pl.DataFrame(),
         industry_df=industry_df if not industry_df.is_empty() else None,
+        institutional=institutional,
     )
 
     members = rank_within_groups(enriched_stocks, price_history, institutional)
