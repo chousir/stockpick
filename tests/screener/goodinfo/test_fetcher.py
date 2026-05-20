@@ -16,7 +16,7 @@ def make_fetcher(tmp_path: Path, **kwargs: object) -> GoodinfoFetcher:
         "cache_dir": tmp_path,
         "interval_sec": 0.0,
         "jitter_sec": 0.0,
-        "ttl_hours": 24.0,
+        "refresh_hour": 15,
         "max_retries": 1,
         "backoff_base": 5.0,
         "user_agent": "test/1.0",
@@ -30,9 +30,9 @@ def make_fetcher(tmp_path: Path, **kwargs: object) -> GoodinfoFetcher:
 # ─── 初始化 ──────────────────────────────────────────────────────────────────
 
 
-def test_fetcher_ttl(tmp_path: Path):
-    f = make_fetcher(tmp_path, ttl_hours=6.0)
-    assert f._ttl_hours == 6.0
+def test_fetcher_refresh_hour(tmp_path: Path):
+    f = make_fetcher(tmp_path, refresh_hour=14)
+    assert f._refresh_hour == 14
 
 
 def test_fetcher_max_retries(tmp_path: Path):
@@ -78,12 +78,28 @@ def test_is_fresh_new_file(tmp_path: Path):
 
 
 def test_is_stale(tmp_path: Path):
-    f = make_fetcher(tmp_path, ttl_hours=0.001)  # ~3.6 seconds
+    f = make_fetcher(tmp_path)
     p = tmp_path / "old.html.gz"
     p.touch()
-    old_ts = time.time() - 100  # 100 seconds ago
+    old_ts = time.time() - 2 * 86400  # 2 天前，必早於最近一個交易日盤後界線
     os.utime(p, (old_ts, old_ts))
     assert not f._is_fresh(p)
+
+
+def test_fresh_aligns_to_trading_day_boundary(tmp_path: Path):
+    """界線前一秒抓的過期、後一秒抓的新鮮（這就是「跨交易日重抓、同日讀快取」的契約）。"""
+    f = make_fetcher(tmp_path)
+    import datetime as _dt
+
+    boundary = f._last_publish_boundary(_dt.datetime.now()).timestamp()
+    p = tmp_path / "boundary.html.gz"
+    p.touch()
+
+    os.utime(p, (boundary - 1, boundary - 1))
+    assert not f._is_fresh(p)  # 界線之前抓的（如昨晚跑的）→ 重抓
+
+    os.utime(p, (boundary + 1, boundary + 1))
+    assert f._is_fresh(p)  # 界線之後抓的（今天盤後跑的）→ 讀快取
 
 
 # ─── Cache hit ────────────────────────────────────────────────────────────────
@@ -202,11 +218,11 @@ def test_blocked_does_not_write_cache(tmp_path: Path):
 
 
 def test_stale_cache_triggers_network(tmp_path: Path):
-    fetcher = make_fetcher(tmp_path, ttl_hours=0.001)
+    fetcher = make_fetcher(tmp_path)
     url = "https://goodinfo.tw/tw/StockList.asp?stale=1"
 
     fetcher._write_cache(fetcher._cache_path(url), "<html>old</html>")
-    old_ts = time.time() - 100
+    old_ts = time.time() - 2 * 86400
     os.utime(fetcher._cache_path(url), (old_ts, old_ts))
 
     http_calls: list[str] = []

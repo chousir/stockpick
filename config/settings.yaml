@@ -12,7 +12,7 @@ goodinfo:
   user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
   request_interval_sec: 3
   request_interval_jitter_sec: 1
-  cache_ttl_hours: 24
+  cache_refresh_hour: 15   # 盤後資料穩定時點；同一交易日重複跑讀快取，跨交易日才重抓
   max_retries: 3
   backoff_base: 5
   referer: "https://goodinfo.tw/tw/index.asp"

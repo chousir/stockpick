@@ -31,7 +31,7 @@ class GoodinfoFetcher:
         cache_dir: Path,
         interval_sec: float,
         jitter_sec: float,
-        ttl_hours: float,
+        refresh_hour: int,
         max_retries: int,
         backoff_base: float,
         user_agent: str,
@@ -41,7 +41,7 @@ class GoodinfoFetcher:
         self._cache_dir = cache_dir / "goodinfo" / "screener"
         self._interval = interval_sec
         self._jitter = jitter_sec
-        self._ttl_hours = ttl_hours
+        self._refresh_hour = refresh_hour
         self._max_retries = max_retries
         self._backoff_base = backoff_base
         self._user_agent = user_agent
@@ -55,11 +55,26 @@ class GoodinfoFetcher:
         key = hashlib.md5(url.encode()).hexdigest()
         return self._cache_dir / f"{key}.html.gz"
 
+    def _last_publish_boundary(self, now: datetime.datetime) -> datetime.datetime:
+        """最近一個『交易日盤後資料就緒』時點。
+
+        以 refresh_hour（盤後資料穩定，預設 15:00）為界：當天未到則退前一天，
+        再把界線退到最近的工作日（週六/日無新交易資料，沿用前一交易日）。
+        註：未含國定假日表，連假期間最多每日多抓一次（量極小、可接受）。
+        """
+        boundary = now.replace(hour=self._refresh_hour, minute=0, second=0, microsecond=0)
+        if now < boundary:
+            boundary -= datetime.timedelta(days=1)
+        while boundary.weekday() >= 5:  # 5=週六, 6=週日
+            boundary -= datetime.timedelta(days=1)
+        return boundary
+
     def _is_fresh(self, path: Path) -> bool:
+        """快取是否在最近一個交易日盤後就緒時點之後抓取（同一交易日內重複跑讀快取）。"""
         if not path.exists():
             return False
-        age_hours = (time.time() - path.stat().st_mtime) / 3600
-        return age_hours < self._ttl_hours
+        mtime = datetime.datetime.fromtimestamp(path.stat().st_mtime)
+        return mtime >= self._last_publish_boundary(datetime.datetime.now())
 
     def _read_cache(self, path: Path) -> str:
         with gzip.open(path, "rt", encoding="utf-8") as fh:
@@ -190,7 +205,7 @@ def create_fetcher(settings: dict, cache_dir: Path) -> GoodinfoFetcher:
         cache_dir=cache_dir,
         interval_sec=float(gi["request_interval_sec"]),
         jitter_sec=float(gi["request_interval_jitter_sec"]),
-        ttl_hours=float(gi["cache_ttl_hours"]),
+        refresh_hour=int(gi["cache_refresh_hour"]),
         max_retries=int(gi["max_retries"]),
         backoff_base=float(gi["backoff_base"]),
         user_agent=gi["user_agent"],
