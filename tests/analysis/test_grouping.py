@@ -209,8 +209,30 @@ def test_group_stocks_has_momentum_columns():
     )
     assert "momentum_5d" in groups.columns
     assert "momentum_5d_days_used" in groups.columns
+    assert "up_count" in groups.columns
     assert "momentum_5d" in members.columns
     assert "momentum_days_used" in members.columns
+
+
+def test_group_stocks_momentum_uses_median_not_mean():
+    """單檔小型股飆漲不應拉高整族群：momentum_5d 取中位數而非平均。
+
+    情境同 2026-W21 電力供應業：一檔 +30%、另兩檔 -3% / -17%。
+    mean = +3.33%（假象轉強），median = -3%（真實偏弱），up_count = 1。
+    """
+    results = {
+        "a_breakout": _make_screener_df(
+            ["2330", "2454", "3034"], [30.0, -3.0, -17.0], "a_breakout"
+        )
+    }
+    groups, _ = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2
+    )
+    row = groups.filter(pl.col("industry_code") == "24")
+    # 中位數 = -3.0（非平均 +3.33）
+    assert row["momentum_5d"][0] == pytest.approx(-3.0)
+    # 上漲家數：3 檔僅 1 檔為正
+    assert row["up_count"][0] == 1
 
 
 def test_group_stocks_uses_5_day_momentum():

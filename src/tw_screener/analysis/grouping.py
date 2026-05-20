@@ -1,10 +1,13 @@
 """族群分析：把篩選結果按 TWSE 產業別分組，計算族群強度分數。
 
 強度公式（2026-W21 起改為動能主導）：
-  score = 50 * sigmoid(momentum_5d / 5)   # 動能主導
+  score = 50 * sigmoid(momentum_5d / 5)   # 動能主導（momentum_5d = 族群中位數，抗單檔灌水）
         + 25 * entry_rate                 # 入選率（仍保留訊號）
         + 15 * inst_score                 # 法人佔位
         + 10 * (log1p(members) / log1p(max))   # 規模
+
+另回傳 up_count（族群內 5 日漲幅 > 0 的家數），供報告計算上漲家數比（breadth），
+一眼看穿「整族群轉強」是真廣度還是單檔小型股獨拉。
 """
 
 from __future__ import annotations
@@ -124,6 +127,7 @@ def group_stocks(
             "total_in_industry": pl.Int32,
             "entry_rate": pl.Float64,
             "momentum_5d": pl.Float64,
+            "up_count": pl.Int32,
             "momentum_5d_days_used": pl.Int32,
             "rs_avg": pl.Float64,
             "inst_score": pl.Float64,
@@ -183,7 +187,8 @@ def group_stocks(
     # Group-level aggregation
     agg_exprs: list[pl.Expr] = [
         pl.col("stock_id").count().alias("members_count"),
-        pl.col("momentum_5d").mean().alias("momentum_5d"),
+        pl.col("momentum_5d").median().alias("momentum_5d"),  # 中位數：抗單檔小型股灌水
+        (pl.col("momentum_5d") > 0).cast(pl.Int32).sum().alias("up_count"),  # 上漲家數
         pl.col("momentum_days_used").min().alias("momentum_5d_days_used"),
     ]
     for sid in strategy_ids:
@@ -193,7 +198,7 @@ def group_stocks(
 
     groups = stock_df.group_by(["industry_code", "industry_name"]).agg(agg_exprs)
 
-    # alias for backward compatibility (rs_avg now = 5-day mean return)
+    # alias for backward compatibility (rs_avg now = 5-day median return)
     groups = groups.with_columns(pl.col("momentum_5d").alias("rs_avg"))
 
     # total_in_industry and entry_rate

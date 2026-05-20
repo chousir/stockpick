@@ -156,6 +156,12 @@ def _build_context(
         industry_code = row["industry_code"]
         members_count = int(row["members_count"])
         total_in = int(row.get("total_in_industry", members_count))
+        up_count = int(row.get("up_count", 0) or 0)
+        breadth_str = (
+            f"{up_count}/{members_count} ({up_count / members_count * 100:.0f}%)"
+            if members_count
+            else "0/0"
+        )
 
         counts_per_sid = {sid: int(row.get(f"count_{sid}", 0)) for sid in strategy_ids}
 
@@ -186,6 +192,8 @@ def _build_context(
                 "is_uncategorized": row["industry_name"] == _UNCATEGORIZED,
                 "counts": counts_per_sid,
                 "members_count": members_count,
+                "up_count": up_count,
+                "breadth_str": breadth_str,
                 "total_in_industry": total_in,
                 "entry_rate_pct_str": f"{float(row['entry_rate']) * 100:.1f}%",
                 "momentum_5d": momentum_5d,
