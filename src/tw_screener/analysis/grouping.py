@@ -75,6 +75,7 @@ def group_stocks(
     weights: dict[str, float] | None = None,
     min_group_size: int = 2,
     institutional: pl.DataFrame | None = None,
+    volume_history: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
     Group screened stocks by industry and compute group strength scores (動能主導).
@@ -82,6 +83,8 @@ def group_stocks(
     institutional: 近 N 日三大法人（含 stock_id / total_net）；提供時計入族群法人強度。
         個股層聚合為 inst_net（近 N 日合計淨買超股數），族群層 inst_score =
         法人買超家數比（inst_net > 0 的家數 / 成員數）。未提供 → inst_net = 0、inst_score = 0。
+    volume_history: 含 stock_id / date / trade_volume；提供時計算量比
+        （今日量 / 近 n 日均量）。未提供 → vol_ratio = 0。
 
     Returns (groups_df, enriched_stocks_df):
     - groups_df: industry-level stats sorted by score desc (filtered by min_group_size)
@@ -193,6 +196,46 @@ def group_stocks(
         )
     else:
         stock_df = stock_df.with_columns([pl.lit(0.0).alias(c) for c in _inst_cols])
+
+    # 量比（今日量 / 近 N 日均量）—— 需 ≥ 3 個歷史日才輸出有效值
+    if (
+        volume_history is not None
+        and not volume_history.is_empty()
+        and {"stock_id", "date", "trade_volume"}.issubset(volume_history.columns)
+    ):
+        latest_vol_date = volume_history["date"].max()
+        today_vol = (
+            volume_history.filter(pl.col("date") == latest_vol_date)
+            .select(["stock_id", "trade_volume"])
+            .rename({"trade_volume": "_vol_today"})
+        )
+        prior_avg = (
+            volume_history.filter(pl.col("date") < latest_vol_date)
+            .group_by("stock_id")
+            .agg(
+                pl.col("trade_volume").mean().alias("_vol_avg"),
+                pl.col("trade_volume").count().alias("_vol_days"),
+            )
+        )
+        vol_df = (
+            today_vol.join(prior_avg, on="stock_id", how="left")
+            .with_columns(
+                pl.when(
+                    (pl.col("_vol_avg") > 0)
+                    & pl.col("_vol_avg").is_not_null()
+                    & (pl.col("_vol_days") >= 3)
+                )
+                .then(pl.col("_vol_today") / pl.col("_vol_avg"))
+                .otherwise(0.0)
+                .alias("vol_ratio")
+            )
+            .select(["stock_id", "vol_ratio"])
+        )
+        stock_df = stock_df.join(vol_df, on="stock_id", how="left").with_columns(
+            pl.col("vol_ratio").fill_null(0.0)
+        )
+    else:
+        stock_df = stock_df.with_columns(pl.lit(0.0).alias("vol_ratio"))
 
     # Join with industry classification
     if industry_df is not None and not industry_df.is_empty():

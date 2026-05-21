@@ -388,3 +388,79 @@ def test_compute_rs_partial_data():
     result = _compute_rs_from_history(["2330"], history, pl.DataFrame())
     assert "2330" in result
     assert result["2330"] == pytest.approx(10.0)
+
+
+# ─── 量比 ──────────────────────────────────────────────────────────────────────
+
+
+def _make_volume_history(stock_ids: list[str], dates_per_stock: list, volumes: list) -> pl.DataFrame:
+    from datetime import date as _date
+    rows = []
+    for sid, d, v in zip(stock_ids, dates_per_stock, volumes):
+        rows.append({"stock_id": sid, "date": d, "trade_volume": v})
+    return pl.DataFrame(rows, schema={"stock_id": pl.Utf8, "date": pl.Date, "trade_volume": pl.Int64})
+
+
+def test_group_stocks_vol_ratio_computed():
+    """提供 volume_history → members 含正確 vol_ratio（今日量 / 近 N 日均量）。"""
+    from datetime import date
+
+    dates = [date(2026, 5, d) for d in range(12, 18)]  # 5/12 ~ 5/17（6 日）
+    # 2330: 前 5 日均量 = (1000+1200+800+1100+900)/5 = 1000; 今日(5/17)=2000 → ratio=2.0
+    stock_ids = ["2330"] * 6
+    volumes = [1000, 1200, 800, 1100, 900, 2000]
+    volume_history = _make_volume_history(stock_ids, dates, volumes)
+
+    results = {
+        "a_breakout": _make_screener_df(["2330", "2454"], [3.5, 2.8], "a_breakout")
+    }
+    _, members = group_stocks(
+        results,
+        pl.DataFrame(),
+        pl.DataFrame(),
+        industry_df=_INDUSTRY_DF,
+        min_group_size=2,
+        volume_history=volume_history,
+    )
+    row_2330 = members.filter(pl.col("stock_id") == "2330").to_dicts()[0]
+    assert row_2330["vol_ratio"] == pytest.approx(2.0)
+    # 2454 無 volume_history → vol_ratio = 0
+    row_2454 = members.filter(pl.col("stock_id") == "2454").to_dicts()[0]
+    assert row_2454["vol_ratio"] == pytest.approx(0.0)
+
+
+def test_group_stocks_no_volume_history_vol_ratio_zero():
+    """未提供 volume_history → vol_ratio = 0，不破壞現有流程。"""
+    results = {
+        "a_breakout": _make_screener_df(["2330", "2454"], [3.5, 2.8], "a_breakout")
+    }
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2
+    )
+    for r in members.iter_rows(named=True):
+        assert r["vol_ratio"] == pytest.approx(0.0)
+
+
+def test_group_stocks_vol_ratio_insufficient_data():
+    """歷史天數不足 3 日 → vol_ratio = 0（不輸出不可靠的比值）。"""
+    from datetime import date
+
+    # 只有 2 天歷史 + 今日共 3 筆，prior 2 日 < 3 → vol_ratio = 0
+    dates = [date(2026, 5, 16), date(2026, 5, 17), date(2026, 5, 18)]
+    volume_history = _make_volume_history(
+        ["2330"] * 3, dates, [1000, 1200, 3000]
+    )
+    results = {
+        "a_breakout": _make_screener_df(["2330", "2454"], [3.5, 2.8], "a_breakout")
+    }
+    _, members = group_stocks(
+        results,
+        pl.DataFrame(),
+        pl.DataFrame(),
+        industry_df=_INDUSTRY_DF,
+        min_group_size=2,
+        volume_history=volume_history,
+    )
+    row = members.filter(pl.col("stock_id") == "2330").to_dicts()[0]
+    # prior = 2 days only → below threshold → vol_ratio = 0
+    assert row["vol_ratio"] == pytest.approx(0.0)

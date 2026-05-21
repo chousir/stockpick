@@ -221,6 +221,75 @@ def _parse_institutional(payload: dict[str, Any]) -> pl.DataFrame:
 
 _TPEX_BASE = "https://www.tpex.org.tw"
 _TPEX_STOCK_DAY_PATH = "/www/zh-tw/afterTrading/tradingStock"
+_TPEX_INST_URL = "https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading"
+
+
+def _parse_tpex_institutional(data: list[dict[str, Any]]) -> pl.DataFrame:
+    """解析 TPEX tpex_3insti_daily_trading JSON list → DataFrame（與 _INSTITUTIONAL_SCHEMA 相同）。
+
+    Input: list of dicts, each containing Date (ROC compact), SecuritiesCompanyCode,
+    CompanyName, and net-buy-sell fields for foreign / trust / dealer / total.
+    Values are integer shares（股），same unit as TWSE T86.
+    """
+    if not data:
+        return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+
+    def _net(r: dict[str, Any], *keys: str) -> int:
+        for k in keys:
+            v = r.get(k)
+            if v is not None:
+                s = str(v).strip().replace(",", "")
+                if s and s not in ("", "-", "--"):
+                    try:
+                        return int(s)
+                    except ValueError:
+                        pass
+        return 0
+
+    rows = []
+    for r in data:
+        try:
+            trade_date = _roc_compact_to_date(str(r["Date"]))
+            foreign_net = _net(
+                r,
+                "Foreign Investors include Mainland Area Investors (Foreign Dealers excluded)-Difference",
+                "Foreign_Investors_Difference",
+            )
+            trust_net = _net(
+                r,
+                "SecuritiesInvestmentTrustCompanies-Difference",
+                "Investment_Trust_Difference",
+            )
+            dealer_net = _net(
+                r,
+                "Dealers-Difference",
+                "Dealer_Difference",
+                "Self-owned_Difference",
+            )
+            total_net = _net(r, "TotalDifference", "Total_Difference")
+            rows.append(
+                {
+                    "date": trade_date,
+                    "stock_id": str(r["SecuritiesCompanyCode"]).strip(),
+                    "stock_name": str(r.get("CompanyName", "")).strip(),
+                    "foreign_net": foreign_net,
+                    "trust_net": trust_net,
+                    "dealer_net": dealer_net,
+                    "total_net": total_net,
+                }
+            )
+        except (KeyError, ValueError, IndexError) as e:
+            logger.warning(
+                "略過無效 TPEX 法人資料：{} — {}",
+                r.get("SecuritiesCompanyCode", "?"),
+                e,
+            )
+    return (
+        pl.DataFrame(rows, schema=_INSTITUTIONAL_SCHEMA)
+        if rows
+        else pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+    )
+
 
 # 共用 schema：TWSE STOCK_DAY 與 TPEX tradingStock 對齊（11 欄、單位皆為股 / 元）
 _STOCK_DAY_SCHEMA: dict[str, type[pl.DataType]] = {
@@ -735,6 +804,13 @@ class TWSEClient:
             cur -= timedelta(days=1)
 
         logger.info("fetch_institutional_history: 取得 {} 個交易日法人資料", collected)
+
+        # 順帶補抓上櫃法人（TPEX 只有最新一日，逐次累積）
+        try:
+            self.fetch_otc_institutional()
+        except Exception as e:
+            logger.warning("fetch_institutional_history: 上櫃法人抓取失敗 — {}", e)
+
         if not frames:
             return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
         return (
@@ -759,6 +835,102 @@ class TWSEClient:
         )
         recent_dates = merged["date"].unique().sort(descending=True).head(n_days).to_list()
         return merged.filter(pl.col("date").is_in(recent_dates))
+
+    def fetch_otc_institutional(self) -> pl.DataFrame:
+        """抓上櫃三大法人（TPEX OpenAPI 最新一日），存 institutional_otc_{date}.parquet。
+
+        TPEX OpenAPI 不提供歷史回查，只回傳最新交易日資料，逐次累積成快取。
+        快取檔名含 _otc_ 以區分，但 load_institutional_history 的 glob 模式
+        （institutional_*.parquet）可自動涵蓋，無需修改讀取端。
+        """
+        trading_date = self.latest_trading_date()
+        if trading_date is not None:
+            date_str = trading_date.strftime("%Y%m%d")
+            cache_file = self.cache_dir / f"institutional_otc_{date_str}.parquet"
+            if cache_file.exists():
+                logger.info("上櫃法人命中快取 {}", cache_file)
+                return load_parquet(cache_file)
+
+        self._throttle()
+        try:
+            resp = httpx.get(
+                _TPEX_INST_URL,
+                headers={"User-Agent": self.user_agent},
+                timeout=30.0,
+                follow_redirects=True,
+            )
+            self._last_req = time.monotonic()
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            logger.warning("fetch_otc_institutional 網路錯誤：{}", e)
+            return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+
+        if not isinstance(data, list):
+            logger.warning("TPEX tpex_3insti_daily_trading 回傳非 list，略過")
+            return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+
+        df = _parse_tpex_institutional(data)
+        if df.is_empty():
+            logger.warning("TPEX 上櫃法人解析結果為空")
+            return df
+
+        trade_date = df["date"].max()
+        date_str = trade_date.strftime("%Y%m%d")
+        cache_file = self.cache_dir / f"institutional_otc_{date_str}.parquet"
+        save_parquet(df, cache_file)
+        logger.info("上櫃法人快取 → {} ({} 檔)", cache_file, len(df))
+        return df
+
+    def load_volume_history(
+        self, stock_ids: list[str], n_days: int = 21
+    ) -> pl.DataFrame:
+        """讀取候選股近 n_days 交易日的 trade_volume（純讀快取，不打網）。
+
+        資料來源優先序同 load_candidate_history：
+          1. stock_day_{stock_id}_*.parquet（含完整月份 trade_volume）
+          2. daily_*.parquet（全市場日線，含最新一日）
+        回傳：stock_id / date / trade_volume，按 (stock_id, date) 排序。
+        """
+        _empty = {"stock_id": pl.Utf8, "date": pl.Date, "trade_volume": pl.Int64}
+        if not stock_ids:
+            return pl.DataFrame(schema=_empty)
+
+        stock_id_set = set(stock_ids)
+        frames: list[pl.DataFrame] = []
+
+        for sid in stock_ids:
+            for f in sorted(self.cache_dir.glob(f"stock_day_{sid}_*.parquet")):
+                try:
+                    df = pl.read_parquet(f)
+                    if {"stock_id", "date", "trade_volume"}.issubset(df.columns):
+                        frames.append(df.select(["stock_id", "date", "trade_volume"]))
+                except Exception as e:
+                    logger.warning("讀取 {} 失敗：{}", f, e)
+
+        for f in sorted(self.cache_dir.glob("daily_*.parquet")):
+            try:
+                df = pl.read_parquet(f)
+                if not {"stock_id", "date", "trade_volume"}.issubset(df.columns):
+                    continue
+                df = df.filter(
+                    pl.col("stock_id").is_in(list(stock_id_set))
+                ).select(["stock_id", "date", "trade_volume"])
+                if not df.is_empty():
+                    frames.append(df)
+            except Exception as e:
+                logger.warning("讀取 {} 失敗：{}", f, e)
+
+        if not frames:
+            return pl.DataFrame(schema=_empty)
+
+        merged = (
+            pl.concat(frames)
+            .unique(subset=["stock_id", "date"])
+            .sort(["stock_id", "date"])
+        )
+        merged = merged.group_by("stock_id", maintain_order=True).tail(n_days)
+        return merged
 
     def latest_trading_date(self) -> date | None:
         """

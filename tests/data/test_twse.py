@@ -20,6 +20,7 @@ from tw_screener.data.twse import (
     _parse_listed_industry,
     _parse_revenue,
     _parse_stock_day,
+    _parse_tpex_institutional,
     _roc_compact_to_date,
     _roc_pubdate_to_ym,
     _roc_to_date,
@@ -990,3 +991,179 @@ def test_get_legacy_gives_up_after_max_retries(tmp_path: Path, monkeypatch: pyte
     # max_retries=2 → 共 3 次嘗試
     assert call_count[0] == 3
     assert result == {}
+
+
+# ─── TPEX 上櫃法人 ────────────────────────────────────────────────────────────
+
+
+def test_parse_tpex_institutional_basic():
+    """_parse_tpex_institutional 解析正確欄位（含負值）。"""
+    data = [
+        {
+            "Date": "1150520",
+            "SecuritiesCompanyCode": "6488",
+            "CompanyName": "環球晶",
+            "Foreign Investors include Mainland Area Investors (Foreign Dealers excluded)-Difference": "500000",
+            "SecuritiesInvestmentTrustCompanies-Difference": "100000",
+            "Dealers-Difference": "-50000",
+            "TotalDifference": "550000",
+        },
+        {
+            "Date": "1150520",
+            "SecuritiesCompanyCode": "3105",
+            "CompanyName": "穩懋",
+            "Foreign Investors include Mainland Area Investors (Foreign Dealers excluded)-Difference": "-200000",
+            "SecuritiesInvestmentTrustCompanies-Difference": "0",
+            "Dealers-Difference": "0",
+            "TotalDifference": "-200000",
+        },
+    ]
+    df = _parse_tpex_institutional(data)
+    assert len(df) == 2
+    m = {r["stock_id"]: r for r in df.to_dicts()}
+    assert m["6488"]["date"] == date(2026, 5, 20)
+    assert m["6488"]["foreign_net"] == 500000
+    assert m["6488"]["trust_net"] == 100000
+    assert m["6488"]["dealer_net"] == -50000
+    assert m["6488"]["total_net"] == 550000
+    assert m["3105"]["foreign_net"] == -200000
+    assert m["3105"]["total_net"] == -200000
+
+
+def test_parse_tpex_institutional_empty():
+    """空 list → 回傳正確 schema 的空 DataFrame。"""
+    df = _parse_tpex_institutional([])
+    assert df.is_empty()
+    assert "total_net" in df.columns
+    assert "foreign_net" in df.columns
+
+
+def test_fetch_otc_institutional_saves_cache(tmp_path: Path, monkeypatch):
+    """fetch_otc_institutional 成功時存 institutional_otc_{date}.parquet。"""
+    import httpx as _httpx
+
+    otc_data = [
+        {
+            "Date": "1150519",
+            "SecuritiesCompanyCode": "6488",
+            "CompanyName": "環球晶",
+            "Foreign Investors include Mainland Area Investors (Foreign Dealers excluded)-Difference": "200000",
+            "SecuritiesInvestmentTrustCompanies-Difference": "50000",
+            "Dealers-Difference": "0",
+            "TotalDifference": "250000",
+        }
+    ]
+
+    class MockResp:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+        def raise_for_status(self): pass
+        def json(self): return otc_data
+
+    # daily cache so latest_trading_date() works without network
+    save_parquet(
+        pl.DataFrame({
+            "date": [date(2026, 5, 19)],
+            "stock_id": ["2330"],
+            "name": ["台積電"],
+            "trade_volume": [100000],
+            "trade_value": [500000000],
+            "open": [950.0], "high": [960.0], "low": [945.0], "close": [955.0],
+            "change": [5.0], "transaction": [30000],
+        }),
+        tmp_path / "daily_20260519.parquet",
+    )
+
+    monkeypatch.setattr(_httpx, "get", lambda *a, **kw: MockResp())
+
+    client = TWSEClient(
+        base_url="https://openapi.twse.com.tw/v1",
+        cache_dir=tmp_path,
+        ttl_hours=24.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+    df = client.fetch_otc_institutional()
+    assert not df.is_empty()
+    cache = tmp_path / "institutional_otc_20260519.parquet"
+    assert cache.exists(), "應存 institutional_otc_{date}.parquet"
+    row = df.filter(pl.col("stock_id") == "6488").to_dicts()[0]
+    assert row["foreign_net"] == 200000
+    assert row["total_net"] == 250000
+
+
+def test_fetch_otc_institutional_cache_hit(tmp_path: Path):
+    """已有 institutional_otc_{date}.parquet 時直接讀快取，回傳正確資料。"""
+    trade_date = date(2026, 5, 19)
+    save_parquet(
+        pl.DataFrame({
+            "date": [trade_date],
+            "stock_id": ["6488"],
+            "stock_name": ["環球晶"],
+            "foreign_net": [100],
+            "trust_net": [0],
+            "dealer_net": [0],
+            "total_net": [100],
+        }),
+        tmp_path / "institutional_otc_20260519.parquet",
+    )
+    # daily cache so latest_trading_date() resolves to 2026-05-19
+    save_parquet(
+        pl.DataFrame({
+            "date": [trade_date],
+            "stock_id": ["2330"], "name": ["台積電"],
+            "trade_volume": [100000], "trade_value": [500000000],
+            "open": [950.0], "high": [960.0], "low": [945.0], "close": [955.0],
+            "change": [5.0], "transaction": [30000],
+        }),
+        tmp_path / "daily_20260519.parquet",
+    )
+    client = TWSEClient(
+        base_url="https://openapi.twse.com.tw/v1",
+        cache_dir=tmp_path,
+        ttl_hours=24.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+    df = client.fetch_otc_institutional()
+    assert not df.is_empty()
+    assert df.filter(pl.col("stock_id") == "6488")["foreign_net"][0] == 100
+
+
+# ─── load_volume_history ──────────────────────────────────────────────────────
+
+
+def test_load_volume_history_from_daily(tmp_path: Path):
+    """daily_*.parquet 中的 trade_volume 可被 load_volume_history 讀到。"""
+    for day in [15, 16, 17, 18, 19]:
+        save_parquet(
+            pl.DataFrame({
+                "date": [date(2026, 5, day)],
+                "stock_id": ["2330"],
+                "name": ["台積電"],
+                "trade_volume": [1000 * day],
+                "trade_value": [500000000],
+                "open": [950.0], "high": [960.0], "low": [945.0], "close": [955.0],
+                "change": [5.0], "transaction": [30000],
+            }),
+            tmp_path / f"daily_20260{day:02d}.parquet",
+        )
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    df = client.load_volume_history(["2330"], n_days=10)
+    assert not df.is_empty()
+    assert len(df) == 5
+    assert df.filter(pl.col("date") == date(2026, 5, 19))["trade_volume"][0] == 19000
+
+
+def test_load_volume_history_empty_no_stock_ids(tmp_path: Path):
+    """空 stock_ids → 回傳空 DataFrame。"""
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    df = client.load_volume_history([])
+    assert df.is_empty()
+    assert "trade_volume" in df.columns

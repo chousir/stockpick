@@ -443,6 +443,14 @@ def analysis_group(
     else:
         console.print(f"  法人快取：{institutional['date'].n_unique()} 個交易日")
 
+    volume_history = client.load_volume_history(candidate_ids, n_days=21)
+    if volume_history.is_empty():
+        console.print(
+            "[yellow]  無 trade_volume 快取，量比欄位將顯示 '-'[/yellow]"
+        )
+    else:
+        console.print(f"  量比資料：{volume_history['stock_id'].n_unique()} 檔")
+
     console.print("  計算族群強度分數...")
     groups, enriched_stocks = group_stocks(
         screener_results,
@@ -452,6 +460,7 @@ def analysis_group(
         weights=weights,
         min_group_size=min_group_size,
         institutional=institutional,
+        volume_history=volume_history,
     )
 
     if groups.is_empty():

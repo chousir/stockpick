@@ -83,6 +83,8 @@ def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> d
     inst_net_lots = float(srow.get("inst_net", 0) or 0) / 1000.0  # 股 → 張
     foreign_lots = float(srow.get("foreign_net", 0) or 0) / 1000.0  # 外資
     trust_lots = float(srow.get("trust_net", 0) or 0) / 1000.0  # 投信
+    vol_ratio = float(srow.get("vol_ratio", 0) or 0)
+    vol_ratio_str = f"{vol_ratio:.1f}x" if vol_ratio > 0 else "-"
     return {
         "stock_id": srow["stock_id"],
         "name": srow["name"],
@@ -102,6 +104,8 @@ def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> d
         "inst_net_str": f"{inst_net_lots:+,.0f}",
         "foreign_net_str": f"{foreign_lots:+,.0f}",
         "trust_net_str": f"{trust_lots:+,.0f}",
+        "vol_ratio": vol_ratio,
+        "vol_ratio_str": vol_ratio_str,
         "goodinfo_url": str(srow.get("goodinfo_url", "")),
         "group_size": group_size,
     }
