@@ -292,12 +292,12 @@ def screen_run_all(
     group: str = typer.Option(
         ...,
         "--group",
-        help="策略組：abc（A/B/C 經典三角）或 def（D/E/F ProPicks 復刻組）",
+        help="策略組：defg（D/E/F/G 現行主流程）、def（D/E/F）、abc（A/B/C legacy）",
     ),
 ) -> None:
-    """執行指定組策略（--group abc 跑 a_*/b_*/c_*，--group def 跑 d_*/e_*/f_*）。"""
-    if group not in ("abc", "def"):
-        console.print(f"[red]❌ 未知 group：{group!r}，請用 abc 或 def[/red]")
+    """執行指定組策略（--group defg 跑 d/e/f/g，def 跑 d/e/f，abc 跑 a/b/c）。"""
+    if group not in ("abc", "def", "defg"):
+        console.print(f"[red]❌ 未知 group：{group!r}，請用 defg / def / abc[/red]")
         raise typer.Exit(1)
 
     from tw_screener.screener.runner import ScreenerRunner, derive_week_tag
@@ -462,6 +462,8 @@ def analysis_group(
     else:
         console.print(f"  本週除權息：{len(dividends)} 檔候選股（未來 {dividend_lookahead} 天）")
 
+    g_pullback = cfg.get("g_pullback")
+
     console.print("  計算族群強度分數...")
     groups, enriched_stocks = group_stocks(
         screener_results,
@@ -472,6 +474,7 @@ def analysis_group(
         min_group_size=min_group_size,
         institutional=institutional,
         volume_history=volume_history,
+        g_pullback=g_pullback,
     )
 
     if groups.is_empty():

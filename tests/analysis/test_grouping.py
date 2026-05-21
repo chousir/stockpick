@@ -523,3 +523,132 @@ def test_group_stocks_ma_no_history():
     for r in members.iter_rows(named=True):
         assert r["ma20_dist_pct"] is None
         assert r["ma60_dist_pct"] is None
+
+
+# ─── 策略 G：MA60 斜率 + 拉回 setup 過濾 ──────────────────────────────────────
+
+from datetime import date as _date, timedelta as _timedelta  # noqa: E402
+
+# 80 日：先漲 70 日（100→169）再拉回 10 日（→149）。
+# MA60_today=146.75、MA60_10前=139.50 → 斜率 +5.2%；close 149 → 距季線 +1.53%（帶內）
+_PULLBACK_CLOSES = [100.0 + i for i in range(70)] + [169.0 - 2 * (i + 1) for i in range(10)]
+# 80 日純漲（100→179）：close 179、MA60_today=149.5 → 距季線 +19.7%（延伸、出帶）
+_EXTENDED_CLOSES = [100.0 + i for i in range(80)]
+
+
+def _ma_price_history(closes_map: dict[str, list[float]]) -> pl.DataFrame:
+    rows_sid, rows_date, rows_close = [], [], []
+    for sid, closes in closes_map.items():
+        for i, c in enumerate(closes):
+            rows_sid.append(sid)
+            rows_date.append(_date(2026, 1, 1) + _timedelta(days=i))
+            rows_close.append(float(c))
+    return pl.DataFrame(
+        {"stock_id": rows_sid, "date": rows_date, "close": rows_close},
+        schema={"stock_id": pl.Utf8, "date": pl.Date, "close": pl.Float64},
+    )
+
+
+def _g_screener(close_map: dict[str, float]) -> pl.DataFrame:
+    sids = list(close_map.keys())
+    return pl.DataFrame(
+        {
+            "stock_id": sids,
+            "name": [f"公司{s}" for s in sids],
+            "close": [close_map[s] for s in sids],
+            "change_pct": [0.0] * len(sids),
+            "amount_million": [1000.0] * len(sids),
+            "goodinfo_url": [f"http://g/{s}" for s in sids],
+            "strategy_id": ["g_growth_pullback"] * len(sids),
+        }
+    )
+
+
+def _flat_volume(stock_ids: list[str], today_vol: dict[str, int]) -> pl.DataFrame:
+    """21 日量：前 20 日皆 1000，最後一日為 today_vol[sid]（控制 vol_ratio）。"""
+    rows_sid, rows_date, rows_vol = [], [], []
+    for sid in stock_ids:
+        for i in range(20):
+            rows_sid.append(sid)
+            rows_date.append(_date(2026, 4, 1) + _timedelta(days=i))
+            rows_vol.append(1000)
+        rows_sid.append(sid)
+        rows_date.append(_date(2026, 4, 21))
+        rows_vol.append(today_vol[sid])
+    return pl.DataFrame(
+        {"stock_id": rows_sid, "date": rows_date, "trade_volume": rows_vol},
+        schema={"stock_id": pl.Utf8, "date": pl.Date, "trade_volume": pl.Int64},
+    )
+
+
+def test_group_stocks_g_pullback_keeps_valid_setup():
+    """三條件全中（季線上揚 + 乖離帶內 + 量縮）→ in_g 留 True；延伸股 → False。"""
+    price_history = _ma_price_history(
+        {"2330": _PULLBACK_CLOSES, "2454": _EXTENDED_CLOSES}
+    )
+    results = {"g_growth_pullback": _g_screener({"2330": 149.0, "2454": 179.0})}
+    volume_history = _flat_volume(["2330", "2454"], {"2330": 800, "2454": 800})
+    _, members = group_stocks(
+        results,
+        price_history,
+        pl.DataFrame(),
+        industry_df=_INDUSTRY_DF,
+        min_group_size=2,
+        volume_history=volume_history,
+    )
+    m = {r["stock_id"]: r for r in members.iter_rows(named=True)}
+    assert m["2330"]["in_g_growth_pullback"] is True   # 回踩季線 + 量縮
+    assert m["2454"]["in_g_growth_pullback"] is False  # 距季線 +19.7% 出帶（延伸）
+
+
+def test_group_stocks_g_pullback_volume_expansion_excluded():
+    """價格型態合格但量增（vol_ratio > 1）→ 量縮條件不過 → in_g False。"""
+    price_history = _ma_price_history({"2330": _PULLBACK_CLOSES, "2454": _EXTENDED_CLOSES})
+    results = {"g_growth_pullback": _g_screener({"2330": 149.0, "2454": 179.0})}
+    volume_history = _flat_volume(["2330", "2454"], {"2330": 2000, "2454": 800})  # 2330 量增
+    _, members = group_stocks(
+        results, price_history, pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2, volume_history=volume_history,
+    )
+    m = {r["stock_id"]: r for r in members.iter_rows(named=True)}
+    assert m["2330"]["in_g_growth_pullback"] is False  # 量比 2.0 > 1.0
+
+
+def test_group_stocks_g_pullback_no_volume_data_excluded():
+    """無 volume_history → vol_ratio=0、量縮無法確認 → in_g False（不亂標）。"""
+    price_history = _ma_price_history({"2330": _PULLBACK_CLOSES, "2454": _EXTENDED_CLOSES})
+    results = {"g_growth_pullback": _g_screener({"2330": 149.0, "2454": 179.0})}
+    _, members = group_stocks(
+        results, price_history, pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    m = {r["stock_id"]: r for r in members.iter_rows(named=True)}
+    assert m["2330"]["in_g_growth_pullback"] is False
+
+
+def test_group_stocks_no_g_column_no_error():
+    """results 無 G key → 不產生 in_g 欄、不報錯。"""
+    results = {
+        "e_growth_momentum": _make_screener_df(["2330", "2454"], [3.5, 2.8], "e_growth_momentum")
+    }
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    assert "in_g_growth_pullback" not in members.columns
+    assert "in_e_growth_momentum" in members.columns
+
+
+def test_group_stocks_ma60_slope_sign_and_null():
+    """漲勢 80 日 → ma60_slope_pct > 0；歷史不足 70 日 → null。"""
+    price_history = _ma_price_history(
+        {"2330": _EXTENDED_CLOSES, "2454": [100.0 + i for i in range(40)]}  # 2454 僅 40 日
+    )
+    results = {"g_growth_pullback": _g_screener({"2330": 179.0, "2454": 139.0})}
+    _, members = group_stocks(
+        results, price_history, pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    m = {r["stock_id"]: r for r in members.iter_rows(named=True)}
+    assert m["2330"]["ma60_slope_pct"] is not None and m["2330"]["ma60_slope_pct"] > 0
+    assert m["2454"]["ma60_slope_pct"] is None  # 40 日 < 60+10

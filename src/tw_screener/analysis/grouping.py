@@ -28,6 +28,16 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
 
 _MOMENTUM_DAYS = 5
 
+# 策略 G（成長拉回）的「拉回 setup」判定門檻；可由 settings.yaml 的 g_pullback 覆蓋。
+# 三者皆硬門檻：季線上揚 + 乖離帶內 + 量縮。
+_DEFAULT_G_PULLBACK: dict[str, float] = {
+    "ma60_band_low": -5.0,      # 乖離帶下界（% 距季線；允許略破季線）
+    "ma60_band_high": 10.0,     # 乖離帶上界（超過＝仍延伸，不算回踩）
+    "ma60_slope_window": 10,    # 季線斜率比較視窗（交易日）
+    "ma60_slope_min_pct": 0.0,  # 季線上揚最低斜率（%）；> 此值才算上揚
+    "vol_ratio_max": 1.0,       # 量縮門檻（今日量 / 20 日均量 ≤ 此值）
+}
+
 
 def is_etf_or_warrant(stock_id: str) -> bool:
     """Return True if stock_id is an ETF, structured product, or warrant (should skip analysis).
@@ -62,13 +72,21 @@ def _compute_ma_dist(
     price_history: pl.DataFrame,
     stock_df: pl.DataFrame,
     windows: tuple[int, ...] = (20, 60),
+    slope_window: int = 10,
+    slope_for: int = 60,
 ) -> pl.DataFrame:
-    """Compute MA distance % from latest close per stock.
+    """Compute MA distance % from latest close per stock, plus MA{slope_for} slope %.
 
-    Returns DataFrame with stock_id + ma{w}_dist_pct columns.
-    Null = insufficient data (< w trading days available).
+    Returns DataFrame with stock_id + ma{w}_dist_pct columns, and (when slope_for is
+    in windows) `ma{slope_for}_slope_pct` = % change of MA{slope_for} vs slope_window
+    trading days ago（季線上揚與否）. Null = insufficient data（< w，或斜率需 w+slope_window 日）.
     """
-    null_cols = [pl.lit(None, dtype=pl.Float64).alias(f"ma{w}_dist_pct") for w in windows]
+    has_slope = slope_for in windows
+    out_cols = [f"ma{w}_dist_pct" for w in windows]
+    if has_slope:
+        out_cols.append(f"ma{slope_for}_slope_pct")
+
+    null_cols = [pl.lit(None, dtype=pl.Float64).alias(c) for c in out_cols]
     if (
         price_history.is_empty()
         or "close" not in price_history.columns
@@ -85,6 +103,17 @@ def _compute_ma_dist(
             pl.col("close").tail(w).mean().alias(f"_ma{w}"),
             pl.col("close").tail(w).count().alias(f"_cnt{w}"),
         ]
+    if has_slope:
+        # MA{slope_for} as of slope_window days ago = mean of the window ending then.
+        # tail(slope_for+slope_window).head(slope_for) selects exactly that older window.
+        agg_exprs += [
+            pl.col("close")
+            .tail(slope_for + slope_window)
+            .head(slope_for)
+            .mean()
+            .alias("_ma_prev"),
+            pl.col("close").count().alias("_cnt_all"),
+        ]
     ma_df = sorted_hist.group_by("stock_id").agg(agg_exprs)
 
     ma_df = ma_df.join(stock_df.select(["stock_id", "close"]), on="stock_id", how="left")
@@ -98,10 +127,25 @@ def _compute_ma_dist(
             .then((pl.col("close") - pl.col(f"_ma{w}")) / pl.col(f"_ma{w}") * 100.0)
             .otherwise(None)
             .alias(f"ma{w}_dist_pct")
-        ).drop([f"_ma{w}", f"_cnt{w}"])
+        )
+
+    if has_slope:
+        ma_df = ma_df.with_columns(
+            pl.when(
+                (pl.col("_cnt_all") >= slope_for + slope_window)
+                & (pl.col("_ma_prev") > 0)
+            )
+            .then(
+                (pl.col(f"_ma{slope_for}") - pl.col("_ma_prev"))
+                / pl.col("_ma_prev")
+                * 100.0
+            )
+            .otherwise(None)
+            .alias(f"ma{slope_for}_slope_pct")
+        )
 
     return stock_df.select("stock_id").join(
-        ma_df.select(["stock_id"] + [f"ma{w}_dist_pct" for w in windows]),
+        ma_df.select(["stock_id"] + out_cols),
         on="stock_id",
         how="left",
     )
@@ -125,6 +169,7 @@ def group_stocks(
     min_group_size: int = 2,
     institutional: pl.DataFrame | None = None,
     volume_history: pl.DataFrame | None = None,
+    g_pullback: dict[str, float] | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
     Group screened stocks by industry and compute group strength scores (動能主導).
@@ -134,6 +179,8 @@ def group_stocks(
         法人買超家數比（inst_net > 0 的家數 / 成員數）。未提供 → inst_net = 0、inst_score = 0。
     volume_history: 含 stock_id / date / trade_volume；提供時計算量比
         （今日量 / 近 n 日均量）。未提供 → vol_ratio = 0。
+    g_pullback: 策略 G 的拉回 setup 門檻（見 _DEFAULT_G_PULLBACK）；若 screener 含
+        in_g_growth_pullback，G 的有效命中會被收斂為「基本面命中 ∧ 季線上揚 ∧ 乖離帶內 ∧ 量縮」。
 
     Returns (groups_df, enriched_stocks_df):
     - groups_df: industry-level stats sorted by score desc (filtered by min_group_size)
@@ -195,12 +242,6 @@ def group_stocks(
 
     stock_df = pl.DataFrame(list(stock_rows.values()))
 
-    # strategy_count = sum of all in_{sid} flags
-    strategy_count_expr: pl.Expr = pl.lit(0, dtype=pl.Int32)
-    for sid in strategy_ids:
-        strategy_count_expr = strategy_count_expr + pl.col(f"in_{sid}").cast(pl.Int32)
-    stock_df = stock_df.with_columns(strategy_count_expr.alias("strategy_count"))
-
     # 5-day momentum: prefer price_history; fallback to change_pct
     stock_ids = stock_df["stock_id"].to_list()
     momentum_map = compute_n_day_return(stock_ids, price_history, n=_MOMENTUM_DAYS)
@@ -246,8 +287,11 @@ def group_stocks(
     else:
         stock_df = stock_df.with_columns([pl.lit(0.0).alias(c) for c in _inst_cols])
 
-    # MA20 / MA60 距離（% 偏離最新收盤價）—— 需 ≥ w 個歷史日才輸出有效值；不足則 null
-    ma_dist_df = _compute_ma_dist(price_history, stock_df)
+    # MA20 / MA60 距離 + MA60 斜率（% 偏離最新收盤價 / 季線上揚率）—— 不足則 null
+    g_params = {**_DEFAULT_G_PULLBACK, **(g_pullback or {})}
+    ma_dist_df = _compute_ma_dist(
+        price_history, stock_df, slope_window=int(g_params["ma60_slope_window"])
+    )
     stock_df = stock_df.join(ma_dist_df, on="stock_id", how="left")
 
     # 量比（今日量 / 近 N 日均量）—— 需 ≥ 3 個歷史日才輸出有效值
@@ -289,6 +333,36 @@ def group_stocks(
         )
     else:
         stock_df = stock_df.with_columns(pl.lit(0.0).alias("vol_ratio"))
+
+    # 策略 G 有效命中 = 基本面命中 ∧ 拉回 setup（季線上揚 + 乖離帶內 + 量縮）。
+    # 把 in_g_growth_pullback 從「成長宇宙」收斂成「回踩季線的成長股」；無 G 欄則略過。
+    if "in_g_growth_pullback" in stock_df.columns:
+        has_slope_col = "ma60_slope_pct" in stock_df.columns
+        slope_ok = (
+            (pl.col("ma60_slope_pct") > g_params["ma60_slope_min_pct"])
+            if has_slope_col
+            else pl.lit(False)
+        )
+        pullback_setup = (
+            slope_ok
+            & pl.col("ma60_dist_pct").is_not_null()
+            & pl.col("ma60_dist_pct").is_between(
+                g_params["ma60_band_low"], g_params["ma60_band_high"]
+            )
+            & (pl.col("vol_ratio") > 0)
+            & (pl.col("vol_ratio") <= g_params["vol_ratio_max"])
+        )
+        stock_df = stock_df.with_columns(
+            (pl.col("in_g_growth_pullback") & pullback_setup.fill_null(False)).alias(
+                "in_g_growth_pullback"
+            )
+        )
+
+    # strategy_count = sum of all in_{sid} flags（在 G 收斂後計算，反映有效命中）
+    strategy_count_expr: pl.Expr = pl.lit(0, dtype=pl.Int32)
+    for sid in strategy_ids:
+        strategy_count_expr = strategy_count_expr + pl.col(f"in_{sid}").cast(pl.Int32)
+    stock_df = stock_df.with_columns(strategy_count_expr.alias("strategy_count"))
 
     # Join with industry classification
     if industry_df is not None and not industry_df.is_empty():

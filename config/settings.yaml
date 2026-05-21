@@ -45,3 +45,11 @@ group_analysis:
   top_groups: 10
   top_stocks: 10
   dividend_lookahead_days: 14   # 除權息前瞻窗（日曆日，約 10 交易日）
+
+# 策略 G（成長拉回）的拉回 setup 門檻；G 有效命中 = 基本面命中 ∧ 三者全中
+g_pullback:
+  ma60_band_low: -5.0        # 乖離帶下界（% 距季線；允許略破季線）
+  ma60_band_high: 10.0       # 乖離帶上界（超過＝仍延伸、不算回踩）
+  ma60_slope_window: 10      # 季線斜率比較視窗（交易日）
+  ma60_slope_min_pct: 0.0    # 季線上揚最低斜率（%）；> 此值才算上揚
+  vol_ratio_max: 1.0         # 量縮門檻（今日量 / 20 日均量 ≤ 此值）

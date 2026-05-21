@@ -43,6 +43,26 @@ def test_load_strategy_filter_no_period():
     assert s.filters[0].period is None
 
 
+def test_load_strategy_g_growth_pullback_empty_rules():
+    """G 策略：3 個基本面 filter、rules 為空（拉回 timing 在分析層），schema 通過。"""
+    s = load_strategy(Path("config/strategies/g_growth_pullback.yaml"))
+    assert s.id == "g_growth_pullback"
+    assert s.name == "成長拉回"
+    assert len(s.filters) == 3
+    assert s.rules == []  # 不放技術 rule
+    # 與 E 相同的三個基本面 item
+    items = {f.item for f in s.filters}
+    assert "市值 (億元)" in items
+    assert "累計月營收年增減率(%)" in items
+
+
+def test_build_url_empty_rules_no_fl_rule():
+    """rules 為空時不產生任何 FL_RULE 參數。"""
+    s = load_strategy(Path("config/strategies/g_growth_pullback.yaml"))
+    url = build_screener_url(s, BASE_URL)
+    assert "FL_RULE0" not in unquote(url)
+
+
 def test_load_strategy_filter_min():
     s = load_strategy(STRATEGY_PATH)
     assert s.filters[0].min == 15000

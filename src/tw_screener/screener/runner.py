@@ -22,6 +22,7 @@ from tw_screener.screener.log_writer import write_screen_log
 _GROUP_PREFIX: dict[str, set[str]] = {
     "abc": {"a", "b", "c"},
     "def": {"d", "e", "f"},
+    "defg": {"d", "e", "f", "g"},  # 現行主流程：D/E/F + G（成長拉回）
 }
 
 
