@@ -581,12 +581,19 @@ def _flat_volume(stock_ids: list[str], today_vol: dict[str, int]) -> pl.DataFram
     )
 
 
+def _eg_results(close_map: dict[str, float]) -> dict:
+    """同一批股同時掛 E 與 G：in_e 恆 True → strategy_count≥1 → 不被雜訊過濾丟掉，
+    可獨立驗證 G 的拉回收斂（dict key 決定 in_{sid}，strategy_id 欄不影響）。"""
+    df = _g_screener(close_map)
+    return {"e_growth_momentum": df, "g_growth_pullback": df}
+
+
 def test_group_stocks_g_pullback_keeps_valid_setup():
     """三條件全中（季線上揚 + 乖離帶內 + 量縮）→ in_g 留 True；延伸股 → False。"""
     price_history = _ma_price_history(
         {"2330": _PULLBACK_CLOSES, "2454": _EXTENDED_CLOSES}
     )
-    results = {"g_growth_pullback": _g_screener({"2330": 149.0, "2454": 179.0})}
+    results = _eg_results({"2330": 149.0, "2454": 179.0})  # 同掛 E 故不被丟
     volume_history = _flat_volume(["2330", "2454"], {"2330": 800, "2454": 800})
     _, members = group_stocks(
         results,
@@ -604,7 +611,7 @@ def test_group_stocks_g_pullback_keeps_valid_setup():
 def test_group_stocks_g_pullback_volume_expansion_excluded():
     """價格型態合格但量增（vol_ratio > 1）→ 量縮條件不過 → in_g False。"""
     price_history = _ma_price_history({"2330": _PULLBACK_CLOSES, "2454": _EXTENDED_CLOSES})
-    results = {"g_growth_pullback": _g_screener({"2330": 149.0, "2454": 179.0})}
+    results = _eg_results({"2330": 149.0, "2454": 179.0})
     volume_history = _flat_volume(["2330", "2454"], {"2330": 2000, "2454": 800})  # 2330 量增
     _, members = group_stocks(
         results, price_history, pl.DataFrame(),
@@ -617,13 +624,31 @@ def test_group_stocks_g_pullback_volume_expansion_excluded():
 def test_group_stocks_g_pullback_no_volume_data_excluded():
     """無 volume_history → vol_ratio=0、量縮無法確認 → in_g False（不亂標）。"""
     price_history = _ma_price_history({"2330": _PULLBACK_CLOSES, "2454": _EXTENDED_CLOSES})
-    results = {"g_growth_pullback": _g_screener({"2330": 149.0, "2454": 179.0})}
+    results = _eg_results({"2330": 149.0, "2454": 179.0})
     _, members = group_stocks(
         results, price_history, pl.DataFrame(),
         industry_df=_INDUSTRY_DF, min_group_size=2,
     )
     m = {r["stock_id"]: r for r in members.iter_rows(named=True)}
     assert m["2330"]["in_g_growth_pullback"] is False
+
+
+def test_group_stocks_drops_pure_g_universe_noise():
+    """只從 G 宇宙進來、未過拉回、又不在 D/E/F 的股 → strategy_count=0 被丟出成員池。"""
+    # 2330 過拉回（留）、2454 延伸不過（純 G → 丟）、3034 過拉回（留，湊滿 group）
+    price_history = _ma_price_history(
+        {"2330": _PULLBACK_CLOSES, "2454": _EXTENDED_CLOSES, "3034": _PULLBACK_CLOSES}
+    )
+    results = {"g_growth_pullback": _g_screener({"2330": 149.0, "2454": 179.0, "3034": 149.0})}
+    volume_history = _flat_volume(["2330", "2454", "3034"], {"2330": 800, "2454": 800, "3034": 800})
+    _, members = group_stocks(
+        results, price_history, pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2, volume_history=volume_history,
+    )
+    ids = members["stock_id"].to_list()
+    assert "2330" in ids and "3034" in ids   # 有效 G，留下
+    assert "2454" not in ids                  # 純宇宙雜訊，丟出
+    assert (members["strategy_count"] > 0).all()
 
 
 def test_group_stocks_no_g_column_no_error():
@@ -644,7 +669,7 @@ def test_group_stocks_ma60_slope_sign_and_null():
     price_history = _ma_price_history(
         {"2330": _EXTENDED_CLOSES, "2454": [100.0 + i for i in range(40)]}  # 2454 僅 40 日
     )
-    results = {"g_growth_pullback": _g_screener({"2330": 179.0, "2454": 139.0})}
+    results = _eg_results({"2330": 179.0, "2454": 139.0})  # 同掛 E 故不被丟
     _, members = group_stocks(
         results, price_history, pl.DataFrame(),
         industry_df=_INDUSTRY_DF, min_group_size=2,

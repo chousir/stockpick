@@ -27,9 +27,13 @@
 ## 1. 入選分布總覽
 
 {% for sid in active_strategy_ids -%}
-- 策略 {{ strategy_names[sid] }}共 {{ summary.counts.get(sid, 0) }} 檔
+- 策略 {{ strategy_names[sid] }}共 {{ summary.counts.get(sid, 0) }} 檔{% if sid == "g_growth_pullback" %}（有效拉回命中；基本面成長宇宙 {{ g_universe_size }} 檔）{% endif %}
+
 {% endfor -%}
-- 三組總聯集：{{ summary.total_union }} 檔（去重後）
+- 總聯集：{{ summary.total_union }} 檔（去重後，僅含有效策略命中股）
+{% if "g_growth_pullback" in active_strategy_ids -%}
+> 註：策略 G 的「共 N 檔」為通過拉回過濾（季線上揚＋乖離帶＋量縮）的**有效命中**；G 的 CSV 是較大的基本面成長宇宙（{{ g_universe_size }} 檔），**真正拉回候選以本報告標 G 者為準**，勿直接把 G 的 CSV 當拉回清單。
+{% endif -%}
 {% for key, stocks in summary.intersections.items() -%}
 {% if stocks -%}
 - {{ key }}：{{ stocks | length }} 檔{% if stocks | length <= 5 %}（{{ stocks | join("、") }}）{% endif %}

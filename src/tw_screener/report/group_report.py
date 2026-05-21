@@ -142,7 +142,21 @@ def _build_context(
     active_strategy_ids = [sid for sid in strategy_ids if len(screener_results.get(sid, [])) > 0]
 
     # --- summary ---
-    counts: dict[str, int] = {sid: len(df) for sid, df in screener_results.items()}
+    # 「共 N 檔」採有效命中數（分析池內 in_{sid}=True）。對 D/E/F 等於其 CSV 命中；
+    # 對 G 則為「過拉回過濾後的有效命中」（其 CSV 是較大的基本面成長宇宙）。
+    if not members.is_empty():
+        counts: dict[str, int] = {
+            sid: (
+                int(members.select(pl.col(f"in_{sid}").sum()).item() or 0)
+                if f"in_{sid}" in members.columns
+                else len(screener_results.get(sid, []))
+            )
+            for sid in strategy_ids
+        }
+    else:
+        counts = {sid: len(df) for sid, df in screener_results.items()}
+    # G 的原始基本面宇宙大小（CSV 列數），供 Section 1 註解對照
+    g_universe_size = len(screener_results.get("g_growth_pullback", []))
     total_union = len(members) if not members.is_empty() else 0
 
     intersections: dict[str, list[str]] = {}
@@ -324,6 +338,7 @@ def _build_context(
         },
         "strategy_legend": strategy_legend,
         "summary": summary,
+        "g_universe_size": g_universe_size,
         "groups": group_list,
         "top_groups": top_groups,
         "priority_stocks": priority_rows,

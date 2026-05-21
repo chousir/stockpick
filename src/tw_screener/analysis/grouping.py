@@ -364,6 +364,13 @@ def group_stocks(
         strategy_count_expr = strategy_count_expr + pl.col(f"in_{sid}").cast(pl.Int32)
     stock_df = stock_df.with_columns(strategy_count_expr.alias("strategy_count"))
 
+    # 丟掉「無任何有效策略命中」的成員：這些股只從 G 的基本面宇宙進來、未通過拉回
+    # 過濾、又不在 D/E/F，留著會灌大族群成員數/入選率/廣度，污染強度排名。
+    dropped_noise = int((stock_df["strategy_count"] == 0).sum())
+    if dropped_noise:
+        stock_df = stock_df.filter(pl.col("strategy_count") > 0)
+        logger.info("group_stocks: 排除 {} 檔無有效策略命中的宇宙雜訊（多為 G 未過濾股）", dropped_noise)
+
     # Join with industry classification
     if industry_df is not None and not industry_df.is_empty():
         stock_df = stock_df.join(
