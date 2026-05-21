@@ -81,6 +81,8 @@ def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> d
     days_used = int(srow.get("momentum_days_used", 0) or 0)
     rank_in_group = int(srow.get("rank_in_group", 0) or 0)
     inst_net_lots = float(srow.get("inst_net", 0) or 0) / 1000.0  # 股 → 張
+    foreign_lots = float(srow.get("foreign_net", 0) or 0) / 1000.0  # 外資
+    trust_lots = float(srow.get("trust_net", 0) or 0) / 1000.0  # 投信
     return {
         "stock_id": srow["stock_id"],
         "name": srow["name"],
@@ -98,6 +100,8 @@ def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> d
         "is_top_in_group": rank_in_group == 1,
         "inst_net_lots": inst_net_lots,
         "inst_net_str": f"{inst_net_lots:+,.0f}",
+        "foreign_net_str": f"{foreign_lots:+,.0f}",
+        "trust_net_str": f"{trust_lots:+,.0f}",
         "goodinfo_url": str(srow.get("goodinfo_url", "")),
         "group_size": group_size,
     }

@@ -304,7 +304,7 @@ def test_group_stocks_inst_score_is_buy_breadth():
 
 
 def test_group_stocks_no_institutional_inst_score_zero():
-    """未提供法人資料 → inst_score = 0、inst_net = 0（不破壞）。"""
+    """未提供法人資料 → inst_score = 0、inst_net/foreign_net/trust_net = 0（不破壞）。"""
     results = {
         "a_breakout": _make_screener_df(["2330", "2454"], [3.0, 2.0], "a_breakout")
     }
@@ -312,7 +312,44 @@ def test_group_stocks_no_institutional_inst_score_zero():
         results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2
     )
     assert groups.filter(pl.col("industry_code") == "24")["inst_score"][0] == 0.0
-    assert all(r["inst_net"] == 0.0 for r in members.iter_rows(named=True))
+    for r in members.iter_rows(named=True):
+        assert r["inst_net"] == 0.0
+        assert r["foreign_net"] == 0.0
+        assert r["trust_net"] == 0.0
+
+
+def test_group_stocks_splits_foreign_and_trust():
+    """外資/投信各自近 N 日合計帶入個股；inst_net 仍為三大法人總和。"""
+    from datetime import date
+
+    results = {
+        "a_breakout": _make_screener_df(["2330", "2454"], [3.0, 2.0], "a_breakout")
+    }
+    institutional = pl.DataFrame(
+        {
+            "date": [date(2026, 5, 19), date(2026, 5, 19)],
+            "stock_id": ["2330", "2454"],
+            "stock_name": ["A", "B"],
+            "foreign_net": [1000, -300],
+            "trust_net": [200, 50],
+            "dealer_net": [-100, 10],
+            "total_net": [1100, -240],
+        }
+    )
+    _, members = group_stocks(
+        results,
+        pl.DataFrame(),
+        pl.DataFrame(),
+        industry_df=_INDUSTRY_DF,
+        min_group_size=2,
+        institutional=institutional,
+    )
+    m = {r["stock_id"]: r for r in members.iter_rows(named=True)}
+    assert m["2330"]["inst_net"] == pytest.approx(1100.0)
+    assert m["2330"]["foreign_net"] == pytest.approx(1000.0)
+    assert m["2330"]["trust_net"] == pytest.approx(200.0)
+    assert m["2454"]["foreign_net"] == pytest.approx(-300.0)
+    assert m["2454"]["trust_net"] == pytest.approx(50.0)
 
 
 # ─── _compute_rs_from_history（back-compat wrapper）─────────────────────────

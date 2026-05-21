@@ -9,7 +9,7 @@
 {% endfor %}
 > 標籤 {% for s in strategy_legend %}`[{{ s.label }}]`{% if not loop.last %} {% endif %}{% endfor %} 代表命中策略；同檔多策略以 `+` 連接（如 `{{ strategy_legend[0].label }}+{{ strategy_legend[-1].label }}`）。
 > 漲幅顯示「5 日累計報酬」（標 `*` 代表本地快取資料不足 5 日）。
-> 「法人(張)」為近 20 日三大法人買賣超合計（1 張 = 1000 股，正為買超、負為賣超）。
+> 「法人(張)」為近 20 日三大法人買賣超合計（1 張 = 1000 股，正為買超、負為賣超）；「外資(張)」「投信(張)」為其中外資、投信部分（自營＝法人−外資−投信，未另列）。
 
 ## 1. 入選分布總覽
 
@@ -41,10 +41,10 @@
 
 本週族群表現前 {{ group.top_stocks | length }} 名：
 
-| # | 股號 | 名稱 | 5 日漲幅 | 當日 | 成交金額（百萬） | 法人(張) | 命中策略 | Goodinfo |
-|---|---|---|---|---|---|---|---|---|
+| # | 股號 | 名稱 | 5 日漲幅 | 當日 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 命中策略 | Goodinfo |
+|---|---|---|---|---|---|---|---|---|---|---|
 {% for stock in group.top_stocks -%}
-| {{ stock.rank_in_group }} | {{ stock.stock_id }} | {{ stock.name }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.strategy_str }} | [連結]({{ stock.goodinfo_url }}) |
+| {{ stock.rank_in_group }} | {{ stock.stock_id }} | {{ stock.name }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.foreign_net_str }} | {{ stock.trust_net_str }} | {{ stock.strategy_str }} | [連結]({{ stock.goodinfo_url }}) |
 {% endfor %}
 {% if group.rest_stocks -%}
 
@@ -74,16 +74,16 @@
 >
 > 1. **細分實際族群 / 概念**：TWSE 大分類太粗，請先**逐檔標出所屬次產業 / 概念**，再判斷本族群目前哪個次產業最強、有無跨次產業輪動。次產業錨點（擇用）：AI 伺服器、矽光子 CPO、被動元件、晶圓代工、IC 設計、封測、記憶體、設備材料、鏡頭模組 vs AOI 檢測設備、面板、網通設備 vs 電信三雄、重電 / 綠能。（例：通信網路業同時含 CPO / 砷化鎵與電信三雄，動能與籌碼天差地遠，不可混為一談。）
 > 2. **族群輪動訊號**：觀察各族群 5 日中位、上漲家數(breadth)、法人買超家數比、入選率、領先個股漲幅，判斷是否有族群輪動（換手）跡象。
-> 3. **漲幅領先個股的合理性檢查**：評估每族群排名前 3 個股，用表中「法人(張)」欄（近 20 日三大法人淨買賣超）判斷漲勢有無籌碼支撐——**漲多但法人賣超＝假突破警訊**；對照成交金額看量能。
+> 3. **漲幅領先個股的合理性檢查**：評估每族群排名前 3 個股，用表中「法人(張)」（近 20 日三大法人淨買賣超）判斷漲勢有無籌碼支撐——**漲多但法人賣超＝假突破警訊**；再看「外資(張) vs 投信(張)」分辨**外資趨勢布局 vs 投信短打/作帳**，兩者背離時留意；對照成交金額看量能。
 > 4. **個股簡評**：針對每檔個股，以一句話點出關鍵看法（利多/利空/需觀察的理由）。
 
 {% for group in claude_groups %}
 ### 族群 {{ loop.index }}：{{ group.industry_name }}（強度分數 {{ group.score_str }}、5 日中位 {{ group.momentum_5d_str }}、上漲 {{ group.breadth_str }}、族群入選率 {{ group.entry_rate_pct_str }}）
 
-| 股票代號 | 名稱 | 5 日漲幅 | 當日 | 成交金額（百萬） | 法人(張) | 入選策略 | 族群內排名 | Goodinfo |
-|---|---|---|---|---|---|---|---|---|
+| 股票代號 | 名稱 | 5 日漲幅 | 當日 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 入選策略 | 族群內排名 | Goodinfo |
+|---|---|---|---|---|---|---|---|---|---|---|
 {% for stock in group.stocks -%}
-| {{ stock.stock_id }} | {{ stock.name }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.strategy_str }} | #{{ stock.rank_in_group }} | [連結]({{ stock.goodinfo_url }}) |
+| {{ stock.stock_id }} | {{ stock.name }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.foreign_net_str }} | {{ stock.trust_net_str }} | {{ stock.strategy_str }} | #{{ stock.rank_in_group }} | [連結]({{ stock.goodinfo_url }}) |
 {% endfor %}
 
 {% endfor %}

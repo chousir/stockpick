@@ -89,7 +89,7 @@ def group_stocks(
               entry_rate / momentum_5d（族群中位數）/ up_count / momentum_5d_days_used /
               rs_avg(alias) / inst_buy_count / inst_score / count_{sid} / score
     - enriched_stocks_df: per-stock data with industry, rs (= n_day_return), strategy flags,
-        momentum_5d, momentum_days_used, inst_net
+        momentum_5d, momentum_days_used, inst_net（三大法人總和）, foreign_net（外資）, trust_net（投信）
     """
     if weights is None:
         weights = _DEFAULT_WEIGHTS
@@ -171,20 +171,28 @@ def group_stocks(
         ]
     )
 
-    # 法人淨買超：近 N 日 total_net 合計 → 個股層 inst_net（只算一次，下游共用）
+    # 法人淨買超：近 N 日合計 → inst_net（三大法人總和）/ foreign_net（外資）/
+    # trust_net（投信）。只算一次，下游共用。自營＝inst_net−foreign_net−trust_net 可推得，不另存。
+    _inst_cols = ("inst_net", "foreign_net", "trust_net")
     if (
         institutional is not None
         and not institutional.is_empty()
-        and {"stock_id", "total_net"}.issubset(institutional.columns)
+        and {"stock_id", "total_net", "foreign_net", "trust_net"}.issubset(
+            institutional.columns
+        )
     ):
         inst_agg = institutional.group_by("stock_id").agg(
-            pl.col("total_net").sum().alias("inst_net")
+            [
+                pl.col("total_net").sum().alias("inst_net"),
+                pl.col("foreign_net").sum().alias("foreign_net"),
+                pl.col("trust_net").sum().alias("trust_net"),
+            ]
         )
         stock_df = stock_df.join(inst_agg, on="stock_id", how="left").with_columns(
-            pl.col("inst_net").fill_null(0.0).cast(pl.Float64)
+            [pl.col(c).fill_null(0.0).cast(pl.Float64) for c in _inst_cols]
         )
     else:
-        stock_df = stock_df.with_columns(pl.lit(0.0).alias("inst_net"))
+        stock_df = stock_df.with_columns([pl.lit(0.0).alias(c) for c in _inst_cols])
 
     # Join with industry classification
     if industry_df is not None and not industry_df.is_empty():
