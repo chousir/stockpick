@@ -1,6 +1,6 @@
 # 11 — ProPicks 風格全清單分析（Phase 1 手動流程）
 
-> 本檔是「跑完 `make week GROUP=abc/def` 後，怎麼產出 ProPicks 風格進場
+> 本檔是「跑完 `make week GROUP=defg` 後，怎麼產出 ProPicks 風格進場
 > 清單」的標準流程。手動把資料丟給 Claude Opus，**零代碼成本**。
 >
 > Phase 2（自動化為 `make picks`）等本流程穩定後再做。
@@ -28,17 +28,18 @@
 
 ### Step A：取得 4 份輸入檔
 
-跑完 `make week GROUP=def`（或 `=abc`）後：
+跑完 `make week GROUP=defg`（主流程）後：
 
 ```
 reports/YYYY-Www/
   ├─ group_analysis.md               ← 族群脈絡
   ├─ screen_result_d_quality_leader.csv    ← D 全部入選
   ├─ screen_result_e_growth_momentum.csv   ← E 全部入選
-  └─ screen_result_f_value_rebound.csv     ← F 全部入選
+  ├─ screen_result_f_value_rebound.csv     ← F 全部入選
+  └─ screen_result_g_growth_pullback.csv   ← G 全部入選（成長宇宙；有效拉回命中見 group_analysis.md）
 ```
 
-（跑 GROUP=abc 則對應 a/b/c 三個 CSV）
+（跑 legacy `GROUP=abc` 則對應 a/b/c 三個 CSV）
 
 ### Step B：開 Claude Opus 對話
 
