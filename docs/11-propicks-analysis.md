@@ -26,7 +26,7 @@
 
 ## 流程
 
-### Step A：取得 4 份輸入檔
+### Step A：取得 5 份輸入檔（group_analysis.md + 4 個 CSV）
 
 跑完 `make week GROUP=defg`（主流程）後：
 
@@ -45,9 +45,9 @@ reports/YYYY-Www/
 
 到 [claude.ai](https://claude.ai)，選 **Claude Opus**（最強模型，這步值得用）。
 
-### Step C：依序貼入 4 份檔案內容
+### Step C：依序貼入 5 份檔案內容
 
-順序：先 prompt → 再 group_analysis.md → 再 3 個 CSV。
+順序：先 prompt → 再 group_analysis.md → 再 4 個 CSV（D/E/F/G）。
 
 ### Step D：等 Claude 回覆，存到本週目錄
 
@@ -78,7 +78,8 @@ reports/YYYY-Www/picks.md
 
 > 注意：CSV 是「全部入選」（每組可能 30-100 檔），
 > group_analysis.md 是「彙整與排名」。
-> **請以 CSV 為「候選宇宙」，group_analysis.md 為「族群脈絡」**。
+> **D/E/F：以 CSV 為「候選宇宙」，group_analysis.md 為「族群脈絡」**。
+> **G 例外**：G 的 CSV 是基本面宇宙，拉回候選只看 group_analysis.md 標 G 者（見上方 ⚠️）。
 
 ## 任務
 
@@ -154,7 +155,7 @@ make week GROUP=defg
 # 3. 接著貼 group_analysis.md 內容
 cat reports/$(date +%Y-W%V)/group_analysis.md  # 全選複製貼上
 
-# 4. 接著貼 3 個 CSV 內容
+# 4. 接著貼 4 個 CSV 內容（D/E/F/G）
 cat reports/$(date +%Y-W%V)/screen_result_*.csv  # 全選複製貼上
 
 # 5. Claude 回覆 → 存到 picks.md
@@ -188,5 +189,5 @@ cat reports/$(date +%Y-W%V)/screen_result_*.csv  # 全選複製貼上
 **居安思危**的核心：危險期大家都跌時，少數逆勢上漲的標的常常是下一個
 領漲。Top 10 機械排名抓不到這種 setup，需要 AI 用全清單去看才能挑出來。
 
-D/E/F 篩選本身（hard filter）已經把 1800 檔濾到 ~30-100 檔（每組），
-**這個 universe 才是 Claude 該看的全貌**，而非 top 10 的窄窗。
+D/E/F/G 篩選本身（hard filter）已經把 1800 檔濾到 ~20-100 檔（每組；G 另以季線
+拉回過濾），**這個 universe 才是 Claude 該看的全貌**，而非 top 10 的窄窗。
