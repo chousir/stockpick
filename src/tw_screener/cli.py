@@ -419,7 +419,7 @@ def analysis_group(
                 seen.add(sid)
                 candidate_ids.append(sid)
 
-    price_history = client.load_candidate_history(candidate_ids, n_days=60)
+    price_history = client.load_candidate_history(candidate_ids, n_days=90)
     if price_history.is_empty():
         console.print(
             "[yellow]  無 stock_day / daily 快取，5 日動能將 fallback 到當日漲跌幅[/yellow]"

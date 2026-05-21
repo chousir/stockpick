@@ -464,3 +464,62 @@ def test_group_stocks_vol_ratio_insufficient_data():
     row = members.filter(pl.col("stock_id") == "2330").to_dicts()[0]
     # prior = 2 days only → below threshold → vol_ratio = 0
     assert row["vol_ratio"] == pytest.approx(0.0)
+
+
+# ─── MA 距離計算 ──────────────────────────────────────────────────────────────
+
+
+def _make_price_history(stock_id: str, closes: list[float]) -> pl.DataFrame:
+    from datetime import date
+    n = len(closes)
+    return pl.DataFrame({
+        "stock_id": [stock_id] * n,
+        "date": [date(2026, 1, i + 1) for i in range(n)],
+        "close": closes,
+    })
+
+
+def test_group_stocks_ma20_correct():
+    """提供 25 日歷史 → ma20_dist_pct 正確（最後 20 日均價）。"""
+    closes = [100.0] * 20 + [110.0, 110.0, 110.0, 110.0, 110.0]  # 25 日
+    price_history = _make_price_history("2330", closes)
+    results = {
+        "a_breakout": _make_screener_df(["2330", "2454"], [3.5, 2.8], "a_breakout")
+    }
+    _, members = group_stocks(
+        results, price_history, pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    row = members.filter(pl.col("stock_id") == "2330").to_dicts()[0]
+    # 最後 20 日：15 日 100 + 5 日 110 → ma20 = (15*100 + 5*110) / 20 = 102.5
+    # close (from screener_df) = 100.0 → dist = (100-102.5)/102.5 * 100 ≈ -2.44%
+    assert row["ma20_dist_pct"] == pytest.approx((100.0 - 102.5) / 102.5 * 100, rel=1e-3)
+
+
+def test_group_stocks_ma60_none_when_insufficient():
+    """不足 60 日歷史 → ma60_dist_pct 為 None（顯示 '-'）。"""
+    closes = [100.0] * 30  # only 30 days
+    price_history = _make_price_history("2330", closes)
+    results = {
+        "a_breakout": _make_screener_df(["2330", "2454"], [3.5, 2.8], "a_breakout")
+    }
+    _, members = group_stocks(
+        results, price_history, pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    row = members.filter(pl.col("stock_id") == "2330").to_dicts()[0]
+    assert row["ma60_dist_pct"] is None
+
+
+def test_group_stocks_ma_no_history():
+    """未提供 price_history → ma20/ma60 均為 None，不破壞現有流程。"""
+    results = {
+        "a_breakout": _make_screener_df(["2330", "2454"], [3.5, 2.8], "a_breakout")
+    }
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    for r in members.iter_rows(named=True):
+        assert r["ma20_dist_pct"] is None
+        assert r["ma60_dist_pct"] is None

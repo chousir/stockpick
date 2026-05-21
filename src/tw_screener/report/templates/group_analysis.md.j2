@@ -11,6 +11,7 @@
 > 漲幅顯示「5 日累計報酬」（標 `*` 代表本地快取資料不足 5 日）。
 > 「法人(張)」為近 20 日三大法人買賣超合計（1 張 = 1000 股，正為買超、負為賣超）；「外資(張)」「投信(張)」為其中外資、投信部分（自營＝法人−外資−投信，未另列）。
 > 「量比」為當日成交量 / 近 20 日均量（`-` = 資料不足或無快取）；> 1 代表量能放大，< 1 代表量縮。
+> 「距月線/季線」為收盤價相對 MA20/MA60 的偏離百分比（正 = 站上、負 = 跌破；`-` = 歷史不足）。
 
 ## 1. 入選分布總覽
 
@@ -42,10 +43,10 @@
 
 本週族群表現前 {{ group.top_stocks | length }} 名：
 
-| # | 股號 | 名稱 | 5 日漲幅 | 當日 | 量比 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 命中策略 | Goodinfo |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+| # | 股號 | 名稱 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 命中策略 | Goodinfo |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for stock in group.top_stocks -%}
-| {{ stock.rank_in_group }} | {{ stock.stock_id }} | {{ stock.name }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ stock.vol_ratio_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.foreign_net_str }} | {{ stock.trust_net_str }} | {{ stock.strategy_str }} | [連結]({{ stock.goodinfo_url }}) |
+| {{ stock.rank_in_group }} | {{ stock.stock_id }} | {{ stock.name }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ stock.vol_ratio_str }} | {{ stock.ma20_str }} | {{ stock.ma60_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.foreign_net_str }} | {{ stock.trust_net_str }} | {{ stock.strategy_str }} | [連結]({{ stock.goodinfo_url }}) |
 {% endfor %}
 {% if group.rest_stocks -%}
 
@@ -81,10 +82,10 @@
 {% for group in claude_groups %}
 ### 族群 {{ loop.index }}：{{ group.industry_name }}（強度分數 {{ group.score_str }}、5 日中位 {{ group.momentum_5d_str }}、上漲 {{ group.breadth_str }}、族群入選率 {{ group.entry_rate_pct_str }}）
 
-| 股票代號 | 名稱 | 5 日漲幅 | 當日 | 量比 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 入選策略 | 族群內排名 | Goodinfo |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+| 股票代號 | 名稱 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 入選策略 | 族群內排名 | Goodinfo |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for stock in group.stocks -%}
-| {{ stock.stock_id }} | {{ stock.name }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ stock.vol_ratio_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.foreign_net_str }} | {{ stock.trust_net_str }} | {{ stock.strategy_str }} | #{{ stock.rank_in_group }} | [連結]({{ stock.goodinfo_url }}) |
+| {{ stock.stock_id }} | {{ stock.name }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ stock.vol_ratio_str }} | {{ stock.ma20_str }} | {{ stock.ma60_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.foreign_net_str }} | {{ stock.trust_net_str }} | {{ stock.strategy_str }} | #{{ stock.rank_in_group }} | [連結]({{ stock.goodinfo_url }}) |
 {% endfor %}
 
 {% endfor %}

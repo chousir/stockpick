@@ -58,6 +58,55 @@ def _compute_rs_from_history(
     return {sid: ret for sid, (ret, _days) in momentum_map.items()}
 
 
+def _compute_ma_dist(
+    price_history: pl.DataFrame,
+    stock_df: pl.DataFrame,
+    windows: tuple[int, ...] = (20, 60),
+) -> pl.DataFrame:
+    """Compute MA distance % from latest close per stock.
+
+    Returns DataFrame with stock_id + ma{w}_dist_pct columns.
+    Null = insufficient data (< w trading days available).
+    """
+    null_cols = [pl.lit(None, dtype=pl.Float64).alias(f"ma{w}_dist_pct") for w in windows]
+    if (
+        price_history.is_empty()
+        or "close" not in price_history.columns
+        or "stock_id" not in price_history.columns
+    ):
+        return stock_df.select("stock_id").with_columns(null_cols)
+
+    # Pre-sort so tail(w) inside each group = most-recent w closes
+    sorted_hist = price_history.drop_nulls("close").sort(["stock_id", "date"])
+
+    agg_exprs: list[pl.Expr] = []
+    for w in windows:
+        agg_exprs += [
+            pl.col("close").tail(w).mean().alias(f"_ma{w}"),
+            pl.col("close").tail(w).count().alias(f"_cnt{w}"),
+        ]
+    ma_df = sorted_hist.group_by("stock_id").agg(agg_exprs)
+
+    ma_df = ma_df.join(stock_df.select(["stock_id", "close"]), on="stock_id", how="left")
+    for w in windows:
+        ma_df = ma_df.with_columns(
+            pl.when(
+                (pl.col(f"_cnt{w}") >= w)
+                & (pl.col(f"_ma{w}") > 0)
+                & pl.col("close").is_not_null()
+            )
+            .then((pl.col("close") - pl.col(f"_ma{w}")) / pl.col(f"_ma{w}") * 100.0)
+            .otherwise(None)
+            .alias(f"ma{w}_dist_pct")
+        ).drop([f"_ma{w}", f"_cnt{w}"])
+
+    return stock_df.select("stock_id").join(
+        ma_df.select(["stock_id"] + [f"ma{w}_dist_pct" for w in windows]),
+        on="stock_id",
+        how="left",
+    )
+
+
 def _sigmoid(x: float) -> float:
     """logistic sigmoid; saturates to [0, 1]."""
     if x >= 0:
@@ -196,6 +245,10 @@ def group_stocks(
         )
     else:
         stock_df = stock_df.with_columns([pl.lit(0.0).alias(c) for c in _inst_cols])
+
+    # MA20 / MA60 距離（% 偏離最新收盤價）—— 需 ≥ w 個歷史日才輸出有效值；不足則 null
+    ma_dist_df = _compute_ma_dist(price_history, stock_df)
+    stock_df = stock_df.join(ma_dist_df, on="stock_id", how="left")
 
     # 量比（今日量 / 近 N 日均量）—— 需 ≥ 3 個歷史日才輸出有效值
     if (

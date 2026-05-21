@@ -85,6 +85,15 @@ def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> d
     trust_lots = float(srow.get("trust_net", 0) or 0) / 1000.0  # 投信
     vol_ratio = float(srow.get("vol_ratio", 0) or 0)
     vol_ratio_str = f"{vol_ratio:.1f}x" if vol_ratio > 0 else "-"
+
+    def _ma_str(key: str) -> str:
+        v = srow.get(key)
+        if v is None or (isinstance(v, float) and v != v):  # None or NaN
+            return "-"
+        return f"{v:+.1f}%"
+
+    ma20_str = _ma_str("ma20_dist_pct")
+    ma60_str = _ma_str("ma60_dist_pct")
     return {
         "stock_id": srow["stock_id"],
         "name": srow["name"],
@@ -106,6 +115,8 @@ def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> d
         "trust_net_str": f"{trust_lots:+,.0f}",
         "vol_ratio": vol_ratio,
         "vol_ratio_str": vol_ratio_str,
+        "ma20_str": ma20_str,
+        "ma60_str": ma60_str,
         "goodinfo_url": str(srow.get("goodinfo_url", "")),
         "group_size": group_size,
     }
