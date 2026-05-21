@@ -309,22 +309,23 @@ rules: []   # 刻意不放均線 rule；拉回 timing 在分析層做
 
 ## GROUP 機制
 
-`make week` 強制要求 `GROUP=abc` 或 `GROUP=def`，無預設值。
+`make week` 強制要求 `GROUP`，無預設值。**現行主流程是 `GROUP=defg`**。
 
 ```bash
-make week GROUP=abc        # 跑 A/B/C 經典三角
-make week GROUP=def        # 跑 D/E/F ProPicks 復刻組
-make week                  # ❌ 報錯：請指定 GROUP=abc 或 GROUP=def
-make weekend GROUP=abc     # 含 commit/push
-make screen-all GROUP=def  # 只跑 screen-all 部分
+make week GROUP=defg       # ★ 主流程：D/E/F/G（含成長拉回 G）
+make week GROUP=def        # D/E/F（不含 G）
+make week GROUP=abc        # A/B/C 經典三角（legacy）
+make week                  # ❌ 報錯：請指定 GROUP=defg / def / abc
+make weekend GROUP=defg    # 含 commit/push
+make screen-all GROUP=defg # 只跑 screen-all 部分
 make screen STRATEGY=d_quality_leader  # 單策略仍可（不需 GROUP）
 ```
 
 **實作**：
-- `config/strategies/` 平鋪 6 個 yaml，不用子目錄
-- `tw-screener screen run-all --group abc|def`：runner 依 `strategy.id` 首字母過濾
-  （a_*/b_*/c_* 屬 abc；d_*/e_*/f_* 屬 def）
-- 兩組互斥語意：本週跑了 ABC，reports/Www/ 不會有 D/E/F CSV，反之亦然
+- `config/strategies/` 平鋪 yaml，不用子目錄
+- `tw-screener screen run-all --group defg|def|abc`：runner 依 `strategy.id` 首字母過濾
+  （a/b/c 屬 abc；d/e/f 屬 def；d/e/f/g 屬 defg）
+- 組間互斥語意：本週跑了 ABC，reports/Www/ 不會有 D/E/F/G CSV，反之亦然
 
 ---
 
@@ -335,8 +336,8 @@ make screen STRATEGY=d_quality_leader  # 單策略仍可（不需 GROUP）
 make screen STRATEGY=a_breakout
 
 # 跑指定組（GROUP 必填）
-make screen-all GROUP=abc
-make screen-all GROUP=def
+make screen-all GROUP=defg   # 主流程
+make screen-all GROUP=abc    # legacy
 
 # 看本週結果
 ls reports/$(date +%Y-W%V)/
