@@ -20,6 +20,7 @@ _STRATEGY_LABEL: dict[str, str] = {
     "d_quality_leader": "D",
     "e_growth_momentum": "E",
     "f_value_rebound": "F",
+    "g_growth_pullback": "G",
 }
 
 _STRATEGY_NAME: dict[str, str] = {
@@ -31,6 +32,7 @@ _STRATEGY_NAME: dict[str, str] = {
     "d_quality_leader": "品質龍頭",
     "e_growth_momentum": "成長動能",
     "f_value_rebound": "價值反彈",
+    "g_growth_pullback": "成長拉回",
 }
 
 _STRATEGY_DESCRIPTION: dict[str, str] = {
@@ -58,6 +60,10 @@ _STRATEGY_DESCRIPTION: dict[str, str] = {
     "f_value_rebound": (
         "市值 ≥ 100 億 + 本益比 ≤ 15 + 殖利率 ≥ 3% + 累計營收 YoY ≥ 10%"
         "（中線價值反彈・ProPicks Top Value 風格）"
+    ),
+    "g_growth_pullback": (
+        "市值 ≥ 100 億 + 月營收 YoY ≥ 20% + 季線上揚回踩（乖離 −5%~+10%）+ 量縮"
+        "（中線成長拉回・回檔買點，E 的逆勢孿生）"
     ),
 }
 

@@ -61,9 +61,9 @@ fetch-institutional-history:  ## 回補近 N 個交易日三大法人（DAYS=20 
 screen:  ## 跑單一策略（STRATEGY=a_breakout）
 	uv run tw-screener screen run $(STRATEGY)
 
-screen-all:  ## 跑指定組策略（GROUP=abc 或 GROUP=def）
+screen-all:  ## 跑指定組策略（GROUP=defg 主流程；亦可 def / abc legacy）
 ifndef GROUP
-	@echo "❌ 請指定 GROUP=abc 或 GROUP=def"
+	@echo "❌ 請指定 GROUP=defg（主流程）、def 或 abc（legacy）"
 	@exit 1
 endif
 	uv run tw-screener screen run-all --group $(GROUP)
@@ -89,9 +89,9 @@ report-batch:  ## 批次產本週推薦清單報告
 
 # ─── 完整流程 ─────────────────────────────────────────────────────────────────
 
-week:  ## 完整週流程（GROUP=abc 或 GROUP=def）：fetch-twse → screen-all → fetch-candidates-history → group
+week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → screen-all → fetch-candidates-history → group
 ifndef GROUP
-	@echo "❌ 請指定 GROUP=abc 或 GROUP=def"
+	@echo "❌ 請指定 GROUP=defg（主流程）、def 或 abc（legacy）"
 	@exit 1
 endif
 	$(MAKE) fetch-twse
@@ -99,9 +99,9 @@ endif
 	$(MAKE) fetch-candidates-history
 	$(MAKE) group
 
-weekend:  ## 完整週流程並 commit 結果（GROUP=abc 或 GROUP=def）
+weekend:  ## 完整週流程並 commit 結果（GROUP=defg 主流程）
 ifndef GROUP
-	@echo "❌ 請指定 GROUP=abc 或 GROUP=def"
+	@echo "❌ 請指定 GROUP=defg（主流程）、def 或 abc（legacy）"
 	@exit 1
 endif
 	$(MAKE) week GROUP=$(GROUP)
