@@ -16,6 +16,7 @@ from tw_screener.data.twse import (
     _clean_int,
     _months_back,
     _parse_daily_all,
+    _parse_dividend_calendar,
     _parse_institutional,
     _parse_listed_industry,
     _parse_revenue,
@@ -26,6 +27,7 @@ from tw_screener.data.twse import (
     _roc_to_date,
     _roc_ym_to_ym,
     create_client,
+    filter_dividend_calendar,
 )
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "twse"
@@ -110,6 +112,48 @@ def test_parse_daily_all_empty():
     assert df.is_empty()
     assert "stock_id" in df.columns
     assert "close" in df.columns
+
+
+def test_parse_dividend_calendar():
+    with open(FIXTURE_DIR / "twt48u_all_sample.json") as f:
+        data = json.load(f)
+    df = _parse_dividend_calendar(data)
+    assert len(df) == 5
+    assert df["ex_date"][0] == date(2026, 5, 15)
+    assert df["stock_id"][0] == "2330"
+    assert df["type"][0] == "息"
+    assert df["cash_dividend"][0] == pytest.approx(5.0)
+    # 權值股：無現金股利、有股票股利率
+    row1234 = df.filter(pl.col("stock_id") == "1234")
+    assert row1234["type"][0] == "權"
+    assert row1234["cash_dividend"][0] is None
+    assert row1234["stock_dividend_ratio"][0] == pytest.approx(100.0)
+
+
+def test_parse_dividend_calendar_empty():
+    df = _parse_dividend_calendar([])
+    assert df.is_empty()
+    assert "ex_date" in df.columns
+    assert "cash_dividend" in df.columns
+
+
+def test_filter_dividend_calendar():
+    with open(FIXTURE_DIR / "twt48u_all_sample.json") as f:
+        data = json.load(f)
+    df = _parse_dividend_calendar(data)
+    today = date(2026, 5, 21)
+    out = filter_dividend_calendar(df, today, 14, ["2891", "6446", "2330"])
+    # 窗 [05-21, 06-04] 且為候選股：2330(05-15 過去)、1234(非候選)、2881(06-10 窗外) 皆出局
+    assert out["stock_id"].to_list() == ["2891", "6446"]
+    assert out["ex_date"].to_list() == [date(2026, 5, 22), date(2026, 5, 27)]
+
+
+def test_filter_dividend_calendar_empty_candidates():
+    with open(FIXTURE_DIR / "twt48u_all_sample.json") as f:
+        data = json.load(f)
+    df = _parse_dividend_calendar(data)
+    out = filter_dividend_calendar(df, date(2026, 5, 21), 14, [])
+    assert out.is_empty()
 
 
 def test_parse_institutional():

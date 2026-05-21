@@ -6,6 +6,7 @@
 |---|---|---|---|
 | Goodinfo!台灣股市資訊網 | 自訂條件篩選 | 爬蟲（合規限速） | 灰色，需自律 |
 | TWSE OpenAPI (`openapi.twse.com.tw/v1`) | 全市場當日日 K、月營收、上市公司產業 | REST API | 完全合法 |
+| TWSE OpenAPI 除權息預告 (`exchangeReport/TWT48U_ALL`) | 事件層 Tier 1：候選股未來除權息行事曆 | REST API（免 key） | 完全合法 |
 | TWSE Legacy (`www.twse.com.tw`) | 歷史 OHLCV (`STOCK_DAY`)、三大法人 (`T86`) | REST API（response=json） | 完全合法 |
 | TWSE ISIN (`isin.twse.com.tw/isin/C_public.jsp?strMode=4`) | 上櫃公司產業分類 | HTML（MS950 編碼） | 完全合法 |
 
@@ -132,6 +133,7 @@ Goodinfo 主要用在「條件組合篩選」這個它真正強的地方。
 | TWSE T86 三大法人 | 收盤後約 90 分鐘（**15:00 起穩定**）| 每交易日 | 累積 parquet |
 | 月營收（t187ap05_L） | 每月 10 號前 | 每月 | cron 或手動 |
 | 上市產業分類（t187ap03_L）| 月內穩定 | 每月 | 月更新 |
+| 除權息預告（TWT48U_ALL）| 隨時（前瞻 ~2 個月）| 每日小幅變動 | 事件層：只取候選股、未來約 2 週窗 |
 | 上櫃產業分類（ISIN）| 月內穩定 | 每月 | 月更新 |
 
 **建議跑 `make week` 的時段**：交易日 **15:00 起**。在此之前 T86 可能還沒發布，

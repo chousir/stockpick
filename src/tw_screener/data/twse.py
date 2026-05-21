@@ -2,7 +2,7 @@
 
 import re
 import time
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -465,6 +465,39 @@ def _parse_revenue(data: list[dict[str, Any]]) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=schema)
 
 
+def _parse_dividend_calendar(data: list[dict[str, Any]]) -> pl.DataFrame:
+    """
+    解析除權息預告表（TWT48U_ALL）→ DataFrame。
+
+    每筆含 Date（除權息日，ROC 緊湊格式 YYYMMDD）、Code、Name、
+    Exdividend（息/權）、CashDividend、StockDividendRatio。
+    """
+    schema = {
+        "ex_date": pl.Date,
+        "stock_id": pl.Utf8,
+        "name": pl.Utf8,
+        "type": pl.Utf8,
+        "cash_dividend": pl.Float64,
+        "stock_dividend_ratio": pl.Float64,
+    }
+    rows = []
+    for r in data:
+        try:
+            rows.append(
+                {
+                    "ex_date": _roc_compact_to_date(r["Date"]),
+                    "stock_id": r["Code"].strip(),
+                    "name": r["Name"].strip(),
+                    "type": r.get("Exdividend", "").strip(),
+                    "cash_dividend": _clean_float(r.get("CashDividend", "")),
+                    "stock_dividend_ratio": _clean_float(r.get("StockDividendRatio", "")),
+                }
+            )
+        except (KeyError, ValueError) as e:
+            logger.warning(f"略過無效除權息資料：{r.get('Code', '?')} — {e}")
+    return pl.DataFrame(rows, schema=schema)
+
+
 def _parse_listed_industry(data: list[dict[str, Any]]) -> pl.DataFrame:
     """解析 t187ap03_L（上市公司基本資料）→ stock_id / industry_code / industry_name。"""
     schema = {
@@ -571,6 +604,22 @@ def _months_back(base: date, n: int) -> date:
         month += 12
         year -= 1
     return date(year, month, 1)
+
+
+def filter_dividend_calendar(
+    df: pl.DataFrame,
+    today: date,
+    lookahead_days: int,
+    stock_ids: list[str],
+) -> pl.DataFrame:
+    """篩出 ex_date 落在 [today, today+lookahead_days] 且屬於 stock_ids 的除權息，依日期排序。"""
+    if df.is_empty() or "ex_date" not in df.columns:
+        return df
+    end = today + timedelta(days=lookahead_days)
+    return df.filter(
+        pl.col("ex_date").is_between(today, end)
+        & pl.col("stock_id").is_in(list(set(stock_ids)))
+    ).sort("ex_date")
 
 
 # ─── Client ───────────────────────────────────────────────────────────────────
@@ -964,6 +1013,21 @@ class TWSEClient:
         df = _parse_revenue(data)
         if not df.is_empty():
             save_parquet(df, cache_file)
+        return df
+
+    def fetch_dividend_calendar(self) -> pl.DataFrame:
+        """抓除權息預告表（TWT48U_ALL，全市場前瞻），快取 dividend_calendar_YYYYMMDD.parquet。"""
+        date_str = date.today().strftime("%Y%m%d")
+        cache_file = self.cache_dir / f"dividend_calendar_{date_str}.parquet"
+        if is_fresh(cache_file, self.ttl_hours):
+            logger.info(f"命中快取 {cache_file}")
+            return load_parquet(cache_file)
+        data = self._get("/exchangeReport/TWT48U_ALL")
+        df = _parse_dividend_calendar(data)
+        if not df.is_empty():
+            save_parquet(df, cache_file)
+        else:
+            logger.warning("TWT48U_ALL 回傳空資料（除權息預告無資料或端點異常）")
         return df
 
     def fetch_listed_industry(self) -> pl.DataFrame:

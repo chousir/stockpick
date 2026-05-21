@@ -360,11 +360,13 @@ def analysis_group(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
     """讀最新一週的篩選 CSV + TWSE 快取，產出 group_analysis.md。"""
+    from datetime import date as _date
+
     import yaml as _yaml
 
     from tw_screener.analysis.grouping import group_stocks
     from tw_screener.analysis.leader import find_leaders
-    from tw_screener.data.twse import create_client
+    from tw_screener.data.twse import create_client, filter_dividend_calendar
     from tw_screener.report.group_report import render_group_report
 
     with open(settings, encoding="utf-8") as fh:
@@ -378,6 +380,7 @@ def analysis_group(
     min_group_size = int(ga_cfg.get("min_group_size", 2))
     top_groups = int(ga_cfg.get("top_groups", 10))
     top_stocks = int(ga_cfg.get("top_stocks", 10))
+    dividend_lookahead = int(ga_cfg.get("dividend_lookahead_days", 14))
 
     week_tag, screener_results = _load_latest_screener_results(settings)
     if not screener_results:
@@ -451,6 +454,14 @@ def analysis_group(
     else:
         console.print(f"  量比資料：{volume_history['stock_id'].n_unique()} 檔")
 
+    dividends = filter_dividend_calendar(
+        client.fetch_dividend_calendar(), _date.today(), dividend_lookahead, candidate_ids
+    )
+    if dividends.is_empty():
+        console.print(f"  本週除權息：候選股未來 {dividend_lookahead} 天內無除權息")
+    else:
+        console.print(f"  本週除權息：{len(dividends)} 檔候選股（未來 {dividend_lookahead} 天）")
+
     console.print("  計算族群強度分數...")
     groups, enriched_stocks = group_stocks(
         screener_results,
@@ -471,7 +482,8 @@ def analysis_group(
 
     output_path = Path(cfg["paths"]["reports_dir"]) / week_tag / "group_analysis.md"
     render_group_report(
-        groups, leaders, screener_results, week_tag, output_path, top_groups, top_stocks
+        groups, leaders, screener_results, week_tag, output_path, top_groups, top_stocks,
+        dividend_events=dividends,
     )
 
     console.print(f"[green]報告輸出：{output_path}[/green]")

@@ -44,3 +44,4 @@ group_analysis:
   min_group_size: 2
   top_groups: 10
   top_stocks: 10
+  dividend_lookahead_days: 14   # 除權息前瞻窗（日曆日，約 10 交易日）

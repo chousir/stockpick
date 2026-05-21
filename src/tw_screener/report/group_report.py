@@ -129,6 +129,7 @@ def _build_context(
     week_tag: str,
     top_groups: int,
     top_stocks: int,
+    dividend_events: pl.DataFrame | None = None,
 ) -> dict:
     strategy_ids = sorted(screener_results.keys())
     # Only show strategies that have at least 1 result
@@ -290,6 +291,21 @@ def _build_context(
     # --- Claude analysis section: top 4 categorised groups ---
     claude_groups = [g for g in group_list if not g["is_uncategorized"]][:4]
 
+    # --- dividend calendar (forward 除權息 events for candidates) ---
+    dividend_rows: list[dict] = []
+    if dividend_events is not None and not dividend_events.is_empty():
+        for r in dividend_events.iter_rows(named=True):
+            cash = r.get("cash_dividend")
+            dividend_rows.append(
+                {
+                    "ex_date": r["ex_date"].isoformat() if r.get("ex_date") else "",
+                    "stock_id": r.get("stock_id", ""),
+                    "name": r.get("name", ""),
+                    "type": r.get("type", ""),
+                    "cash_dividend": f"{cash:.2f}" if cash is not None else "-",
+                }
+            )
+
     return {
         "week_tag": week_tag,
         "generated_at": date.today().isoformat(),
@@ -306,6 +322,7 @@ def _build_context(
         "top_groups": top_groups,
         "priority_stocks": priority_rows,
         "claude_groups": claude_groups,
+        "dividend_rows": dividend_rows,
     }
 
 
@@ -317,12 +334,16 @@ def render_group_report(
     output_path: Path,
     top_groups: int = 10,
     top_stocks: int = 10,
+    dividend_events: pl.DataFrame | None = None,
 ) -> None:
     """Render group_analysis.md to output_path using Jinja2 template.
 
     members: rank_within_groups 的回傳；含 rank_in_group / leader_score / momentum_5d。
+    dividend_events: 候選股未來窗內除權息（filter_dividend_calendar 的回傳）；None/空則不渲染該段。
     """
-    context = _build_context(groups, members, screener_results, week_tag, top_groups, top_stocks)
+    context = _build_context(
+        groups, members, screener_results, week_tag, top_groups, top_stocks, dividend_events
+    )
 
     env = Environment(
         loader=FileSystemLoader(str(_TEMPLATE_DIR)),
