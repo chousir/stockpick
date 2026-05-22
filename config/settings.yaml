@@ -39,7 +39,7 @@ group_analysis:
   weights:
     momentum: 0.50      # 5 日累計漲幅（sigmoid 校準），動能主導
     entry_rate: 0.25    # 族群入選率
-    institutional: 0.15 # 法人佔位（暫未啟用）
+    institutional: 0.15 # 法人買超家數比（族群內 inst_net>0 家數 / 成員數，已啟用）
     size: 0.10          # 族群規模（log 正規化）
   min_group_size: 2
   top_groups: 10

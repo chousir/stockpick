@@ -19,10 +19,10 @@
 ┌──────────────────────────────────────────────────────────────┐
 │  Layer 2：選股層                                              │
 │  ─────────────                                                │
-│  config/strategies/*.yaml ──→ ScreenerRunner ──→ 3 個 CSV     │
+│  config/strategies/*.yaml ──→ ScreenerRunner ──→ 每組一份 CSV │
 │                                                               │
 │  輸出：reports/YYYY-Www/screen_result_{strategy_id}.csv       │
-│        e.g. screen_result_a_breakout.csv                      │
+│        GROUP=defg → d/e/f/g 四份（主流程）                    │
 └──────────────────────────────────────────────────────────────┘
                               │
                               ▼

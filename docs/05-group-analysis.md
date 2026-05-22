@@ -11,9 +11,9 @@
 
 ## 模組輸入
 
-- 三組策略的 CSV：`reports/YYYY-Www/screen_result_{a,b,c}.csv`
-- 全市場價量歷史（60 天）：`data/cache/twse/daily_*.parquet`
-- 大盤指數（加權、櫃買）：同上
+- 各策略的 CSV：`reports/YYYY-Www/screen_result_*.csv`（主流程 GROUP=defg → d/e/f/g）
+- 候選股價量歷史（13 個月）：`data/cache/twse/stock_day_*.parquet` + `daily_*.parquet`
+- 近 20 日三大法人（含上市 T86 + 上櫃 TPEX）：`data/cache/twse/institutional_*.parquet`
 
 ## 模組輸出
 
@@ -22,31 +22,31 @@
 ```markdown
 # 2026-W21 族群分析報告
 
-## 0. 策略代號說明
-- A 波段啟動：週 MACD + 5/10/20 均線多頭排列（短線 1–4 週）
-- B 法人成長：月營收 YoY ≥ 15% + 外資投信同步連買（中線 1–3 月）
-- C 低基期成長：月營收 YoY ≥ 10% + 距 6 月高 -20% 以下 + 外資連買（中線）
+## 0. 策略代號說明（主流程 D/E/F/G）
+- D 品質龍頭：市值≥100 億 + ROE≥15 + 配息 8 年 + 連 2 季淨利（6+ 月）
+- E 成長動能：市值≥100 億 + 營收 YoY≥20 + 連 2 季淨利 + 均線多頭（順勢，1–3 月）
+- F 價值反彈：市值≥100 億 + PER≤15 + 殖利率≥3 + 營收 YoY≥10（3–6 月）
+- G 成長拉回：同 E 基本面 + 季線上揚回踩（乖離 −5%~+10%）+ 量縮（逆勢，1–3 月）
 
 ## 1. 入選分布總覽
-- 策略 A 共 18 檔；B 共 12 檔；C 共 24 檔
-- 三組總聯集：48 檔
+- 策略 D 共 60 檔；E 共 25；F 共 65；G 共 22（有效拉回；宇宙 113）
+- 總聯集：142 檔（僅含有效策略命中股）
 
-## 2. 族群強度排名（前 5）
+## 2. 族群強度排名（前 10）
 
-| Rank | 族群 | A 入選 | B 入選 | C 入選 | 族群入選率 | 5 日均漲 | 強度分數 |
-|---|---|---|---|---|---|---|---|
-| 1 | 半導體業 | 6 | 3 | 2 | 28% | +4.2% | 52.1 |
-| 2 | 電腦及周邊設備業 | 4 | 2 | 0 | 22% | +5.8% | 51.7 |
+| Rank | 族群 | D | E | F | G | 族群入選率 | 5 日中位 | 上漲家數 | 法人買超 | 強度分數 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 通信網路業 | 1 | 2 | 1 | 1 | 30% | +2.0% | 4/7 | 6/7 | 58.1 |
 | ... |
 
 ## 3. 各族群本週表現
-（每族群列出「前 3 名（依 5 日漲幅）」+ 命中策略標籤，不再用「領頭羊」字眼）
+（每族群列出「前 3 名（依 leader_score）」+ 命中策略標籤，不再用「領頭羊」字眼）
 
-### 1. 半導體業（共 11 檔入選・5 日均漲 +4.2%）
-本週族群表現前 3 名：
+### 1. 通信網路業（共 7 檔入選・5 日中位 +2.0%・上漲 4/7）
+本週族群表現前 3 名（欄含量比、距月線、距季線、法人/外資/投信）：
 
-| # | 股號 | 名稱 | 5 日漲幅 | 當日 | 成交金額 | 命中策略 | Goodinfo |
-| 1 | 3034 | 聯詠 | +8.5% | +2.1% | 1500 | A+B | 連結 |
+| # | 股號 | 名稱 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 成交金額 | 法人(張) | 外資(張) | 投信(張) | 命中策略 | Goodinfo |
+| 1 | 2455 | 全新 | +7.1% | +4.6% | 3.1x | +12.6% | +40.9% | 10967 | +13,131 | +7,900 | +6,744 | D+E | 連結 |
 | 2 | ... |
 
 其他入選股：8069 元太、3596 智易...
@@ -82,16 +82,18 @@
 ```
 強度分數 = w_mom  * 100 * sigmoid(momentum_5d / 5)            # 動能（sigmoid 校準）
          + w_er   * 100 * entry_rate                          # 入選率
-         + w_inst * 100 * inst_score                          # 法人佔位
+         + w_inst * 100 * inst_score                          # 法人買超家數比（已啟用）
          + w_sz   * 100 * (log1p(members) / log1p(max))       # 規模
 
 其中：
-  momentum_5d   = 族群入選股的 5 日累計報酬 mean（取自 stock_day_*.parquet
-                  或 daily_*.parquet；資料不足時 fallback 到 change_pct，
-                  並在族群層級記錄 momentum_5d_days_used）
+  momentum_5d   = 族群入選股的 5 日累計報酬「中位數」（median，抗單檔小型股灌水；
+                  取自 stock_day_*.parquet 或 daily_*.parquet；資料不足時 fallback
+                  到 change_pct，並在族群層級記錄 momentum_5d_days_used）
   entry_rate    = 族群入選股數 / 族群在 industry_df 中的總檔數
-  inst_score    = 族群入選股外資+投信累計買超的標準化分數（暫為 0）
+  inst_score    = 族群內近 20 日三大法人淨買超 (inst_net>0) 的家數 / 成員數（落在 [0,1]）
   members       = 族群入選股數
+  另記 up_count（5 日漲幅 > 0 家數，供報告算「上漲家數」廣度）、
+       inst_buy_count（法人買超家數），個股層另帶量比 / 距月線 / 距季線。
 
 預設權重（config/settings.yaml 可調）：
   w_mom  = 0.50  # 動能：5 日累計漲幅（族群實際走勢）
@@ -103,21 +105,24 @@ sigmoid 而非 clip：避免 5 日大漲 20% 仍只拿到 clip(10) 的天花板�
 讓動能強族群在分數上有區分度（5 日漲 5% → 0.5；漲 10% → 0.73；漲 20% → 0.88）。
 ```
 
-**動能資料來源（X+Y 混合策略）**：
-- **X**：`make week` 流程中跑 `make fetch-candidates-history`，對本週入選股
-  聯集去重個股批次補抓 STOCK_DAY 2 個月歷史。過去月份永久快取，首次 ~5–10 分鐘
-- **Y**：`data/cache/twse/daily_*.parquet` 每週累積一筆，第 5 週起累積成完整 5 日窗
-- 兩者由 `TWSEClient.load_candidate_history()` 合併，按 (stock_id, date) 去重後算 5 日 gap
+**動能 / 均線資料來源（X+Y 混合策略）**：
+- **X**：`make week` 流程中跑 `make fetch-candidates-history`，對本週入選股聯集去重
+  個股批次補抓 STOCK_DAY **13 個月**歷史（MA60 斜率需 ≥70 日）。過去月份永久快取，
+  首次 ~30–40 分鐘，之後每週只抓當月
+- **Y**：`data/cache/twse/daily_*.parquet` 每週累積一筆
+- 兩者由 `TWSEClient.load_candidate_history()` 合併，算 5 日動能、MA20/60＋斜率；
+  量比由 `load_volume_history()` 算（今日量 / 近 20 日均量）
 
-**完整 `make week` 流程**：
+**完整 `make week GROUP=defg` 流程**：
 ```
-1. fetch-twse              → daily / T86 / revenue / industry
-2. screen-all              → A/B/C 純跑 Goodinfo，三份 CSV 為純結果快照
+1. fetch-twse              → daily / T86 / 上櫃 TPEX 法人 / revenue / industry
+2. screen-all              → D/E/F/G 純跑 Goodinfo，各一份 CSV 為純結果快照
 3. fetch-candidates-history → 對聯集個股抓 stock_day（純加工資料層）
-4. group                   → 讀 stock_day 算 5 日動能 → group_analysis.md
+4. group                   → 算 5 日中位 / 量比 / MA60 / 法人 + G 拉回過濾 → group_analysis.md
 ```
 
-**A/B/C CSV 一律是純 Goodinfo 結果快照**，不被任何後處理覆寫。
+**策略 CSV 一律是純 Goodinfo 結果快照**，不被任何後處理覆寫。
+（G 的 CSV 是基本面成長宇宙；拉回過濾只在 group 步驟標記於 group_analysis.md，不改 CSV。）
 5 日動能值**只在 group_analysis.md 顯示**，CSV 維持 Goodinfo 原 schema（含當日 change_pct）。
 
 設計原則：策略可換來換去，但 CSV schema 與後處理機制保持單純，避免特定策略綁住整體流程。
@@ -132,7 +137,7 @@ leader_score = (
     0.50 * momentum_rank_norm     # 在族群中 5 日漲幅排名
   + 0.25 * amount_rank_norm       # 絕對成交值排名（避免冷門股）
   + 0.15 * inst_rank_norm         # 外資+投信買超排名
-  + 0.10 * strategy_count_rank_norm  # 入選策略數排名（A∩B∩C > A∩B > A）
+  + 0.10 * strategy_count_rank_norm  # 入選策略數排名（D∩E∩F > D∩E > 單一；G 為有效命中後計）
 )
 ```
 
@@ -173,8 +178,13 @@ def group_stocks(
     industry_df: pl.DataFrame | None = None,
     weights: dict[str, float] | None = None,
     min_group_size: int = 2,
+    institutional: pl.DataFrame | None = None,  # 近 20 日三大法人 → inst_net / inst_score
+    volume_history: pl.DataFrame | None = None, # → 量比 vol_ratio
+    g_pullback: dict[str, float] | None = None, # G 拉回 setup 門檻（季線/乖離帶/量縮）
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
-    """回傳 (groups_df, members_df)。groups_df 含 momentum_5d / momentum_5d_days_used。"""
+    """回傳 (groups_df, members_df)。members 含 momentum_5d / inst_net / 外資 / 投信 /
+    vol_ratio / ma20_dist_pct / ma60_dist_pct / ma60_slope_pct / in_{sid}（G 已收斂）。
+    G 收斂後丟掉 strategy_count==0 的宇宙雜訊，避免污染族群統計。"""
 
 # src/tw_screener/analysis/leader.py（find_leaders 為 rank_within_groups 的 alias）
 
@@ -218,6 +228,7 @@ Claude: 讀資料、補寫
 | 族群分類粒度 | TWSE/TPEX 官方 28 類（粗，單標籤） | 無法區分 IC 設計 vs 封測；由 Claude Section 6 分析補充 |
 | earliest_breakout_rank | 不含此因子 | 族群內排名用 momentum / 成交值 / 法人 / 策略數四因子；突破時序未納入 |
 | 5 日動能資料 | 首次 `make week` 前 5 日漲幅依快取深度有 `*` 標註 | 第 1 週可能只有 1–2 日資料；跑過 `fetch-candidates-history` 後第 2 週起穩定 |
-| 上櫃股 OHLCV 歷史 | `STOCK_DAY` 同樣支援上櫃 | 與上市無差別；ETF/權證會被 `is_etf_or_warrant` 過濾 |
-| 法人資料 T86 | 非交易日為空 | `make fetch-twse` 需在交易日執行 |
-| inst_score | 永遠是 0（佔位） | 法人權重 15% 目前不影響強度，待 T86 累積後啟用 |
+| 上櫃股 OHLCV 歷史 | 上櫃走 TPEX `tradingStock`、上市走 `STOCK_DAY`（同 schema） | 與上市無差別；ETF/權證會被 `is_etf_or_warrant` 過濾 |
+| 法人資料 | 上市 T86 + 上櫃 TPEX；非交易日為空 | `make fetch-twse` 需在交易日執行；上櫃 TPEX 僅最新日、逐次累積 |
+| inst_score | 已啟用＝法人買超家數比 | 法人權重 15% 計入強度；無法人快取時退回 0 |
+| MA60 斜率 / G 拉回 | 需 ≥70 交易日歷史 | 新上市未滿者該欄 null，G 不標（誠實，非錯誤） |

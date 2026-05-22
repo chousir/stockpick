@@ -33,17 +33,16 @@
 ### Step 1：抓資料 + 跑篩選 + 族群分析
 
 ```bash
-make week GROUP=abc    # 跑 A/B/C 經典三角
-# 或
-make week GROUP=def    # 跑 D/E/F ProPicks 復刻組
+make week GROUP=defg   # 主流程：D/E/F/G（ProPicks 復刻組＋成長拉回）
+# （def=D/E/F 不含 G；abc=A/B/C 經典三角 legacy）
 ```
 
 等同於：
 
 ```bash
 make fetch-twse     # 抓 TWSE 全市場日線、法人、月營收
-make screen-all GROUP=abc      # 跑指定組三策略，產 screen_result_*.csv
-make fetch-candidates-history  # 補抓候選股 3 個月歷史 OHLCV
+make screen-all GROUP=defg     # 跑指定組策略，產 screen_result_*.csv
+make fetch-candidates-history  # 補抓候選股 13 個月歷史 OHLCV（MA60 斜率用）
 make group                     # 族群分析，產 group_analysis.md
 ```
 
@@ -51,7 +50,7 @@ make group                     # 族群分析，產 group_analysis.md
 
 ```
 reports/YYYY-Www/
-  ├─ screen_result_*.csv  ← 3 個 CSV（依 GROUP 決定 a/b/c 或 d/e/f）
+  ├─ screen_result_*.csv  ← 4 個 CSV（GROUP=defg → d/e/f/g；legacy abc → a/b/c）
   └─ group_analysis.md    ← Step 2 看這個
 ```
 
@@ -59,7 +58,7 @@ reports/YYYY-Www/
 
 **模式 2a（推薦）：ProPicks 風格全清單分析**
 
-把 `group_analysis.md` + 3 個 `screen_result_*.csv` 貼到 Claude Opus 網頁
+把 `group_analysis.md` + 4 個 `screen_result_*.csv` 貼到 Claude Opus 網頁
 對話，配合範本 prompt 讓 AI 在「完整候選宇宙」（不只 top 10）中挑：
 
 - 5-7 檔進場清單 + 為何入選 + 進場思路 + 主要風險

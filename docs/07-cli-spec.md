@@ -27,11 +27,11 @@ fmt:            ## ruff format
 # ─── 資料 ───────────────────────────────────────
 fetch-twse:     ## 增量抓 TWSE 日線、法人、月營收、產業分類
 fetch-stock STOCK_ID=2330:  ## 抓單檔個股完整資料
-fetch-candidates-history:   ## 對本週入選股聯集補抓 STOCK_DAY 歷史（5 日動能用）
+fetch-candidates-history:   ## 對本週入選股聯集補抓 STOCK_DAY 歷史（動能 + MA60 斜率用，MONTHS=13 預設）
 
 # ─── 選股 ───────────────────────────────────────
 screen STRATEGY=a_breakout: ## 跑單一策略
-screen-all:     ## 跑全部三組策略
+screen-all GROUP=defg: ## 跑指定組策略（defg 主流程 / def / abc legacy）
 screen-dry STRATEGY=a_breakout: ## 預演（不打網，只組 URL 給看）
 
 # ─── 分析 ───────────────────────────────────────
@@ -113,7 +113,7 @@ tw-screener hello
 tw-screener version
 tw-screener data fetch-twse
 tw-screener data fetch-stock STOCK_ID
-tw-screener data fetch-candidates-history [--week WEEK] [--months 2]
+tw-screener data fetch-candidates-history [--week WEEK] [--months 13]
 tw-screener screen run STRATEGY [--dry-run]
 tw-screener screen run-all
 tw-screener screen dry STRATEGY

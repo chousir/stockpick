@@ -73,9 +73,9 @@ FINMIND_TOKEN=
 make init              # 初始化資料夾
 make sync              # uv sync 裝依賴
 make test              # 跑測試
-make screen            # 跑三組策略選股
+make screen-all GROUP=defg  # 跑指定組策略選股（主流程 D/E/F/G）
 make group             # 族群分析
-make week              # 完整週流程（screen + group）
+make week GROUP=defg   # 完整週流程（fetch → screen → 補歷史 → group）
 make clean-cache       # 清掉超過 7 天的快取
 ```
 

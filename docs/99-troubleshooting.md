@@ -295,13 +295,13 @@ group_analysis:
 
 ### 症狀
 ```
-group_analysis.md 第 2 節「5 日均漲」欄全部標 *，第 3 節族群標題顯示「（1 日資料）」
+group_analysis.md 第 2 節「5 日中位」欄全部標 *，第 3 節族群標題顯示「（1 日資料）」
 所有 momentum_5d 都跟 change_pct 一樣
 ```
 
 ### 原因
 個股的 stock_day 快取尚未建立。`make week` 流程內含 `fetch-candidates-history`，
-會對本週入選股聯集去重個股逐檔抓 stock_day 2 個月歷史。
+會對本週入選股聯集去重個股逐檔抓 stock_day 13 個月歷史（MA60 斜率需 ≥70 日；首次 ~30–40 分鐘，過去月份永久快取）。
 
 2026-W21 起 OTC 股也透過 TPEX 抓 stock_day（自動分派，下游無感），不再 fallback。
 若仍標 `*`：可能是新上市股或 TPEX 無收錄。
