@@ -29,18 +29,17 @@ watchlist/       ← 自選股清單
 ## Step 2 — 每週主流程
 
 ```bash
-make week GROUP=abc   # 跑 A/B/C 經典三角
-# 或
-make week GROUP=def   # 跑 D/E/F ProPicks 復刻組
+make week GROUP=defg   # 主流程：D/E/F/G（ProPicks 復刻組＋成長拉回）
+# （def=D/E/F 不含 G；abc=A/B/C 經典三角 legacy）
 ```
 
-`make week` 是三個子步驟的串聯：
+`make week` 是四個子步驟的串聯：
 
 ```
 fetch-twse  →  screen-all (GROUP)  →  fetch-candidates-history  →  group
 ```
 
-**GROUP 必填**：`make week` 不帶 GROUP 會報錯。兩組互斥，每週只能跑一組。
+**GROUP 必填**：`make week` 不帶 GROUP 會報錯。各組互斥，每週只能跑一組（主流程 defg）。
 
 ---
 
@@ -56,27 +55,25 @@ fetch-twse  →  screen-all (GROUP)  →  fetch-candidates-history  →  group
 
 ---
 
-### 2b. `screen-all` — 三組策略篩選
+### 2b. `screen-all` — 策略篩選
 
-從 Goodinfo 自訂條件篩選，每組策略對應一份 CSV。**依 GROUP 決定跑哪 3 組**。
+從 Goodinfo 自訂條件篩選，每組策略對應一份 CSV。**依 GROUP 決定跑哪幾組**。
 
-`GROUP=abc`（經典三角，不重疊、各覆蓋單維度）：
-
-| 策略 | 條件概念 | 產出檔案 |
-|---|---|---|
-| **A 動能突破** | MACD 翻多 + 均線多頭 + 流動性 | `screen_result_a_breakout.csv` |
-| **B 成長主力** | 營收 YoY + 連續淨利 + 外資連買 | `screen_result_b_growth_institutional.csv` |
-| **C 品質價值** | ROE + 連續配息 + 殖利率 | `screen_result_c_quality_value.csv` |
-
-`GROUP=def`（ProPicks 復刻組，每組混合多個 ProPicks 因子）：
+`GROUP=defg`（主流程，ProPicks 復刻組＋成長拉回）：
 
 | 策略 | 條件概念 | 產出檔案 |
 |---|---|---|
 | **D 品質龍頭** | 市值 + ROE + 配息 + 淨利連增（TWCH15 風） | `screen_result_d_quality_leader.csv` |
-| **E 成長動能** | 市值 + YoY 20% + 均線多頭（Tech Titans 風） | `screen_result_e_growth_momentum.csv` |
+| **E 成長動能** | 市值 + YoY 20% + 均線多頭（Tech Titans・順勢） | `screen_result_e_growth_momentum.csv` |
 | **F 價值反彈** | 市值 + 低 PER + 殖利率 + 反陷阱（Top Value 風） | `screen_result_f_value_rebound.csv` |
+| **G 成長拉回** | 同 E 基本面（無均線 rule）；拉回 timing 在分析層 | `screen_result_g_growth_pullback.csv` |
 
-每個 CSV 約 5–30 檔個股，欄位包含：股號、股名、策略分數、關鍵指標。
+> G 的 CSV 是「基本面成長宇宙」（較大），有效拉回命中（季線上揚＋乖離帶＋量縮）在
+> `group` 步驟用快取的 MA60／量比過濾，標記於 `group_analysis.md`。
+
+`GROUP=abc`（legacy 經典三角）：A 動能突破 / B 成長主力 / C 品質價值，各一份 CSV。
+
+每個 CSV 欄位包含：股號、股名、收盤、漲跌幅、成交量值、PER/PB、Goodinfo 連結。
 
 **產出路徑：** `reports/2026-W20/`
 
@@ -85,7 +82,7 @@ fetch-twse  →  screen-all (GROUP)  →  fetch-candidates-history  →  group
 ### 2c. `group` — 族群分析
 
 ```
-三個 CSV  →  對照產業分類  →  計算族群強度分數  →  找領頭羊  →  group_analysis.md
+4 個 CSV  →  對照產業分類  →  計算族群強度分數（含法人/量比/MA60）→  找領頭羊  →  group_analysis.md
 ```
 
 **產出：** `reports/2026-W20/group_analysis.md`
@@ -114,12 +111,12 @@ cat reports/2026-W20/group_analysis.md
 
 ### 3b. ProPicks 風格全清單分析（推薦）
 
-把 `group_analysis.md` + 3 個 `screen_result_*.csv` 整批貼到 Claude Opus
+把 `group_analysis.md` + 4 個 `screen_result_*.csv` 整批貼到 Claude Opus
 網頁對話（[claude.ai](https://claude.ai)），用範本 prompt 讓 AI 在
 **完整候選宇宙**中挑（不只 top 10），輸出 ProPicks 風格進場清單：
 
-- 5-7 檔精選 + 為何入選 + 進場思路 + 主要風險
-- 訊號交集判讀（D∩E、E∩F、D∩E∩F）
+- 5-7 檔精選 + 為何入選 + 進場思路（停損用距季線、量比確認）+ 主要風險
+- 訊號交集判讀（D∩E、E∩F、D∩E∩F、**E∩G**；G 單獨命中＝拉回成長股）
 - 本週市場節奏 + 居安思危訊號 + 異常崛起個股
 - 觀察名單（追蹤但不進場）
 
@@ -163,14 +160,14 @@ make report-batch
 ## 今日時間線（0517 週日早上）
 
 ```
-08:00  make week GROUP=abc    → 約 3–8 分鐘（含 Goodinfo rate limit sleep）
-                               # 想跑 ProPicks 風：make week GROUP=def
-08:10  貼 group_analysis.md + 3 CSV 到 Claude Opus，用 Phase 1 prompt
+08:00  make week GROUP=defg   → 約 5–10 分鐘（4 組篩選 + Goodinfo rate limit sleep）
+                               # 首次跑會補抓 13 個月歷史（~30-40 分鐘，之後走 cache）
+08:10  貼 group_analysis.md + 4 CSV 到 Claude Opus，用 Phase 1 prompt
        → 拿到 picks.md（5-7 檔進場清單，含為何入選/進場/風險/居安思危）
        完整流程 → docs/11-propicks-analysis.md
 08:20  對 picks.md 內每檔跑 make report STOCK_ID=XXXX → 深度報告
 08:35  讀深度報告，決定本週 watchlist
-08:45  make weekend GROUP=abc → commit + push 結果到 git（GROUP 必填）
+08:45  make weekend GROUP=defg → commit + push 結果到 git（GROUP 必填）
 ```
 
 今天是 W20 最後一天。**下週六重複 Step 2–5。**

@@ -21,14 +21,13 @@
 # Step 1：首次 clone 後做一次
 make sync && make init
 
-# Step 2：每週跑一次（抓資料 → 三組篩選 → 族群分析）
-# GROUP 必填，二選一：abc=經典三角 / def=ProPicks 復刻
-make week GROUP=abc
-# 或
-make week GROUP=def
+# Step 2：每週跑一次（抓資料 → 篩選 → 族群分析）
+# 主流程：GROUP=defg（D/E/F/G ProPicks 復刻組＋成長拉回）
+make week GROUP=defg
+# （def=D/E/F 不含 G；abc=A/B/C 經典三角，已列 legacy）
 
 # Step 3：ProPicks 風格全清單分析（推薦，需要 Claude Opus 網頁對話）
-#   把 group_analysis.md + 3 個 screen_result_*.csv 貼到 claude.ai
+#   把 group_analysis.md + 4 個 screen_result_*.csv 貼到 claude.ai
 #   配合 docs/11-propicks-analysis.md 的範本 prompt
 #   產出 reports/Www/picks.md（5-7 檔進場清單 + 為何入選 + 風險 + 居安思危）
 #   或：純人工讀 group_analysis.md 挑股（快但只看 top 10 機械排名）
@@ -51,43 +50,35 @@ make report-batch
 
 1. **半自動，不全自動**：資料抓取、選股、報告骨架自動化；下單決策保留給人。
 2. **資料層與分析層分離**：數字由程式抓、由 Polars 算；解讀由 Claude 寫。
-3. **雙策略體系**：A/B/C 經典三角（學院派、單維度互補）vs D/E/F ProPicks 復刻組
-   （AI 派、多因子整合），`make week GROUP=abc/def` 二選一切換（見下方說明）。
+3. **主策略組 D/E/F/G**：ProPicks 復刻組（多因子整合）＋成長拉回 G（E 的逆勢孿生），
+   `make week GROUP=defg`；A/B/C 經典三角為早期 legacy（保留可跑、不再維護）。
 4. **族群 + 領頭羊優先**：台股強族群帶動明顯，找對族群比找對個股重要。
 5. **累積式知識庫**：每週結果存 Git，三個月後可回看策略勝率。
 
-## 兩組策略體系
+## 策略體系
 
-每週 `make week` 必須選擇 `GROUP=abc` 或 `GROUP=def`，兩組互斥（無預設值）。
+現行主流程 `make week GROUP=defg`，跑 **D/E/F/G** 四組（無預設值，GROUP 必填）。
 
-### A/B/C 經典三角（學院派・不重疊）
+### D/E/F/G ProPicks 復刻組（現行主力）
 
-每組單一維度主導，覆蓋攻擊 / 主力 / 防守三個象限：
+D/E/F 對標 Investing.com ProPicks 三大主題策略，每組混合財務 / 成長 / 估值 / 動能多個因子；
+**共用「市值≥100 億」**作為風格識別。**G 是 E 的逆勢孿生**，補抓 D/E/F 漏看的「回踩季線」優質成長股：
 
-| 策略 | 條件概念 | 角色 | 持有時間 |
-|---|---|---|---|
-| **A 動能突破** | 週 MACD 翻多 + 5/10/20 均線多頭 + 流動性過濾 | 攻擊 | 1–4 週 |
-| **B 成長主力** | 累計營收 YoY + 連續 2 季淨利 + 外資連買 | 主力 | 1–3 月 |
-| **C 品質價值** | 近 4 季 ROE≥20 + 連續配息 10 年 + 殖利率≥4 | 防守 | 6+ 月 |
-
-### D/E/F ProPicks 復刻組（AI 派・多因子整合）
-
-對標 Investing.com ProPicks 三大主題策略，每組混合財務 / 成長 / 估值 / 動能多個因子；
-**三組共用「市值≥100 億」**作為風格識別（A/B/C 是全市場視角）：
-
-| 策略 | 條件概念 | 對標 ProPicks | 持有時間 |
+| 策略 | 條件概念 | 對標 / 角色 | 持有時間 |
 |---|---|---|---|
 | **D 品質龍頭** | 市值≥100 億 + ROE≥15 + 配息 8 年 + 連 2 季淨利 | TWCH15 台灣晶片冠軍 | 6+ 月 |
-| **E 成長動能** | 市值≥100 億 + 營收 YoY≥20 + 連 2 季淨利 + 均線多頭 | Tech Titans | 1–3 月 |
+| **E 成長動能** | 市值≥100 億 + 營收 YoY≥20 + 連 2 季淨利 + 均線多頭 | Tech Titans（順勢） | 1–3 月 |
 | **F 價值反彈** | 市值≥100 億 + PER≤15 + 殖利率≥3 + 營收 YoY≥10 | Top Value Stocks | 3–6 月 |
+| **G 成長拉回** | 同 E 基本面 + 季線上揚回踩（乖離 −5%~+10%）+ 量縮 | E 的逆勢孿生（低接） | 1–3 月 |
 
-### 兩組並用的優勢
+> **E 順勢、G 逆勢**：E 抓已突破/均線多頭的強勢成長股，G 抓暫時失守均線、回踩上揚季線的同類股，
+> 兩者技術狀態近乎互斥、共同覆蓋各種市況。G 的拉回過濾（季線上揚＋乖離帶＋量縮）在分析層用快取的
+> MA60／量比計算，CSV 為基本面宇宙、有效拉回命中見 `group_analysis.md`。
 
-- **不同市況用不同組**：盤整 / 分歧時用 ABC（單維度訊號清楚），趨勢明確時用 DEF（多因子過濾雜訊）
-- **跨週交叉驗證**：本週 ABC 入選的股，下週切 DEF 也再次入選 → 雙重訊號 = 最強候選
-- **思維風格互補**：A/B/C 是教科書式分工，D/E/F 是 ProPicks AI 從 100+ 因子蒸餾的結果，
-  並用可避免單一框架盲點
-- **累積後可回測**：兩組各自跑數個月後，可比較同檔股票在不同框架下的勝率與報酬
+### A/B/C 經典三角（legacy）
+
+早期實驗、已停用（保留檔案、`GROUP=abc` 仍可跑，新功能不再接）：A 動能突破（MACD＋均線多頭）、
+B 成長主力（營收＋淨利＋外資連買）、C 品質價值（ROE＋配息＋殖利率）。
 
 詳細條件與設計取捨見 [docs/03-strategies.md](./docs/03-strategies.md)。
 
@@ -107,7 +98,7 @@ make report-batch
 | [`docs/00-architecture.md`](./docs/00-architecture.md) | 系統架構、資料流、模組職責 |
 | [`docs/01-environment.md`](./docs/01-environment.md) | 環境設定、依賴管理、devcontainer |
 | [`docs/02-data-sources.md`](./docs/02-data-sources.md) | Goodinfo 爬蟲規範、證交所 OpenAPI、合規限速 |
-| [`docs/03-strategies.md`](./docs/03-strategies.md) | A/B/C + D/E/F 兩組策略定義、GROUP 切換機制、YAML 規範 |
+| [`docs/03-strategies.md`](./docs/03-strategies.md) | D/E/F/G 主策略 + A/B/C legacy 定義、GROUP 切換機制、YAML 規範 |
 | [`docs/04-screener-spec.md`](./docs/04-screener-spec.md) | 選股模組規格 |
 | [`docs/05-group-analysis.md`](./docs/05-group-analysis.md) | 族群分析、領頭羊判斷 |
 | [`docs/06-report-spec.md`](./docs/06-report-spec.md) | 個股深度報告框架與輸出規範 |
