@@ -56,10 +56,10 @@
 
 > **個股領漲鏡頭**，補族群強度（廣度鏡頭）的盲點：半導體這種「少數龍頭噴出、多數成分股拉回」的大族群，5 日中位數會被稀釋、族群排名靠後，但領漲個股仍應被看見。此表不分族群、純按 5 日漲幅排序。
 
-| # | 股號 | 名稱 | 族群 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 法人(張) | 命中策略 | Goodinfo |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+| # | 股號 | 名稱 | 族群 | 次產業 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 法人(張) | 命中策略 | Goodinfo |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for s in strong_stocks -%}
-| {{ loop.index }} | {{ s.stock_id }} | {{ s.name }} | {{ s.industry_name }} | {{ s.momentum_5d_str }}{% if s.momentum_partial %}*{% endif %} | {{ s.change_pct_str }} | {{ s.vol_ratio_str }} | {{ s.ma20_str }} | {{ s.ma60_str }} | {{ s.inst_net_str }} | {{ s.strategy_str }} | [連結]({{ s.goodinfo_url }}) |
+| {{ loop.index }} | {{ s.stock_id }} | {{ s.name }} | {{ s.industry_name }} | {{ s.sub_industry_str }} | {{ s.momentum_5d_str }}{% if s.momentum_partial %}*{% endif %} | {{ s.change_pct_str }} | {{ s.vol_ratio_str }} | {{ s.ma20_str }} | {{ s.ma60_str }} | {{ s.inst_net_str }} | {{ s.strategy_str }} | [連結]({{ s.goodinfo_url }}) |
 {% endfor %}
 
 {% endif %}
@@ -70,10 +70,10 @@
 
 本週族群表現前 {{ group.top_stocks | length }} 名：
 
-| # | 股號 | 名稱 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 命中策略 | Goodinfo |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| # | 股號 | 名稱 | 次產業 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 命中策略 | Goodinfo |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for stock in group.top_stocks -%}
-| {{ stock.rank_in_group }} | {{ stock.stock_id }} | {{ stock.name }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ stock.vol_ratio_str }} | {{ stock.ma20_str }} | {{ stock.ma60_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.foreign_net_str }} | {{ stock.trust_net_str }} | {{ stock.strategy_str }} | [連結]({{ stock.goodinfo_url }}) |
+| {{ stock.rank_in_group }} | {{ stock.stock_id }} | {{ stock.name }} | {{ stock.sub_industry_str }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ stock.vol_ratio_str }} | {{ stock.ma20_str }} | {{ stock.ma60_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.foreign_net_str }} | {{ stock.trust_net_str }} | {{ stock.strategy_str }} | [連結]({{ stock.goodinfo_url }}) |
 {% endfor %}
 {% if group.rest_stocks -%}
 
@@ -101,7 +101,7 @@
 
 > 以下為本週篩選出的前 {{ claude_groups | length }} 大領漲族群，請 Claude 依照每個族群的個股資料，進行以下分析：
 >
-> 1. **細分實際族群 / 概念**：TWSE 大分類太粗，請先**逐檔標出所屬次產業 / 概念**，再判斷本族群目前哪個次產業最強、有無跨次產業輪動。次產業錨點（擇用）：AI 伺服器、矽光子 CPO、被動元件、晶圓代工、IC 設計、封測、記憶體、設備材料、鏡頭模組 vs AOI 檢測設備、面板、網通設備 vs 電信三雄、重電 / 綠能。（例：通信網路業同時含 CPO / 砷化鎵與電信三雄，動能與籌碼天差地遠，不可混為一談。）
+> 1. **細分實際族群 / 概念**：TWSE 大分類太粗，表中已附「次產業」欄作為起點（如半導體分記憶體模組/IC設計/封測/設備），請**據此再細化或校正**，判斷本族群目前哪個次產業最強、有無跨次產業輪動。次產業錨點（擇用）：AI 伺服器、矽光子 CPO、被動元件、晶圓代工、IC 設計、封測、記憶體、設備材料、鏡頭模組 vs AOI 檢測設備、面板、網通設備 vs 電信三雄、重電 / 綠能。（例：通信網路業同時含 CPO / 砷化鎵與電信三雄，動能與籌碼天差地遠，不可混為一談。）
 > 2. **族群輪動訊號**：觀察各族群 5 日中位、上漲家數(breadth)、法人買超家數比、入選率、領先個股漲幅，判斷是否有族群輪動（換手）跡象。
 > 3. **漲幅領先個股的合理性檢查**：評估每族群排名前 3 個股，用表中「法人(張)」（近 20 日三大法人淨買賣超）判斷漲勢有無籌碼支撐——**漲多但法人賣超＝假突破警訊**；再看「外資(張) vs 投信(張)」分辨**外資趨勢布局 vs 投信短打/作帳**，兩者背離時留意；對照成交金額看量能。
 > 4. **個股簡評**：針對每檔個股，以一句話點出關鍵看法（利多/利空/需觀察的理由）。
@@ -111,10 +111,10 @@
 {% for group in claude_groups %}
 ### 族群 {{ loop.index }}：{{ group.industry_name }}（強度分數 {{ group.score_str }}、5 日中位 {{ group.momentum_5d_str }}、上漲 {{ group.breadth_str }}、族群入選率 {{ group.entry_rate_pct_str }}）
 
-| 股票代號 | 名稱 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 入選策略 | 族群內排名 | Goodinfo |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 股票代號 | 名稱 | 次產業 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 入選策略 | 族群內排名 | Goodinfo |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for stock in group.stocks -%}
-| {{ stock.stock_id }} | {{ stock.name }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ stock.vol_ratio_str }} | {{ stock.ma20_str }} | {{ stock.ma60_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.foreign_net_str }} | {{ stock.trust_net_str }} | {{ stock.strategy_str }} | #{{ stock.rank_in_group }} | [連結]({{ stock.goodinfo_url }}) |
+| {{ stock.stock_id }} | {{ stock.name }} | {{ stock.sub_industry_str }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ stock.vol_ratio_str }} | {{ stock.ma20_str }} | {{ stock.ma60_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.foreign_net_str }} | {{ stock.trust_net_str }} | {{ stock.strategy_str }} | #{{ stock.rank_in_group }} | [連結]({{ stock.goodinfo_url }}) |
 {% endfor %}
 
 {% endfor %}

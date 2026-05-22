@@ -483,6 +483,21 @@ def analysis_group(
     console.print("  計算族群內排名...")
     leaders = find_leaders(enriched_stocks, price_history, institutional)
 
+    # 次產業（並存只顯示）：join sub_industry，並提醒「電子股未標」者增量補
+    from tw_screener.analysis.concepts import load_concepts, unmapped_electronics
+
+    concepts_df = load_concepts()
+    if not concepts_df.is_empty() and not leaders.is_empty():
+        leaders = leaders.join(concepts_df, on="stock_id", how="left")
+        unmapped = unmapped_electronics(leaders)
+        if unmapped:
+            console.print(
+                f"[yellow]  次產業未標（電子股 {len(unmapped)} 檔，可補 config/concepts.yaml）："
+                f"{', '.join(unmapped[:20])}{' …' if len(unmapped) > 20 else ''}[/yellow]"
+            )
+        else:
+            console.print("  次產業：電子候選股全數已標")
+
     output_path = Path(cfg["paths"]["reports_dir"]) / week_tag / "group_analysis.md"
     render_group_report(
         groups, leaders, screener_results, week_tag, output_path, top_groups, top_stocks,

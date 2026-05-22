@@ -101,6 +101,8 @@ def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> d
 
     ma20_str = _ma_str("ma20_dist_pct")
     ma60_str = _ma_str("ma60_dist_pct")
+    sub_industry = srow.get("sub_industry")
+    sub_industry_str = str(sub_industry) if sub_industry else "—"
     return {
         "stock_id": srow["stock_id"],
         "name": srow["name"],
@@ -124,6 +126,7 @@ def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> d
         "vol_ratio_str": vol_ratio_str,
         "ma20_str": ma20_str,
         "ma60_str": ma60_str,
+        "sub_industry_str": sub_industry_str,
         "goodinfo_url": str(srow.get("goodinfo_url", "")),
         "group_size": group_size,
     }
