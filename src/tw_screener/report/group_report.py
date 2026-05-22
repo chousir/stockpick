@@ -69,6 +69,7 @@ _STRATEGY_DESCRIPTION: dict[str, str] = {
 
 _UNCATEGORIZED = "未分類"
 _TOP_PER_GROUP = 3
+_TOP_STRONG = 15  # 跨族群強勢領漲股 Top N（個股領漲鏡頭，補族群廣度鏡頭的盲點）
 
 
 def _fmt_pct(v: float) -> str:
@@ -308,6 +309,17 @@ def _build_context(
     else:
         priority_rows = []
 
+    # --- 跨族群強勢領漲股（純 5 日漲幅排序，補族群廣度鏡頭埋掉的權值領漲）---
+    # 半導體這種「少數龍頭噴出、多數拉回」的大族群，5 日中位被稀釋→族群排名靠後，
+    # 但領漲個股（如台積電）仍應被看見。此處不分族群、純動能排序攤出。
+    strong_stocks: list[dict] = []
+    if not members.is_empty() and "momentum_5d" in members.columns:
+        strong_df = members.sort("momentum_5d", descending=True).head(_TOP_STRONG)
+        for srow in strong_df.iter_rows(named=True):
+            d = _build_stock_dict(srow, strategy_ids, len(strong_df))
+            d["industry_name"] = srow.get("industry_name", _UNCATEGORIZED)
+            strong_stocks.append(d)
+
     # --- Claude analysis section: top 4 categorised groups ---
     claude_groups = [g for g in group_list if not g["is_uncategorized"]][:4]
 
@@ -339,6 +351,7 @@ def _build_context(
         "strategy_legend": strategy_legend,
         "summary": summary,
         "g_universe_size": g_universe_size,
+        "strong_stocks": strong_stocks,
         "groups": group_list,
         "top_groups": top_groups,
         "priority_stocks": priority_rows,

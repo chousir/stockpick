@@ -200,6 +200,21 @@ def test_e2e_render_report_contains_required_sections(tmp_path: Path):
     assert "深度分析" in content
 
 
+def test_e2e_render_report_has_cross_group_strong_section(tmp_path: Path):
+    """報告應含「跨族群強勢領漲股」區段，且個股按 5 日漲幅降序。"""
+    results = {"a_breakout": _SCREENER_A, "b_growth_institutional": _SCREENER_B}
+    groups, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    ranked = rank_within_groups(members, pl.DataFrame(), pl.DataFrame())
+    output = tmp_path / "group_analysis.md"
+    render_group_report(groups, ranked, results, "2026-W21", output)
+    content = output.read_text(encoding="utf-8")
+    assert "強勢領漲股" in content
+    assert "不分族群" in content
+
+
 def test_e2e_render_report_no_leader_word(tmp_path: Path):
     """新版報告不應再出現「領頭羊」字樣。"""
     results = {"a_breakout": _SCREENER_A, "b_growth_institutional": _SCREENER_B}

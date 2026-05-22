@@ -51,6 +51,18 @@
 > 強度分數 = 50 × sigmoid(5 日中位漲/5) + 25 × 入選率 + 15 × 法人買超家數比 + 10 × log 規模
 > 「5 日中位」為族群內 5 日漲幅中位數（抗單檔灌水）；「上漲家數」為 5 日上漲成員數 / 總成員數；「法人買超」為近 20 日三大法人淨買超成員數 / 總成員數。
 
+{% if strong_stocks %}
+## 2.5 本週強勢領漲股 Top {{ strong_stocks | length }}（不分族群・純 5 日漲幅）
+
+> **個股領漲鏡頭**，補族群強度（廣度鏡頭）的盲點：半導體這種「少數龍頭噴出、多數成分股拉回」的大族群，5 日中位數會被稀釋、族群排名靠後，但領漲個股仍應被看見。此表不分族群、純按 5 日漲幅排序。
+
+| # | 股號 | 名稱 | 族群 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 法人(張) | 命中策略 | Goodinfo |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+{% for s in strong_stocks -%}
+| {{ loop.index }} | {{ s.stock_id }} | {{ s.name }} | {{ s.industry_name }} | {{ s.momentum_5d_str }}{% if s.momentum_partial %}*{% endif %} | {{ s.change_pct_str }} | {{ s.vol_ratio_str }} | {{ s.ma20_str }} | {{ s.ma60_str }} | {{ s.inst_net_str }} | {{ s.strategy_str }} | [連結]({{ s.goodinfo_url }}) |
+{% endfor %}
+
+{% endif %}
 ## 3. 各族群本週表現
 
 {% for group in groups %}
