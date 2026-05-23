@@ -677,3 +677,33 @@ def test_group_stocks_ma60_slope_sign_and_null():
     m = {r["stock_id"]: r for r in members.iter_rows(named=True)}
     assert m["2330"]["ma60_slope_pct"] is not None and m["2330"]["ma60_slope_pct"] > 0
     assert m["2454"]["ma60_slope_pct"] is None  # 40 日 < 60+10
+
+
+# ─── 電子次產業強度排名 ─────────────────────────────────────────────────────────
+
+
+def test_rank_sub_industries_splits_and_ranks():
+    """半導體拆成次產業各自排名；強股次產業勝過弱股次產業；不足 min_size 過濾。"""
+    members = pl.DataFrame(
+        {
+            "stock_id": ["A1", "A2", "B1", "B2", "C1"],
+            "sub_industry": ["IC設計", "IC設計", "記憶體模組", "記憶體模組", "矽智財"],
+            "momentum_5d": [8.0, 6.0, -7.0, -5.0, 20.0],
+            "inst_net": [100.0, 50.0, -10.0, -20.0, 30.0],
+        }
+    )
+    from tw_screener.analysis.grouping import rank_sub_industries
+    out = rank_sub_industries(members, min_group_size=2)
+    subs = out["sub_industry"].to_list()
+    assert "矽智財" not in subs              # 只 1 檔 → 過濾
+    assert subs[0] == "IC設計"               # 中位 +7 > 記憶體模組 中位 -6 → 排前
+    ic = out.filter(pl.col("sub_industry") == "IC設計").to_dicts()[0]
+    assert ic["up_count"] == 2               # 兩檔皆漲
+    mem = out.filter(pl.col("sub_industry") == "記憶體模組").to_dicts()[0]
+    assert mem["score"] < ic["score"]        # 弱次產業分數較低
+
+
+def test_rank_sub_industries_empty_without_column():
+    out_cols = __import__("tw_screener.analysis.grouping", fromlist=["rank_sub_industries"])
+    from tw_screener.analysis.grouping import rank_sub_industries
+    assert rank_sub_industries(pl.DataFrame({"stock_id": ["A"], "momentum_5d": [1.0]})).is_empty()

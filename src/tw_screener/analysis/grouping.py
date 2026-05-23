@@ -477,3 +477,71 @@ def group_stocks(
         len(groups),
     )
     return groups, stock_df
+
+
+def rank_sub_industries(
+    members: pl.DataFrame, min_group_size: int = 2
+) -> pl.DataFrame:
+    """電子次產業強度排名：把 TWSE 大分類細分（半導體→記憶體模組/IC設計/封測…）各自排名。
+
+    members 需含 sub_industry / momentum_5d（無則回空）。因 concepts.yaml 只標候選股、
+    缺「次產業全市場母體數」，故**不用入選率**，把其 25% 權重併入動能：
+        score = 70 * sigmoid(5日中位/5) + 15 * 法人買超家數比 + 15 * log 規模
+    回傳 sub_industry / members_count / momentum_5d / up_count / inst_buy_count /
+    inst_score / score，按 score 降序、過濾 < min_group_size。
+    """
+    _empty = pl.DataFrame(
+        schema={
+            "sub_industry": pl.Utf8,
+            "members_count": pl.Int32,
+            "momentum_5d": pl.Float64,
+            "up_count": pl.Int32,
+            "inst_buy_count": pl.Int32,
+            "inst_score": pl.Float64,
+            "score": pl.Float64,
+        }
+    )
+    if (
+        members.is_empty()
+        or "sub_industry" not in members.columns
+        or "momentum_5d" not in members.columns
+    ):
+        return _empty
+    df = members.filter(pl.col("sub_industry").is_not_null())
+    if df.is_empty():
+        return _empty
+
+    has_inst = "inst_net" in df.columns
+    agg_exprs: list[pl.Expr] = [
+        pl.col("stock_id").count().alias("members_count"),
+        pl.col("momentum_5d").median().alias("momentum_5d"),
+        (pl.col("momentum_5d") > 0).cast(pl.Int32).sum().alias("up_count"),
+    ]
+    if has_inst:
+        agg_exprs.append((pl.col("inst_net") > 0).cast(pl.Int32).sum().alias("inst_buy_count"))
+    g = df.group_by("sub_industry").agg(agg_exprs)
+    g = g.filter(pl.col("members_count") >= min_group_size)
+    if g.is_empty():
+        return _empty
+    if not has_inst:
+        g = g.with_columns(pl.lit(0, dtype=pl.Int32).alias("inst_buy_count"))
+
+    g = g.with_columns(
+        (pl.col("inst_buy_count").cast(pl.Float64) / pl.col("members_count").cast(pl.Float64)).alias(
+            "inst_score"
+        )
+    )
+    log_max = math.log1p(float(g["members_count"].max() or 1))
+    mom_score_vals = [_sigmoid(v / 5.0) for v in g["momentum_5d"].to_list()]
+    g = g.with_columns(pl.Series("_mom", mom_score_vals, dtype=pl.Float64))
+    g = g.with_columns(
+        ((pl.col("members_count").cast(pl.Float64) + 1.0).log(base=math.e) / log_max).alias("_sz")
+    )
+    g = g.with_columns(
+        (
+            0.70 * 100.0 * pl.col("_mom")
+            + 0.15 * 100.0 * pl.col("inst_score")
+            + 0.15 * 100.0 * pl.col("_sz")
+        ).alias("score")
+    ).drop(["_mom", "_sz"])
+    return g.sort("score", descending=True)

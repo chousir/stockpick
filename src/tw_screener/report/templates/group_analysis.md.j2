@@ -63,6 +63,19 @@
 {% endfor %}
 
 {% endif %}
+{% if sub_groups %}
+## 2.6 電子次產業強度排名（細分 TWSE 大分類）
+
+> 把半導體等大分類拆成次產業各自排名，避免「少數龍頭領漲、多數拉回」被整桶中位數埋掉（如記憶體模組 vs IC設計 vs 封測 vs 設備強弱天差地遠）。次產業＝Claude 知識播種的 `config/concepts.yaml`，僅含電子股。
+> 強度分數 = 70 × sigmoid(5 日中位/5) + 15 × 法人買超家數比 + 15 × log 規模（**無入選率**，因缺次產業全市場母體數；故與 Section 2 大分類分數不可直接比較）。
+
+| Rank | 次產業 | 入選 | 5 日中位 | 上漲家數 | 法人買超 | 強度分數 |
+|---|---|---|---|---|---|---|
+{% for sg in sub_groups -%}
+| {{ loop.index }} | {{ sg.sub_industry }} | {{ sg.members_count }} | {{ sg.momentum_5d_str }} | {{ sg.breadth_str }} | {{ sg.inst_breadth_str }} | {{ sg.score_str }} |
+{% endfor %}
+
+{% endif %}
 ## 3. 各族群本週表現
 
 {% for group in groups %}

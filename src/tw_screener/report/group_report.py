@@ -323,6 +323,27 @@ def _build_context(
             d["industry_name"] = srow.get("industry_name", _UNCATEGORIZED)
             strong_stocks.append(d)
 
+    # --- 電子次產業強度排名（細分 TWSE 大分類，半導體→記憶體模組/IC設計/封測…）---
+    from tw_screener.analysis.grouping import rank_sub_industries
+
+    sub_groups: list[dict] = []
+    sub_df = rank_sub_industries(members)
+    for row in sub_df.iter_rows(named=True):
+        cnt = int(row["members_count"])
+        up = int(row.get("up_count", 0) or 0)
+        ib = int(row.get("inst_buy_count", 0) or 0)
+        mom = float(row.get("momentum_5d", 0) or 0)
+        sub_groups.append(
+            {
+                "sub_industry": row["sub_industry"],
+                "members_count": cnt,
+                "momentum_5d_str": _fmt_pct(mom),
+                "breadth_str": f"{up}/{cnt}" if cnt else "0/0",
+                "inst_breadth_str": f"{ib}/{cnt}" if cnt else "0/0",
+                "score_str": f"{float(row['score']):.1f}",
+            }
+        )
+
     # --- Claude analysis section: top 4 categorised groups ---
     claude_groups = [g for g in group_list if not g["is_uncategorized"]][:4]
 
@@ -355,6 +376,7 @@ def _build_context(
         "summary": summary,
         "g_universe_size": g_universe_size,
         "strong_stocks": strong_stocks,
+        "sub_groups": sub_groups,
         "groups": group_list,
         "top_groups": top_groups,
         "priority_stocks": priority_rows,
