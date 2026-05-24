@@ -46,6 +46,20 @@ make report-batch
 **每週使用流程詳解 → [docs/10-sop.md](./docs/10-sop.md)**  
 **遇到問題（被擋、空資料、未分類等）→ [docs/99-troubleshooting.md](./docs/99-troubleshooting.md)**
 
+## 偶爾跑：更新概念股題材（多標籤主題）
+
+```bash
+make build-themes DRY=1   # 預覽：產 config/concepts.candidate.yaml，不覆蓋正式檔
+make build-themes         # 正式：把 Yahoo 概念股 merge 進 config/concepts.yaml（先備份 .bak）
+```
+
+- 一個指令把 Yahoo 「概念股」題材（衛星/低軌衛星、AI、5G…）的成分股 **merge 進 `config/concepts.yaml`**；
+  你**手動維護的電子次產業原封不動**（靠檔內 `concept_themes` 清單分辨，重跑只換概念股）。
+- 報告會多出 **2.7 概念股主題強度排名**，逐股「主題」欄也帶上概念股題材。
+- **建議每月或每隔幾天跑一次**：概念股成分會變動，太久不更新會失準。約 101 頁 × 3 秒 ≈ 5–7 分。
+- 限制：每個題材取 Yahoo 前約 30 檔（領頭觀察、非全量）；電子次產業因會被截斷故維持手動。詳見
+  [docs/02-data-sources.md](./docs/02-data-sources.md)。
+
 ## 核心設計原則
 
 1. **半自動，不全自動**：資料抓取、選股、報告骨架自動化；下單決策保留給人。

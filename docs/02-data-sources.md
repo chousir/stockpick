@@ -127,9 +127,10 @@ Goodinfo 主要用在「條件組合篩選」這個它真正強的地方。
 
 ## Yahoo 股市 概念股主題（多標籤主題）
 
-只爬「概念股」主題成分（電子次產業沿用手標 `config/concepts.yaml`，完整不截斷）。資料在 SSR
-`root.App.main`、純 HTTP 取得，每筆帶乾淨 `systexId` 股號＋`symbolName`，**免名稱→股號比對**。
-產出 `config/themes.yaml`，與 concepts.yaml 合併成統一多標籤 long table（見 `analysis/concepts.load_themes`）。
+只爬「概念股」主題成分（電子次產業沿用手標，完整不截斷）。資料在 SSR `root.App.main`、純 HTTP
+取得，每筆帶乾淨 `systexId` 股號＋`symbolName`，**免名稱→股號比對**。`make build-themes` 把概念股
+**merge 進 `config/concepts.yaml`**（單一檔）：以檔內 `concept_themes` 清單分辨自動概念股，重跑時
+清舊換新、**手動電子次產業原封不動**；`load_themes` 據 `concept_themes` 判每個標籤的 kind。
 
 ### 限制（已知、誠實揭露）
 - 每個概念股主題 SSR **只內嵌前約 30 檔**（領頭觀察、非全量）；「載入更多」是 runtime 組出、

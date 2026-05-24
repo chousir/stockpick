@@ -56,7 +56,7 @@ fetch-candidates-history:  ## 對本週篩選結果補抓 STOCK_DAY 歷史（MA2
 fetch-institutional-history:  ## 回補近 N 個交易日三大法人（DAYS=20 可調，族群法人強度用）
 	uv run tw-screener data fetch-institutional-history --days $(or $(DAYS),20)
 
-build-themes:  ## 爬 Yahoo 概念股主題成分 → config/themes.yaml（DRY=1 只產 candidate 不覆蓋）
+build-themes:  ## 爬 Yahoo 概念股 merge 進 config/concepts.yaml（DRY=1 只產 candidate 不覆蓋）
 	uv run tw-screener data build-themes $(if $(DRY),--dry-run,)
 
 # ─── 選股 ────────────────────────────────────────────────────────────────────

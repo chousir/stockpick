@@ -28,38 +28,32 @@ def test_load_concepts_missing_file(tmp_path: Path):
 
 
 def test_load_themes_explodes_multilabel_real_file():
-    """load_themes：多標籤一檔展開成多列、kind=次產業。"""
-    df = load_themes(
-        concepts_path=Path("config/concepts.yaml"), themes_path=Path("nonexistent.yaml")
-    )
+    """load_themes：多標籤一檔展開成多列；無 concept_themes 時皆 kind=次產業。"""
+    df = load_themes(Path("config/concepts.yaml"))
     rows = df.filter(pl.col("stock_id") == "3034")
     assert set(rows["theme"].to_list()) == {"IC設計服務", "面板業"}
     assert set(rows["kind"].to_list()) == {SUB_INDUSTRY_KIND}
 
 
-def test_load_themes_merges_two_sources(tmp_path: Path):
-    """concepts.yaml（次產業）＋ themes.yaml（概念股）合併成統一 long table。"""
-    cpath = tmp_path / "concepts.yaml"
-    cpath.write_text(
-        'concepts:\n  "2330": IC生產製造\n  "3017": ["散熱", "AI"]\n', encoding="utf-8"
+def test_load_themes_kind_from_concept_themes(tmp_path: Path):
+    """concept_themes 清單內的標籤 → 概念股；其餘 → 次產業（同檔多標籤、各自 kind）。"""
+    p = tmp_path / "concepts.yaml"
+    p.write_text(
+        "concept_themes: [衛星]\n"
+        "concepts:\n"
+        '  "2330": IC生產製造\n'
+        '  "2317": [機殼, 衛星]\n',
+        encoding="utf-8",
     )
-    tpath = tmp_path / "themes.yaml"
-    tpath.write_text(
-        'themes:\n  衛星:\n    kind: 概念股\n    members: ["2330", "2314"]\n', encoding="utf-8"
-    )
-    df = load_themes(concepts_path=cpath, themes_path=tpath)
-    # 2330 同時是次產業(IC生產製造) + 概念股(衛星) → 兩列
-    assert set(df.filter(pl.col("stock_id") == "2330")["theme"].to_list()) == {
-        "IC生產製造",
-        "衛星",
-    }
-    kinds = {r["theme"]: r["kind"] for r in df.iter_rows(named=True)}
-    assert kinds["IC生產製造"] == SUB_INDUSTRY_KIND
-    assert kinds["衛星"] == CONCEPT_KIND
+    df = load_themes(p)
+    kinds = {(r["stock_id"], r["theme"]): r["kind"] for r in df.iter_rows(named=True)}
+    assert kinds[("2330", "IC生產製造")] == SUB_INDUSTRY_KIND
+    assert kinds[("2317", "機殼")] == SUB_INDUSTRY_KIND
+    assert kinds[("2317", "衛星")] == CONCEPT_KIND  # 在 concept_themes 內
 
 
-def test_load_themes_empty_when_both_missing(tmp_path: Path):
-    df = load_themes(concepts_path=tmp_path / "a.yaml", themes_path=tmp_path / "b.yaml")
+def test_load_themes_empty_when_missing(tmp_path: Path):
+    df = load_themes(tmp_path / "nope.yaml")
     assert df.is_empty()
     assert set(df.columns) == {"stock_id", "theme", "kind"}
 

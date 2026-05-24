@@ -220,17 +220,16 @@ def data_fetch_candidates_history(
 @data_app.command("build-themes")
 def data_build_themes(
     dry_run: bool = typer.Option(
-        False, "--dry-run", help="寫 config/themes.candidate.yaml、不覆蓋正式檔"
+        False, "--dry-run", help="寫 config/concepts.candidate.yaml、不覆蓋正式檔"
     ),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
-    """從 Yahoo 股市爬「概念股」主題成分，產出 config/themes.yaml（多標籤主題用）。
+    """爬 Yahoo「概念股」主題成分，merge 進 config/concepts.yaml（多標籤主題）。
 
-    只抓概念股（電子次產業沿用手標 config/concepts.yaml）。每主題 SSR 只內嵌前約 30
-    檔（領頭觀察、非全量），分頁 XHR 依爬蟲自律不爬。約 101 頁 × 3 秒、久久跑一次。
+    只更新概念股；**手動電子次產業原封不動**。靠檔內 concept_themes 清單分辨自動概念股、
+    重跑時清舊換新。每主題 SSR 只內嵌前約 30 檔（領頭觀察、非全量），分頁 XHR 依爬蟲自律
+    不爬。約 101 頁 × 3 秒、久久跑一次（建議每月，避免題材成分變動失準）。
     """
-    import datetime as _dt
-
     import yaml as _yaml
 
     from tw_screener.screener.yahoo.fetcher import create_yahoo_fetcher
@@ -245,19 +244,18 @@ def data_build_themes(
     tb = cfg.get("themes_build", {})
     wanted_labels = set(tb.get("category_labels", ["概念股"]))
     min_members = int(tb.get("concept_min_members", 3))
-    base_url = cfg["yahoo"]["base_url"].rstrip("/")
-    cache_dir = Path(cfg["paths"]["cache_dir"])
-    fetcher = create_yahoo_fetcher(cfg, cache_dir)
+    fetcher = create_yahoo_fetcher(cfg, Path(cfg["paths"]["cache_dir"]))
+    concepts_path = Path("config/concepts.yaml")
 
+    # 1) 爬 Yahoo 概念股 → {主題: [股號]}
     console.print("[bold]抓 Yahoo 主題索引（/class）...[/bold]")
     all_refs = parse_class_index(fetcher.get("/class"))
     refs = [r for r in all_refs if r.kind in wanted_labels]
     console.print(
         f"  全部 {len(all_refs)} 主題，取 {'、'.join(sorted(wanted_labels))} 共 {len(refs)} 個"
     )
-
-    themes: dict[str, dict] = {}
-    kept = dropped = 0
+    scraped: dict[str, list[str]] = {}
+    dropped = 0
     for idx, ref in enumerate(refs, 1):
         try:
             members = parse_category_members(fetcher.get(ref.href))
@@ -268,29 +266,52 @@ def data_build_themes(
         if len(ids) < min_members:
             dropped += 1
             continue
-        themes[ref.name] = {"kind": ref.kind, "url": f"{base_url}{ref.href}", "members": ids}
-        kept += 1
+        scraped[ref.name] = ids
         if idx % 20 == 0:
-            console.print(f"  進度 {idx}/{len(refs)}（保留 {kept}、丟棄 {dropped}）")
+            console.print(f"  進度 {idx}/{len(refs)}（保留 {len(scraped)}、丟棄 {dropped}）")
+    new_concept_set = set(scraped)
 
-    doc = {
-        "meta": {
-            "source": "Yahoo 股市 概念股",
-            "fetched_at": _dt.date.today().isoformat(),
-            "note": "每主題取 SSR 前約 30 檔（非全量）；電子次產業見 config/concepts.yaml",
-        },
-        "themes": themes,
-    }
+    # 2) 讀現有 concepts.yaml：剝掉上次自動寫入的概念股標籤（保留手動次產業），再加本次概念股
+    existing: dict = {}
+    if concepts_path.exists():
+        with open(concepts_path, encoding="utf-8") as fh:
+            existing = _yaml.safe_load(fh) or {}
+    old_concept_set = set(existing.get("concept_themes", []) or [])
+    labels_by_id: dict[str, list[str]] = {}
+    for sid, val in (existing.get("concepts", {}) or {}).items():
+        lst = list(val) if isinstance(val, list) else [val]
+        labels_by_id[str(sid)] = [str(x) for x in lst if str(x) not in old_concept_set]
+    for theme, ids in scraped.items():
+        for sid in ids:
+            labels_by_id.setdefault(sid, []).append(theme)
 
-    out_path = Path("config") / ("themes.candidate.yaml" if dry_run else "themes.yaml")
-    if not dry_run and out_path.exists():
-        bak = out_path.with_name(out_path.name + ".bak")
-        bak.write_text(out_path.read_text(encoding="utf-8"), encoding="utf-8")
+    # 3) 收斂：去重、單一標籤收成 scalar、剝光（只剩舊概念股）者移除
+    out_concepts: dict[str, object] = {}
+    for sid, labels in labels_by_id.items():
+        deduped = list(dict.fromkeys(labels))
+        if not deduped:
+            continue
+        out_concepts[sid] = deduped[0] if len(deduped) == 1 else deduped
+
+    header = (
+        "# 主題對照表（次產業手動 + 概念股自動）\n"
+        "# - concepts: {股號: 標籤 | [標籤...]}；一檔可多標籤。\n"
+        "# - concept_themes: Yahoo 概念股主題名，由 `make build-themes` 維護（重跑只換概念股，\n"
+        "#   手動電子次產業不動）；判斷標籤 kind 也靠它。每主題取 Yahoo SSR 前約 30 檔。\n\n"
+    )
+    doc = {"concept_themes": sorted(new_concept_set), "concepts": out_concepts}
+
+    out_path = Path("config") / ("concepts.candidate.yaml" if dry_run else "concepts.yaml")
+    if not dry_run and concepts_path.exists():
+        bak = concepts_path.with_name(concepts_path.name + ".bak")
+        bak.write_text(concepts_path.read_text(encoding="utf-8"), encoding="utf-8")
         console.print(f"  已備份舊檔 → {bak}")
     with open(out_path, "w", encoding="utf-8") as fh:
+        fh.write(header)
         _yaml.safe_dump(doc, fh, allow_unicode=True, sort_keys=False)
     console.print(
-        f"[green]完成：{kept} 主題寫入 {out_path}（丟棄 {dropped} 個 < {min_members} 檔）[/green]"
+        f"[green]完成：{len(scraped)} 概念股主題 merge 進 {out_path}"
+        f"（丟棄 {dropped} 個 < {min_members} 檔；手動次產業保留）[/green]"
     )
 
 

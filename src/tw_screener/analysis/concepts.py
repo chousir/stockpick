@@ -1,8 +1,8 @@
-"""主題對照表載入：手標電子次產業（config/concepts.yaml）＋ Yahoo 概念股（config/themes.yaml）。
+"""主題對照表載入：單一 config/concepts.yaml（手標電子次產業 + Yahoo 概念股 merge 進來）。
 
-合併成統一多標籤 long table `(stock_id, theme, kind)`，一檔可屬多主題。
-`kind`＝「次產業」（手標電子，完整）或「概念股」（Yahoo 爬，每主題前約 30 檔）。
-主題強度排名見 grouping.rank_themes；報表逐股主題欄見 report/group_report。
+`concepts: {id: 標籤 | [標籤...]}` 多標籤 long table `(stock_id, theme, kind)`，一檔可屬多主題。
+`kind` 由 `concept_themes` 清單判定：在清單內＝「概念股」（make build-themes 維護），否則＝
+「次產業」（手動）。主題強度排名見 grouping.rank_themes；報表逐股主題欄見 report/group_report。
 """
 
 from __future__ import annotations
@@ -59,43 +59,25 @@ def load_concepts(path: Path = Path("config/concepts.yaml")) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=_SCHEMA)
 
 
-def load_themes(
-    concepts_path: Path = Path("config/concepts.yaml"),
-    themes_path: Path = Path("config/themes.yaml"),
-) -> pl.DataFrame:
-    """讀兩來源 → 統一 long table DataFrame(stock_id, theme, kind)，一檔多列。
+def load_themes(concepts_path: Path = Path("config/concepts.yaml")) -> pl.DataFrame:
+    """讀 concepts.yaml → 統一 long table DataFrame(stock_id, theme, kind)，一檔多列。
 
-    - concepts.yaml（手標電子次產業）：`concepts: {id: 主題 | [主題...]}` → kind=次產業。
-    - themes.yaml（Yahoo 概念股）：`themes: {名稱: {kind, url, members:[id...]}}` → kind=概念股。
-    任一檔不存在則該來源略過。兩檔都無 → 回空表。
+    `concepts: {id: 主題 | [主題...]}`；標籤的 kind 由 `concept_themes` 清單判定：在清單內
+    ＝概念股（make build-themes 維護），否則＝次產業（手動）。檔案不存在 → 回空表。
     """
+    if not concepts_path.exists():
+        logger.warning("concepts.yaml 不存在（{}），主題將留空", concepts_path)
+        return pl.DataFrame(schema=_THEME_SCHEMA)
+    with open(concepts_path, encoding="utf-8") as fh:
+        data = yaml.safe_load(fh) or {}
+    concept_set = set(data.get("concept_themes", []) or [])
     rows: list[dict[str, str]] = []
-
-    if concepts_path.exists():
-        with open(concepts_path, encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or {}
-        for sid, val in (data.get("concepts", {}) or {}).items():
-            labels = val if isinstance(val, list) else [val]
-            for lab in labels:
-                rows.append(
-                    {"stock_id": str(sid), "theme": str(lab), "kind": SUB_INDUSTRY_KIND}
-                )
-    else:
-        logger.warning("concepts.yaml 不存在（{}），次產業主題將留空", concepts_path)
-
-    if themes_path.exists():
-        with open(themes_path, encoding="utf-8") as fh:
-            tdata = yaml.safe_load(fh) or {}
-        for name, info in (tdata.get("themes", {}) or {}).items():
-            info = info or {}
-            kind = str(info.get("kind", CONCEPT_KIND))
-            for sid in info.get("members", []) or []:
-                rows.append({"stock_id": str(sid), "theme": str(name), "kind": kind})
-    else:
-        logger.info(
-            "themes.yaml 不存在（{}），概念股主題將留空（可跑 make build-themes）", themes_path
-        )
-
+    for sid, val in (data.get("concepts", {}) or {}).items():
+        labels = val if isinstance(val, list) else [val]
+        for lab in labels:
+            lab = str(lab)
+            kind = CONCEPT_KIND if lab in concept_set else SUB_INDUSTRY_KIND
+            rows.append({"stock_id": str(sid), "theme": lab, "kind": kind})
     if not rows:
         return pl.DataFrame(schema=_THEME_SCHEMA)
     return pl.DataFrame(rows, schema=_THEME_SCHEMA).unique(maintain_order=True)
