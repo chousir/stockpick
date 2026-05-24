@@ -46,19 +46,28 @@ make report-batch
 **每週使用流程詳解 → [docs/10-sop.md](./docs/10-sop.md)**  
 **遇到問題（被擋、空資料、未分類等）→ [docs/99-troubleshooting.md](./docs/99-troubleshooting.md)**
 
-## 偶爾跑：更新概念股題材（多標籤主題）
+## 維護 `config/concepts.yaml`（多標籤主題：次產業 + 概念股）
 
+`concepts.yaml` 給每檔股票額外的主題標籤（**並存**於 TWSE 主族群、不取代）。`make week` 最後一步
+`group` 會讀它，在 `group_analysis.md` 產出 **2.6 電子次產業 / 2.7 概念股強度排名** + 個股「主題」欄，
+並請 Claude 判斷同主題叢集是否輪動領漲。**半自動維護，分兩部分：**
+
+### A. 電子次產業 — 手動
+- 直接編 `concepts.yaml` 的 `concepts:`：`"股號": 次產業` 或多標籤 `"股號": [次產業A, 次產業B]`。
+- 為何手動：Yahoo 每類只給前 ~30 檔，會把成分 >30 的次產業（IC設計服務 ~115…）截斷，故維持手動、完整。
+
+### B. 概念股題材 — 自動（一個指令）
 ```bash
-make build-themes DRY=1   # 預覽：產 config/concepts.candidate.yaml，不覆蓋正式檔
-make build-themes         # 正式：把 Yahoo 概念股 merge 進 config/concepts.yaml（先備份 .bak）
+make build-themes DRY=1   # 預覽 → config/concepts.candidate.yaml（不覆蓋正式檔）
+make build-themes         # 正式 → merge 進 config/concepts.yaml（先自動備份 .bak）
 ```
-
-- 一個指令把 Yahoo 「概念股」題材（衛星/低軌衛星、AI、5G…）的成分股 **merge 進 `config/concepts.yaml`**；
-  你**手動維護的電子次產業原封不動**（靠檔內 `concept_themes` 清單分辨，重跑只換概念股）。
-- 報告會多出 **2.7 概念股主題強度排名**，逐股「主題」欄也帶上概念股題材。
-- **建議每月或每隔幾天跑一次**：概念股成分會變動，太久不更新會失準。約 101 頁 × 3 秒 ≈ 5–7 分。
-- 限制：每個題材取 Yahoo 前約 30 檔（領頭觀察、非全量）；電子次產業因會被截斷故維持手動。詳見
-  [docs/02-data-sources.md](./docs/02-data-sources.md)。
+- 從 Yahoo 抓「概念股」成分（衛星/5G/AI…）**merge 進 concepts.yaml**；**手動次產業原封不動**
+  （靠檔內 `concept_themes` 清單分辨自動概念股，重跑只清舊換新）。
+- **挑要哪些題材**：編 `config/settings.yaml` 的 `themes_build.concept_whitelist`
+  （留空＝全部 101 個）。目前預設 15 個熱門趨勢（衛星/5G/AI/電動車/功率半導體…）；
+  全部可選名單見 [docs/02-data-sources.md](./docs/02-data-sources.md)。
+- **建議每月跑一次**（概念股成分會變動，太久不更新會失準）。白名單 15 個 ≈ 45 秒；全 101 個 ≈ 5–7 分。
+- 限制：每題材取 Yahoo 前約 30 檔（領頭觀察、非全量）。
 
 ## 核心設計原則
 
