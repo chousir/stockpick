@@ -28,7 +28,6 @@
 
 {% for sid in active_strategy_ids -%}
 - 策略 {{ strategy_names[sid] }}共 {{ summary.counts.get(sid, 0) }} 檔{% if sid == "g_growth_pullback" %}（有效拉回命中；基本面成長宇宙 {{ g_universe_size }} 檔）{% endif %}
-
 {% endfor -%}
 - 總聯集：{{ summary.total_union }} 檔（去重後，僅含有效策略命中股）
 {% if "g_growth_pullback" in active_strategy_ids -%}
@@ -37,7 +36,6 @@
 {% for key, stocks in summary.intersections.items() -%}
 {% if stocks -%}
 - {{ key }}：{{ stocks | length }} 檔{% if stocks | length <= 5 %}（{{ stocks | join("、") }}）{% endif %}
-
 {% endif -%}
 {% endfor %}
 ## 2. 族群強度排名（前 {{ top_groups }}）
