@@ -243,6 +243,7 @@ def data_build_themes(
 
     tb = cfg.get("themes_build", {})
     wanted_labels = set(tb.get("category_labels", ["概念股"]))
+    whitelist = set(tb.get("concept_whitelist", []) or [])
     min_members = int(tb.get("concept_min_members", 3))
     fetcher = create_yahoo_fetcher(cfg, Path(cfg["paths"]["cache_dir"]))
     concepts_path = Path("config/concepts.yaml")
@@ -251,8 +252,17 @@ def data_build_themes(
     console.print("[bold]抓 Yahoo 主題索引（/class）...[/bold]")
     all_refs = parse_class_index(fetcher.get("/class"))
     refs = [r for r in all_refs if r.kind in wanted_labels]
+    if whitelist:
+        missing = whitelist - {r.name for r in refs}
+        if missing:
+            console.print(
+                f"[yellow]  白名單有 {len(missing)} 個對不到 Yahoo 主題名（忽略）："
+                f"{'、'.join(sorted(missing))}[/yellow]"
+            )
+        refs = [r for r in refs if r.name in whitelist]
     console.print(
-        f"  全部 {len(all_refs)} 主題，取 {'、'.join(sorted(wanted_labels))} 共 {len(refs)} 個"
+        f"  全部 {len(all_refs)} 主題，取 {'、'.join(sorted(wanted_labels))}"
+        f"{'（白名單篩選）' if whitelist else ''} 共 {len(refs)} 個"
     )
     scraped: dict[str, list[str]] = {}
     dropped = 0

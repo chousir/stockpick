@@ -33,6 +33,24 @@ themes_build:
   category_labels: ["概念股"]   # 只抓概念股；集團股 / 電子產業不抓
   concept_min_members: 3        # 概念股清單較鬆，保留門檻拉高防雜訊
   min_members: 2                # 次產業（手標）排名保留門檻
+  # 只爬/只寫白名單裡的概念股題材（留空＝全部 101 個）；只會抓這幾頁、又快又乾淨。
+  # 名稱須與 Yahoo 完全一致；全部可選名單見 docs/02-data-sources.md。自由增刪。
+  concept_whitelist:
+    - "衛星/低軌衛星"
+    - "5G"
+    - "AI人工智慧"
+    - "雲伺服器"
+    - "電動車/油電車"
+    - "ADAS"
+    - "車聯網"
+    - "功率半導體"
+    - "矽智財(IP)"
+    - "Mini LED"
+    - "無線充電"
+    - "半導體設備"
+    - "機器人/智慧機械"
+    - "風力發電/離岸風電"
+    - "國防自主"
 
 twse:
   base_url: "https://openapi.twse.com.tw/v1"

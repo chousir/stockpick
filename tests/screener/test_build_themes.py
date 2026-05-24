@@ -22,6 +22,7 @@ yahoo:
   concurrency: 1
 themes_build:
   category_labels: ["概念股"]
+  concept_whitelist: ["衛星/低軌衛星"]
   concept_min_members: 3
   min_members: 2
 """
@@ -69,3 +70,6 @@ def test_build_themes_dry_run_merges_into_concepts(tmp_path: Path, monkeypatch):
     assert ("2330", "舊概念A") not in rec
     # 2317（鴻海，在衛星成分）拿到新概念股、kind=概念股
     assert rec[("2317", "衛星/低軌衛星")] == CONCEPT_KIND
+    # 白名單只留衛星 → 概念股題材只有這一個
+    concept_themes = {r["theme"] for r in df.iter_rows(named=True) if r["kind"] == CONCEPT_KIND}
+    assert concept_themes == {"衛星/低軌衛星"}
