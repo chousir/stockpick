@@ -479,20 +479,28 @@ def group_stocks(
     return groups, stock_df
 
 
-def rank_sub_industries(
-    members: pl.DataFrame, min_group_size: int = 2
+def rank_themes(
+    members: pl.DataFrame,
+    themes_long: pl.DataFrame,
+    min_members: int = 2,
+    concept_min_members: int = 3,
 ) -> pl.DataFrame:
-    """電子次產業強度排名：把 TWSE 大分類細分（半導體→記憶體模組/IC設計/封測…）各自排名。
+    """多標籤主題強度排名：候選股依所屬主題（次產業＋概念股）各自分群排名。
 
-    members 需含 sub_industry / momentum_5d（無則回空）。因 concepts.yaml 只標候選股、
-    缺「次產業全市場母體數」，故**不用入選率**，把其 25% 權重併入動能：
+    members 需含 stock_id / momentum_5d；themes_long 為 (stock_id, theme, kind) long table，
+    一檔可屬多主題、join 後各貢獻一列。因主題只涵蓋部分股、缺「全市場母體數」，故**不用
+    入選率**，把其 25% 權重併入動能：
         score = 70 * sigmoid(5日中位/5) + 15 * 法人買超家數比 + 15 * log 規模
-    回傳 sub_industry / members_count / momentum_5d / up_count / inst_buy_count /
-    inst_score / score，按 score 降序、過濾 < min_group_size。
+    保留門檻依 kind 分流：次產業 >= min_members、概念股 >= concept_min_members。
+    回傳 theme / kind / members_count / momentum_5d / up_count / inst_buy_count /
+    inst_score / score，按 score 降序。
     """
+    from tw_screener.analysis.concepts import SUB_INDUSTRY_KIND
+
     _empty = pl.DataFrame(
         schema={
-            "sub_industry": pl.Utf8,
+            "theme": pl.Utf8,
+            "kind": pl.Utf8,
             "members_count": pl.Int32,
             "momentum_5d": pl.Float64,
             "up_count": pl.Int32,
@@ -503,11 +511,13 @@ def rank_sub_industries(
     )
     if (
         members.is_empty()
-        or "sub_industry" not in members.columns
+        or themes_long.is_empty()
         or "momentum_5d" not in members.columns
+        or "theme" not in themes_long.columns
     ):
         return _empty
-    df = members.filter(pl.col("sub_industry").is_not_null())
+    # 一檔對多主題各貢獻一列：candidate × theme（inner join＝只算落在候選股的主題成分）
+    df = members.join(themes_long, on="stock_id", how="inner")
     if df.is_empty():
         return _empty
 
@@ -519,17 +529,22 @@ def rank_sub_industries(
     ]
     if has_inst:
         agg_exprs.append((pl.col("inst_net") > 0).cast(pl.Int32).sum().alias("inst_buy_count"))
-    g = df.group_by("sub_industry").agg(agg_exprs)
-    g = g.filter(pl.col("members_count") >= min_group_size)
+    g = df.group_by(["theme", "kind"]).agg(agg_exprs)
+    g = g.filter(
+        pl.when(pl.col("kind") == SUB_INDUSTRY_KIND)
+        .then(pl.col("members_count") >= min_members)
+        .otherwise(pl.col("members_count") >= concept_min_members)
+    )
     if g.is_empty():
         return _empty
     if not has_inst:
         g = g.with_columns(pl.lit(0, dtype=pl.Int32).alias("inst_buy_count"))
 
     g = g.with_columns(
-        (pl.col("inst_buy_count").cast(pl.Float64) / pl.col("members_count").cast(pl.Float64)).alias(
-            "inst_score"
-        )
+        (
+            pl.col("inst_buy_count").cast(pl.Float64)
+            / pl.col("members_count").cast(pl.Float64)
+        ).alias("inst_score")
     )
     log_max = math.log1p(float(g["members_count"].max() or 1))
     mom_score_vals = [_sigmoid(v / 5.0) for v in g["momentum_5d"].to_list()]

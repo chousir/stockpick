@@ -83,7 +83,12 @@ def _strategy_str(row: dict, strategy_ids: list[str]) -> str:
     return "+".join(labels) if labels else "-"
 
 
-def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> dict:
+def _build_stock_dict(
+    srow: dict,
+    strategy_ids: list[str],
+    group_size: int,
+    theme_str_map: dict[str, str] | None = None,
+) -> dict:
     momentum_5d = float(srow.get("momentum_5d", srow.get("rs", 0)) or 0)
     days_used = int(srow.get("momentum_days_used", 0) or 0)
     rank_in_group = int(srow.get("rank_in_group", 0) or 0)
@@ -101,8 +106,7 @@ def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> d
 
     ma20_str = _ma_str("ma20_dist_pct")
     ma60_str = _ma_str("ma60_dist_pct")
-    sub_industry = srow.get("sub_industry")
-    sub_industry_str = str(sub_industry) if sub_industry else "—"
+    sub_industry_str = (theme_str_map or {}).get(str(srow["stock_id"]), "—")
     return {
         "stock_id": srow["stock_id"],
         "name": srow["name"],
@@ -132,6 +136,40 @@ def _build_stock_dict(srow: dict, strategy_ids: list[str], group_size: int) -> d
     }
 
 
+def _build_theme_str_map(
+    members: pl.DataFrame,
+    themes_long: pl.DataFrame,
+    ranked: pl.DataFrame,
+    cap: int = 3,
+) -> dict[str, str]:
+    """每檔的主題顯示字串：次產業（身分）優先、再補當前最強的概念股主題，合計上限 cap。
+
+    「哪個多標籤重要」交給強度排名回答：身分必顯示，題材按 ranked 的 score 由高到低取。
+    """
+    from tw_screener.analysis.concepts import SUB_INDUSTRY_KIND
+
+    if members.is_empty() or themes_long.is_empty():
+        return {}
+    score_map: dict[str, float] = {}
+    if not ranked.is_empty():
+        score_map = {r["theme"]: float(r["score"]) for r in ranked.iter_rows(named=True)}
+    member_ids = set(members["stock_id"].to_list())
+    by_stock: dict[str, list[tuple[int, float, str]]] = {}
+    for row in themes_long.iter_rows(named=True):
+        sid = row["stock_id"]
+        if sid not in member_ids:
+            continue
+        kind_rank = 0 if row["kind"] == SUB_INDUSTRY_KIND else 1  # 次產業優先
+        by_stock.setdefault(sid, []).append(
+            (kind_rank, -score_map.get(row["theme"], 0.0), row["theme"])
+        )
+    out: dict[str, str] = {}
+    for sid, items in by_stock.items():
+        items.sort()  # 次產業優先，組內按 score 由高到低
+        out[sid] = "、".join(t for _, _, t in items[:cap])
+    return out
+
+
 def _build_context(
     groups: pl.DataFrame,
     members: pl.DataFrame,
@@ -140,6 +178,7 @@ def _build_context(
     top_groups: int,
     top_stocks: int,
     dividend_events: pl.DataFrame | None = None,
+    themes_long: pl.DataFrame | None = None,
 ) -> dict:
     strategy_ids = sorted(screener_results.keys())
     # Only show strategies that have at least 1 result
@@ -195,6 +234,32 @@ def _build_context(
         for sid in active_strategy_ids
     ]
 
+    # --- 主題強度排名（次產業 + 概念股，多標籤 long table）＋ 逐股主題顯示字串 ---
+    from tw_screener.analysis.concepts import SUB_INDUSTRY_KIND
+    from tw_screener.analysis.grouping import rank_themes
+
+    themes_long = themes_long if themes_long is not None else pl.DataFrame()
+    ranked = rank_themes(members, themes_long)
+    theme_str_map = _build_theme_str_map(members, themes_long, ranked)
+    sub_groups: list[dict] = []
+    concept_groups: list[dict] = []
+    for row in ranked.iter_rows(named=True):
+        cnt = int(row["members_count"])
+        up = int(row.get("up_count", 0) or 0)
+        ib = int(row.get("inst_buy_count", 0) or 0)
+        mom = float(row.get("momentum_5d", 0) or 0)
+        entry = {
+            "members_count": cnt,
+            "momentum_5d_str": _fmt_pct(mom),
+            "breadth_str": f"{up}/{cnt}" if cnt else "0/0",
+            "inst_breadth_str": f"{ib}/{cnt}" if cnt else "0/0",
+            "score_str": f"{float(row['score']):.1f}",
+        }
+        if row["kind"] == SUB_INDUSTRY_KIND:
+            sub_groups.append({"sub_industry": row["theme"], **entry})
+        else:
+            concept_groups.append({"theme": row["theme"], **entry})
+
     # --- groups table (top N) ---
     top_groups_df = groups.head(top_groups)
     group_list: list[dict] = []
@@ -223,7 +288,7 @@ def _build_context(
 
         n = len(group_stocks_df)
         all_stocks = [
-            _build_stock_dict(srow, strategy_ids, n)
+            _build_stock_dict(srow, strategy_ids, n, theme_str_map)
             for srow in group_stocks_df.iter_rows(named=True)
         ]
 
@@ -319,30 +384,9 @@ def _build_context(
     if not members.is_empty() and "momentum_5d" in members.columns:
         strong_df = members.sort("momentum_5d", descending=True).head(_TOP_STRONG)
         for srow in strong_df.iter_rows(named=True):
-            d = _build_stock_dict(srow, strategy_ids, len(strong_df))
+            d = _build_stock_dict(srow, strategy_ids, len(strong_df), theme_str_map)
             d["industry_name"] = srow.get("industry_name", _UNCATEGORIZED)
             strong_stocks.append(d)
-
-    # --- 電子次產業強度排名（細分 TWSE 大分類，半導體→記憶體模組/IC設計/封測…）---
-    from tw_screener.analysis.grouping import rank_sub_industries
-
-    sub_groups: list[dict] = []
-    sub_df = rank_sub_industries(members)
-    for row in sub_df.iter_rows(named=True):
-        cnt = int(row["members_count"])
-        up = int(row.get("up_count", 0) or 0)
-        ib = int(row.get("inst_buy_count", 0) or 0)
-        mom = float(row.get("momentum_5d", 0) or 0)
-        sub_groups.append(
-            {
-                "sub_industry": row["sub_industry"],
-                "members_count": cnt,
-                "momentum_5d_str": _fmt_pct(mom),
-                "breadth_str": f"{up}/{cnt}" if cnt else "0/0",
-                "inst_breadth_str": f"{ib}/{cnt}" if cnt else "0/0",
-                "score_str": f"{float(row['score']):.1f}",
-            }
-        )
 
     # --- Claude analysis section: top 4 categorised groups ---
     claude_groups = [g for g in group_list if not g["is_uncategorized"]][:4]
@@ -377,6 +421,7 @@ def _build_context(
         "g_universe_size": g_universe_size,
         "strong_stocks": strong_stocks,
         "sub_groups": sub_groups,
+        "concept_groups": concept_groups,
         "groups": group_list,
         "top_groups": top_groups,
         "priority_stocks": priority_rows,
@@ -394,14 +439,23 @@ def render_group_report(
     top_groups: int = 10,
     top_stocks: int = 10,
     dividend_events: pl.DataFrame | None = None,
+    themes_long: pl.DataFrame | None = None,
 ) -> None:
     """Render group_analysis.md to output_path using Jinja2 template.
 
     members: rank_within_groups 的回傳；含 rank_in_group / leader_score / momentum_5d。
     dividend_events: 候選股未來窗內除權息（filter_dividend_calendar 的回傳）；None/空則不渲染該段。
+    themes_long: load_themes() 的 (stock_id, theme, kind) long table；None/空則主題排名留空。
     """
     context = _build_context(
-        groups, members, screener_results, week_tag, top_groups, top_stocks, dividend_events
+        groups,
+        members,
+        screener_results,
+        week_tag,
+        top_groups,
+        top_stocks,
+        dividend_events,
+        themes_long,
     )
 
     env = Environment(

@@ -56,7 +56,7 @@
 
 > **個股領漲鏡頭**，補族群強度（廣度鏡頭）的盲點：半導體這種「少數龍頭噴出、多數成分股拉回」的大族群，5 日中位數會被稀釋、族群排名靠後，但領漲個股仍應被看見。此表不分族群、純按 5 日漲幅排序。
 
-| # | 股號 | 名稱 | 族群 | 次產業 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 法人(張) | 命中策略 | Goodinfo |
+| # | 股號 | 名稱 | 族群 | 主題 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 法人(張) | 命中策略 | Goodinfo |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for s in strong_stocks -%}
 | {{ loop.index }} | {{ s.stock_id }} | {{ s.name }} | {{ s.industry_name }} | {{ s.sub_industry_str }} | {{ s.momentum_5d_str }}{% if s.momentum_partial %}*{% endif %} | {{ s.change_pct_str }} | {{ s.vol_ratio_str }} | {{ s.ma20_str }} | {{ s.ma60_str }} | {{ s.inst_net_str }} | {{ s.strategy_str }} | [連結]({{ s.goodinfo_url }}) |
@@ -66,13 +66,25 @@
 {% if sub_groups %}
 ## 2.6 電子次產業強度排名（細分 TWSE 大分類）
 
-> 把半導體等大分類拆成次產業各自排名，避免「少數龍頭領漲、多數拉回」被整桶中位數埋掉（如記憶體模組 vs IC設計 vs 封測 vs 設備強弱天差地遠）。次產業＝Claude 知識播種的 `config/concepts.yaml`，僅含電子股。
+> 把半導體等大分類拆成次產業各自排名，避免「少數龍頭領漲、多數拉回」被整桶中位數埋掉（如記憶體模組 vs IC設計 vs 封測 vs 設備強弱天差地遠）。次產業＝手標 `config/concepts.yaml`（電子次產業、完整成分）。
 > 強度分數 = 70 × sigmoid(5 日中位/5) + 15 × 法人買超家數比 + 15 × log 規模（**無入選率**，因缺次產業全市場母體數；故與 Section 2 大分類分數不可直接比較）。
 
 | Rank | 次產業 | 入選 | 5 日中位 | 上漲家數 | 法人買超 | 強度分數 |
 |---|---|---|---|---|---|---|
 {% for sg in sub_groups -%}
 | {{ loop.index }} | {{ sg.sub_industry }} | {{ sg.members_count }} | {{ sg.momentum_5d_str }} | {{ sg.breadth_str }} | {{ sg.inst_breadth_str }} | {{ sg.score_str }} |
+{% endfor %}
+
+{% endif %}
+{% if concept_groups %}
+## 2.7 概念股／趨勢主題強度排名（Yahoo 概念股）
+
+> 趨勢題材主題（衛星/低軌衛星、AI、5G…）的候選股叢集強度。來源 Yahoo 股市概念股（每主題取前約 30 檔領頭、清單較鬆），**僅作題材輪動參考**，不與 2.6 次產業排名混為一談。強度分數公式同 2.6。
+
+| Rank | 概念股主題 | 入選 | 5 日中位 | 上漲家數 | 法人買超 | 強度分數 |
+|---|---|---|---|---|---|---|
+{% for cg in concept_groups -%}
+| {{ loop.index }} | {{ cg.theme }} | {{ cg.members_count }} | {{ cg.momentum_5d_str }} | {{ cg.breadth_str }} | {{ cg.inst_breadth_str }} | {{ cg.score_str }} |
 {% endfor %}
 
 {% endif %}
@@ -83,7 +95,7 @@
 
 本週族群表現前 {{ group.top_stocks | length }} 名：
 
-| # | 股號 | 名稱 | 次產業 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 命中策略 | Goodinfo |
+| # | 股號 | 名稱 | 主題 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 命中策略 | Goodinfo |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for stock in group.top_stocks -%}
 | {{ stock.rank_in_group }} | {{ stock.stock_id }} | {{ stock.name }} | {{ stock.sub_industry_str }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ stock.vol_ratio_str }} | {{ stock.ma20_str }} | {{ stock.ma60_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.foreign_net_str }} | {{ stock.trust_net_str }} | {{ stock.strategy_str }} | [連結]({{ stock.goodinfo_url }}) |
@@ -120,11 +132,12 @@
 > 4. **個股簡評＋趨勢階段**：針對每檔個股一句話點出關鍵看法（利多/利空/需觀察）；並用「距月線 × 距季線 + 量比 + 當日 vs 5 日中位」標一個趨勢階段——**起漲**（剛站上月線/季線、量增）／**主升續勢**（雙線之上、5 日強）／**回踩拉回**（季線上揚但回測月線、量縮＝典型 G）／**轉弱**（雙線之下，或當日強但 5 日弱＝反彈非反轉）。全用表中數字判，不臆測。
 > 5. **事件曝險（進場時點）**：對照上方「0.5 本週除權息」清單，若推薦個股在未來約 2 週內除息，須在 picks 的進場時點明確提醒（除息日股價蒸發股利、留意填息/貼息），不可忽略。**只標時點與風險，不預測填息與否、不發明除息利多利空結論。**
 > 6. **策略 G（成長拉回）判讀**：G = 高成長股（同 E 的基本面）但「長多短空、回踩季線」——季線(MA60)仍上揚、股價回到季線附近(距季線約 −5%~+10%)、且量縮。它專抓 E 漏掉的「拉回中的優質成長股」。看到 **G 命中**或 **E∩G 交集**時：判斷沿季線拉回是**基本面轉壞 vs 純技術調整**；用「法人(張)＋外資/投信＋量比」辨健康整理 vs 出貨——**G + 量縮 + 法人續買＝健康回檔買點；G + 法人倒貨＝下跌陷阱**。**E∩G**＝主升段回踩、雙確認最強；**G 單獨命中（E 沒中）**＝被拉回的成長領先股，正是「跌後可能再起漲」的核心候選。
+> 7. **主題叢集輪動（對照 2.6／2.7 排名）**：對照「次產業強度排名」與「概念股主題排名」，判斷是否有**同主題叢集真輪動領漲**（多檔齊漲、breadth 高），而非單一權值股灌水。概念股清單較鬆、僅作題材參考；**不發明主題、不編造強度數字**，只就表中已算出的排名與 breadth 論述。
 
 {% for group in claude_groups %}
 ### 族群 {{ loop.index }}：{{ group.industry_name }}（強度分數 {{ group.score_str }}、5 日中位 {{ group.momentum_5d_str }}、上漲 {{ group.breadth_str }}、族群入選率 {{ group.entry_rate_pct_str }}）
 
-| 股票代號 | 名稱 | 次產業 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 入選策略 | 族群內排名 | Goodinfo |
+| 股票代號 | 名稱 | 主題 | 5 日漲幅 | 當日 | 量比 | 距月線 | 距季線 | 成交金額（百萬） | 法人(張) | 外資(張) | 投信(張) | 入選策略 | 族群內排名 | Goodinfo |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for stock in group.stocks -%}
 | {{ stock.stock_id }} | {{ stock.name }} | {{ stock.sub_industry_str }} | {{ stock.momentum_5d_str }}{% if stock.momentum_partial %}*{% endif %} | {{ stock.change_pct_str }} | {{ stock.vol_ratio_str }} | {{ stock.ma20_str }} | {{ stock.ma60_str }} | {{ "%.0f" | format(stock.amount_million) }} | {{ stock.inst_net_str }} | {{ stock.foreign_net_str }} | {{ stock.trust_net_str }} | {{ stock.strategy_str }} | #{{ stock.rank_in_group }} | [連結]({{ stock.goodinfo_url }}) |

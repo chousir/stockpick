@@ -18,6 +18,22 @@ goodinfo:
   referer: "https://goodinfo.tw/tw/index.asp"
   concurrency: 1
 
+# Yahoo 股市「概念股」主題成分（多標籤主題用）；只抓概念股，電子次產業沿用手標 concepts.yaml
+yahoo:
+  base_url: "https://tw.stock.yahoo.com"
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  request_interval_sec: 3
+  request_interval_jitter_sec: 1
+  cache_ttl_hours: 24      # 概念股成分鮮少變，同日重跑讀快取
+  max_retries: 3
+  backoff_base: 5
+  concurrency: 1
+
+themes_build:
+  category_labels: ["概念股"]   # 只抓概念股；集團股 / 電子產業不抓
+  concept_min_members: 3        # 概念股清單較鬆，保留門檻拉高防雜訊
+  min_members: 2                # 次產業（手標）排名保留門檻
+
 twse:
   base_url: "https://openapi.twse.com.tw/v1"
   user_agent: "tw-stock-screener/0.1"

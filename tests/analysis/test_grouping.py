@@ -682,28 +682,69 @@ def test_group_stocks_ma60_slope_sign_and_null():
 # ─── 電子次產業強度排名 ─────────────────────────────────────────────────────────
 
 
-def test_rank_sub_industries_splits_and_ranks():
-    """半導體拆成次產業各自排名；強股次產業勝過弱股次產業；不足 min_size 過濾。"""
+def test_rank_themes_splits_and_ranks():
+    """次產業拆開各自排名；強主題勝過弱主題；不足 min_members 過濾。"""
     members = pl.DataFrame(
         {
             "stock_id": ["A1", "A2", "B1", "B2", "C1"],
-            "sub_industry": ["IC設計", "IC設計", "記憶體模組", "記憶體模組", "矽智財"],
             "momentum_5d": [8.0, 6.0, -7.0, -5.0, 20.0],
             "inst_net": [100.0, 50.0, -10.0, -20.0, 30.0],
         }
     )
-    from tw_screener.analysis.grouping import rank_sub_industries
-    out = rank_sub_industries(members, min_group_size=2)
-    subs = out["sub_industry"].to_list()
-    assert "矽智財" not in subs              # 只 1 檔 → 過濾
-    assert subs[0] == "IC設計"               # 中位 +7 > 記憶體模組 中位 -6 → 排前
-    ic = out.filter(pl.col("sub_industry") == "IC設計").to_dicts()[0]
+    themes_long = pl.DataFrame(
+        {
+            "stock_id": ["A1", "A2", "B1", "B2", "C1"],
+            "theme": ["IC設計", "IC設計", "記憶體模組", "記憶體模組", "矽智財"],
+            "kind": ["次產業"] * 5,
+        }
+    )
+    from tw_screener.analysis.grouping import rank_themes
+    out = rank_themes(members, themes_long, min_members=2)
+    themes = out["theme"].to_list()
+    assert "矽智財" not in themes             # 只 1 檔 → 過濾
+    assert themes[0] == "IC設計"              # 中位 +7 > 記憶體模組 -6 → 排前
+    ic = out.filter(pl.col("theme") == "IC設計").to_dicts()[0]
     assert ic["up_count"] == 2               # 兩檔皆漲
-    mem = out.filter(pl.col("sub_industry") == "記憶體模組").to_dicts()[0]
-    assert mem["score"] < ic["score"]        # 弱次產業分數較低
+    assert ic["kind"] == "次產業"
+    mem = out.filter(pl.col("theme") == "記憶體模組").to_dicts()[0]
+    assert mem["score"] < ic["score"]        # 弱主題分數較低
 
 
-def test_rank_sub_industries_empty_without_column():
-    out_cols = __import__("tw_screener.analysis.grouping", fromlist=["rank_sub_industries"])
-    from tw_screener.analysis.grouping import rank_sub_industries
-    assert rank_sub_industries(pl.DataFrame({"stock_id": ["A"], "momentum_5d": [1.0]})).is_empty()
+def test_rank_themes_multilabel_contributes_to_each():
+    """一檔屬兩主題 → 兩主題各算入它（多標籤 long table 各貢獻一列）。"""
+    members = pl.DataFrame({"stock_id": ["X", "Y", "Z"], "momentum_5d": [10.0, 10.0, 10.0]})
+    themes_long = pl.DataFrame(
+        {
+            "stock_id": ["X", "Y", "X", "Z"],
+            "theme": ["AI", "AI", "散熱", "散熱"],
+            "kind": ["概念股"] * 4,
+        }
+    )
+    from tw_screener.analysis.grouping import rank_themes
+    out = rank_themes(members, themes_long, concept_min_members=2)
+    counts = {r["theme"]: r["members_count"] for r in out.iter_rows(named=True)}
+    assert counts["AI"] == 2                  # X, Y
+    assert counts["散熱"] == 2                 # X（同時貢獻兩主題）, Z
+
+
+def test_rank_themes_concept_min_members_filter():
+    """門檻依 kind 分流：概念股 2 檔在 concept_min_members=3 下過濾，次產業 2 檔保留。"""
+    members = pl.DataFrame({"stock_id": ["A", "B"], "momentum_5d": [5.0, 5.0]})
+    themes_long = pl.DataFrame(
+        {
+            "stock_id": ["A", "B", "A", "B"],
+            "theme": ["IC設計", "IC設計", "AI", "AI"],
+            "kind": ["次產業", "次產業", "概念股", "概念股"],
+        }
+    )
+    from tw_screener.analysis.grouping import rank_themes
+    out = rank_themes(members, themes_long, min_members=2, concept_min_members=3)
+    themes = out["theme"].to_list()
+    assert "IC設計" in themes                  # 次產業 2 檔 ≥ 2 → 保留
+    assert "AI" not in themes                  # 概念股 2 檔 < 3 → 過濾
+
+
+def test_rank_themes_empty_without_themes():
+    from tw_screener.analysis.grouping import rank_themes
+    members = pl.DataFrame({"stock_id": ["A"], "momentum_5d": [1.0]})
+    assert rank_themes(members, pl.DataFrame()).is_empty()

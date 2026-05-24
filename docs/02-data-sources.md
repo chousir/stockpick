@@ -9,6 +9,7 @@
 | TWSE OpenAPI 除權息預告 (`exchangeReport/TWT48U_ALL`) | 事件層 Tier 1：候選股未來除權息行事曆 | REST API（免 key） | 完全合法 |
 | TWSE Legacy (`www.twse.com.tw`) | 歷史 OHLCV (`STOCK_DAY`)、三大法人 (`T86`) | REST API（response=json） | 完全合法 |
 | TWSE ISIN (`isin.twse.com.tw/isin/C_public.jsp?strMode=4`) | 上櫃公司產業分類 | HTML（MS950 編碼） | 完全合法 |
+| Yahoo 股市 (`tw.stock.yahoo.com`) | 概念股/趨勢主題成分（多標籤主題） | 爬蟲（合規限速；**只爬概念股**） | 灰色，需自律 |
 
 ## Goodinfo 爬蟲規範（重要，違反會被擋）
 
@@ -124,11 +125,28 @@ data/cache/goodinfo/
 
 Goodinfo 主要用在「條件組合篩選」這個它真正強的地方。
 
+## Yahoo 股市 概念股主題（多標籤主題）
+
+只爬「概念股」主題成分（電子次產業沿用手標 `config/concepts.yaml`，完整不截斷）。資料在 SSR
+`root.App.main`、純 HTTP 取得，每筆帶乾淨 `systexId` 股號＋`symbolName`，**免名稱→股號比對**。
+產出 `config/themes.yaml`，與 concepts.yaml 合併成統一多標籤 long table（見 `analysis/concepts.load_themes`）。
+
+### 限制（已知、誠實揭露）
+- 每個概念股主題 SSR **只內嵌前約 30 檔**（領頭觀察、非全量）；「載入更多」是 runtime 組出、
+  帶 crumb 的前端 XHR，逆向脆弱且屬 ToS 灰區，**依爬蟲自律不爬**。
+- 故 Yahoo 不抓電子次產業（約半數 >30 檔會被截斷）；電子次產業維持手標、完整。
+
+### 強制規則（同 Goodinfo 等級自律，寫在 `config/settings.yaml` `yahoo:`）
+- 請求間隔 ≥3 秒 + 抖動、真實瀏覽器 UA（可換）、24h 快取、concurrency=1、連續失敗指數退避。
+- 全量約 101 個概念股頁 × 3 秒 ≈ 5–7 分；久久跑一次（`make build-themes`，`DRY=1` 只產 candidate）。
+- 解析離線測試用 `tests/fixtures/yahoo/`，不每次打網。
+
 ## 資料更新頻率與最早可用時點
 
 | 資料 | 最早可用時點 | 更新頻率 | 處理方式 |
 |---|---|---|---|
 | Goodinfo 篩選結果 | 收盤後 30–60 分鐘 | 每週一次或更頻繁 | 對齊交易日：同日讀 cache、跨交易日重抓 |
+| Yahoo 概念股主題成分 | 即時 | 鮮少變（季度級） | 24h 快取；手動 `make build-themes` 更新 |
 | TWSE 日線（STOCK_DAY_ALL）| 收盤後 ~30 分鐘 | 每交易日 | 累積 parquet |
 | TWSE T86 三大法人 | 收盤後約 90 分鐘（**15:00 起穩定**）| 每交易日 | 累積 parquet |
 | 月營收（t187ap05_L） | 每月 10 號前 | 每月 | cron 或手動 |

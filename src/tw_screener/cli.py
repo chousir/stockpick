@@ -217,6 +217,83 @@ def data_fetch_candidates_history(
     )
 
 
+@data_app.command("build-themes")
+def data_build_themes(
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="寫 config/themes.candidate.yaml、不覆蓋正式檔"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """從 Yahoo 股市爬「概念股」主題成分，產出 config/themes.yaml（多標籤主題用）。
+
+    只抓概念股（電子次產業沿用手標 config/concepts.yaml）。每主題 SSR 只內嵌前約 30
+    檔（領頭觀察、非全量），分頁 XHR 依爬蟲自律不爬。約 101 頁 × 3 秒、久久跑一次。
+    """
+    import datetime as _dt
+
+    import yaml as _yaml
+
+    from tw_screener.screener.yahoo.fetcher import create_yahoo_fetcher
+    from tw_screener.screener.yahoo.parser import (
+        parse_category_members,
+        parse_class_index,
+    )
+
+    with open(settings, encoding="utf-8") as fh:
+        cfg = _yaml.safe_load(fh)
+
+    tb = cfg.get("themes_build", {})
+    wanted_labels = set(tb.get("category_labels", ["概念股"]))
+    min_members = int(tb.get("concept_min_members", 3))
+    base_url = cfg["yahoo"]["base_url"].rstrip("/")
+    cache_dir = Path(cfg["paths"]["cache_dir"])
+    fetcher = create_yahoo_fetcher(cfg, cache_dir)
+
+    console.print("[bold]抓 Yahoo 主題索引（/class）...[/bold]")
+    all_refs = parse_class_index(fetcher.get("/class"))
+    refs = [r for r in all_refs if r.kind in wanted_labels]
+    console.print(
+        f"  全部 {len(all_refs)} 主題，取 {'、'.join(sorted(wanted_labels))} 共 {len(refs)} 個"
+    )
+
+    themes: dict[str, dict] = {}
+    kept = dropped = 0
+    for idx, ref in enumerate(refs, 1):
+        try:
+            members = parse_category_members(fetcher.get(ref.href))
+        except Exception as exc:  # noqa: BLE001 — 單主題失敗不中斷整批
+            console.print(f"[yellow]  [{idx}/{len(refs)}] {ref.name} 失敗：{exc}[/yellow]")
+            continue
+        ids = [sid for sid, _ in members]
+        if len(ids) < min_members:
+            dropped += 1
+            continue
+        themes[ref.name] = {"kind": ref.kind, "url": f"{base_url}{ref.href}", "members": ids}
+        kept += 1
+        if idx % 20 == 0:
+            console.print(f"  進度 {idx}/{len(refs)}（保留 {kept}、丟棄 {dropped}）")
+
+    doc = {
+        "meta": {
+            "source": "Yahoo 股市 概念股",
+            "fetched_at": _dt.date.today().isoformat(),
+            "note": "每主題取 SSR 前約 30 檔（非全量）；電子次產業見 config/concepts.yaml",
+        },
+        "themes": themes,
+    }
+
+    out_path = Path("config") / ("themes.candidate.yaml" if dry_run else "themes.yaml")
+    if not dry_run and out_path.exists():
+        bak = out_path.with_name(out_path.name + ".bak")
+        bak.write_text(out_path.read_text(encoding="utf-8"), encoding="utf-8")
+        console.print(f"  已備份舊檔 → {bak}")
+    with open(out_path, "w", encoding="utf-8") as fh:
+        _yaml.safe_dump(doc, fh, allow_unicode=True, sort_keys=False)
+    console.print(
+        f"[green]完成：{kept} 主題寫入 {out_path}（丟棄 {dropped} 個 < {min_members} 檔）[/green]"
+    )
+
+
 # ─── screen 子指令 ────────────────────────────────────────────────────────────
 
 
@@ -483,13 +560,13 @@ def analysis_group(
     console.print("  計算族群內排名...")
     leaders = find_leaders(enriched_stocks, price_history, institutional)
 
-    # 次產業（並存只顯示）：join sub_industry，並提醒「電子股未標」者增量補
-    from tw_screener.analysis.concepts import load_concepts, unmapped_electronics
+    # 主題（多標籤）：手標電子次產業 + Yahoo 概念股 → long table。不 join 進 leaders
+    # （會把每檔複製成多列、炸掉逐股表），改交報表內 rank_themes / 顯示字串處理。
+    from tw_screener.analysis.concepts import load_themes, unmapped_electronics
 
-    concepts_df = load_concepts()
-    if not concepts_df.is_empty() and not leaders.is_empty():
-        leaders = leaders.join(concepts_df, on="stock_id", how="left")
-        unmapped = unmapped_electronics(leaders)
+    themes_long = load_themes()
+    if not themes_long.is_empty() and not leaders.is_empty():
+        unmapped = unmapped_electronics(leaders, themes_long)
         if unmapped:
             console.print(
                 f"[yellow]  次產業未標（電子股 {len(unmapped)} 檔，可補 config/concepts.yaml）："
@@ -501,7 +578,7 @@ def analysis_group(
     output_path = Path(cfg["paths"]["reports_dir"]) / week_tag / "group_analysis.md"
     render_group_report(
         groups, leaders, screener_results, week_tag, output_path, top_groups, top_stocks,
-        dividend_events=dividends,
+        dividend_events=dividends, themes_long=themes_long,
     )
 
     console.print(f"[green]報告輸出：{output_path}[/green]")
