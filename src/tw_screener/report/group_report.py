@@ -496,16 +496,19 @@ def write_candidates_enriched_csv(
     # 估值（PE/PB）來自 screener CSV，不在 members → 建 stock_id 對照（首見為準）
     pe_map: dict[str, object] = {}
     pb_map: dict[str, object] = {}
+    vol_map: dict[str, object] = {}  # 今日成交張，用來算法人集中度
     for df in screener_results.values():
         if df.is_empty():
             continue
-        has_pe, has_pb = "pe_ratio" in df.columns, "pb_ratio" in df.columns
+        cols = df.columns
         for rr in df.iter_rows(named=True):
             sid = str(rr["stock_id"])
-            if has_pe and sid not in pe_map:
+            if "pe_ratio" in cols and sid not in pe_map:
                 pe_map[sid] = rr.get("pe_ratio")
-            if has_pb and sid not in pb_map:
+            if "pb_ratio" in cols and sid not in pb_map:
                 pb_map[sid] = rr.get("pb_ratio")
+            if "volume_lots" in cols and sid not in vol_map:
+                vol_map[sid] = rr.get("volume_lots")
 
     fc = flags_cfg or {}
     overheated = float(fc.get("overheated_ma60_pct", 40))
@@ -536,6 +539,14 @@ def write_candidates_enriched_csv(
         fn = _num(r.get("foreign_net"), 0)
         tn = _num(r.get("trust_net"), 0)
         instn = _num(r.get("inst_net"), 0)
+        inst_lots = _lots(r.get("inst_net"))
+        vlots = _num(vol_map.get(sid), 0)
+        # 法人淨買超佔近 20 日成交量%（集中度）：20日均量=今日量/vol_ratio，×20≈20日總量
+        inst_pct20d = None
+        if inst_lots is not None and vlots and vr and vr > 0:
+            tot20 = (vlots / vr) * 20.0
+            if tot20 > 0:
+                inst_pct20d = round(inst_lots / tot20 * 100, 1)
 
         flags: list[str] = []
         if m60 is not None and m60 > overheated:
@@ -565,7 +576,9 @@ def write_candidates_enriched_csv(
                 "amount_million": amt,
                 "pe_ratio": pe,
                 "pb_ratio": pb,
-                "inst_net_lots": _lots(r.get("inst_net")),
+                "volume_lots_today": vlots,
+                "inst_net_lots": inst_lots,
+                "inst_pct20d": inst_pct20d,
                 "foreign_net_lots": _lots(r.get("foreign_net")),
                 "trust_net_lots": _lots(r.get("trust_net")),
                 "flags": ";".join(flags),
