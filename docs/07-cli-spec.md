@@ -67,7 +67,8 @@ make week                      # 一鍵：抓 TWSE + 三策略選股 + 族群分
 # 完成後打開：
 open reports/2026-W21/group_analysis.md
 
-# 從第 5 節「推薦個股深度分析優先順序」挑 5-10 檔，逐檔產資料草稿
+# 從 picks.md 精選進場清單（或 candidates_enriched.csv）挑 5-10 檔，逐檔產資料草稿
+# 注意：第 5 節是族群輪動機械基準、非挑股池，勿直接照它挑
 make report STOCK_ID=2330
 make report STOCK_ID=3034
 # 或一次跑前 5 檔
