@@ -615,7 +615,9 @@ def analysis_group(
     from tw_screener.report.group_report import write_candidates_enriched_csv
 
     csv_path = output_path.parent / "candidates_enriched.csv"
-    n_cand = write_candidates_enriched_csv(leaders, themes_long, screener_results, csv_path)
+    n_cand = write_candidates_enriched_csv(
+        leaders, themes_long, screener_results, csv_path, flags_cfg=cfg.get("propicks_flags")
+    )
 
     console.print(f"[green]報告輸出：{output_path}[/green]")
     console.print(f"  全候選股完整欄位 CSV：{csv_path}（{n_cand} 檔，供 ProPicks 全宇宙挑股）")

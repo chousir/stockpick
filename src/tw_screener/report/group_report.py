@@ -476,11 +476,13 @@ def write_candidates_enriched_csv(
     themes_long: pl.DataFrame | None,
     screener_results: dict[str, pl.DataFrame],
     path: Path,
+    flags_cfg: dict | None = None,
 ) -> int:
-    """輸出「全候選股 × 完整技術/籌碼欄位」CSV，供 ProPicks 在全宇宙挑股。
+    """輸出「全候選股 × 完整技術/籌碼/估值欄位 + flags 排雷欄」CSV，供 ProPicks 在全宇宙挑股。
 
-    補 group_analysis.md 只列部分股的盲點：這裡每一檔候選都有 5 日漲幅/距月線/距季線/量比/
-    法人(張)拆分/主題。缺值（無快取）寫空白，讓 Claude 標「需查證」而非編造。回傳寫入檔數。
+    補 group_analysis.md 只列部分股的盲點：每檔都有 5 日漲幅/距月線/距季線/量比/法人(張)拆分/
+    PE/PB/主題，並程式預算 flags（過熱/低流動/高PE/土洋對作/強漲法人賣）讓 AI 快速排雷、把腦力
+    留給判斷。缺值（無快取）寫空白 → 標「需查證」而非編造。回傳寫入檔數。
     """
     if members.is_empty():
         return 0
@@ -490,6 +492,27 @@ def write_candidates_enriched_csv(
     ranked = rank_themes(members, themes_long)
     theme_map = _build_theme_str_map(members, themes_long, ranked)
     strategy_ids = sorted(screener_results.keys())
+
+    # 估值（PE/PB）來自 screener CSV，不在 members → 建 stock_id 對照（首見為準）
+    pe_map: dict[str, object] = {}
+    pb_map: dict[str, object] = {}
+    for df in screener_results.values():
+        if df.is_empty():
+            continue
+        has_pe, has_pb = "pe_ratio" in df.columns, "pb_ratio" in df.columns
+        for rr in df.iter_rows(named=True):
+            sid = str(rr["stock_id"])
+            if has_pe and sid not in pe_map:
+                pe_map[sid] = rr.get("pe_ratio")
+            if has_pb and sid not in pb_map:
+                pb_map[sid] = rr.get("pb_ratio")
+
+    fc = flags_cfg or {}
+    overheated = float(fc.get("overheated_ma60_pct", 40))
+    low_liq = float(fc.get("low_liquidity_amount", 100))
+    high_pe = float(fc.get("high_pe", 50))
+    cross_lots = float(fc.get("cross_trade_lots", 5000)) * 1000.0  # 張 → 股
+    rally = float(fc.get("strong_rally_pct", 15))
 
     def _num(v: object, nd: int = 1) -> float | None:
         if v is None or (isinstance(v, float) and v != v):
@@ -505,6 +528,27 @@ def write_candidates_enriched_csv(
     for r in members.sort(sort_col, descending=True).iter_rows(named=True):
         sid = str(r["stock_id"])
         vr = _num(r.get("vol_ratio"), 2)
+        mom = _num(r.get("momentum_5d"), 2)
+        m60 = _num(r.get("ma60_dist_pct"), 1)
+        amt = _num(r.get("amount_million"), 0)
+        pe = _num(pe_map.get(sid), 1)
+        pb = _num(pb_map.get(sid), 2)
+        fn = _num(r.get("foreign_net"), 0)
+        tn = _num(r.get("trust_net"), 0)
+        instn = _num(r.get("inst_net"), 0)
+
+        flags: list[str] = []
+        if m60 is not None and m60 > overheated:
+            flags.append("過熱")
+        if amt is not None and amt < low_liq:
+            flags.append("低流動")
+        if pe is not None and pe > high_pe:
+            flags.append("高PE")
+        if fn is not None and tn is not None and fn * tn < 0 and min(abs(fn), abs(tn)) > cross_lots:
+            flags.append("土洋對作")
+        if mom is not None and mom > rally and instn is not None and instn < 0:
+            flags.append("強漲法人賣")
+
         rows.append(
             {
                 "stock_id": sid,
@@ -513,15 +557,18 @@ def write_candidates_enriched_csv(
                 "theme": theme_map.get(sid, ""),
                 "strategy": _strategy_str(r, strategy_ids),
                 "rank_in_group": int(r.get("rank_in_group", 0) or 0),
-                "momentum_5d_pct": _num(r.get("momentum_5d"), 2),
+                "momentum_5d_pct": mom,
                 "change_pct": _num(r.get("change_pct"), 2),
                 "vol_ratio": vr if (vr or 0) > 0 else None,
                 "ma20_dist_pct": _num(r.get("ma20_dist_pct"), 1),
-                "ma60_dist_pct": _num(r.get("ma60_dist_pct"), 1),
-                "amount_million": _num(r.get("amount_million"), 0),
+                "ma60_dist_pct": m60,
+                "amount_million": amt,
+                "pe_ratio": pe,
+                "pb_ratio": pb,
                 "inst_net_lots": _lots(r.get("inst_net")),
                 "foreign_net_lots": _lots(r.get("foreign_net")),
                 "trust_net_lots": _lots(r.get("trust_net")),
+                "flags": ";".join(flags),
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
             }
         )
