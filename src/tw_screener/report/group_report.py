@@ -469,3 +469,63 @@ def render_group_report(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(content, encoding="utf-8")
     logger.info("group_analysis.md 輸出 → {}", output_path)
+
+
+def write_candidates_enriched_csv(
+    members: pl.DataFrame,
+    themes_long: pl.DataFrame | None,
+    screener_results: dict[str, pl.DataFrame],
+    path: Path,
+) -> int:
+    """輸出「全候選股 × 完整技術/籌碼欄位」CSV，供 ProPicks 在全宇宙挑股。
+
+    補 group_analysis.md 只列部分股的盲點：這裡每一檔候選都有 5 日漲幅/距月線/距季線/量比/
+    法人(張)拆分/主題。缺值（無快取）寫空白，讓 Claude 標「需查證」而非編造。回傳寫入檔數。
+    """
+    if members.is_empty():
+        return 0
+    from tw_screener.analysis.grouping import rank_themes
+
+    themes_long = themes_long if themes_long is not None else pl.DataFrame()
+    ranked = rank_themes(members, themes_long)
+    theme_map = _build_theme_str_map(members, themes_long, ranked)
+    strategy_ids = sorted(screener_results.keys())
+
+    def _num(v: object, nd: int = 1) -> float | None:
+        if v is None or (isinstance(v, float) and v != v):
+            return None
+        return round(float(v), nd)  # type: ignore[arg-type]
+
+    def _lots(v: object) -> float | None:
+        n = _num(v, 0)
+        return round(n / 1000.0) if n is not None else None
+
+    rows: list[dict] = []
+    sort_col = "momentum_5d" if "momentum_5d" in members.columns else "stock_id"
+    for r in members.sort(sort_col, descending=True).iter_rows(named=True):
+        sid = str(r["stock_id"])
+        vr = _num(r.get("vol_ratio"), 2)
+        rows.append(
+            {
+                "stock_id": sid,
+                "name": r.get("name", ""),
+                "industry": r.get("industry_name", ""),
+                "theme": theme_map.get(sid, ""),
+                "strategy": _strategy_str(r, strategy_ids),
+                "rank_in_group": int(r.get("rank_in_group", 0) or 0),
+                "momentum_5d_pct": _num(r.get("momentum_5d"), 2),
+                "change_pct": _num(r.get("change_pct"), 2),
+                "vol_ratio": vr if (vr or 0) > 0 else None,
+                "ma20_dist_pct": _num(r.get("ma20_dist_pct"), 1),
+                "ma60_dist_pct": _num(r.get("ma60_dist_pct"), 1),
+                "amount_million": _num(r.get("amount_million"), 0),
+                "inst_net_lots": _lots(r.get("inst_net")),
+                "foreign_net_lots": _lots(r.get("foreign_net")),
+                "trust_net_lots": _lots(r.get("trust_net")),
+                "goodinfo_url": str(r.get("goodinfo_url", "")),
+            }
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame(rows).write_csv(path)
+    logger.info("candidates_enriched.csv 輸出 → {}（{} 檔）", path, len(rows))
+    return len(rows)

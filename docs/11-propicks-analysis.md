@@ -32,10 +32,11 @@
 
 ```
 reports/YYYY-Www/
-  ├─ group_analysis.md               ← 族群脈絡
-  ├─ screen_result_d_quality_leader.csv    ← D 全部入選
-  ├─ screen_result_e_growth_momentum.csv   ← E 全部入選
-  ├─ screen_result_f_value_rebound.csv     ← F 全部入選
+  ├─ group_analysis.md                     ← 族群脈絡、強度排名
+  ├─ candidates_enriched.csv               ← ★全候選股 × 完整技術/籌碼欄位（主要挑股宇宙）
+  ├─ screen_result_d_quality_leader.csv    ← D 全部入選（原始）
+  ├─ screen_result_e_growth_momentum.csv   ← E 全部入選（原始）
+  ├─ screen_result_f_value_rebound.csv     ← F 全部入選（原始）
   └─ screen_result_g_growth_pullback.csv   ← G 全部入選（成長宇宙；有效拉回命中見 group_analysis.md）
 ```
 
@@ -45,9 +46,9 @@ reports/YYYY-Www/
 
 到 [claude.ai](https://claude.ai)，選 **Claude Opus**（最強模型，這步值得用）。
 
-### Step C：依序貼入 5 份檔案內容
+### Step C：依序貼入檔案內容
 
-順序：先 prompt → 再 group_analysis.md → 再 4 個 CSV（D/E/F/G）。
+順序：先 prompt → 再 group_analysis.md → 再 **candidates_enriched.csv** → 再 4 個 CSV（D/E/F/G）。
 
 ### Step D：等 Claude 回覆，存到本週目錄
 
@@ -70,7 +71,8 @@ reports/YYYY-Www/picks.md
 1. group_analysis.md：族群強度、入選分布、推薦清單（**Section 2.5 為跨族群強勢領漲股
    Top 15**、**Section 2.6 為電子次產業強度排名**（半導體拆記憶體模組/IC設計/封測/設備各自排名，看哪個次塊強）、**Section 2.7 為概念股／趨勢主題強度排名**（衛星/低軌衛星、5G、AI、電動車…等題材的候選股叢集強度，清單較鬆、僅作題材輪動參考）、Section 5 為系統公式排名前 10、Section 6 為前 4 大領漲族群完整名單）。Section 2/3/6 已含
    **5 日中位、上漲家數(breadth)、法人買超家數比、每檔法人(張)＋外資(張)/投信(張)拆分（近 20 日淨買賣超）、量比（今日量/20日均量）、距月線/距季線（相對 MA20/MA60）、主題（每檔的次產業＋當前最強的概念股題材，次產業把半導體切記憶體模組/IC設計/封測…，補 TWSE 大分類太粗）**。
-2. screen_result_*_*.csv：每組策略的「全部入選股」原始 CSV
+2. **candidates_enriched.csv：全候選股（去重 union）× 完整欄位**——股號/名稱/族群/主題/命中策略/族群內排名/5日漲幅/當日/量比/距月線/距季線/成交額/法人(張)/外資(張)/投信(張)/Goodinfo。**這是你挑股的主要宇宙：每一檔都有技術＋籌碼資料**（不像 group_analysis.md 只列部分股）。某欄空白＝該檔該項無快取＝標「需查證」。
+3. screen_result_*_*.csv：每組策略的「全部入選股」原始 CSV（只有收盤/漲跌/PE/PB，看「哪檔中哪些策略」用）
 
 > **策略代號**：D 品質龍頭、E 成長動能、F 價值反彈、**G 成長拉回（高成長股回踩上揚季線、量縮——E 的逆勢孿生，專抓被拉回、其他策略漏看的優質成長股）**。A/B/C 為早期 legacy，現行主流程只跑 D/E/F/G。
 >
@@ -81,11 +83,10 @@ reports/YYYY-Www/picks.md
 > **D/E/F：以 CSV 為「候選宇宙」，group_analysis.md 為「族群脈絡」**。
 > **G 例外**：G 的 CSV 是基本面宇宙，拉回候選只看 group_analysis.md 標 G 者（見上方 ⚠️）。
 
-> ⚠️ **資料在哪、缺了別編**：**距月線/距季線、量比、5 日漲幅、法人(張)/外資/投信** 只存在於
-> group_analysis.md 的**表格**（Section 2.5/2.6/2.7、3、6 列到的股）。screen_result CSV **只有**
-> 收盤、當日漲跌幅、PE、PB、成交額。**若你挑的票不在 group_analysis.md 任何表格裡，這些技術/籌碼
-> 數據就「沒有資料」**——該欄請標「**未在彙整表，需查 Goodinfo**」，**絕不可自行編造或用記憶填**；
-> 趨勢階段、停損位等需技術數據的判斷，無資料時一律標「需查證」。
+> ⚠️ **資料在哪、缺了別編**：技術/籌碼欄位（距月線/距季線、量比、5 日漲幅、法人(張)/外資/投信）
+> **全候選股都在 candidates_enriched.csv**——以它為挑股依據。group_analysis.md 是脈絡/排名、screen_result
+> CSV 只有收盤/PE/PB。**candidates_enriched.csv 裡某格空白＝該檔該項無快取資料**，請標「**需查 Goodinfo**」，
+> **絕不可自行編造或用記憶填**；趨勢階段、停損位等需技術數據時無資料一律標「需查證」。
 
 > 📌 **關於 group_analysis.md 末尾的「## 6. Claude 族群深度分析請求」**：那是報告**內建寫給你的
 > 分析指引**（細分次產業、族群輪動、訂單外溢、個股簡評＋趨勢階段、G 判讀、主題叢集）。請把它當成
@@ -96,7 +97,7 @@ reports/YYYY-Www/picks.md
 
 ### 1. 進場清單（核心 6–10 檔 ＋ 機會 4–6 檔，分兩級）
 
-從**所有 CSV 入選股**中挑兩級候選：**核心**（6–10 檔・訊號最強、資料完整、high-conviction）
+從 **candidates_enriched.csv（全候選宇宙，每檔都有完整資料）** 挑兩級候選：**核心**（6–10 檔・訊號最強、資料完整、high-conviction）
 ＋**機會**（4–6 檔・setup 成形但需再確認，或二線輪動/低基期；可含資料不全者，但缺的數據要標「需查證」）。**重要原則**：
 
 - **族群強度是「廣度鏡頭」**：少數權值領漲、多數拉回的大族群（如半導體）會被中位數埋在族群排名後段。**務必對照 Section 2.5「跨族群強勢領漲股」、Section 2.6「電子次產業強度排名」與 Section 2.7「概念股主題強度排名」**——2.6 把半導體拆成記憶體模組/IC設計/封測/設備各自排名（看哪個「次塊」強，如半導體設備強、記憶體模組弱），2.7 看 5G/AI/衛星等題材是否成叢領漲（同主題多檔齊漲＝真輪動，非單檔灌水）；別把整桶半導體當一塊判
@@ -174,8 +175,9 @@ make week GROUP=defg
 # 3. 接著貼 group_analysis.md 內容
 cat reports/$(date +%Y-W%V)/group_analysis.md  # 全選複製貼上
 
-# 4. 接著貼 4 個 CSV 內容（D/E/F/G）
-cat reports/$(date +%Y-W%V)/screen_result_*.csv  # 全選複製貼上
+# 4. 接著貼 candidates_enriched.csv（主要挑股宇宙）+ 4 個 CSV（D/E/F/G）
+cat reports/$(date +%Y-W%V)/candidates_enriched.csv  # 全選複製貼上
+cat reports/$(date +%Y-W%V)/screen_result_*.csv
 
 # 5. Claude 回覆 → 存到 picks.md
 # 在 IDE 開 reports/YYYY-Www/picks.md 貼入

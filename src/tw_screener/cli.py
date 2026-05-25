@@ -612,7 +612,13 @@ def analysis_group(
         dividend_events=dividends, themes_long=themes_long,
     )
 
+    from tw_screener.report.group_report import write_candidates_enriched_csv
+
+    csv_path = output_path.parent / "candidates_enriched.csv"
+    n_cand = write_candidates_enriched_csv(leaders, themes_long, screener_results, csv_path)
+
     console.print(f"[green]報告輸出：{output_path}[/green]")
+    console.print(f"  全候選股完整欄位 CSV：{csv_path}（{n_cand} 檔，供 ProPicks 全宇宙挑股）")
     console.print(f"  族群數：{len(groups)}，推薦分析：前 {top_stocks} 檔")
 
 

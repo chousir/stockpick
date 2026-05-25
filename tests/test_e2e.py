@@ -281,3 +281,28 @@ def test_e2e_render_report_no_forbidden_words(tmp_path: Path):
     content = output.read_text(encoding="utf-8")
     for word in ("目標價", "強烈建議", "飆股", "絕對"):
         assert word not in content, f"forbidden word found: {word}"
+
+
+# ─── E2E: candidates_enriched.csv ─────────────────────────────────────────────
+
+
+def test_e2e_candidates_enriched_csv(tmp_path: Path):
+    """全候選股完整欄位 CSV：每檔一列、含技術/籌碼欄、檔數＝候選數。"""
+    from tw_screener.report.group_report import write_candidates_enriched_csv
+
+    results = {"a_breakout": _SCREENER_A, "b_growth_institutional": _SCREENER_B}
+    groups, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2
+    )
+    ranked = rank_within_groups(members, pl.DataFrame(), pl.DataFrame())
+    out = tmp_path / "candidates_enriched.csv"
+    n = write_candidates_enriched_csv(ranked, pl.DataFrame(), results, out)
+    assert out.exists()
+    assert n == len(ranked)
+    df = pl.read_csv(out)
+    assert df.height == len(ranked)
+    for col in [
+        "stock_id", "name", "industry", "theme", "strategy", "rank_in_group",
+        "momentum_5d_pct", "ma60_dist_pct", "inst_net_lots", "goodinfo_url",
+    ]:
+        assert col in df.columns
