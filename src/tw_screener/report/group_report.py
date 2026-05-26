@@ -477,8 +477,9 @@ def write_candidates_enriched_csv(
     screener_results: dict[str, pl.DataFrame],
     path: Path,
     flags_cfg: dict | None = None,
+    rev_yoy_map: dict | None = None,
 ) -> int:
-    """輸出「全候選股 × 完整技術/籌碼/估值欄位 + flags 排雷欄」CSV，供 ProPicks 在全宇宙挑股。
+    """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
 
     補 group_analysis.md 只列部分股的盲點：每檔都有 5 日漲幅/距月線/距季線/量比/法人(張)拆分/
     PE/PB/主題，並程式預算 flags（過熱/低流動/高PE/土洋對作/強漲法人賣）讓 AI 快速排雷、把腦力
@@ -497,6 +498,7 @@ def write_candidates_enriched_csv(
     pe_map: dict[str, object] = {}
     pb_map: dict[str, object] = {}
     vol_map: dict[str, object] = {}  # 今日成交張，用來算法人集中度
+    close_map: dict[str, object] = {}  # 收盤價，用來還原 MA20/MA60 絕對價
     for df in screener_results.values():
         if df.is_empty():
             continue
@@ -509,6 +511,8 @@ def write_candidates_enriched_csv(
                 pb_map[sid] = rr.get("pb_ratio")
             if "volume_lots" in cols and sid not in vol_map:
                 vol_map[sid] = rr.get("volume_lots")
+            if "close" in cols and sid not in close_map:
+                close_map[sid] = rr.get("close")
 
     fc = flags_cfg or {}
     overheated = float(fc.get("overheated_ma60_pct", 40))
@@ -526,6 +530,13 @@ def write_candidates_enriched_csv(
         n = _num(v, 0)
         return round(n / 1000.0) if n is not None else None
 
+    def _lvl(close: float | None, dist: float | None) -> float | None:
+        """由收盤價與距離% 還原均線絕對價。"""
+        if close is None or dist is None:
+            return None
+        denom = 1 + dist / 100.0
+        return round(close / denom, 2) if denom > 0 else None
+
     rows: list[dict] = []
     sort_col = "momentum_5d" if "momentum_5d" in members.columns else "stock_id"
     for r in members.sort(sort_col, descending=True).iter_rows(named=True):
@@ -533,6 +544,11 @@ def write_candidates_enriched_csv(
         vr = _num(r.get("vol_ratio"), 2)
         mom = _num(r.get("momentum_5d"), 2)
         m60 = _num(r.get("ma60_dist_pct"), 1)
+        m20 = _num(r.get("ma20_dist_pct"), 1)
+        close = _num(close_map.get(sid), 2)
+        ma20_price = _lvl(close, m20)
+        ma60_price = _lvl(close, m60)
+        ryoy = _num(rev_yoy_map.get(sid), 1) if rev_yoy_map else None
         amt = _num(r.get("amount_million"), 0)
         pe = _num(pe_map.get(sid), 1)
         pb = _num(pb_map.get(sid), 2)
@@ -570,12 +586,16 @@ def write_candidates_enriched_csv(
                 "rank_in_group": int(r.get("rank_in_group", 0) or 0),
                 "momentum_5d_pct": mom,
                 "change_pct": _num(r.get("change_pct"), 2),
+                "close": close,
                 "vol_ratio": vr if (vr or 0) > 0 else None,
-                "ma20_dist_pct": _num(r.get("ma20_dist_pct"), 1),
+                "ma20_dist_pct": m20,
                 "ma60_dist_pct": m60,
+                "ma20_price": ma20_price,
+                "ma60_price": ma60_price,
                 "amount_million": amt,
                 "pe_ratio": pe,
                 "pb_ratio": pb,
+                "rev_yoy_pct": ryoy,
                 "volume_lots_today": vlots,
                 "inst_net_lots": inst_lots,
                 "inst_pct20d": inst_pct20d,

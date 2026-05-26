@@ -14,11 +14,15 @@ from tw_screener.analysis.concepts import (
 
 
 def test_load_concepts_real_file():
-    """load_concepts（薄殼）：多標籤以「、」串接成單欄。"""
+    """load_concepts（薄殼）：多標籤以「、」串接成單欄。
+
+    用「包含」而非「等於」——concepts.yaml 半自動維護，build-themes 會 merge 概念股，
+    故手動次產業標籤恆在、但可能附帶概念股標籤。
+    """
     df = load_concepts(Path("config/concepts.yaml"))
     m = {r["stock_id"]: r["sub_industry"] for r in df.iter_rows(named=True)}
-    assert m["2330"] == "IC生產製造"
-    assert m["3034"] == "IC設計服務、面板業"  # 多標籤串接
+    assert "IC生產製造" in m["2330"]
+    assert "IC設計服務" in m["3034"] and "面板業" in m["3034"]  # 多標籤串接
 
 
 def test_load_concepts_missing_file(tmp_path: Path):
@@ -28,11 +32,14 @@ def test_load_concepts_missing_file(tmp_path: Path):
 
 
 def test_load_themes_explodes_multilabel_real_file():
-    """load_themes：多標籤一檔展開成多列；無 concept_themes 時皆 kind=次產業。"""
+    """load_themes：多標籤一檔展開成多列；次產業標籤 kind=次產業（可能另含概念股列）。"""
     df = load_themes(Path("config/concepts.yaml"))
     rows = df.filter(pl.col("stock_id") == "3034")
-    assert set(rows["theme"].to_list()) == {"IC設計服務", "面板業"}
-    assert set(rows["kind"].to_list()) == {SUB_INDUSTRY_KIND}
+    themes = set(rows["theme"].to_list())
+    assert {"IC設計服務", "面板業"} <= themes  # 含這兩個次產業（可能再加概念股）
+    kinds = {r["theme"]: r["kind"] for r in rows.iter_rows(named=True)}
+    assert kinds["IC設計服務"] == SUB_INDUSTRY_KIND
+    assert kinds["面板業"] == SUB_INDUSTRY_KIND
 
 
 def test_load_themes_kind_from_concept_themes(tmp_path: Path):

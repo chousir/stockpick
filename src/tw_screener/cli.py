@@ -614,9 +614,19 @@ def analysis_group(
 
     from tw_screener.report.group_report import write_candidates_enriched_csv
 
+    rev_df = client.fetch_revenue()
+    rev_yoy_map: dict[str, object] = {}
+    if not rev_df.is_empty() and {"stock_id", "yoy_pct"} <= set(rev_df.columns):
+        rdf = rev_df
+        if "year_month" in rev_df.columns:
+            rdf = rev_df.sort("year_month", descending=True)
+        for rr in rdf.iter_rows(named=True):
+            rev_yoy_map.setdefault(str(rr["stock_id"]), rr.get("yoy_pct"))
+
     csv_path = output_path.parent / "candidates_enriched.csv"
     n_cand = write_candidates_enriched_csv(
-        leaders, themes_long, screener_results, csv_path, flags_cfg=cfg.get("propicks_flags")
+        leaders, themes_long, screener_results, csv_path,
+        flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map,
     )
 
     console.print(f"[green]報告輸出：{output_path}[/green]")

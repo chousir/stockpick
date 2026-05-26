@@ -303,7 +303,8 @@ def test_e2e_candidates_enriched_csv(tmp_path: Path):
     assert df.height == len(ranked)
     for col in [
         "stock_id", "name", "industry", "theme", "strategy", "rank_in_group",
-        "momentum_5d_pct", "ma60_dist_pct", "amount_million", "pe_ratio", "pb_ratio",
+        "momentum_5d_pct", "close", "ma60_dist_pct", "ma20_price", "ma60_price",
+        "amount_million", "pe_ratio", "pb_ratio", "rev_yoy_pct",
         "volume_lots_today", "inst_net_lots", "inst_pct20d", "flags", "goodinfo_url",
     ]:
         assert col in df.columns
