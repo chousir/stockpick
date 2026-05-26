@@ -463,6 +463,102 @@ def _load_latest_screener_results(
     return week_tag, results
 
 
+def _read_watchlist_csv(path: Path) -> list[str]:
+    """讀觀察清單 CSV（欄：stock_id[,note]）→ 股號清單。檔不存在回空。"""
+    import polars as _pl
+
+    if not path.exists():
+        return []
+    try:
+        df = _pl.read_csv(str(path), infer_schema_length=0)  # 全當字串、保留前導 0
+    except Exception:
+        return []
+    if "stock_id" not in df.columns:
+        return []
+    return [str(s).strip() for s in df["stock_id"].to_list() if s and str(s).strip()]
+
+
+def _read_holdings_csv(path: Path) -> dict:
+    """讀庫存 CSV（欄：stock_id,buy_price[,shares,note]）→ {股號: {buy_price, shares}}。"""
+    import polars as _pl
+
+    if not path.exists():
+        return {}
+    try:
+        df = _pl.read_csv(str(path), infer_schema_length=0)
+    except Exception:
+        return {}
+    if "stock_id" not in df.columns:
+        return {}
+
+    def _f(v: object) -> float | None:
+        try:
+            return float(str(v).replace(",", "")) if v not in (None, "") else None
+        except ValueError:
+            return None
+
+    out: dict = {}
+    for r in df.iter_rows(named=True):
+        sid = str(r.get("stock_id") or "").strip()
+        if sid:
+            out[sid] = {"buy_price": _f(r.get("buy_price")), "shares": _f(r.get("shares"))}
+    return out
+
+
+def _enrich_named_list(client, stock_ids, industry_df, institutional, g_pullback, name_map=None):
+    """把任意股票清單 enrich 成 (members, synth_screener)，reuse group_stocks 同套指標。
+
+    各股先 fetch_stock_ohlcv（無快取會抓網、補到 MA60 所需歷史），再丟 group_stocks 算
+    momentum/MA/量比/法人。回傳 members（含技術籌碼欄）＋ synth（供 writer 取 close/量）。
+    """
+    import polars as _pl
+
+    from tw_screener.analysis.grouping import group_stocks
+
+    ids = list(dict.fromkeys(str(s).strip() for s in stock_ids if str(s).strip()))
+    frames, rows = [], []
+    for sid in ids:
+        oh = client.fetch_stock_ohlcv(sid, n_days=100)
+        if oh.is_empty():
+            console.print(f"[yellow]  {sid}：無 OHLCV 快取，跳過（先 make fetch-stock）[/yellow]")
+            continue
+        oh = oh.sort("date")
+        frames.append(oh.select(["stock_id", "date", "close", "trade_volume"]))
+        d = oh.tail(1).to_dicts()[0]
+        close = float(d.get("close") or 0.0)
+        chg = float(d.get("change") or 0.0)
+        prev = close - chg
+        rows.append(
+            {
+                "stock_id": sid,
+                "name": (name_map or {}).get(sid, ""),
+                "close": close,
+                "change_pct": round(chg / prev * 100.0, 2) if prev else 0.0,
+                "amount_million": round(float(d.get("trade_value") or 0) / 1_000_000.0, 2),
+                "volume_lots": round(float(d.get("trade_volume") or 0) / 1000.0),
+                "pe_ratio": None,
+                "pb_ratio": None,
+                "goodinfo_url": f"https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={sid}",
+                "strategy_id": "_list",
+            }
+        )
+    if not rows:
+        return _pl.DataFrame(), {}
+    synth = _pl.DataFrame(rows)
+    price_history = _pl.concat(frames, how="vertical")
+    volume_history = price_history.select(["stock_id", "date", "trade_volume"])
+    _, members = group_stocks(
+        {"_list": synth},
+        price_history,
+        _pl.DataFrame(),
+        industry_df=industry_df,
+        institutional=institutional,
+        volume_history=volume_history,
+        g_pullback=g_pullback,
+    )
+    return members, {"_list": synth}
+
+
 @analysis_app.command("group")
 def analysis_group(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
@@ -616,12 +712,17 @@ def analysis_group(
 
     rev_df = client.fetch_revenue()
     rev_yoy_map: dict[str, object] = {}
-    if not rev_df.is_empty() and {"stock_id", "yoy_pct"} <= set(rev_df.columns):
+    name_map: dict[str, str] = {}
+    if not rev_df.is_empty() and "stock_id" in rev_df.columns:
         rdf = rev_df
         if "year_month" in rev_df.columns:
             rdf = rev_df.sort("year_month", descending=True)
         for rr in rdf.iter_rows(named=True):
-            rev_yoy_map.setdefault(str(rr["stock_id"]), rr.get("yoy_pct"))
+            sid = str(rr["stock_id"])
+            if "yoy_pct" in rev_df.columns:
+                rev_yoy_map.setdefault(sid, rr.get("yoy_pct"))
+            if "company_name" in rev_df.columns:
+                name_map.setdefault(sid, str(rr.get("company_name") or ""))
 
     csv_path = output_path.parent / "candidates_enriched.csv"
     n_cand = write_candidates_enriched_csv(
@@ -631,6 +732,35 @@ def analysis_group(
 
     console.print(f"[green]報告輸出：{output_path}[/green]")
     console.print(f"  全候選股完整欄位 CSV：{csv_path}（{n_cand} 檔，供 ProPicks 全宇宙挑股）")
+
+    # 庫存與觀察清單（必分析）→ enrich 成 reports 下 2 個 CSV
+    from tw_screener.report.group_report import write_named_list_csv
+
+    wl_dir = Path(cfg["paths"].get("watchlist_dir", "watchlist"))
+    holdings_map = _read_holdings_csv(wl_dir / "holdings.csv")
+    watch_ids = _read_watchlist_csv(wl_dir / "watchlist.csv")
+    for label, ids, hmap in [
+        ("holdings", list(holdings_map), holdings_map),
+        ("watchlist", watch_ids, None),
+    ]:
+        if not ids:
+            continue
+        console.print(f"  enrich {label}（{len(ids)} 檔，無快取會抓網）...")
+        wl_members, wl_synth = _enrich_named_list(
+            client,
+            ids,
+            industry_df if not industry_df.is_empty() else None,
+            institutional,
+            g_pullback,
+            name_map=name_map,
+        )
+        out_csv = output_path.parent / f"{label}_enriched.csv"
+        n = write_named_list_csv(
+            wl_members, themes_long, wl_synth, out_csv,
+            flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map, holdings_map=hmap,
+        )
+        console.print(f"[green]  {label}_enriched.csv：{n} 檔 → {out_csv}[/green]")
+
     console.print(f"  族群數：{len(groups)}，推薦分析：前 {top_stocks} 檔")
 
 

@@ -471,22 +471,16 @@ def render_group_report(
     logger.info("group_analysis.md 輸出 → {}", output_path)
 
 
-def write_candidates_enriched_csv(
+def _build_enriched_rows(
     members: pl.DataFrame,
     themes_long: pl.DataFrame | None,
     screener_results: dict[str, pl.DataFrame],
-    path: Path,
     flags_cfg: dict | None = None,
     rev_yoy_map: dict | None = None,
-) -> int:
-    """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
-
-    補 group_analysis.md 只列部分股的盲點：每檔都有 5 日漲幅/距月線/距季線/量比/法人(張)拆分/
-    PE/PB/主題，並程式預算 flags（過熱/低流動/高PE/土洋對作/強漲法人賣）讓 AI 快速排雷、把腦力
-    留給判斷。缺值（無快取）寫空白 → 標「需查證」而非編造。回傳寫入檔數。
-    """
+) -> list[dict]:
+    """組「每檔 × 技術/籌碼/估值/基本面 + flags」列（candidates / 庫存 / 觀察 共用）。"""
     if members.is_empty():
-        return 0
+        return []
     from tw_screener.analysis.grouping import rank_themes
 
     themes_long = themes_long if themes_long is not None else pl.DataFrame()
@@ -605,7 +599,62 @@ def write_candidates_enriched_csv(
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
             }
         )
+    return rows
+
+
+def write_candidates_enriched_csv(
+    members: pl.DataFrame,
+    themes_long: pl.DataFrame | None,
+    screener_results: dict[str, pl.DataFrame],
+    path: Path,
+    flags_cfg: dict | None = None,
+    rev_yoy_map: dict | None = None,
+) -> int:
+    """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
+
+    補 group_analysis.md 只列部分股的盲點：每檔都有 5 日漲幅/距月線/距季線/量比/法人(張)拆分/
+    PE/PB/主題，並程式預算 flags（過熱/低流動/高PE/土洋對作/強漲法人賣）讓 AI 快速排雷、把腦力
+    留給判斷。缺值（無快取）寫空白 → 標「需查證」而非編造。回傳寫入檔數。
+    """
+    rows = _build_enriched_rows(members, themes_long, screener_results, flags_cfg, rev_yoy_map)
+    if not rows:
+        return 0
     path.parent.mkdir(parents=True, exist_ok=True)
     pl.DataFrame(rows).write_csv(path)
     logger.info("candidates_enriched.csv 輸出 → {}（{} 檔）", path, len(rows))
+    return len(rows)
+
+
+def write_named_list_csv(
+    members: pl.DataFrame,
+    themes_long: pl.DataFrame | None,
+    screener_results: dict[str, pl.DataFrame],
+    path: Path,
+    *,
+    flags_cfg: dict | None = None,
+    rev_yoy_map: dict | None = None,
+    holdings_map: dict | None = None,
+) -> int:
+    """輸出庫存/觀察清單 enriched CSV（同 candidates 欄位）。
+
+    holdings_map={stock_id: {"buy_price": x, "shares": y}} 時，每列加 買入價/報酬率%/現值(千)，
+    供「續抱/加碼/減碼/停利/停損」決策對照。回傳寫入檔數。
+    """
+    rows = _build_enriched_rows(members, themes_long, screener_results, flags_cfg, rev_yoy_map)
+    if not rows:
+        return 0
+    if holdings_map is not None:
+        for row in rows:
+            h = holdings_map.get(row["stock_id"]) or {}
+            buy = h.get("buy_price")
+            shares = h.get("shares")
+            close = row.get("close")
+            row["buy_price"] = buy
+            row["return_pct"] = (
+                round((close - buy) / buy * 100, 1) if (buy and close and buy > 0) else None
+            )
+            row["market_value_k"] = round(close * shares / 1000) if (close and shares) else None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pl.DataFrame(rows).write_csv(path)
+    logger.info("{} 輸出 → {}（{} 檔）", path.name, path, len(rows))
     return len(rows)

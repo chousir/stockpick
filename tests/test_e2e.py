@@ -308,3 +308,29 @@ def test_e2e_candidates_enriched_csv(tmp_path: Path):
         "volume_lots_today", "inst_net_lots", "inst_pct20d", "flags", "goodinfo_url",
     ]:
         assert col in df.columns
+
+
+def test_e2e_named_list_csv_holdings(tmp_path: Path):
+    """庫存清單 CSV：加 buy_price/return_pct/market_value_k；觀察清單無 buy_price。"""
+    from tw_screener.report.group_report import write_named_list_csv
+
+    results = {"a_breakout": _SCREENER_A, "b_growth_institutional": _SCREENER_B}
+    groups, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2
+    )
+    ranked = rank_within_groups(members, pl.DataFrame(), pl.DataFrame())
+    sid = str(ranked["stock_id"].to_list()[0])
+
+    out_h = tmp_path / "holdings_enriched.csv"
+    n = write_named_list_csv(
+        ranked, pl.DataFrame(), results, out_h,
+        holdings_map={sid: {"buy_price": 100.0, "shares": 5.0}},
+    )
+    assert out_h.exists() and n == len(ranked)
+    dfh = pl.read_csv(out_h)
+    for col in ["buy_price", "return_pct", "market_value_k"]:
+        assert col in dfh.columns
+
+    out_w = tmp_path / "watchlist_enriched.csv"
+    write_named_list_csv(ranked, pl.DataFrame(), results, out_w)  # 無 holdings_map
+    assert "buy_price" not in pl.read_csv(out_w).columns

@@ -20,6 +20,14 @@ build/
 # Reports — commit only analysis outputs, not raw data
 reports/*/stocks/
 reports/*/_meta/
+reports/*
+
+# 個人庫存（含買入價）不進 git
+watchlist/holdings.csv
+
+# build-themes 等產生的備份檔
+*.bak
+config/*.candidate.yaml
 
 # Cache
 .ruff_cache/
