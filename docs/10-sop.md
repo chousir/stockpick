@@ -50,18 +50,21 @@ make group                     # 族群分析，產 group_analysis.md
 
 ```
 reports/YYYY-Www/
-  ├─ screen_result_*.csv  ← 4 個 CSV（GROUP=defg → d/e/f/g；legacy abc → a/b/c）
-  └─ group_analysis.md    ← Step 2 看這個
+  ├─ screen_result_*.csv        ← 4 個 CSV（GROUP=defg → d/e/f/g；legacy abc → a/b/c）
+  ├─ group_analysis.md          ← Step 2 看這個（族群脈絡）
+  ├─ candidates_enriched.csv    ← 全候選股 × 完整技術/籌碼/估值/flags（主要挑股宇宙）
+  └─ holdings/watchlist_enriched.csv  ← 有維護 watchlist/ 才產（庫存/觀察清單・必分析）
 ```
 
 ### Step 2：產出進場清單（兩種模式擇一）
 
 **模式 2a（推薦）：ProPicks 風格全清單分析**
 
-把 `group_analysis.md` + 4 個 `screen_result_*.csv` 貼到 Claude Opus 網頁
-對話，配合範本 prompt 讓 AI 在「完整候選宇宙」（不只 top 10）中挑：
+把 `group_analysis.md` + `candidates_enriched.csv` +（若有）`holdings/watchlist_enriched.csv`
++ 4 個 `screen_result_*.csv` 貼到 Claude Opus 網頁對話，配合範本 prompt 讓 AI 在「完整候選宇宙」中挑：
 
-- 5-7 檔進場清單 + 為何入選 + 進場思路 + 主要風險
+- **任務 0（必做）**：庫存決策（續抱/加碼/減碼/停利/停損）＋觀察清單進場時機
+- 精選進場清單（寧缺勿濫）+ 為何入選 + 進場思路 + 主要風險
 - 訊號交集（D∩E、E∩F、D∩E∩F）
 - 本週市場節奏 + 居安思危訊號 + 異常崛起個股
 - 觀察名單（追蹤但不進場）
@@ -171,8 +174,11 @@ Claude 回覆完整 Markdown 後：
 
 報告寫完後，依個人習慣決定要不要：
 
-- 把追蹤的股加進 `watchlist/active.md`
-- `git add reports/ watchlist/ && git commit -m "Weekly analysis YYYY-Www"`
+- **維護庫存/觀察清單**（下次 `make group` 會自動 enrich＋強制分析，見任務 0）：
+  - 新進場 → 加進 `watchlist/holdings.csv`（`股號,買入價,股數,備註`；含成本、已 gitignore 不外流）
+  - 想追蹤 → 加進 `watchlist/watchlist.csv`（`股號,備註`）
+  - `watchlist/active.md` 仍可當自由筆記（不進分析流程）
+- `git add reports/ watchlist/ && git commit -m "Weekly analysis YYYY-Www"`（holdings.csv 已 gitignore，不會被加入）
 - 用 `make weekend` 也可以（會自動 commit + push）
 
 ---

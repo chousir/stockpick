@@ -34,6 +34,8 @@
 reports/YYYY-Www/
   ├─ group_analysis.md                     ← 族群脈絡、強度排名
   ├─ candidates_enriched.csv               ← ★全候選股 × 完整技術/籌碼欄位（主要挑股宇宙）
+  ├─ holdings_enriched.csv                 ← ★我的庫存（含買入價/報酬率，必分析・見任務 0）※有維護才產
+  ├─ watchlist_enriched.csv                ← ★我的觀察清單（必分析・見任務 0）※有維護才產
   ├─ screen_result_d_quality_leader.csv    ← D 全部入選（原始）
   ├─ screen_result_e_growth_momentum.csv   ← E 全部入選（原始）
   ├─ screen_result_f_value_rebound.csv     ← F 全部入選（原始）
@@ -41,6 +43,7 @@ reports/YYYY-Www/
 ```
 
 （跑 legacy `GROUP=abc` 則對應 a/b/c 三個 CSV）
+（holdings/watchlist_enriched.csv 由 `watchlist/holdings.csv`＋`watchlist/watchlist.csv` 維護後、`make group` 自動產出）
 
 ### Step B：開 Claude Opus 對話
 
@@ -48,7 +51,7 @@ reports/YYYY-Www/
 
 ### Step C：依序貼入檔案內容
 
-順序：先 prompt → 再 group_analysis.md → 再 **candidates_enriched.csv** → 再 4 個 CSV（D/E/F/G）。
+順序：先 prompt → 再 group_analysis.md → 再 **candidates_enriched.csv** → 再 **holdings/watchlist_enriched.csv（若有）** → 再 4 個 CSV（D/E/F/G）。
 
 ### Step D：等 Claude 回覆，存到本週目錄
 

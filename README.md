@@ -27,10 +27,9 @@ make week GROUP=defg
 # （def=D/E/F 不含 G；abc=A/B/C 經典三角，已列 legacy）
 
 # Step 3：ProPicks 風格全清單分析（推薦，需要 Claude Opus 網頁對話）
-#   把 group_analysis.md + 4 個 screen_result_*.csv 貼到 claude.ai
+#   貼 group_analysis.md + candidates_enriched.csv + holdings/watchlist_enriched.csv + 4 個 screen CSV
 #   配合 docs/11-propicks-analysis.md 的範本 prompt
-#   產出 reports/Www/picks.md（5-7 檔進場清單 + 為何入選 + 風險 + 居安思危）
-#   或：純人工讀 group_analysis.md 挑股（快但只看 top 10 機械排名）
+#   產出 reports/Www/picks.md（任務0 庫存/觀察決策 + 精選進場清單 + 風險 + 居安思危）
 cat reports/$(date +%Y-W%V)/group_analysis.md
 
 # Step 4：對 picks.md 內每檔產個股深度報告（5-10 秒/檔）
@@ -68,6 +67,24 @@ make build-themes         # 正式 → merge 進 config/concepts.yaml（先自�
   全部可選名單見 [docs/02-data-sources.md](./docs/02-data-sources.md)。
 - **建議每月跑一次**（概念股成分會變動，太久不更新會失準）。白名單 15 個 ≈ 45 秒；全 101 個 ≈ 5–7 分。
 - 限制：每題材取 Yahoo 前約 30 檔（領頭觀察、非全量）。
+
+## 維護庫存／觀察清單（部位管理・每次必分析）
+
+選股流程只找「新標的」；你**已持有的部位**與**私人觀察股**靠這兩份清單納入分析——
+不受篩選宇宙限制、即使沒命中任何策略也會被逐檔分析。
+
+```bash
+# 編兩個檔（範例列改成你的）：
+#   watchlist/holdings.csv   股號,買入價,股數,備註   ← 庫存（含成本，已 gitignore 不外流）
+#   watchlist/watchlist.csv  股號,備註                ← 觀察清單
+make group   # （或 make week）末尾自動 enrich，產出下列 2 檔（清單股無快取會自動抓 TWSE）
+```
+
+- 產出 `reports/Www/holdings_enriched.csv`（技術/籌碼/估值/月營收YoY/flags ＋ **報酬率%、現值、MA60停損價**）
+  與 `watchlist_enriched.csv`（同欄、無買入價）。
+- Step 3 把這 2 檔一起貼給 Claude → prompt 的**任務 0（必做）**：庫存給**續抱/加碼/減碼/停利/停損**、
+  觀察給**進場時機**。
+- 隱私：`holdings.csv`（含買入價）已在 `.gitignore`，不進 git；`watchlist.csv` 只有股號。
 
 ## 核心設計原則
 
