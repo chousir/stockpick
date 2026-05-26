@@ -508,19 +508,38 @@ def _read_holdings_csv(path: Path) -> dict:
 def _enrich_named_list(client, stock_ids, industry_df, institutional, g_pullback, name_map=None):
     """把任意股票清單 enrich 成 (members, synth_screener)，reuse group_stocks 同套指標。
 
-    各股先 fetch_stock_ohlcv（無快取會抓網、補到 MA60 所需歷史），再丟 group_stocks 算
-    momentum/MA/量比/法人。回傳 members（含技術籌碼欄）＋ synth（供 writer 取 close/量）。
+    各股先 fetch_stock_ohlcv 讀快取；快取沒有（多為上櫃股、不在上市 daily）就主動
+    fetch_stock_history 補抓（OTC 自動走 TPEX），再丟 group_stocks 算 momentum/MA/量比/
+    法人。回傳 members（含技術籌碼欄）＋ synth（供 writer 取 close/量）。
     """
     import polars as _pl
 
     from tw_screener.analysis.grouping import group_stocks
 
     ids = list(dict.fromkeys(str(s).strip() for s in stock_ids if str(s).strip()))
+
+    # name fallback：name_map（月營收，僅上市）缺名時，補 industry_df.stock_name（含上櫃）
+    name_fallback: dict[str, str] = {}
+    if (
+        industry_df is not None
+        and not industry_df.is_empty()
+        and {"stock_id", "stock_name"}.issubset(industry_df.columns)
+    ):
+        for _id, _nm in industry_df.select(["stock_id", "stock_name"]).iter_rows():
+            name_fallback.setdefault(str(_id), str(_nm or ""))
+
+    def _name(sid: str) -> str:
+        return (name_map or {}).get(sid) or name_fallback.get(sid, "") or ""
+
     frames, rows = [], []
     for sid in ids:
         oh = client.fetch_stock_ohlcv(sid, n_days=100)
         if oh.is_empty():
-            console.print(f"[yellow]  {sid}：無 OHLCV 快取，跳過（先 make fetch-stock）[/yellow]")
+            # 快取沒有 → 主動抓歷史（上櫃股自動走 TPEX），再讀一次
+            client.fetch_stock_history(sid, months=6)
+            oh = client.fetch_stock_ohlcv(sid, n_days=100)
+        if oh.is_empty():
+            console.print(f"[yellow]  {sid}：抓不到 OHLCV，跳過（可能下市或代號錯）[/yellow]")
             continue
         oh = oh.sort("date")
         frames.append(oh.select(["stock_id", "date", "close", "trade_volume"]))
@@ -531,7 +550,7 @@ def _enrich_named_list(client, stock_ids, industry_df, institutional, g_pullback
         rows.append(
             {
                 "stock_id": sid,
-                "name": (name_map or {}).get(sid, ""),
+                "name": _name(sid),
                 "close": close,
                 "change_pct": round(chg / prev * 100.0, 2) if prev else 0.0,
                 "amount_million": round(float(d.get("trade_value") or 0) / 1_000_000.0, 2),

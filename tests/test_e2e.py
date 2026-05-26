@@ -334,3 +334,71 @@ def test_e2e_named_list_csv_holdings(tmp_path: Path):
     out_w = tmp_path / "watchlist_enriched.csv"
     write_named_list_csv(ranked, pl.DataFrame(), results, out_w)  # 無 holdings_map
     assert "buy_price" not in pl.read_csv(out_w).columns
+
+
+def _fake_ohlcv(sid: str) -> pl.DataFrame:
+    """造 12 個交易日的最小 OHLCV（_enrich_named_list / group_stocks 需要的欄）。"""
+    from datetime import date, timedelta
+
+    days = [date(2026, 5, 1) + timedelta(days=i) for i in range(12)]
+    closes = [100.0 + i for i in range(12)]
+    return pl.DataFrame(
+        {
+            "stock_id": [sid] * 12,
+            "date": days,
+            "open": closes,
+            "high": [c + 1 for c in closes],
+            "low": [c - 1 for c in closes],
+            "close": closes,
+            "change": [1.0] * 12,
+            "trade_volume": [1_000_000] * 12,
+            "trade_value": [100_000_000] * 12,
+            "transaction": [500] * 12,
+        }
+    )
+
+
+class _FakeClient:
+    """模擬 TWSE client：cached_id 直接有 OHLCV；otc_id 要等 fetch_stock_history 才有。"""
+
+    def __init__(self, cached_id: str, otc_id: str):
+        self._cached, self._otc = cached_id, otc_id
+        self._otc_ready = False
+        self.history_calls: list[str] = []
+
+    def fetch_stock_ohlcv(self, sid: str, n_days: int = 60) -> pl.DataFrame:
+        if sid == self._cached or (sid == self._otc and self._otc_ready):
+            return _fake_ohlcv(sid)
+        return pl.DataFrame()
+
+    def fetch_stock_history(self, sid: str, months: int = 3) -> pl.DataFrame:
+        self.history_calls.append(sid)
+        if sid == self._otc:
+            self._otc_ready = True  # 模擬 TPEX 抓回後寫入快取
+        return _fake_ohlcv(sid)
+
+
+def test_enrich_named_list_fetches_uncached_and_names_from_industry():
+    """回歸：上櫃股無快取時主動 fetch_stock_history 不被丟；name 由 industry_df 補。"""
+    from tw_screener.cli import _enrich_named_list
+
+    cached, otc = "2330", "6231"
+    industry_df = pl.DataFrame(
+        {
+            "stock_id": [cached, otc],
+            "stock_name": ["台積電", "系微"],
+            "industry_code": ["24", "27"],
+            "industry_name": ["半導體業", "資訊服務業"],
+        }
+    )
+    client = _FakeClient(cached, otc)
+    # name_map 只有上市股、缺上櫃 6231 → 6231 的名字必須走 industry_df fallback
+    members, _ = _enrich_named_list(
+        client, [cached, otc], industry_df, pl.DataFrame(), None, name_map={cached: "台積電"}
+    )
+
+    got = set(members["stock_id"].cast(pl.Utf8).to_list())
+    assert {cached, otc} <= got, "無快取的上櫃股不應被丟掉"
+    assert client.history_calls == [otc], "只有無快取的股應觸發 fetch_stock_history"
+    name_by_id = dict(zip(members["stock_id"].cast(pl.Utf8), members["name"], strict=False))
+    assert name_by_id[otc] == "系微", "name_map 缺名時應由 industry_df.stock_name 補"
