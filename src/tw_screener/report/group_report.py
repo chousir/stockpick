@@ -550,6 +550,8 @@ def _build_enriched_rows(
         tn = _num(r.get("trust_net"), 0)
         instn = _num(r.get("inst_net"), 0)
         inst_lots = _lots(r.get("inst_net"))
+        foreign_lots = _lots(r.get("foreign_net"))
+        trust_lots = _lots(r.get("trust_net"))
         vlots = _num(vol_map.get(sid), 0)
         # 法人淨買超佔近 20 日成交量%（集中度）：20日均量=今日量/vol_ratio，×20≈20日總量
         inst_pct20d = None
@@ -557,6 +559,11 @@ def _build_enriched_rows(
             tot20 = (vlots / vr) * 20.0
             if tot20 > 0:
                 inst_pct20d = round(inst_lots / tot20 * 100, 1)
+
+        # 法人快取缺漏（join 不到，非真實零買賣超）：四欄顯示空白，由 flag 標示供人工查證
+        inst_missing = bool(r.get("inst_missing"))
+        if inst_missing:
+            inst_lots = inst_pct20d = foreign_lots = trust_lots = None
 
         flags: list[str] = []
         if m60 is not None and m60 > overheated:
@@ -569,6 +576,8 @@ def _build_enriched_rows(
             flags.append("土洋對作")
         if mom is not None and mom > rally and instn is not None and instn < 0:
             flags.append("強漲法人賣")
+        if inst_missing:
+            flags.append("法人缺漏")
 
         rows.append(
             {
@@ -593,8 +602,8 @@ def _build_enriched_rows(
                 "volume_lots_today": vlots,
                 "inst_net_lots": inst_lots,
                 "inst_pct20d": inst_pct20d,
-                "foreign_net_lots": _lots(r.get("foreign_net")),
-                "trust_net_lots": _lots(r.get("trust_net")),
+                "foreign_net_lots": foreign_lots,
+                "trust_net_lots": trust_lots,
                 "flags": ";".join(flags),
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
             }
@@ -609,20 +618,44 @@ def write_candidates_enriched_csv(
     path: Path,
     flags_cfg: dict | None = None,
     rev_yoy_map: dict | None = None,
-) -> int:
+) -> list[dict]:
     """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
 
     補 group_analysis.md 只列部分股的盲點：每檔都有 5 日漲幅/距月線/距季線/量比/法人(張)拆分/
-    PE/PB/主題，並程式預算 flags（過熱/低流動/高PE/土洋對作/強漲法人賣）讓 AI 快速排雷、把腦力
-    留給判斷。缺值（無快取）寫空白 → 標「需查證」而非編造。回傳寫入檔數。
+    PE/PB/主題，並程式預算 flags（過熱/低流動/高PE/土洋對作/強漲法人賣/法人缺漏）讓 AI 快速
+    排雷、把腦力留給判斷。缺值（無快取）寫空白 → 標「需查證」而非編造。回傳已建立的列（list[dict]，
+    供庫存/觀察清單重用同一筆來源值以保持跨 CSV 一致）。
     """
     rows = _build_enriched_rows(members, themes_long, screener_results, flags_cfg, rev_yoy_map)
     if not rows:
-        return 0
+        return []
     path.parent.mkdir(parents=True, exist_ok=True)
     pl.DataFrame(rows).write_csv(path)
     logger.info("candidates_enriched.csv 輸出 → {}（{} 檔）", path, len(rows))
-    return len(rows)
+    return rows
+
+
+# 重疊股（同時在 candidates 宇宙與庫存/觀察）一律重用 candidates 那筆，避免兩條 enrich 路徑
+# 來源/視窗不同造成同一檔量比/集中度/成交額分岔。只重用市場/籌碼/估值/flags，識別欄與策略欄保留。
+_CANONICAL_REUSE_FIELDS = (
+    "momentum_5d_pct",
+    "change_pct",
+    "vol_ratio",
+    "ma20_dist_pct",
+    "ma60_dist_pct",
+    "ma20_price",
+    "ma60_price",
+    "amount_million",
+    "pe_ratio",
+    "pb_ratio",
+    "rev_yoy_pct",
+    "volume_lots_today",
+    "inst_net_lots",
+    "inst_pct20d",
+    "foreign_net_lots",
+    "trust_net_lots",
+    "flags",
+)
 
 
 def write_named_list_csv(
@@ -634,15 +667,29 @@ def write_named_list_csv(
     flags_cfg: dict | None = None,
     rev_yoy_map: dict | None = None,
     holdings_map: dict | None = None,
+    canonical_rows: dict[str, dict] | None = None,
 ) -> int:
     """輸出庫存/觀察清單 enriched CSV（同 candidates 欄位）。
 
     holdings_map={stock_id: {"buy_price": x, "shares": y}} 時，每列加 買入價/報酬率%/現值(千)，
-    供「續抱/加碼/減碼/停利/停損」決策對照。回傳寫入檔數。
+    供「續抱/加碼/減碼/停利/停損」決策對照。
+    canonical_rows={stock_id: candidates_row} 時，重疊股重用 candidates 的市場/籌碼/估值/flags
+    欄位，使三份 CSV 對同一檔股票數字一致。回傳寫入檔數。
     """
     rows = _build_enriched_rows(members, themes_long, screener_results, flags_cfg, rev_yoy_map)
     if not rows:
         return 0
+    if canonical_rows:
+        for row in rows:
+            canon = canonical_rows.get(row["stock_id"])
+            if not canon:
+                continue
+            for field in _CANONICAL_REUSE_FIELDS:
+                if field in canon:
+                    row[field] = canon.get(field)
+            # close 取 canonical（None 時保留 named 值，避免清掉持股 return_pct 依據）
+            if canon.get("close") is not None:
+                row["close"] = canon.get("close")
     if holdings_map is not None:
         for row in rows:
             h = holdings_map.get(row["stock_id"]) or {}

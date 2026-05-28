@@ -170,6 +170,7 @@ def group_stocks(
     institutional: pl.DataFrame | None = None,
     volume_history: pl.DataFrame | None = None,
     g_pullback: dict[str, float] | None = None,
+    vol_lookback: int = 20,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
     Group screened stocks by industry and compute group strength scores (動能主導).
@@ -178,7 +179,9 @@ def group_stocks(
         個股層聚合為 inst_net（近 N 日合計淨買超股數），族群層 inst_score =
         法人買超家數比（inst_net > 0 的家數 / 成員數）。未提供 → inst_net = 0、inst_score = 0。
     volume_history: 含 stock_id / date / trade_volume；提供時計算量比
-        （今日量 / 近 n 日均量）。未提供 → vol_ratio = 0。
+        （今日量 / 近 vol_lookback 日均量）。未提供 → vol_ratio = 0。
+    vol_lookback: 量比均量視窗（交易日）。每檔只取今日之前最近 vol_lookback 天平均，
+        與輸入的 volume_history 列數無關 → 不論餵幾天都是一致的 N 日均量。
     g_pullback: 策略 G 的拉回 setup 門檻（見 _DEFAULT_G_PULLBACK）；若 screener 含
         in_g_growth_pullback，G 的有效命中會被收斂為「基本面命中 ∧ 季線上揚 ∧ 乖離帶內 ∧ 量縮」。
 
@@ -281,11 +284,17 @@ def group_stocks(
                 pl.col("trust_net").sum().alias("trust_net"),
             ]
         )
-        stock_df = stock_df.join(inst_agg, on="stock_id", how="left").with_columns(
-            [pl.col(c).fill_null(0.0).cast(pl.Float64) for c in _inst_cols]
+        # 先記「法人缺漏」（join 不到法人快取）再 fill 0：缺漏 vs 真實零買賣超要能區分。
+        # numeric 仍填 0，下游排名/族群法人家數比行為不變；inst_missing 只供 writer 顯示空白+旗標。
+        stock_df = (
+            stock_df.join(inst_agg, on="stock_id", how="left")
+            .with_columns(pl.col("inst_net").is_null().alias("inst_missing"))
+            .with_columns([pl.col(c).fill_null(0.0).cast(pl.Float64) for c in _inst_cols])
         )
     else:
-        stock_df = stock_df.with_columns([pl.lit(0.0).alias(c) for c in _inst_cols])
+        stock_df = stock_df.with_columns(
+            [pl.lit(0.0).alias(c) for c in _inst_cols] + [pl.lit(True).alias("inst_missing")]
+        )
 
     # MA20 / MA60 距離 + MA60 斜率（% 偏離最新收盤價 / 季線上揚率）—— 不足則 null
     g_params = {**_DEFAULT_G_PULLBACK, **(g_pullback or {})}
@@ -306,12 +315,14 @@ def group_stocks(
             .select(["stock_id", "trade_volume"])
             .rename({"trade_volume": "_vol_today"})
         )
+        # 每檔只取今日之前「最近 vol_lookback 天」平均：與輸入列數脫鉤，避免餵 100 天
+        # 卻算成 99 日均量（candidates 餵 21 天、named 餵 100 天，過去會得到不同量比）。
         prior_avg = (
             volume_history.filter(pl.col("date") < latest_vol_date)
             .group_by("stock_id")
             .agg(
-                pl.col("trade_volume").mean().alias("_vol_avg"),
-                pl.col("trade_volume").count().alias("_vol_days"),
+                pl.col("trade_volume").sort_by("date").tail(vol_lookback).mean().alias("_vol_avg"),
+                pl.col("trade_volume").sort_by("date").tail(vol_lookback).count().alias("_vol_days"),
             )
         )
         vol_df = (

@@ -87,6 +87,7 @@ group_analysis:
   top_groups: 10
   top_stocks: 10
   dividend_lookahead_days: 14   # 除權息前瞻窗（日曆日，約 10 交易日）
+  vol_lookback_days: 20         # 量比均量視窗（交易日）；每檔只取今日前最近 N 天平均，與輸入列數脫鉤
 
 # 策略 G（成長拉回）的拉回 setup 門檻；G 有效命中 = 基本面命中 ∧ 三者全中
 g_pullback:

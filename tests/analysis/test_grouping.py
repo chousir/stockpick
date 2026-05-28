@@ -466,6 +466,61 @@ def test_group_stocks_vol_ratio_insufficient_data():
     assert row["vol_ratio"] == pytest.approx(0.0)
 
 
+def test_group_stocks_vol_ratio_window_capped():
+    """量比均量視窗截斷到 vol_lookback：餵 40 天歷史也只取最近 20 天均量（與輸入列數脫鉤）。"""
+    from datetime import date, timedelta
+
+    base = date(2026, 1, 1)
+    # 41 筆：最舊 20 天量=5000、其次 20 天量=1000、最後一天(今日)=2000
+    dates = [base + timedelta(days=i) for i in range(41)]
+    volumes = [5000] * 20 + [1000] * 20 + [2000]
+    volume_history = _make_volume_history(["2330"] * 41, dates, volumes)
+    results = {"a_breakout": _make_screener_df(["2330", "2454"], [3.5, 2.8], "a_breakout")}
+
+    # 預設 vol_lookback=20 → 近 20 日均量=1000 → ratio = 2000/1000 = 2.0
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2, volume_history=volume_history,
+    )
+    row = members.filter(pl.col("stock_id") == "2330").to_dicts()[0]
+    assert row["vol_ratio"] == pytest.approx(2.0)
+
+    # vol_lookback=40 → 全 40 日均量=(20*5000+20*1000)/40=3000 → ratio≈0.667（證明參數生效）
+    _, members40 = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2, volume_history=volume_history,
+        vol_lookback=40,
+    )
+    row40 = members40.filter(pl.col("stock_id") == "2330").to_dicts()[0]
+    assert row40["vol_ratio"] == pytest.approx(2000 / 3000)
+
+
+def test_group_stocks_inst_missing_flag():
+    """法人 join 不到 → inst_missing=True 且 numeric 仍填 0（評分/排名不變）；有資料 → False。"""
+    results = {"a_breakout": _make_screener_df(["2330", "2454"], [3.0, 2.0], "a_breakout")}
+    institutional = _make_institutional(["2330"], [1000])  # 只有 2330 有法人快取
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2, institutional=institutional,
+    )
+    m = {r["stock_id"]: r for r in members.iter_rows(named=True)}
+    assert m["2330"]["inst_missing"] is False
+    assert m["2330"]["inst_net"] == pytest.approx(1000.0)
+    assert m["2454"]["inst_missing"] is True
+    assert m["2454"]["inst_net"] == 0.0  # 缺漏仍填 0，下游排名/家數比行為不變
+
+
+def test_group_stocks_inst_missing_when_no_institutional():
+    """完全無法人資料 → 所有成員 inst_missing=True。"""
+    results = {"a_breakout": _make_screener_df(["2330", "2454"], [3.0, 2.0], "a_breakout")}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    for r in members.iter_rows(named=True):
+        assert r["inst_missing"] is True
+
+
 # ─── MA 距離計算 ──────────────────────────────────────────────────────────────
 
 

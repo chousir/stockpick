@@ -296,9 +296,9 @@ def test_e2e_candidates_enriched_csv(tmp_path: Path):
     )
     ranked = rank_within_groups(members, pl.DataFrame(), pl.DataFrame())
     out = tmp_path / "candidates_enriched.csv"
-    n = write_candidates_enriched_csv(ranked, pl.DataFrame(), results, out)
+    rows = write_candidates_enriched_csv(ranked, pl.DataFrame(), results, out)
     assert out.exists()
-    assert n == len(ranked)
+    assert len(rows) == len(ranked)  # 現回傳已建立的列（供重疊股重用）
     df = pl.read_csv(out)
     assert df.height == len(ranked)
     for col in [

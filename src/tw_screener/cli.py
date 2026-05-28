@@ -505,7 +505,9 @@ def _read_holdings_csv(path: Path) -> dict:
     return out
 
 
-def _enrich_named_list(client, stock_ids, industry_df, institutional, g_pullback, name_map=None):
+def _enrich_named_list(
+    client, stock_ids, industry_df, institutional, g_pullback, name_map=None, vol_lookback=20
+):
     """把任意股票清單 enrich 成 (members, synth_screener)，reuse group_stocks 同套指標。
 
     各股先 fetch_stock_ohlcv 讀快取；快取沒有（多為上櫃股、不在上市 daily）就主動
@@ -574,6 +576,7 @@ def _enrich_named_list(client, stock_ids, industry_df, institutional, g_pullback
         institutional=institutional,
         volume_history=volume_history,
         g_pullback=g_pullback,
+        vol_lookback=vol_lookback,
     )
     return members, {"_list": synth}
 
@@ -604,6 +607,7 @@ def analysis_group(
     top_groups = int(ga_cfg.get("top_groups", 10))
     top_stocks = int(ga_cfg.get("top_stocks", 10))
     dividend_lookahead = int(ga_cfg.get("dividend_lookahead_days", 14))
+    vol_lookback = int(ga_cfg.get("vol_lookback_days", 20))
 
     week_tag, screener_results = _load_latest_screener_results(settings)
     if not screener_results:
@@ -677,6 +681,22 @@ def analysis_group(
     else:
         console.print(f"  量比資料：{volume_history['stock_id'].n_unique()} 檔")
 
+    # 資料日期一致性檢查（安全網）：三個來源若非同一交易日，量價/籌碼可能來自不同快照
+    _src_dates: dict[str, object] = {}
+    for _label, _df in (
+        ("OHLCV", price_history),
+        ("量", volume_history),
+        ("法人", institutional),
+    ):
+        if not _df.is_empty() and "date" in _df.columns:
+            _src_dates[_label] = _df["date"].max()
+    if len(set(_src_dates.values())) > 1:
+        console.print(
+            "[yellow]  ⚠ 資料來源最新日期不一致："
+            + "、".join(f"{k}={v}" for k, v in _src_dates.items())
+            + "；量價/籌碼可能來自不同快照，建議重抓對齊[/yellow]"
+        )
+
     dividends = filter_dividend_calendar(
         client.fetch_dividend_calendar(), _date.today(), dividend_lookahead, candidate_ids
     )
@@ -698,6 +718,7 @@ def analysis_group(
         institutional=institutional,
         volume_history=volume_history,
         g_pullback=g_pullback,
+        vol_lookback=vol_lookback,
     )
 
     if groups.is_empty():
@@ -744,10 +765,13 @@ def analysis_group(
                 name_map.setdefault(sid, str(rr.get("company_name") or ""))
 
     csv_path = output_path.parent / "candidates_enriched.csv"
-    n_cand = write_candidates_enriched_csv(
+    cand_rows = write_candidates_enriched_csv(
         leaders, themes_long, screener_results, csv_path,
         flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map,
     )
+    # 重疊股重用：庫存/觀察清單同檔一律沿用 candidates 那筆，避免跨 CSV 量比/集中度/成交額分岔
+    canonical_rows = {row["stock_id"]: row for row in cand_rows}
+    n_cand = len(cand_rows)
 
     console.print(f"[green]報告輸出：{output_path}[/green]")
     console.print(f"  全候選股完整欄位 CSV：{csv_path}（{n_cand} 檔，供 ProPicks 全宇宙挑股）")
@@ -772,11 +796,13 @@ def analysis_group(
             institutional,
             g_pullback,
             name_map=name_map,
+            vol_lookback=vol_lookback,
         )
         out_csv = output_path.parent / f"{label}_enriched.csv"
         n = write_named_list_csv(
             wl_members, themes_long, wl_synth, out_csv,
             flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map, holdings_map=hmap,
+            canonical_rows=canonical_rows,
         )
         console.print(f"[green]  {label}_enriched.csv：{n} 檔 → {out_csv}[/green]")
 
