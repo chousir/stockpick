@@ -7,7 +7,7 @@
 # 欄位：
 #   date     : YYYY-MM-DD（西元）
 #   name     : 事件名稱
-#   category : FOMC | CPI | PCE | 台股結算 | 法說 | 財報季 | 選舉 | MSCI
+#   category : FOMC | CPI | PCE | 台股結算 | 法說 | 財報季 | 選舉 | MSCI | 題材 | 季節性
 #   severity : 高 | 中（對台股的雙向衝擊強度）
 #   verified : false = Claude 補的常見排程、日期待你校對；校對過改 true
 #   note     : 一句補充（可省）
@@ -18,6 +18,12 @@
 
 events:
   # ── 2026 June ──
+  - date: 2026-06-02
+    name: Computex 台北電腦展（利多出盡觀察）
+    category: 題材
+    severity: 中
+    verified: false
+    note: AI 題材年度旺事，展後常利多出盡；日期待查（每年約 5 月底–6 月初）
   - date: 2026-06-10
     name: 美國 5 月 CPI
     category: CPI
@@ -95,6 +101,12 @@ events:
     verified: false
 
   # ── 2026 September ──
+  - date: 2026-09-01
+    name: 9–10 月期中選前季節性弱勢窗口（起）
+    category: 季節性
+    severity: 中
+    verified: false
+    note: 美股期中選舉年 9–10 月歷史偏弱；經驗法則非定律，視為逢回分批佈局窗、非追高
   - date: 2026-09-11
     name: 美國 8 月 CPI
     category: CPI
@@ -140,6 +152,12 @@ events:
     severity: 中
     verified: false
     note: 歷史上選前偏弱、選後偏強（經驗法則，非定律）
+  - date: 2026-11-04
+    name: 11 月選後–12 月季節性強勢窗口（起）
+    category: 季節性
+    severity: 中
+    verified: false
+    note: 選後不確定性消除＋年底作帳行情，歷史偏強；經驗法則非定律，前面佈局到位則收成
   - date: 2026-11-13
     name: 美國 10 月 CPI
     category: CPI
