@@ -39,7 +39,8 @@ reports/YYYY-Www/
   ├─ screen_result_d_quality_leader.csv    ← D 全部入選（原始）
   ├─ screen_result_e_growth_momentum.csv   ← E 全部入選（原始）
   ├─ screen_result_f_value_rebound.csv     ← F 全部入選（原始）
-  └─ screen_result_g_growth_pullback.csv   ← G 全部入選（成長宇宙；有效拉回命中見 group_analysis.md）
+  ├─ screen_result_g_growth_pullback.csv   ← G 全部入選（成長宇宙；有效拉回命中見 group_analysis.md）
+  └─ theme_strength.csv                    ← ⚙️ 內部快照（次產業 lead_score/排名，供下週算 ΔRank）・**不必貼給 Claude**（內容已在 group_analysis.md Section 2.8）
 ```
 
 （跑 legacy `GROUP=abc` 則對應 a/b/c 三個 CSV）
