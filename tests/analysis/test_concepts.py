@@ -21,7 +21,7 @@ def test_load_concepts_real_file():
     """
     df = load_concepts(Path("config/concepts.yaml"))
     m = {r["stock_id"]: r["sub_industry"] for r in df.iter_rows(named=True)}
-    assert "IC生產製造" in m["2330"]
+    assert "晶圓代工" in m["2330"]  # 台積電：晶圓代工（Wantgoo 匯入曾誤併入 IC生產製造，已正名）
     assert "IC設計服務" in m["3034"] and "面板業" in m["3034"]  # 多標籤串接
 
 
