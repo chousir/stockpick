@@ -179,6 +179,7 @@ def _build_context(
     top_stocks: int,
     dividend_events: pl.DataFrame | None = None,
     themes_long: pl.DataFrame | None = None,
+    macro_events: pl.DataFrame | None = None,
 ) -> dict:
     strategy_ids = sorted(screener_results.keys())
     # Only show strategies that have at least 1 result
@@ -406,6 +407,22 @@ def _build_context(
                 }
             )
 
+    # --- macro calendar (forward 市場級總經事件) ---
+    macro_rows: list[dict] = []
+    if macro_events is not None and not macro_events.is_empty():
+        for r in macro_events.iter_rows(named=True):
+            mdate = r.get("date")
+            macro_rows.append(
+                {
+                    "date": mdate.isoformat() if mdate else "",
+                    "name": r.get("name", ""),
+                    "category": r.get("category", ""),
+                    "severity": r.get("severity", ""),
+                    "verified": bool(r.get("verified", False)),
+                    "note": r.get("note", ""),
+                }
+            )
+
     return {
         "week_tag": week_tag,
         "generated_at": date.today().isoformat(),
@@ -427,6 +444,7 @@ def _build_context(
         "priority_stocks": priority_rows,
         "claude_groups": claude_groups,
         "dividend_rows": dividend_rows,
+        "macro_rows": macro_rows,
     }
 
 
@@ -440,6 +458,7 @@ def render_group_report(
     top_stocks: int = 10,
     dividend_events: pl.DataFrame | None = None,
     themes_long: pl.DataFrame | None = None,
+    macro_events: pl.DataFrame | None = None,
 ) -> None:
     """Render group_analysis.md to output_path using Jinja2 template.
 
@@ -456,6 +475,7 @@ def render_group_report(
         top_stocks,
         dividend_events,
         themes_long,
+        macro_events,
     )
 
     env = Environment(

@@ -607,6 +607,7 @@ def analysis_group(
     top_groups = int(ga_cfg.get("top_groups", 10))
     top_stocks = int(ga_cfg.get("top_stocks", 10))
     dividend_lookahead = int(ga_cfg.get("dividend_lookahead_days", 14))
+    macro_lookahead = int(ga_cfg.get("macro_lookahead_days", 30))
     vol_lookback = int(ga_cfg.get("vol_lookback_days", 20))
 
     week_tag, screener_results = _load_latest_screener_results(settings)
@@ -705,6 +706,17 @@ def analysis_group(
     else:
         console.print(f"  本週除權息：{len(dividends)} 檔候選股（未來 {dividend_lookahead} 天）")
 
+    from tw_screener.data.macro import filter_macro_calendar, load_macro_calendar
+
+    macro_events = filter_macro_calendar(load_macro_calendar(), _date.today(), macro_lookahead)
+    if macro_events.is_empty():
+        console.print(
+            f"  未來總經事件：未來 {macro_lookahead} 天內無"
+            "（或 config/macro_calendar.yaml 未建/窗內無事件）"
+        )
+    else:
+        console.print(f"  未來總經事件：{len(macro_events)} 筆（未來 {macro_lookahead} 天）")
+
     g_pullback = cfg.get("g_pullback")
 
     console.print("  計算族群強度分數...")
@@ -745,7 +757,7 @@ def analysis_group(
     output_path = Path(cfg["paths"]["reports_dir"]) / week_tag / "group_analysis.md"
     render_group_report(
         groups, leaders, screener_results, week_tag, output_path, top_groups, top_stocks,
-        dividend_events=dividends, themes_long=themes_long,
+        dividend_events=dividends, themes_long=themes_long, macro_events=macro_events,
     )
 
     from tw_screener.report.group_report import write_candidates_enriched_csv

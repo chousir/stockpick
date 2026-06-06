@@ -1,0 +1,179 @@
+# 總經／市場級事件行事曆（手動維護）
+#
+# 用途：`make group` 會過濾出未來窗內事件，注入 group_analysis.md 的
+#       「Section 0.6 未來總經事件」，供 ProPicks 做事件曝險判斷
+#       （雙向事件落地前控倉、把彈藥留過事件，見 prompt 任務 2 事件閘門）。
+#
+# 欄位：
+#   date     : YYYY-MM-DD（西元）
+#   name     : 事件名稱
+#   category : FOMC | CPI | PCE | 台股結算 | 法說 | 財報季 | 選舉 | MSCI
+#   severity : 高 | 中（對台股的雙向衝擊強度）
+#   verified : false = Claude 補的常見排程、日期待你校對；校對過改 true
+#   note     : 一句補充（可省）
+#
+# ⚠️ verified: false 一律當「待查證」——FOMC/CPI 實際日期以官方公告為準
+#    （Fed、美國 BLS、TWSE、各公司 IR），台股結算為每月第三個週三（遇假日順延）。
+#    過期事件留著無妨（會被日期窗自動濾掉）；定期把已過月份清掉即可。
+
+events:
+  # ── 2026 June ──
+  - date: 2026-06-10
+    name: 美國 5 月 CPI
+    category: CPI
+    severity: 高
+    verified: false
+    note: 通膨數據，左右 Fed 路徑
+  - date: 2026-06-17
+    name: FOMC 利率決議
+    category: FOMC
+    severity: 高
+    verified: false
+    note: 6/16-17 會議，17 決議＋記者會（台股 6/18 反映）
+  - date: 2026-06-17
+    name: 台指期／選擇權結算
+    category: 台股結算
+    severity: 中
+    verified: false
+    note: 每月第三個週三
+  - date: 2026-06-26
+    name: 美國 5 月 PCE
+    category: PCE
+    severity: 中
+    verified: false
+
+  # ── 2026 July ──
+  - date: 2026-07-14
+    name: 美國 6 月 CPI
+    category: CPI
+    severity: 高
+    verified: false
+  - date: 2026-07-15
+    name: 台指期／選擇權結算
+    category: 台股結算
+    severity: 中
+    verified: false
+  - date: 2026-07-16
+    name: 台積電法說（Q2）
+    category: 法說
+    severity: 高
+    verified: false
+    note: AI capex 指引，半導體鏈定生死
+  - date: 2026-07-29
+    name: FOMC 利率決議
+    category: FOMC
+    severity: 高
+    verified: false
+
+  # ── 2026 August ──
+  - date: 2026-08-12
+    name: 美國 7 月 CPI
+    category: CPI
+    severity: 高
+    verified: false
+  - date: 2026-08-14
+    name: 台股 Q2 財報截止
+    category: 財報季
+    severity: 中
+    verified: false
+    note: 多數上市櫃 Q2 財報申報截止
+  - date: 2026-08-19
+    name: 台指期／選擇權結算
+    category: 台股結算
+    severity: 中
+    verified: false
+  - date: 2026-08-26
+    name: 輝達（NVIDIA）財報
+    category: 法說
+    severity: 高
+    verified: false
+    note: AI 鏈 catalyst，台廠供應鏈連動
+  - date: 2026-08-28
+    name: MSCI 季度調整生效
+    category: MSCI
+    severity: 中
+    verified: false
+
+  # ── 2026 September ──
+  - date: 2026-09-11
+    name: 美國 8 月 CPI
+    category: CPI
+    severity: 高
+    verified: false
+  - date: 2026-09-16
+    name: FOMC 利率決議
+    category: FOMC
+    severity: 高
+    verified: false
+  - date: 2026-09-16
+    name: 台指期／選擇權結算
+    category: 台股結算
+    severity: 中
+    verified: false
+
+  # ── 2026 October ──
+  - date: 2026-10-14
+    name: 美國 9 月 CPI
+    category: CPI
+    severity: 高
+    verified: false
+  - date: 2026-10-15
+    name: 台積電法說（Q3）
+    category: 法說
+    severity: 高
+    verified: false
+  - date: 2026-10-21
+    name: 台指期／選擇權結算
+    category: 台股結算
+    severity: 中
+    verified: false
+  - date: 2026-10-28
+    name: FOMC 利率決議
+    category: FOMC
+    severity: 高
+    verified: false
+
+  # ── 2026 November ──
+  - date: 2026-11-03
+    name: 美國期中選舉
+    category: 選舉
+    severity: 中
+    verified: false
+    note: 歷史上選前偏弱、選後偏強（經驗法則，非定律）
+  - date: 2026-11-13
+    name: 美國 10 月 CPI
+    category: CPI
+    severity: 高
+    verified: false
+  - date: 2026-11-18
+    name: 輝達（NVIDIA）財報
+    category: 法說
+    severity: 高
+    verified: false
+  - date: 2026-11-18
+    name: 台指期／選擇權結算
+    category: 台股結算
+    severity: 中
+    verified: false
+  - date: 2026-11-24
+    name: MSCI 季度調整生效
+    category: MSCI
+    severity: 中
+    verified: false
+
+  # ── 2026 December ──
+  - date: 2026-12-10
+    name: 美國 11 月 CPI
+    category: CPI
+    severity: 高
+    verified: false
+  - date: 2026-12-16
+    name: FOMC 利率決議
+    category: FOMC
+    severity: 高
+    verified: false
+  - date: 2026-12-16
+    name: 台指期／選擇權結算
+    category: 台股結算
+    severity: 中
+    verified: false
