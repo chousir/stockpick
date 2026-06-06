@@ -758,6 +758,7 @@ def analysis_group(
     render_group_report(
         groups, leaders, screener_results, week_tag, output_path, top_groups, top_stocks,
         dividend_events=dividends, themes_long=themes_long, macro_events=macro_events,
+        radar_cfg=ga_cfg.get("radar"),
     )
 
     from tw_screener.report.group_report import write_candidates_enriched_csv

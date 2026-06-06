@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from pathlib import Path
 
@@ -170,6 +171,140 @@ def _build_theme_str_map(
     return out
 
 
+def _rank_delta_str(rd: object) -> str:
+    """ΔRank 顯示：▲升／▼降／0 持平／—（無上週快照）。"""
+    if rd is None:
+        return "—"
+    n = int(rd)  # type: ignore[call-overload]
+    if n > 0:
+        return f"▲{n}"
+    if n < 0:
+        return f"▼{-n}"
+    return "0"
+
+
+_SNAPSHOT_COLS = [
+    "theme",
+    "kind",
+    "radar_rank",
+    "lead_score",
+    "score",
+    "momentum_5d",
+    "members_count",
+    "foreign_score",
+    "vol_surge_score",
+    "rank_delta",
+]
+
+
+def _week_key(name: str) -> tuple[int, int] | None:
+    """'2026-W23' → (2026, 23)，供跨週排序；非法名稱回 None。"""
+    m = re.match(r"(\d{4})-W(\d{1,2})", name)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _load_prev_theme_snapshot(report_dir: Path, week_tag: str) -> pl.DataFrame | None:
+    """掃 reports/*/theme_strength.csv，取週序 < 本週的最近一份（供 ΔRank）；無則 None。"""
+    cur = _week_key(week_tag)
+    root = report_dir.parent
+    if cur is None or not root.exists():
+        return None
+    found: list[tuple[tuple[int, int], Path]] = []
+    for d in root.iterdir():
+        snap = d / "theme_strength.csv"
+        k = _week_key(d.name) if d.is_dir() else None
+        if k is not None and k < cur and snap.exists():
+            found.append((k, snap))
+    if not found:
+        return None
+    found.sort()
+    try:
+        return pl.read_csv(found[-1][1])
+    except Exception as exc:  # noqa: BLE001 — 壞快照不該擋住本週報告
+        logger.warning("讀上週 theme_strength 失敗：{}", exc)
+        return None
+
+
+def _write_theme_snapshot(radar: pl.DataFrame, report_dir: Path) -> None:
+    """寫本週 theme_strength.csv（機器可讀快照，供下週算 ΔRank）。"""
+    if radar.is_empty():
+        return
+    cols = [c for c in _SNAPSHOT_COLS if c in radar.columns]
+    report_dir.mkdir(parents=True, exist_ok=True)
+    radar.select(cols).write_csv(report_dir / "theme_strength.csv")
+
+
+def _build_radar(
+    ranked: pl.DataFrame,
+    members: pl.DataFrame,
+    themes_long: pl.DataFrame,
+    theme_str_map: dict[str, str],
+    strategy_ids: list[str],
+    report_dir: Path | None,
+    week_tag: str,
+    radar_cfg: dict | None,
+) -> tuple[list[dict], list[dict]]:
+    """輪動雷達：以 lead_score 重排（領先鏡頭）＋週對週 ΔRank，並寫本週快照。
+
+    回傳 (radar_groups〔Section 2.8〕, radar_deep_dive〔Section 6・top-N 次產業含成員股〕)。
+    """
+    from tw_screener.analysis.concepts import SUB_INDUSTRY_KIND
+    from tw_screener.analysis.grouping import attach_rank_delta
+
+    if ranked.is_empty():
+        return [], []
+    radar = ranked.sort("lead_score", descending=True).with_row_index("radar_rank", offset=1)
+    prev = _load_prev_theme_snapshot(report_dir, week_tag) if report_dir else None
+    radar = attach_rank_delta(radar, prev)
+    if report_dir is not None:
+        _write_theme_snapshot(radar, report_dir)
+
+    def _row_common(row: dict) -> dict:
+        cnt = int(row["members_count"])
+        fb = int(row.get("foreign_buy_count", 0) or 0)
+        vs = int(row.get("vol_surge_count", 0) or 0)
+        return {
+            "theme": row["theme"],
+            "kind": row["kind"],
+            "members_count": cnt,
+            "momentum_5d_str": _fmt_pct(float(row.get("momentum_5d", 0) or 0)),
+            "foreign_breadth_str": f"{fb}/{cnt}" if cnt else "0/0",
+            "vol_surge_str": f"{vs}/{cnt}" if cnt else "0/0",
+            "rank_delta_str": _rank_delta_str(row.get("rank_delta")),
+            "lead_score_str": f"{float(row['lead_score']):.1f}",
+            "score_str": f"{float(row['score']):.1f}",
+        }
+
+    radar_groups = [
+        {"radar_rank": int(row["radar_rank"]), **_row_common(row)}
+        for row in radar.iter_rows(named=True)
+    ]
+
+    # Section 6 深度解讀：top-N 次產業（kind=次產業）by lead_score，逐塊列其成員候選股
+    deep_n = int((radar_cfg or {}).get("deep_dive_top_n", 6))
+    radar_deep_dive: list[dict] = []
+    if not members.is_empty() and not themes_long.is_empty():
+        member_ids = set(members["stock_id"].to_list())
+        theme_members: dict[str, list[str]] = {}
+        for tr in themes_long.filter(pl.col("kind") == SUB_INDUSTRY_KIND).iter_rows(named=True):
+            sid = tr["stock_id"]
+            if sid in member_ids:
+                theme_members.setdefault(tr["theme"], []).append(sid)
+        sub_radar = radar.filter(pl.col("kind") == SUB_INDUSTRY_KIND).head(deep_n)
+        for row in sub_radar.iter_rows(named=True):
+            ids = theme_members.get(row["theme"], [])
+            sub_df = members.filter(pl.col("stock_id").is_in(ids)).sort(
+                "leader_score", descending=True
+            )
+            stocks = [
+                _build_stock_dict(sr, strategy_ids, len(ids), theme_str_map)
+                for sr in sub_df.iter_rows(named=True)
+            ]
+            radar_deep_dive.append({**_row_common(row), "stocks": stocks})
+
+    return radar_groups, radar_deep_dive
+
+
 def _build_context(
     groups: pl.DataFrame,
     members: pl.DataFrame,
@@ -180,6 +315,8 @@ def _build_context(
     dividend_events: pl.DataFrame | None = None,
     themes_long: pl.DataFrame | None = None,
     macro_events: pl.DataFrame | None = None,
+    report_dir: Path | None = None,
+    radar_cfg: dict | None = None,
 ) -> dict:
     strategy_ids = sorted(screener_results.keys())
     # Only show strategies that have at least 1 result
@@ -240,8 +377,24 @@ def _build_context(
     from tw_screener.analysis.grouping import rank_themes
 
     themes_long = themes_long if themes_long is not None else pl.DataFrame()
-    ranked = rank_themes(members, themes_long)
+    rc = radar_cfg or {}
+    ranked = rank_themes(
+        members,
+        themes_long,
+        vol_surge_ratio=float(rc.get("vol_surge_ratio", 1.5)),
+        lead_weights=rc.get("lead_weights"),
+    )
     theme_str_map = _build_theme_str_map(members, themes_long, ranked)
+    radar_groups, radar_deep_dive = _build_radar(
+        ranked,
+        members,
+        themes_long,
+        theme_str_map,
+        strategy_ids,
+        report_dir,
+        week_tag,
+        radar_cfg,
+    )
     sub_groups: list[dict] = []
     concept_groups: list[dict] = []
     for row in ranked.iter_rows(named=True):
@@ -443,6 +596,8 @@ def _build_context(
         "top_groups": top_groups,
         "priority_stocks": priority_rows,
         "claude_groups": claude_groups,
+        "radar_groups": radar_groups,
+        "radar_deep_dive": radar_deep_dive,
         "dividend_rows": dividend_rows,
         "macro_rows": macro_rows,
     }
@@ -459,6 +614,7 @@ def render_group_report(
     dividend_events: pl.DataFrame | None = None,
     themes_long: pl.DataFrame | None = None,
     macro_events: pl.DataFrame | None = None,
+    radar_cfg: dict | None = None,
 ) -> None:
     """Render group_analysis.md to output_path using Jinja2 template.
 
@@ -476,6 +632,8 @@ def render_group_report(
         dividend_events,
         themes_long,
         macro_events,
+        report_dir=output_path.parent,
+        radar_cfg=radar_cfg,
     )
 
     env = Environment(

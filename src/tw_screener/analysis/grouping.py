@@ -495,16 +495,26 @@ def rank_themes(
     themes_long: pl.DataFrame,
     min_members: int = 2,
     concept_min_members: int = 3,
+    vol_surge_ratio: float = 1.5,
+    lead_weights: dict[str, float] | None = None,
 ) -> pl.DataFrame:
     """多標籤主題強度排名：候選股依所屬主題（次產業＋概念股）各自分群排名。
 
-    members 需含 stock_id / momentum_5d；themes_long 為 (stock_id, theme, kind) long table，
-    一檔可屬多主題、join 後各貢獻一列。因主題只涵蓋部分股、缺「全市場母體數」，故**不用
-    入選率**，把其 25% 權重併入動能：
-        score = 70 * sigmoid(5日中位/5) + 15 * 法人買超家數比 + 15 * log 規模
+    members 需含 stock_id / momentum_5d（可選 inst_net / foreign_net / vol_ratio）；
+    themes_long 為 (stock_id, theme, kind) long table，一檔可屬多主題、join 後各貢獻一列。
+    因主題只涵蓋部分股、缺「全市場母體數」，故**不用入選率**。算兩種分數：
+
+    - **score（漲幅強度・落後鏡頭，Section 2.6/2.7 用）**：
+        70 * sigmoid(5日中位/5) + 15 * 法人買超家數比 + 15 * log 規模
+    - **lead_score（領先分數・領先鏡頭，輪動雷達 Section 2.8 用）**：
+        外資買超 breadth + 量能放大 breadth 主導、動能僅輔（預設 0.45/0.30/0.25）。
+        專抓「籌碼/量能已進、價格未動」的次產業（漲幅排名後段但 lead_score 高＝下一棒）。
+
+    vol_surge_ratio：量比 ≥ 此值才算「量能放大」（預設 1.5）。
     保留門檻依 kind 分流：次產業 >= min_members、概念股 >= concept_min_members。
-    回傳 theme / kind / members_count / momentum_5d / up_count / inst_buy_count /
-    inst_score / score，按 score 降序。
+    回傳含 members_count / momentum_5d / up_count / inst_buy_count / inst_score /
+    foreign_buy_count / vol_surge_count / foreign_score / vol_surge_score / score /
+    lead_score，按 score 降序（雷達排序在報表層用 lead_score 重排）。
     """
     from tw_screener.analysis.concepts import SUB_INDUSTRY_KIND
 
@@ -517,7 +527,12 @@ def rank_themes(
             "up_count": pl.Int32,
             "inst_buy_count": pl.Int32,
             "inst_score": pl.Float64,
+            "foreign_buy_count": pl.Int32,
+            "vol_surge_count": pl.Int32,
+            "foreign_score": pl.Float64,
+            "vol_surge_score": pl.Float64,
             "score": pl.Float64,
+            "lead_score": pl.Float64,
         }
     )
     if (
@@ -533,6 +548,8 @@ def rank_themes(
         return _empty
 
     has_inst = "inst_net" in df.columns
+    has_foreign = "foreign_net" in df.columns
+    has_vol = "vol_ratio" in df.columns
     agg_exprs: list[pl.Expr] = [
         pl.col("stock_id").count().alias("members_count"),
         pl.col("momentum_5d").median().alias("momentum_5d"),
@@ -540,6 +557,14 @@ def rank_themes(
     ]
     if has_inst:
         agg_exprs.append((pl.col("inst_net") > 0).cast(pl.Int32).sum().alias("inst_buy_count"))
+    if has_foreign:
+        agg_exprs.append(
+            (pl.col("foreign_net") > 0).cast(pl.Int32).sum().alias("foreign_buy_count")
+        )
+    if has_vol:
+        agg_exprs.append(
+            (pl.col("vol_ratio") >= vol_surge_ratio).cast(pl.Int32).sum().alias("vol_surge_count")
+        )
     g = df.group_by(["theme", "kind"]).agg(agg_exprs)
     g = g.filter(
         pl.when(pl.col("kind") == SUB_INDUSTRY_KIND)
@@ -548,14 +573,21 @@ def rank_themes(
     )
     if g.is_empty():
         return _empty
-    if not has_inst:
-        g = g.with_columns(pl.lit(0, dtype=pl.Int32).alias("inst_buy_count"))
+    for col, present in (
+        ("inst_buy_count", has_inst),
+        ("foreign_buy_count", has_foreign),
+        ("vol_surge_count", has_vol),
+    ):
+        if not present:
+            g = g.with_columns(pl.lit(0, dtype=pl.Int32).alias(col))
 
+    members_f = pl.col("members_count").cast(pl.Float64)
     g = g.with_columns(
-        (
-            pl.col("inst_buy_count").cast(pl.Float64)
-            / pl.col("members_count").cast(pl.Float64)
-        ).alias("inst_score")
+        [
+            (pl.col("inst_buy_count").cast(pl.Float64) / members_f).alias("inst_score"),
+            (pl.col("foreign_buy_count").cast(pl.Float64) / members_f).alias("foreign_score"),
+            (pl.col("vol_surge_count").cast(pl.Float64) / members_f).alias("vol_surge_score"),
+        ]
     )
     log_max = math.log1p(float(g["members_count"].max() or 1))
     mom_score_vals = [_sigmoid(v / 5.0) for v in g["momentum_5d"].to_list()]
@@ -563,11 +595,55 @@ def rank_themes(
     g = g.with_columns(
         ((pl.col("members_count").cast(pl.Float64) + 1.0).log(base=math.e) / log_max).alias("_sz")
     )
+    # 漲幅強度分數（落後鏡頭，Section 2.6/2.7）
     g = g.with_columns(
         (
             0.70 * 100.0 * pl.col("_mom")
             + 0.15 * 100.0 * pl.col("inst_score")
             + 0.15 * 100.0 * pl.col("_sz")
         ).alias("score")
+    )
+    # 領先分數（領先鏡頭，輪動雷達 Section 2.8）：外資/量能 breadth 主導、動能僅輔
+    lw = {"foreign": 0.45, "vol_surge": 0.30, "momentum": 0.25, **(lead_weights or {})}
+    g = g.with_columns(
+        (
+            lw["foreign"] * 100.0 * pl.col("foreign_score")
+            + lw["vol_surge"] * 100.0 * pl.col("vol_surge_score")
+            + lw["momentum"] * 100.0 * pl.col("_mom")
+        ).alias("lead_score")
     ).drop(["_mom", "_sz"])
     return g.sort("score", descending=True)
+
+
+def attach_rank_delta(
+    radar: pl.DataFrame,
+    prev: pl.DataFrame | None,
+) -> pl.DataFrame:
+    """為已按 lead_score 排序、含 radar_rank 的雷達表附上週對週 ΔRank。
+
+    radar 需含 theme / radar_rank；prev 為上週快照（含 theme / radar_rank）。
+    rank_delta = 上週 radar_rank − 本週 radar_rank（正＝排名跳升＝輪動進場）；
+    無上週快照或該主題上週不在榜 → null（首次跑屬正常，不報錯）。
+    """
+    null_delta = pl.lit(None, dtype=pl.Int32).alias("rank_delta")
+    if radar.is_empty():
+        return radar.with_columns(null_delta)
+    if (
+        prev is None
+        or prev.is_empty()
+        or "theme" not in prev.columns
+        or "radar_rank" not in prev.columns
+    ):
+        return radar.with_columns(null_delta)
+    prev_map = prev.select(
+        ["theme", pl.col("radar_rank").cast(pl.Int32).alias("_prev_rank")]
+    ).unique(subset=["theme"], keep="first")
+    return (
+        radar.join(prev_map, on="theme", how="left")
+        .with_columns(
+            (pl.col("_prev_rank") - pl.col("radar_rank").cast(pl.Int32))
+            .cast(pl.Int32)
+            .alias("rank_delta")
+        )
+        .drop("_prev_rank")
+    )

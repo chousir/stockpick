@@ -89,6 +89,13 @@ group_analysis:
   dividend_lookahead_days: 14   # 除權息前瞻窗（日曆日，約 10 交易日）
   macro_lookahead_days: 30      # 總經事件前瞻窗（日曆日，涵蓋雙雷／法說／結算）
   vol_lookback_days: 20         # 量比均量視窗（交易日）；每檔只取今日前最近 N 天平均，與輸入列數脫鉤
+  radar:                        # 輪動雷達（Section 2.8 領先鏡頭 + Section 6 深度解讀驅動）
+    vol_surge_ratio: 1.5        # 量比 ≥ 此值算「量能放大」（領先訊號之一）
+    deep_dive_top_n: 6          # Section 6 深度解讀取前 N 強領先次產業
+    lead_weights:               # 領先分數權重：外資/量能 breadth 主導、動能僅輔
+      foreign: 0.45
+      vol_surge: 0.30
+      momentum: 0.25
 
 # 策略 G（成長拉回）的拉回 setup 門檻；G 有效命中 = 基本面命中 ∧ 三者全中
 g_pullback:

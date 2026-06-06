@@ -782,6 +782,50 @@ def test_rank_themes_multilabel_contributes_to_each():
     assert counts["散熱"] == 2                 # X（同時貢獻兩主題）, Z
 
 
+def test_rank_themes_lead_score_favours_breadth_over_momentum():
+    """領先分數 vs 漲幅分數分流：外資/量能 breadth 高但漲幅落後者，lead_score 應勝。"""
+    members = pl.DataFrame(
+        {
+            "stock_id": ["M1", "M2", "M3", "U1", "U2", "U3"],
+            "momentum_5d": [-1.0, -2.0, -1.5, 8.0, 7.0, 9.0],
+            "inst_net": [100.0, 200.0, 50.0, -10.0, -20.0, 5.0],
+            "foreign_net": [100.0, 200.0, 150.0, -10.0, -20.0, -5.0],
+            "vol_ratio": [1.8, 2.0, 1.6, 0.5, 0.6, 0.4],
+        }
+    )
+    themes_long = pl.DataFrame(
+        {
+            "stock_id": ["M1", "M2", "M3", "U1", "U2", "U3"],
+            "theme": ["記憶體", "記憶體", "記憶體", "驅動IC", "驅動IC", "驅動IC"],
+            "kind": ["次產業"] * 6,
+        }
+    )
+    from tw_screener.analysis.grouping import rank_themes
+
+    out = rank_themes(members, themes_long, vol_surge_ratio=1.5)
+    d = {r["theme"]: r for r in out.iter_rows(named=True)}
+    assert d["記憶體"]["foreign_buy_count"] == 3      # 外資全買
+    assert d["記憶體"]["vol_surge_count"] == 3        # 量比皆 ≥ 1.5
+    assert d["記憶體"]["lead_score"] > d["驅動IC"]["lead_score"]  # 領先鏡頭：記憶體勝
+    assert d["記憶體"]["score"] < d["驅動IC"]["score"]            # 漲幅鏡頭：驅動IC勝（分流）
+
+
+def test_attach_rank_delta():
+    """ΔRank = 上週 radar_rank − 本週；無上週快照或新題材 → null。"""
+    from tw_screener.analysis.grouping import attach_rank_delta
+
+    radar = pl.DataFrame(
+        {"theme": ["記憶體", "驅動IC"], "radar_rank": [1, 2], "lead_score": [80.0, 40.0]}
+    )
+    prev = pl.DataFrame({"theme": ["驅動IC", "記憶體"], "radar_rank": [1, 2]})
+    dd = {r["theme"]: r["rank_delta"] for r in attach_rank_delta(radar, prev).iter_rows(named=True)}
+    assert dd["記憶體"] == 1       # 上週 2 → 本週 1，升 1
+    assert dd["驅動IC"] == -1      # 上週 1 → 本週 2，降 1
+    assert attach_rank_delta(radar, None)["rank_delta"].to_list() == [None, None]
+    new = pl.DataFrame({"theme": ["新題材"], "radar_rank": [1], "lead_score": [50.0]})
+    assert attach_rank_delta(new, prev)["rank_delta"].to_list() == [None]
+
+
 def test_rank_themes_concept_min_members_filter():
     """門檻依 kind 分流：概念股 2 檔在 concept_min_members=3 下過濾，次產業 2 檔保留。"""
     members = pl.DataFrame({"stock_id": ["A", "B"], "momentum_5d": [5.0, 5.0]})
