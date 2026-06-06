@@ -29,7 +29,8 @@ make week GROUP=defg
 # Step 3：ProPicks 風格全清單分析（推薦，需要 Claude Opus 網頁對話）
 #   貼 group_analysis.md + candidates_enriched.csv + holdings/watchlist_enriched.csv + 4 個 screen CSV
 #   配合 docs/11-propicks-analysis.md 的範本 prompt
-#   產出 reports/Www/picks.md（任務0 庫存/觀察決策 + 精選進場清單 + 風險 + 居安思危）
+#   產出 reports/Www/picks.md（開頭=執行摘要：姿態＋可動作 3-5 檔含分批進場價/MA60 停損＋關鍵風險；
+#   再接任務0 庫存/觀察決策＋精選進場清單＋訊號交集＋市場節奏，並對照 2.8 輪動雷達與 0.6 總經事件）
 cat reports/$(date +%Y-W%V)/group_analysis.md
 
 # Step 4：對 picks.md 內每檔產個股深度報告（5-10 秒/檔）
@@ -48,12 +49,15 @@ make report-batch
 ## 維護 `config/concepts.yaml`（多標籤主題：次產業 + 概念股）
 
 `concepts.yaml` 給每檔股票額外的主題標籤（**並存**於 TWSE 主族群、不取代）。`make week` 最後一步
-`group` 會讀它，在 `group_analysis.md` 產出 **2.6 電子次產業 / 2.7 概念股強度排名** + 個股「主題」欄，
-並請 Claude 判斷同主題叢集是否輪動領漲。**半自動維護，分兩部分：**
+`group` 會讀它，在 `group_analysis.md` 產出 **2.6 次產業**（半導體拆記憶體/記憶體模組/IC設計/封測/晶圓代工…，
+含金融證券/壽險/銀行、航運貨櫃/散裝/航空）、**2.7 概念股**、**2.8 輪動雷達**（領先鏡頭：外資/量能 breadth
+＋週對週 ΔRank）強度排名 + 個股「主題」欄，並驅動 **Section 6 領先次產業深度解讀**。**半自動維護，分兩部分：**
 
-### A. 電子次產業 — 手動
+### A. 次產業（電子完整 + 金融/航運主要成分）— 手動
 - 直接編 `concepts.yaml` 的 `concepts:`：`"股號": 次產業` 或多標籤 `"股號": [次產業A, 次產業B]`。
+- 涵蓋：電子（半導體拆記憶體/記憶體模組/IC設計/封測/晶圓代工…）＋金融（證券/壽險/銀行/產險/票券）＋航運（貨櫃/散裝/航空）。
 - 為何手動：Yahoo 每類只給前 ~30 檔，會把成分 >30 的次產業（IC設計服務 ~115…）截斷，故維持手動、完整。
+  **⚠️ 勿用外部「批次匯入」整碗覆蓋**：玩股網等來源分類偏粗（無記憶體/封測/晶圓代工桶），會把細分類併掉。
 
 ### B. 概念股題材 — 自動（一個指令）
 ```bash
@@ -85,6 +89,26 @@ make group   # （或 make week）末尾自動 enrich，產出下列 2 檔（清
 - Step 3 把這 2 檔一起貼給 Claude → prompt 的**任務 0（必做）**：庫存給**續抱/加碼/減碼/停利/停損**、
   觀察給**進場時機**。
 - 隱私：`holdings.csv`（含買入價）已在 `.gitignore`，不進 git；`watchlist.csv` 只有股號。
+
+## 維護 `config/macro_calendar.yaml`（總經行事曆・市場級事件）
+
+市場級雙向事件（FOMC、CPI、台股結算、台積法說、輝達財報、財報季、選舉…）。`make group` 會把未來
+約 30 天（`settings.yaml` 的 `group_analysis.macro_lookahead_days`）的事件注入 `group_analysis.md`
+的 **Section 0.6 未來總經事件**，供 ProPicks 做**事件曝險**判斷（雙向事件落地前控倉、把彈藥留過事件）。
+
+```yaml
+# config/macro_calendar.yaml — events: 下一筆一事件
+events:
+  - date: 2026-06-17
+    name: FOMC 利率決議
+    category: FOMC        # FOMC|CPI|PCE|台股結算|法說|財報季|選舉|MSCI
+    severity: 高          # 高|中（對台股雙向衝擊）
+    verified: false       # false=待校對：系統補的常見排程，日期須以官方公告為準
+```
+
+- **你要做的**：內建已補 2026-06~12 常見排程、**全部 `verified: false`**。請依官方公告
+  （Fed / 美國 BLS / TWSE / 公司 IR）**校對日期，正確的改 `verified: true`**；過期月份定期清掉。
+- 缺檔／格式錯不會擋流程（Section 0.6 自然不顯示，不報錯）。
 
 ## 核心設計原則
 

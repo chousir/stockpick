@@ -127,15 +127,15 @@ Goodinfo 主要用在「條件組合篩選」這個它真正強的地方。
 
 ## Yahoo 股市 概念股主題（多標籤主題）
 
-只爬「概念股」主題成分（電子次產業沿用手標，完整不截斷）。資料在 SSR `root.App.main`、純 HTTP
+只爬「概念股」主題成分（次產業〔電子＋金融/航運〕沿用手標，完整不截斷）。資料在 SSR `root.App.main`、純 HTTP
 取得，每筆帶乾淨 `systexId` 股號＋`symbolName`，**免名稱→股號比對**。`make build-themes` 把概念股
 **merge 進 `config/concepts.yaml`**（單一檔）：以檔內 `concept_themes` 清單分辨自動概念股，重跑時
-清舊換新、**手動電子次產業原封不動**；`load_themes` 據 `concept_themes` 判每個標籤的 kind。
+清舊換新、**手動次產業（電子＋金融/航運）原封不動**；`load_themes` 據 `concept_themes` 判每個標籤的 kind。
 
 ### 限制（已知、誠實揭露）
 - 每個概念股主題 SSR **只內嵌前約 30 檔**（領頭觀察、非全量）；「載入更多」是 runtime 組出、
   帶 crumb 的前端 XHR，逆向脆弱且屬 ToS 灰區，**依爬蟲自律不爬**。
-- 故 Yahoo 不抓電子次產業（約半數 >30 檔會被截斷）；電子次產業維持手標、完整。
+- 故 Yahoo 不抓次產業（電子約半數 >30 檔會被截斷，且來源分類太粗、無記憶體/封測/晶圓代工桶）；次產業（電子＋金融/航運）維持手標、完整。
 
 ### 只抓重要題材（白名單）
 `config/settings.yaml` 的 `themes_build.concept_whitelist` 列出要抓的題材名（留空＝全部 101 個）。
