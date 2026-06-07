@@ -29,6 +29,9 @@ watchlist/holdings.csv
 *.bak
 config/*.candidate.yaml
 
+# PoC 抓取快照（可重生，不進 git）
+poc/active_etf/snapshots/
+
 # Cache
 .ruff_cache/
 .mypy_cache/
