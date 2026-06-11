@@ -1098,5 +1098,129 @@ def sector_flows_cmd(
         console.print("[dim]（dry：未落檔；落檔與 ΔRank 快照接續於 R3）[/dim]")
 
 
+@sector_app.command("calibrate")
+def sector_calibrate_cmd(
+    x_pct: float | None = typer.Option(None, help="起漲門檻 X%（預設讀 settings）"),
+    n_days: int | None = typer.Option(None, help="前瞻視窗 N 交易日"),
+    m_days: int | None = typer.Option(None, help="低基期回看 M 交易日"),
+    out_dir: Path = typer.Option(Path("research/rotation"), help="校準報告輸出目錄"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """R2 起漲點回測校準（研究軌）：掃描資金訊號門檻，產 research/rotation/ 報告。"""
+    from datetime import date as _date
+
+    import polars as pl
+    import yaml
+
+    from tw_screener.analysis.rotation import (
+        compute_fund_flows,
+        compute_subindustry_baskets,
+        load_market_history,
+    )
+    from tw_screener.analysis.sector_universe import list_subindustries
+    from tw_screener.backtest.rotation_calib import (
+        detect_breakouts,
+        render_calibration_report,
+        scan_signals,
+    )
+    from tw_screener.data.twse import create_client
+
+    with open(settings) as f:
+        cfg = yaml.safe_load(f)
+    rot = cfg.get("rotation", {})
+    cal = rot.get("calibration", {})
+    p = {
+        "x_pct": x_pct if x_pct is not None else float(cal.get("breakout_x_pct", 10.0)),
+        "n_days": n_days if n_days is not None else int(cal.get("breakout_n_days", 15)),
+        "m_days": m_days if m_days is not None else int(cal.get("low_base_m_days", 60)),
+        "low_base_tol_pct": float(cal.get("low_base_tol_pct", 3.0)),
+        "cooldown_days": int(cal.get("cooldown_days", 15)),
+        "lead_window": int(cal.get("lead_window", 15)),
+        "z_window": int(cal.get("z_window", 60)),
+        "z_min_periods": int(cal.get("z_min_periods", 30)),
+    }
+    short_w = int(rot.get("short_window", 5))
+    long_w = int(rot.get("long_window", 20))
+    history_days = int(rot.get("history_days", 250))
+    min_members = int(rot.get("min_members", 5))
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+
+    console.print(f"[bold]載入資料（{history_days} 交易日）...[/bold]")
+    members = list_subindustries()
+    market = load_market_history(cache_dir, n_days=history_days)
+    institutional = create_client(settings).load_institutional_history(n_days=history_days)
+    if members.is_empty() or market.is_empty() or institutional.is_empty():
+        console.print("[red]缺資料：concepts.yaml / daily 快取 / 法人快取[/red]")
+        raise typer.Exit(1)
+
+    # 只校準成員數達標的次產業（避免單檔灌水）
+    big_enough = (
+        members.group_by("sub_industry")
+        .agg(pl.col("stock_id").count().alias("n"))
+        .filter(pl.col("n") >= min_members)["sub_industry"]
+        .to_list()
+    )
+    members = members.filter(pl.col("sub_industry").is_in(big_enough))
+
+    baskets = compute_subindustry_baskets(members, market)
+    flows = compute_fund_flows(
+        members,
+        institutional,
+        volume_history=market.select(["date", "stock_id", "volume"]),
+        short_window=short_w,
+        long_window=long_w,
+    )
+    episodes = detect_breakouts(
+        baskets,
+        x_pct=p["x_pct"],
+        n_days=p["n_days"],
+        m_days=p["m_days"],
+        low_base_tol_pct=p["low_base_tol_pct"],
+        cooldown_days=p["cooldown_days"],
+    )
+    console.print(
+        f"次產業 {len(big_enough)} 個・起漲點 {episodes.height} 個"
+        f"（X={p['x_pct']}% N={p['n_days']} M={p['m_days']}）"
+    )
+    if episodes.is_empty():
+        console.print("[red]無起漲點樣本——放寬 --x-pct 或 --n-days 後重跑[/red]")
+        raise typer.Exit(1)
+
+    console.print("[bold]掃描訊號 × 門檻...[/bold]")
+    scan = scan_signals(
+        flows,
+        episodes,
+        z_window=p["z_window"],
+        z_min_periods=p["z_min_periods"],
+        lead_window=p["lead_window"],
+        occupy_days=p["cooldown_days"],
+    )
+
+    data_range = (market["date"].min(), market["date"].max())
+    report = render_calibration_report(
+        scan,
+        episodes,
+        p,
+        data_range,
+        min_triggers=int(cal.get("min_triggers", 8)),
+        min_lift=float(cal.get("min_lift", 1.5)),
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tag = _date.today().strftime("%Y%m%d")
+    md_path = out_dir / f"calibration_{tag}.md"
+    csv_path = out_dir / f"calibration_{tag}.csv"
+    md_path.write_text(report, encoding="utf-8")
+    scan.write_csv(csv_path)
+    console.print(f"[green]報告 → {md_path}[/green]")
+    console.print(f"[green]全掃描表 → {csv_path}[/green]")
+    console.print("\n[bold]F1 前 8 名：[/bold]")
+    for r in scan.head(8).iter_rows(named=True):
+        lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
+        console.print(
+            f"  {r['signal']}：命中 {r['hit_rate']:.0%}・recall {r['recall']:.0%}"
+            f"・lift {lift}・領先中位 {r['median_lead_days']} 日（{r['n_triggers']} 觸發）"
+        )
+
+
 if __name__ == "__main__":
     app()

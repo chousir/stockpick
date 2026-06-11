@@ -48,3 +48,6 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# 研究軌輸出（R2 校準報告等，本地可重生，docs/12）
+/research/

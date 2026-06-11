@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git mv *)",
+      "Bash(wait)",
+      "Bash(uv run *)",
+      "Bash(git commit -m ' *)",
+      "Bash(grep -E \"\\\\.md$|SOP\")",
+      "Bash(grep -v '^--$')",
+      "WebSearch",
+      "WebFetch(domain:www.investing.com)",
+      "WebFetch(domain:havingchien.substack.com)",
+      "Bash(grep -oE '[A-Z]?\\(市值|本益比|毛利率|淨值|淨利率|股價|淨值比|現金股利|EPS|月營收|現金流量|負債比|股東權益|連續|配息|殖利率|ROE|ROA|淨利|營業利益\\)[^\"=&]{0,30}' /home/user/stockpick/tests/fixtures/goodinfo/screener_result.html)",
+      "Bash(grep -oE 'value=\"[^\"]{2,40}\"' /home/user/stockpick/tests/fixtures/goodinfo/screener_result.html)",
+      "WebFetch(domain:goodinfo.tw)",
+      "WebFetch(domain:jasonblog.github.io)",
+      "WebFetch(domain:chenchenhouse.com)",
+      "WebFetch(domain:vocus.cc)",
+      "WebFetch(domain:smart.businessweekly.com.tw)",
+      "Bash(make screen-all *)",
+      "Bash(make week *)",
+      "Bash(make test-unit *)",
+      "Bash(xargs awk -F',' 'NR<=20 {print}')",
+      "Bash(awk -F',' '{print $1}')",
+      "Bash(xargs ls -lh)",
+      "WebFetch(domain:www.tpex.org.tw)",
+      "Bash(cd /home/user/stockpick; ls -la data/cache/twse/daily_*.parquet data/cache/twse/institutional_*.parquet 2>/dev/null; echo \"---settings twse---\"; sed -n '/^twse:/,/^[a-z]/p' config/settings.yaml)"
+    ],
+    "additionalDirectories": [
+      "/tmp",
+      "/home/user/stockpick/config"
+    ]
+  }
+}
