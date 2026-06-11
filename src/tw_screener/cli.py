@@ -24,6 +24,11 @@ app.add_typer(analysis_app, name="analysis")
 report_app = typer.Typer(help="個股報告指令", no_args_is_help=True)
 app.add_typer(report_app, name="report")
 
+sector_app = typer.Typer(
+    help="次產業資金流向輪動（docs/12-sector-rotation.md）", no_args_is_help=True
+)
+app.add_typer(sector_app, name="sector")
+
 # ─── 頂層指令 ─────────────────────────────────────────────────────────────────
 
 
@@ -958,6 +963,57 @@ def report_batch(
             console.print(f"    [green]→ {output.name}[/green]")
         except Exception as e:
             console.print(f"    [red]失敗：{e}[/red]")
+
+
+# ─── sector 子指令（次產業資金流向輪動，docs/12-sector-rotation.md） ────────────
+
+
+@sector_app.command("universe")
+def sector_universe_cmd(
+    list_all: bool = typer.Option(False, "--list", help="列出所有次產業與成員"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """次產業宇宙總覽：concepts.yaml 手標次產業 + TWSE 28 類對照覆蓋率（純讀快取）。"""
+    import polars as pl
+    import yaml
+
+    from tw_screener.analysis.sector_universe import (
+        list_subindustries,
+        load_industry_mapping,
+    )
+
+    with open(settings) as f:
+        cfg = yaml.safe_load(f)
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+
+    members = list_subindustries()
+    industry = load_industry_mapping(cache_dir)
+
+    if members.is_empty():
+        console.print("[red]concepts.yaml 無次產業標記[/red]")
+        raise typer.Exit(1)
+
+    n_subs = members["sub_industry"].n_unique()
+    n_stocks = members["stock_id"].n_unique()
+    console.print(f"[bold]次產業：{n_subs} 個・成員股：{n_stocks} 檔（去重）[/bold]")
+    if not industry.is_empty():
+        mapped = members.join(industry, on="stock_id", how="inner")["stock_id"].n_unique()
+        console.print(
+            f"TWSE 28 類對照：全市場 {industry.height} 檔・"
+            f"次產業成員可對照 {mapped}/{n_stocks} 檔"
+        )
+    else:
+        console.print("[yellow]無 industry_YYYYMM 快取（請先 make fetch-twse）[/yellow]")
+
+    if list_all:
+        counts = (
+            members.group_by("sub_industry")
+            .agg(pl.col("stock_id").count().alias("members"))
+            .sort("members", descending=True)
+        )
+        for sub, n in counts.iter_rows():
+            sample = members.filter(pl.col("sub_industry") == sub)["stock_id"].head(6)
+            console.print(f"  {sub}（{n} 檔）：{', '.join(sample)}{' …' if n > 6 else ''}")
 
 
 if __name__ == "__main__":

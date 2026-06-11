@@ -1273,7 +1273,29 @@ class TWSEClient:
         all_frames = stock_day_frames + daily_frames
         if not all_frames:
             return pl.DataFrame(schema=_empty_schema)
-        return pl.concat(all_frames).unique(subset=["date"]).sort("date").tail(n_days)
+
+        def _align(df: pl.DataFrame) -> pl.DataFrame:
+            # daily_all_* 快取的成交量欄叫 volume，統一成 trade_volume（同單位：股）
+            if "volume" in df.columns and "trade_volume" not in df.columns:
+                df = df.rename({"volume": "trade_volume"})
+            # 對齊標準 schema：缺的欄補 null（如 daily_all_* 沒有 open/high/low），
+            # 多的欄（如 name）丟掉，避免不同寬度的 frame concat 報 ShapeError。
+            return df.select(
+                [
+                    pl.col(c).cast(dt) if c in df.columns else pl.lit(None, dtype=dt).alias(c)
+                    for c, dt in _empty_schema.items()
+                ]
+            )
+
+        # stock_day（完整）排在 daily（可能只有 close/volume）之前，
+        # 同一日重複時 keep="first" 保留欄位較完整的來源。
+        aligned = [_align(f) for f in all_frames]
+        return (
+            pl.concat(aligned)
+            .unique(subset=["date"], keep="first")
+            .sort("date")
+            .tail(n_days)
+        )
 
     def load_candidate_history(
         self, stock_ids: list[str], n_days: int = 60

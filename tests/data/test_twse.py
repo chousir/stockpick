@@ -1211,3 +1211,112 @@ def test_load_volume_history_empty_no_stock_ids(tmp_path: Path):
     df = client.load_volume_history([])
     assert df.is_empty()
     assert "trade_volume" in df.columns
+
+
+# ─── fetch_stock_ohlcv 多源 schema 對齊（R0：daily_all 與 stock_day 合併） ──────
+
+
+def _make_client(tmp_path: Path) -> TWSEClient:
+    return TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+
+
+def test_fetch_stock_ohlcv_mixed_schema_sources(tmp_path: Path):
+    """stock_day（完整 OHLCV）+ daily_all（只有 close/volume）合併不 ShapeError。
+
+    daily_all_* 的成交量欄叫 volume（會被 _align 統一成 trade_volume）、
+    且缺 open/high/low（補 null）、多 name 欄（丟掉）。
+    """
+    pl.DataFrame({
+        "date": [date(2026, 5, 18)],
+        "stock_id": ["2330"],
+        "trade_volume": [1000],
+        "trade_value": [500000],
+        "open": [500.0], "high": [510.0], "low": [495.0], "close": [505.0],
+        "change": [5.0],
+        "transaction": [800],
+    }).write_parquet(tmp_path / "stock_day_2330_202605.parquet")
+
+    pl.DataFrame({
+        "date": [date(2026, 5, 18), date(2026, 5, 19)],
+        "stock_id": ["2330", "2330"],
+        "name": ["台積電", "台積電"],
+        "close": [999.0, 508.0],
+        "volume": [2000, 2200],
+    }).write_parquet(tmp_path / "daily_all_20260519.parquet")
+
+    df = _make_client(tmp_path).fetch_stock_ohlcv("2330", n_days=10)
+
+    assert len(df) == 2
+    assert "trade_volume" in df.columns and "volume" not in df.columns
+    assert "name" not in df.columns
+    # 同日重複：stock_day（完整來源）優先，close 應為 505 而非 daily 的 999
+    d0518 = df.filter(pl.col("date") == date(2026, 5, 18))
+    assert d0518["close"][0] == 505.0
+    assert d0518["open"][0] == 500.0
+    # daily-only 的那天：open/high/low 為 null、volume 對齊成 trade_volume
+    d0519 = df.filter(pl.col("date") == date(2026, 5, 19))
+    assert d0519["close"][0] == 508.0
+    assert d0519["open"][0] is None
+    assert d0519["trade_volume"][0] == 2200
+
+
+def test_fetch_stock_ohlcv_daily_only(tmp_path: Path):
+    """只有 daily_all 快取（無 stock_day）也能回資料。"""
+    pl.DataFrame({
+        "date": [date(2026, 5, 19)],
+        "stock_id": ["2317"],
+        "close": [150.0],
+        "volume": [3000],
+    }).write_parquet(tmp_path / "daily_all_20260519.parquet")
+
+    df = _make_client(tmp_path).fetch_stock_ohlcv("2317", n_days=10)
+    assert len(df) == 1
+    assert df["trade_volume"][0] == 3000
+
+
+# ─── load_institutional_history 上市＋上櫃合併（R0） ───────────────────────────
+
+
+def test_load_institutional_history_merges_listed_and_otc(tmp_path: Path):
+    """glob institutional_*.parquet 同時涵蓋上市與 _otc_ 快取。"""
+    inst_schema = {
+        "date": pl.Date, "stock_id": pl.Utf8, "stock_name": pl.Utf8,
+        "foreign_net": pl.Int64, "trust_net": pl.Int64,
+        "dealer_net": pl.Int64, "total_net": pl.Int64,
+    }
+    pl.DataFrame({
+        "date": [date(2026, 6, 9)], "stock_id": ["2330"], "stock_name": ["台積電"],
+        "foreign_net": [1000], "trust_net": [100], "dealer_net": [10],
+        "total_net": [1110],
+    }, schema=inst_schema).write_parquet(tmp_path / "institutional_20260609.parquet")
+    pl.DataFrame({
+        "date": [date(2026, 6, 9)], "stock_id": ["8299"], "stock_name": ["群聯"],
+        "foreign_net": [-500], "trust_net": [200], "dealer_net": [0],
+        "total_net": [-300],
+    }, schema=inst_schema).write_parquet(tmp_path / "institutional_otc_20260609.parquet")
+
+    df = _make_client(tmp_path).load_institutional_history(n_days=20)
+    assert set(df["stock_id"].to_list()) == {"2330", "8299"}
+    assert df.filter(pl.col("stock_id") == "8299")["foreign_net"][0] == -500
+
+
+def test_load_institutional_history_respects_n_days(tmp_path: Path):
+    """n_days 取最近 N 個交易日，舊日被切掉。"""
+    inst_schema = {
+        "date": pl.Date, "stock_id": pl.Utf8, "stock_name": pl.Utf8,
+        "foreign_net": pl.Int64, "trust_net": pl.Int64,
+        "dealer_net": pl.Int64, "total_net": pl.Int64,
+    }
+    for i, d in enumerate([date(2026, 6, 5), date(2026, 6, 8), date(2026, 6, 9)]):
+        pl.DataFrame({
+            "date": [d], "stock_id": ["2330"], "stock_name": ["台積電"],
+            "foreign_net": [i], "trust_net": [0], "dealer_net": [0], "total_net": [i],
+        }, schema=inst_schema).write_parquet(
+            tmp_path / f"institutional_{d.strftime('%Y%m%d')}.parquet"
+        )
+
+    df = _make_client(tmp_path).load_institutional_history(n_days=2)
+    assert sorted(df["date"].unique().to_list()) == [date(2026, 6, 8), date(2026, 6, 9)]
