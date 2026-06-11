@@ -104,3 +104,13 @@ g_pullback:
   ma60_slope_window: 10      # 季線斜率比較視窗（交易日）
   ma60_slope_min_pct: 0.0    # 季線上揚最低斜率（%）；> 此值才算上揚
   vol_ratio_max: 1.0         # 量縮門檻（今日量 / 20 日均量 ≤ 此值）
+
+# 次產業資金流向輪動（docs/12-sector-rotation.md）
+# R1 為視窗骨架；R2 校準後的起漲點/訊號門檻會寫回此段
+rotation:
+  short_window: 5            # 短窗（交易日）：net_flow_5d / momentum / breadth
+  long_window: 20            # 長窗（交易日）：net_flow_20d / concentration
+  history_days: 250          # 載入法人/價量歷史天數（≈ 1 年）
+  min_members: 5             # 籃子最小成員數（小於此不列排名，避免單檔灌水）
+  top_n: 10                  # 報表/CLI 顯示前 N 名
+  rank_by: net_flow_20d      # 排名鍵（ΔRank 基準；R2 校準後可能改）

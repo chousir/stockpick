@@ -1016,5 +1016,87 @@ def sector_universe_cmd(
             console.print(f"  {sub}（{n} 檔）：{', '.join(sample)}{' …' if n > 6 else ''}")
 
 
+@sector_app.command("flows")
+def sector_flows_cmd(
+    week: str = typer.Option("current", "--week", help="計算週次（R1 僅支援 current）"),
+    dry: bool = typer.Option(False, "--dry", help="只印結果不落檔（R1 一律 dry，落檔留 R3）"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """次產業法人資金流向排名（純讀快取；前 N 流入 + 流出警訊）。"""
+    import yaml
+
+    from tw_screener.analysis.rotation import (
+        compute_fund_flows,
+        load_market_history,
+        rank_flows,
+    )
+    from tw_screener.analysis.sector_universe import list_subindustries
+    from tw_screener.data.twse import create_client
+
+    if week != "current":
+        console.print("[red]R1 僅支援 --week current（歷史週次查詢隨 R3 落檔後提供）[/red]")
+        raise typer.Exit(1)
+
+    with open(settings) as f:
+        cfg = yaml.safe_load(f)
+    rot = cfg.get("rotation", {})
+    short_w = int(rot.get("short_window", 5))
+    long_w = int(rot.get("long_window", 20))
+    history_days = int(rot.get("history_days", 250))
+    min_members = int(rot.get("min_members", 5))
+    top_n = int(rot.get("top_n", 10))
+    rank_by = str(rot.get("rank_by", f"net_flow_{long_w}d"))
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+
+    members = list_subindustries()
+    if members.is_empty():
+        console.print("[red]concepts.yaml 無次產業標記[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold]載入法人/價量歷史（{history_days} 交易日）...[/bold]")
+    institutional = create_client(settings).load_institutional_history(n_days=history_days)
+    market = load_market_history(cache_dir, n_days=history_days)
+    if institutional.is_empty():
+        console.print("[red]無法人快取（請先 make fetch-twse）[/red]")
+        raise typer.Exit(1)
+
+    volume = (
+        market.select(["date", "stock_id", "volume"]) if not market.is_empty() else None
+    )
+    flows = compute_fund_flows(
+        members,
+        institutional,
+        volume_history=volume,
+        short_window=short_w,
+        long_window=long_w,
+    )
+    ranked = rank_flows(flows, by=rank_by, min_members=min_members)
+    latest_date = flows["date"].max()
+    console.print(
+        f"[bold]資金流向排名（{latest_date}・排名鍵 {rank_by}・籃子 ≥{min_members} 檔）[/bold]"
+    )
+
+    def _fmt_row(r: dict) -> str:
+        lots = r[rank_by] / 1000  # 股 → 張
+        conc = r.get(f"flow_concentration_{long_w}d")
+        conc_part = f"・力度 {conc * 100:.2f}%" if conc is not None else ""
+        delta = r.get("rank_delta")
+        delta_part = f"・ΔRank {delta:+d}" if delta is not None else ""
+        return (
+            f"  #{r['radar_rank']:>2} {r['sub_industry']}（{r['members']} 檔）"
+            f" 淨{'流入' if lots >= 0 else '流出'} {abs(lots):,.0f} 張"
+            f"・breadth {r[f'flow_breadth_{long_w}d']:.0%}{conc_part}{delta_part}"
+        )
+
+    console.print(f"[green]── 資金流入 前 {top_n} ──[/green]")
+    for r in ranked.head(top_n).iter_rows(named=True):
+        console.print(_fmt_row(r))
+    console.print(f"[red]── 資金流出 末 {min(top_n, 5)} ──[/red]")
+    for r in ranked.tail(min(top_n, 5)).iter_rows(named=True):
+        console.print(_fmt_row(r))
+    if dry:
+        console.print("[dim]（dry：未落檔；落檔與 ΔRank 快照接續於 R3）[/dim]")
+
+
 if __name__ == "__main__":
     app()
