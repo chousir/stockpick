@@ -1098,6 +1098,98 @@ def sector_flows_cmd(
         console.print("[dim]（dry：未落檔；落檔與 ΔRank 快照接續於 R3）[/dim]")
 
 
+@sector_app.command("rotation")
+def sector_rotation_cmd(
+    top: int | None = typer.Option(None, help="排名顯示前 N（預設讀 settings）"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """R3 生產輪動報表：產 reports/YYYY-Www/sector_rotation.md + .csv（四象限＋校準訊號）。"""
+    import polars as pl
+    import yaml
+
+    from tw_screener.analysis.rotation import (
+        compute_fund_flows,
+        compute_subindustry_baskets,
+        load_market_history,
+    )
+    from tw_screener.analysis.sector_universe import list_subindustries
+    from tw_screener.data.twse import create_client
+    from tw_screener.report.rotation_report import (
+        build_rotation_table,
+        load_prev_rotation_snapshot,
+        render_rotation_report,
+    )
+    from tw_screener.screener.runner import derive_week_tag
+
+    with open(settings) as f:
+        cfg = yaml.safe_load(f)
+    rot = cfg.get("rotation", {})
+    quad = rot.get("quadrant", {})
+    short_w = int(rot.get("short_window", 5))
+    long_w = int(rot.get("long_window", 20))
+    history_days = int(rot.get("history_days", 250))
+    min_members = int(rot.get("min_members", 5))
+    top_n = top if top is not None else int(rot.get("top_n", 10))
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+    reports_dir = Path(cfg["paths"]["reports_dir"])
+
+    console.print(f"[bold]載入資料（{history_days} 交易日）...[/bold]")
+    members = list_subindustries()
+    market = load_market_history(cache_dir, n_days=history_days)
+    institutional = create_client(settings).load_institutional_history(n_days=history_days)
+    if members.is_empty() or market.is_empty() or institutional.is_empty():
+        console.print("[red]缺資料：concepts.yaml / daily 快取 / 法人快取[/red]")
+        raise typer.Exit(1)
+
+    baskets = compute_subindustry_baskets(
+        members, market, clip_daily_return_pct=float(rot.get("clip_daily_return_pct", 10.0))
+    )
+    flows = compute_fund_flows(
+        members,
+        institutional,
+        volume_history=market.select(["date", "stock_id", "volume"]),
+        short_window=short_w,
+        long_window=long_w,
+    )
+
+    week_tag = derive_week_tag(settings)
+    prev = load_prev_rotation_snapshot(reports_dir, week_tag)
+    table = build_rotation_table(
+        flows,
+        baskets,
+        short_window=short_w,
+        long_window=long_w,
+        entry_signal=rot.get("entry_signal", {}),
+        position_window=int(quad.get("position_window", 60)),
+        position_low_pct=float(quad.get("position_low_pct", 10.0)),
+        rank_by=rot.get("rank_by"),
+        min_members=min_members,
+        prev=prev,
+    )
+    if table.is_empty():
+        console.print("[red]輪動表為空（資料不足）[/red]")
+        raise typer.Exit(1)
+
+    md_path = render_rotation_report(
+        table,
+        week_tag=week_tag,
+        output_dir=reports_dir / week_tag,
+        short_window=short_w,
+        long_window=long_w,
+        entry_signal=rot.get("entry_signal", {}),
+        position_low_pct=float(quad.get("position_low_pct", 10.0)),
+        top_n=top_n,
+        data_date=str(flows["date"].max()),
+    )
+    n_next = table.filter(pl.col("quadrant") == "下一棒").height
+    n_trig = table.filter(pl.col("entry_triggered")).height
+    console.print(f"[green]輪動報表 → {md_path}[/green]")
+    console.print(
+        f"  次產業 {table.height} 個・下一棒候選 {n_next} 個・★訊號觸發 {n_trig} 個"
+        f"・ΔRank {'有上週快照' if prev is not None else '首週（無快照）'}"
+    )
+
+
 @sector_app.command("calibrate")
 def sector_calibrate_cmd(
     x_pct: float | None = typer.Option(None, help="起漲門檻 X%（預設讀 settings）"),
@@ -1162,7 +1254,9 @@ def sector_calibrate_cmd(
     )
     members = members.filter(pl.col("sub_industry").is_in(big_enough))
 
-    baskets = compute_subindustry_baskets(members, market)
+    baskets = compute_subindustry_baskets(
+        members, market, clip_daily_return_pct=float(rot.get("clip_daily_return_pct", 10.0))
+    )
     flows = compute_fund_flows(
         members,
         institutional,

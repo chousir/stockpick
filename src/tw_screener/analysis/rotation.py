@@ -45,26 +45,36 @@ _MARKET_SCHEMA: dict[str, type[pl.DataType]] = {
 
 
 def load_market_history(cache_dir: Path, n_days: int = 250) -> pl.DataFrame:
-    """純讀 daily_*.parquet（含 daily_all_*）→ 全市場 (date, stock_id, close, volume)。
+    """純讀日線快取 → (date, stock_id, close, volume)，取最近 n_days 個交易日。
 
-    舊格式缺 volume 時補 null；取最近 n_days 個交易日。無快取回空表。
+    來源（優先序，同日去重 keep first）：
+    1. daily_*.parquet（含 daily_all_*）：全市場日快取，但僅上市（TWSE）
+    2. stock_day_*.parquet：個股月快取（fetch-candidates-history 累積），
+       補上櫃成員——上櫃日線只存在於曾入選候選的個股快取（已知部分覆蓋，
+       見 docs/12 §3 缺口；TPEX 全市場日線未快取）
+    舊格式缺 volume 時補 null。無快取回空表。
     """
     frames: list[pl.DataFrame] = []
-    for f in sorted(cache_dir.glob("daily_*.parquet")):
-        try:
-            df = pl.read_parquet(f)
-            if not {"date", "stock_id", "close"}.issubset(df.columns):
-                continue
-            frames.append(
-                df.select(
-                    [
-                        pl.col(c).cast(dt) if c in df.columns else pl.lit(None, dtype=dt).alias(c)
-                        for c, dt in _MARKET_SCHEMA.items()
-                    ]
-                )
-            )
-        except Exception as e:
-            logger.warning("讀取 {} 失敗：{}", f, e)
+
+    def _normalize(df: pl.DataFrame) -> pl.DataFrame:
+        if "trade_volume" in df.columns and "volume" not in df.columns:
+            df = df.rename({"trade_volume": "volume"})
+        return df.select(
+            [
+                pl.col(c).cast(dt) if c in df.columns else pl.lit(None, dtype=dt).alias(c)
+                for c, dt in _MARKET_SCHEMA.items()
+            ]
+        )
+
+    for pattern in ("daily_*.parquet", "stock_day_*.parquet"):
+        for f in sorted(cache_dir.glob(pattern)):
+            try:
+                df = pl.read_parquet(f)
+                if not {"date", "stock_id", "close"}.issubset(df.columns):
+                    continue
+                frames.append(_normalize(df))
+            except Exception as e:
+                logger.warning("讀取 {} 失敗：{}", f, e)
     if not frames:
         return pl.DataFrame(schema=_MARKET_SCHEMA)
     merged = pl.concat(frames).unique(subset=["date", "stock_id"], keep="first").sort("date")
@@ -75,12 +85,16 @@ def load_market_history(cache_dir: Path, n_days: int = 250) -> pl.DataFrame:
 def compute_subindustry_baskets(
     membership: pl.DataFrame,
     price_history: pl.DataFrame,
+    clip_daily_return_pct: float = 10.0,
 ) -> pl.DataFrame:
     """次產業等權籃子日報酬（docs/12 §2.2）。
 
     Args:
         membership: (sub_industry, stock_id) long table（多標籤股在各籃子都計入）
         price_history: (date, stock_id, close, ...) 全市場日線
+        clip_daily_return_pct: 個股日報酬夾限（%）。台股漲跌停 ±10%，逾此＝
+            減資/分割/除權息/停牌補跳等未還原事件（如國巨 2025-08-25 單日 −74%），
+            夾住避免毒化籃子指數。設 0 停用。
 
     Returns:
         (sub_industry, date, basket_return_pct, basket_index, members_priced)
@@ -88,12 +102,14 @@ def compute_subindustry_baskets(
     """
     if membership.is_empty() or price_history.is_empty():
         return pl.DataFrame(schema=_BASKET_SCHEMA)
+    ret_expr = pl.col("close") / pl.col("close").shift(1).over("stock_id") - 1.0
+    if clip_daily_return_pct > 0:
+        bound = clip_daily_return_pct / 100
+        ret_expr = ret_expr.clip(-bound, bound)
     rets = (
         price_history.select(["date", "stock_id", "close"])
         .sort(["stock_id", "date"])
-        .with_columns(
-            (pl.col("close") / pl.col("close").shift(1).over("stock_id") - 1.0).alias("_ret")
-        )
+        .with_columns(ret_expr.alias("_ret"))
         .drop_nulls("_ret")
     )
     joined = membership.join(rets, on="stock_id", how="inner")

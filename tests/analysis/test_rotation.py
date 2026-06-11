@@ -228,3 +228,34 @@ def test_load_market_history_n_days_cut(tmp_path: Path):
 def test_load_market_history_empty(tmp_path: Path):
     df = load_market_history(tmp_path)
     assert df.is_empty()
+
+
+def test_baskets_clip_extreme_return():
+    """減資/分割造成的 -74% 假日報酬被夾在 -10%（毒化防護）。"""
+    ds = _dates(3)
+    rows = []
+    for d, c in zip(ds, [546.0, 143.0, 145.0]):  # day2 -73.8%（未還原分割）
+        rows.append({"date": d, "stock_id": "2327", "close": c})
+    membership = pl.DataFrame({"sub_industry": ["被動元件"], "stock_id": ["2327"]})
+    df = compute_subindustry_baskets(membership, pl.DataFrame(rows))
+    assert df.sort("date")["basket_return_pct"][0] == pytest.approx(-10.0)
+    # 停用 clip 時保留原值
+    df_raw = compute_subindustry_baskets(
+        membership, pl.DataFrame(rows), clip_daily_return_pct=0
+    )
+    assert df_raw.sort("date")["basket_return_pct"][0] < -70
+
+
+def test_load_market_history_includes_stock_day(tmp_path: Path):
+    """stock_day_*（上櫃候選股月快取）納入全市場日線（trade_volume → volume）。"""
+    pl.DataFrame(
+        {"date": [D0], "stock_id": ["2330"], "close": [1000.0], "volume": [5000]}
+    ).write_parquet(tmp_path / "daily_all_20260601.parquet")
+    pl.DataFrame(
+        {"date": [D0], "stock_id": ["8299"], "close": [700.0], "trade_volume": [3000],
+         "open": [690.0], "high": [710.0], "low": [688.0]}
+    ).write_parquet(tmp_path / "stock_day_8299_202606.parquet")
+
+    df = load_market_history(tmp_path, n_days=250)
+    assert set(df["stock_id"].to_list()) == {"2330", "8299"}
+    assert df.filter(pl.col("stock_id") == "8299")["volume"][0] == 3000

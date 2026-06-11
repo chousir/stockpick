@@ -112,13 +112,18 @@ rotation:
   long_window: 20            # 長窗（交易日）：net_flow_20d / concentration
   history_days: 250          # 載入法人/價量歷史天數（≈ 1 年）
   min_members: 5             # 籃子最小成員數（小於此不列排名，避免單檔灌水）
+  clip_daily_return_pct: 10.0  # 籃子個股日報酬夾限＝台股漲跌停；防減資/分割未還原假跳動毒化指數
   top_n: 10                  # 報表/CLI 顯示前 N 名
   rank_by: net_flow_20d      # 排名鍵（ΔRank 基準；R2 校準後可能改）
+  quadrant:                  # R3 四象限：資金軸＝長窗淨流正負；價格軸＝籃子位階
+    position_window: 60      # 位階回看（交易日）
+    position_low_pct: 10.0   # 距 60 日低 ≤ 此值＝「未漲」（與 R2 起漲 X=10% 對齊）
   entry_signal:              # ★ R2 校準結果（2026-06-11・資料 2025-05-28~2026-06-10・34 起漲點）
     signal: trust_flow_20d   # 投信 20 日資金流：跨起漲定義（X=10/12%）最穩健的領先訊號
     mode: z                  # 門檻為自身 60 日滾動 z 分數（次產業間規模可比）
     threshold: 1.0
-    require_momentum: true   # 且 flow_momentum>0：recall 50-60%・lift 1.3-1.5・領先中位 8-10 日
+    require_momentum: true   # 且 flow_momentum>0：recall 5-6成・lift 1.2-1.5・領先中位 8-10 日
+                             # （R3 籃子修正——clip±10%＋stock_day 補上櫃——後重校準，結論不變）
     lead_window: 15          # 觸發後 15 交易日內起漲算命中（校準同值）
     confirm_signal: flow_breadth_20d   # 確認鏡頭：高精度低 recall（>0.6 時 lift ~1.5）
     confirm_threshold: 0.6

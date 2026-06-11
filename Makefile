@@ -1,6 +1,6 @@
 .PHONY: init sync test test-unit test-integration lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry \
-        group leaders report report-batch week weekend backtest-strategies rotation-calib
+        group leaders report report-batch week weekend backtest-strategies rotation-calib rotation
 
 # ─── 環境 ────────────────────────────────────────────────────────────────────
 
@@ -123,3 +123,6 @@ backtest-strategies:  ## ⚠️ 回測三組策略勝率（需 3 個月以上歷
 
 rotation-calib:  ## R2 起漲點回測校準（研究軌，產 research/rotation/ 校準報告；docs/12）
 	uv run tw-screener sector calibrate
+
+rotation:  ## 次產業資金流向輪動報表（產 reports/週次/sector_rotation.md+csv；docs/12）
+	uv run tw-screener sector rotation

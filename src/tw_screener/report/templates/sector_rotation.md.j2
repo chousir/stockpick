@@ -1,0 +1,93 @@
+{% macro lots(v) %}{{ "{:,.0f}".format(v) if v is not none else "—" }}{% endmacro %}
+{% macro pct(v, d=1) %}{{ "%.*f%%"|format(d, v) if v is not none else "—" }}{% endmacro %}
+{% macro marks(r) %}{{ "★" if r.entry_triggered else "" }}{{ "◆" if r.confirm_triggered else "" }}{% endmacro %}
+{% macro delta(r) %}{{ "%+d"|format(r.rank_delta) if r.rank_delta is not none else "—" }}{% endmacro %}
+{% macro conc(r) %}{{ "%.2f%%"|format(r["flow_concentration_" ~ lw ~ "d"] * 100) if r["flow_concentration_" ~ lw ~ "d"] is not none else "—" }}{% endmacro %}
+# {{ week_tag }} 次產業資金流向輪動
+
+> 資料日期：{{ data_date }}・法人滾動視窗 {{ s }}/{{ lw }} 交易日・位階基準：距 60 日低點 {{ position_low_pct }}%
+> ★＝校準進場訊號 {{ sig_label }} 觸發中・◆＝確認鏡頭 {{ confirm_label }} 達標（R2 校準，見 docs/12）
+> 本報告為機械篩選輸出，僅供族群資金輪動參考；多空判讀與進出決策由人負責。
+{% if not has_prev %}
+> ΔRank 無上週 sector_rotation.csv 快照（首週正常），本週標 `—`。
+{% endif %}
+
+## 1. 資金流向排名（前 {{ top_n }}・按 {{ lw }} 日法人淨流）
+
+| # | 次產業 | 檔數 | {{ lw }}日淨流(張) | {{ s }}日淨流(張) | 動能(張) | breadth | 力度 | 5日籃子 | 距低 | 象限 | 訊號 | ΔRank |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+{% for r in top_rows -%}
+| {{ r.radar_rank }} | {{ r.sub_industry }} | {{ r.members }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ lots(r.flow_momentum_lots) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ conc(r) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ pct(r.above_low_pct) }} | {{ r.quadrant }} | {{ marks(r) }} | {{ delta(r) }} |
+{% endfor %}
+
+## 2. 出貨警訊（資金流出 × 位階已高）
+
+{% if outflow_rows -%}
+| 次產業 | {{ lw }}日淨流(張) | 距低 | breadth | 5日籃子 |
+|---|---|---|---|---|
+{% for r in outflow_rows -%}
+| {{ r.sub_industry }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ pct(r.above_low_pct) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ pct(r.basket_ret_5d_pct) }} |
+{% endfor %}
+{%- else -%}
+本週無「流出 × 已漲」次產業。
+{%- endif %}
+
+## 3. 輪動四象限
+
+### 🟢 下一棒候選（流入 × 未漲・重點觀察）
+
+{% if q_next -%}
+{% for r in q_next -%}
+- **{{ r.sub_industry }}**：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}・breadth {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }}・力度 {{ conc(r) }} {{ marks(r) }}
+{% endfor %}
+{%- else -%}
+本週無——資金流入的次產業位階皆已偏高（或無流入）。
+{%- endif %}
+
+### 🔵 主升續勢（流入 × 已漲）
+
+{% if q_trend -%}
+{% for r in q_trend -%}
+- {{ r.sub_industry }}：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}・5日籃子 {{ pct(r.basket_ret_5d_pct) }} {{ marks(r) }}
+{% endfor %}
+{%- else -%}
+（無）
+{%- endif %}
+
+### 🔴 出貨警訊（流出 × 已漲）
+
+{% if outflow_rows -%}
+{% for r in outflow_rows -%}
+- {{ r.sub_industry }}：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}
+{% endfor %}
+{%- else -%}
+（無）
+{%- endif %}
+
+### ⚪ 冷卻觀望（流出 × 未漲）
+
+{% if q_cool -%}
+{{ q_cool | map(attribute="sub_industry") | join("、") }}
+{%- else -%}
+（無）
+{%- endif %}
+
+## 4. 校準訊號觸發中（★ {{ sig_label }}）
+
+{% if triggered -%}
+{% for r in triggered -%}
+- **{{ r.sub_industry }}**（象限：{{ r.quadrant }}）：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}{{ "・◆確認達標" if r.confirm_triggered else "" }}
+{% endfor %}
+歷史校準參考：此訊號觸發後 15 交易日內起漲命中率約為隨機 1.3-1.5 倍、中位領先 8-10 日（樣本 1 年、34 起漲點，統計力有限）。
+{%- else -%}
+本週無次產業觸發校準訊號。
+{%- endif %}
+
+## 5. 資料來源與時間
+
+- 法人買賣超：TWSE T86 + TPEX 上櫃（data/cache/twse/institutional_*.parquet，{{ data_date }} 止）
+- 價量：日線快取（daily_* 上市全覆蓋＋stock_day_* 補上櫃候選股）；次產業分類：config/concepts.yaml 手標
+- 籃子位階/報酬僅基於**有日線快取的成員**（每籃實際檔數見 CSV `members_priced` 欄）；
+  個股日報酬夾限 ±10%（漲跌停界線，防減資/分割未還原假跳動）
+- 訊號門檻：R2 起漲點回測校準（research/rotation/，settings.yaml rotation.entry_signal）
+- 產出：tw-screener sector rotation（docs/12-sector-rotation.md）
