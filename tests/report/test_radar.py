@@ -56,3 +56,28 @@ def test_prev_lookup_none_when_no_earlier_week(tmp_path: Path):
     w23 = tmp_path / "2026-W23"
     w23.mkdir()
     assert _load_prev_theme_snapshot(w23, "2026-W23") is None
+
+
+def test_rotation_overlay_load_and_graceful_missing(tmp_path: Path):
+    """R5：sector_rotation.csv 並列對照；檔不存在/壞檔 → 空 dict 優雅降級。"""
+    from tw_screener.report.group_report import _load_rotation_overlay
+
+    assert _load_rotation_overlay(None) == {}
+    assert _load_rotation_overlay(tmp_path) == {}  # 無檔
+
+    pl.DataFrame(
+        {
+            "sub_industry": ["記憶體", "PCB"],
+            "radar_rank": [2, 9],
+            "quadrant": ["主升續勢", "出貨警訊"],
+            "entry_triggered": [True, False],
+        }
+    ).write_csv(tmp_path / "sector_rotation.csv")
+    out = _load_rotation_overlay(tmp_path)
+    assert out["記憶體"] == {"rank": 2, "quadrant": "主升續勢", "triggered": True}
+    assert out["PCB"]["triggered"] is False
+
+    # 欄位不齊的壞快照 → 空 dict
+    (tmp_path / "bad").mkdir()
+    pl.DataFrame({"foo": [1]}).write_csv(tmp_path / "bad" / "sector_rotation.csv")
+    assert _load_rotation_overlay(tmp_path / "bad") == {}

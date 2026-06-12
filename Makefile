@@ -92,7 +92,7 @@ report-batch:  ## 批次產本週推薦清單報告
 
 # ─── 完整流程 ─────────────────────────────────────────────────────────────────
 
-week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → screen-all → fetch-candidates-history → group → rotation
+week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → screen-all → fetch-candidates-history → rotation → group
 ifndef GROUP
 	@echo "❌ 請指定 GROUP=defg（主流程）、def 或 abc（legacy）"
 	@exit 1
@@ -100,8 +100,8 @@ endif
 	$(MAKE) fetch-twse
 	$(MAKE) screen-all GROUP=$(GROUP)
 	$(MAKE) fetch-candidates-history
+	-$(MAKE) rotation   # 先跑輪動（group 的 2.8 雷達要讀 sector_rotation.csv 並列；失敗不擋主流程）
 	$(MAKE) group
-	-$(MAKE) rotation   # 次產業資金輪動報表（選配：失敗不擋主流程）
 
 weekend:  ## 完整週流程並 commit 結果（GROUP=defg 主流程）
 ifndef GROUP

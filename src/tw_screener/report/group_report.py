@@ -234,6 +234,34 @@ def _write_theme_snapshot(radar: pl.DataFrame, report_dir: Path) -> None:
     radar.select(cols).write_csv(report_dir / "theme_strength.csv")
 
 
+def _load_rotation_overlay(report_dir: Path | None) -> dict[str, dict]:
+    """讀本週 sector_rotation.csv（R3 全宇宙資金流向輪動），供 Section 2.8 並列對照。
+
+    回傳 {次產業: {rank, quadrant, triggered}}；檔不存在（沒先跑 make rotation）→ 空 dict、
+    雷達表該兩欄顯示 —（優雅降級，不報錯）。make week 已將 rotation 排在 group 之前。
+    """
+    if report_dir is None:
+        return {}
+    snap = report_dir / "sector_rotation.csv"
+    if not snap.exists():
+        return {}
+    try:
+        df = pl.read_csv(snap)
+    except Exception as exc:  # noqa: BLE001 — 壞快照不該擋本週報告
+        logger.warning("讀 sector_rotation.csv 失敗：{}", exc)
+        return {}
+    if not {"sub_industry", "radar_rank", "quadrant"}.issubset(df.columns):
+        return {}
+    return {
+        r["sub_industry"]: {
+            "rank": int(r["radar_rank"]),
+            "quadrant": str(r["quadrant"]),
+            "triggered": bool(r.get("entry_triggered", False)),
+        }
+        for r in df.iter_rows(named=True)
+    }
+
+
 def _build_radar(
     ranked: pl.DataFrame,
     members: pl.DataFrame,
@@ -258,11 +286,13 @@ def _build_radar(
     radar = attach_rank_delta(radar, prev)
     if report_dir is not None:
         _write_theme_snapshot(radar, report_dir)
+    rotation_map = _load_rotation_overlay(report_dir)  # R5：全宇宙資金輪動並列對照
 
     def _row_common(row: dict) -> dict:
         cnt = int(row["members_count"])
         fb = int(row.get("foreign_buy_count", 0) or 0)
         vs = int(row.get("vol_surge_count", 0) or 0)
+        rot = rotation_map.get(row["theme"])
         return {
             "theme": row["theme"],
             "kind": row["kind"],
@@ -273,6 +303,10 @@ def _build_radar(
             "rank_delta_str": _rank_delta_str(row.get("rank_delta")),
             "lead_score_str": f"{float(row['lead_score']):.1f}",
             "score_str": f"{float(row['score']):.1f}",
+            "rotation_rank_str": f"#{rot['rank']}" if rot else "—",
+            "rotation_quadrant_str": (
+                f"{rot['quadrant']}{'★' if rot['triggered'] else ''}" if rot else "—"
+            ),
         }
 
     radar_groups = [
