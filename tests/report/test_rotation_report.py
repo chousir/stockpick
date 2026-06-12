@@ -171,3 +171,79 @@ def test_render_no_leading_blank_lines(table: pl.DataFrame, tmp_path: Path):
         short_window=5, long_window=20, entry_signal={}, position_low_pct=10.0,
     )
     assert md_path.read_text(encoding="utf-8").startswith("# 2026-W24")
+
+
+# ─── R4 我的參與度疊圖 ────────────────────────────────────────────────────────
+
+
+def test_build_participation_tags_and_counts(table: pl.DataFrame):
+    from tw_screener.report.rotation_report import build_participation
+
+    membership = _membership()  # 1111→甲(下一棒) 2222→乙(主升) 3333→丙(出貨) 4444→丁(冷卻)
+    out = build_participation(
+        [
+            ("庫存", ["1111", "3333", "9999"], False),  # 9999 未標次產業
+            ("觀察", [], False),                          # 空 → 略過
+            ("命中", ["1111", "1111", "2222"], True),     # 重複去重
+        ],
+        membership,
+        table,
+        long_window=20,
+    )
+    assert [s["source"] for s in out] == ["庫存", "命中"]  # 空來源被略過
+    hold = out[0]
+    assert hold["n_total"] == 3
+    assert hold["n_inflow"] == 1     # 1111（甲流入）
+    assert hold["n_warning"] == 1    # 3333（丙出貨警訊）
+    assert hold["n_untagged"] == 1   # 9999
+    t1111 = next(s for s in hold["stocks"] if s["stock_id"] == "1111")["tags"][0]
+    assert t1111["quadrant"] == Q_NEXT and t1111["inflow"] is True
+    hits = out[1]
+    assert hits["n_total"] == 2  # 去重後 1111/2222
+    assert Q_NEXT in hits["by_quadrant"]
+
+
+def test_build_participation_sub_below_min_members(table: pl.DataFrame):
+    """股票屬於榜外次產業（< min_members 未進 table）→ quadrant None、不計流入。"""
+    from tw_screener.report.rotation_report import build_participation
+
+    membership = pl.DataFrame(
+        {"sub_industry": ["小眾", "甲流入未漲"], "stock_id": ["5555", "1111"]}
+    )
+    out = build_participation([("庫存", ["5555"], False)], membership, table, long_window=20)
+    tag = out[0]["stocks"][0]["tags"][0]
+    assert tag["quadrant"] is None and tag["inflow"] is None
+    assert out[0]["n_inflow"] == 0
+
+
+def test_render_participation_section(table: pl.DataFrame, tmp_path: Path):
+    from tw_screener.report.rotation_report import build_participation
+
+    participation = build_participation(
+        [("庫存（holdings.csv）", ["1111", "9999"], False), ("本週命中", ["2222"], True)],
+        _membership(),
+        table,
+        long_window=20,
+        names={"1111": "甲一", "2222": "乙二"},
+    )
+    md_path = render_rotation_report(
+        table, week_tag="2026-W24", output_dir=tmp_path / "w",
+        short_window=5, long_window=20, entry_signal={}, position_low_pct=10.0,
+        participation=participation,
+    )
+    md = md_path.read_text(encoding="utf-8")
+    assert "## 5. 我的參與度" in md
+    assert "1111 甲一" in md and "甲流入未漲（下一棒・流入）" in md
+    assert "未標次產業" in md  # 9999
+    assert "## 6. 資料來源與時間" in md  # 段號順延
+
+
+def test_render_without_participation_skips_section(table: pl.DataFrame, tmp_path: Path):
+    md_path = render_rotation_report(
+        table, week_tag="2026-W24", output_dir=tmp_path / "w2",
+        short_window=5, long_window=20, entry_signal={}, position_low_pct=10.0,
+        participation=None,
+    )
+    md = md_path.read_text(encoding="utf-8")
+    assert "我的參與度" not in md
+    assert "## 5. 資料來源與時間" in md

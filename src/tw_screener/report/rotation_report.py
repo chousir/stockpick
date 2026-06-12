@@ -131,6 +131,86 @@ def build_rotation_table(
     )
 
 
+def build_participation(
+    sources: list[tuple[str, list[str], bool]],
+    membership: pl.DataFrame,
+    table: pl.DataFrame,
+    long_window: int,
+    names: dict[str, str] | None = None,
+) -> list[dict]:
+    """「我的參與度」疊圖（docs/12 §5.4）：每股 → 所屬次產業的象限/資金方向。
+
+    Args:
+        sources: [(來源名, stock_ids, compact)]；compact=True 按象限壓縮列（命中股多用）
+        membership: (sub_industry, stock_id)；table: build_rotation_table 輸出
+        names: stock_id → 名稱（缺時只列股號）
+
+    Returns:
+        每來源一 dict：source / compact / stocks（逐檔 tags）/ by_quadrant /
+        n_total / n_inflow / n_warning / n_untagged。空 stock_ids 的來源略過。
+    """
+    names = names or {}
+    flow_col = f"net_flow_{long_window}d"
+    sub_info: dict[str, dict] = {
+        r["sub_industry"]: {
+            "quadrant": r["quadrant"],
+            "inflow": (r[flow_col] or 0) > 0,
+            "triggered": bool(r["entry_triggered"]),
+        }
+        for r in table.iter_rows(named=True)
+    }
+    subs_by_stock: dict[str, list[str]] = {}
+    for sub, sid in membership.iter_rows():
+        subs_by_stock.setdefault(sid, []).append(sub)
+
+    out: list[dict] = []
+    for source, stock_ids, compact in sources:
+        if not stock_ids:
+            continue
+        stocks: list[dict] = []
+        by_quadrant: dict[str, list[str]] = {}
+        n_inflow = n_warning = n_untagged = 0
+        for sid in dict.fromkeys(stock_ids):  # 去重保序
+            label = f"{sid} {names.get(sid, '')}".strip()
+            tags = []
+            for sub in subs_by_stock.get(sid, []):
+                info = sub_info.get(sub)
+                tags.append(
+                    {
+                        "sub": sub,
+                        # quadrant None＝榜外（成員數 < min_members 未列輪動排名）
+                        "quadrant": info["quadrant"] if info else None,
+                        "inflow": info["inflow"] if info else None,
+                        "triggered": info["triggered"] if info else False,
+                    }
+                )
+            if not tags:
+                n_untagged += 1
+                by_quadrant.setdefault("未標次產業", []).append(label)
+            else:
+                if any(t["inflow"] for t in tags):
+                    n_inflow += 1
+                if any(t["quadrant"] == Q_DISTRIBUTE for t in tags):
+                    n_warning += 1
+                for t in tags:
+                    q = t["quadrant"] or "榜外"
+                    by_quadrant.setdefault(q, []).append(f"{label}（{t['sub']}）")
+            stocks.append({"stock_id": sid, "label": label, "tags": tags})
+        out.append(
+            {
+                "source": source,
+                "compact": compact,
+                "stocks": stocks,
+                "by_quadrant": by_quadrant,
+                "n_total": len(stocks),
+                "n_inflow": n_inflow,
+                "n_warning": n_warning,
+                "n_untagged": n_untagged,
+            }
+        )
+    return out
+
+
 def render_rotation_report(
     table: pl.DataFrame,
     week_tag: str,
@@ -141,8 +221,12 @@ def render_rotation_report(
     position_low_pct: float,
     top_n: int = 10,
     data_date: str = "",
+    participation: list[dict] | None = None,
 ) -> Path:
-    """渲染 sector_rotation.md + 寫 sector_rotation.csv，回傳 md 路徑。"""
+    """渲染 sector_rotation.md + 寫 sector_rotation.csv，回傳 md 路徑。
+
+    participation：build_participation 輸出；None/空 → 略過「我的參與度」段（誠實降級）。
+    """
     s, lw = short_window, long_window
     env = Environment(loader=FileSystemLoader(_TEMPLATE_DIR), keep_trailing_newline=True)
     tpl = env.get_template("sector_rotation.md.j2")
@@ -176,6 +260,7 @@ def render_rotation_report(
         q_cool=list(_rows(quadrants[Q_COOL])),
         triggered=list(_rows(table.filter(pl.col("entry_triggered")).sort("radar_rank"))),
         has_prev=table["rank_delta"].null_count() < table.height if not table.is_empty() else False,
+        participation=participation or [],
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     md_path = output_dir / "sector_rotation.md"

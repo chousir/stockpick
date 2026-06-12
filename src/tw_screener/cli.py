@@ -1112,9 +1112,13 @@ def sector_rotation_cmd(
         compute_subindustry_baskets,
         load_market_history,
     )
-    from tw_screener.analysis.sector_universe import list_subindustries
+    from tw_screener.analysis.sector_universe import (
+        list_subindustries,
+        load_industry_mapping,
+    )
     from tw_screener.data.twse import create_client
     from tw_screener.report.rotation_report import (
+        build_participation,
         build_rotation_table,
         load_prev_rotation_snapshot,
         render_rotation_report,
@@ -1170,6 +1174,39 @@ def sector_rotation_cmd(
         console.print("[red]輪動表為空（資料不足）[/red]")
         raise typer.Exit(1)
 
+    # R4 疊圖：庫存 / 觀察 / 本週命中（任一未維護則略過該來源，不報錯）
+    wl_dir = Path(cfg["paths"].get("watchlist_dir", "watchlist"))
+    holdings_ids = list(_read_holdings_csv(wl_dir / "holdings.csv").keys())
+    watch_ids = _read_watchlist_csv(wl_dir / "watchlist.csv")
+    hit_ids: list[str] = []
+    for f in sorted((reports_dir / week_tag).glob("screen_result_*.csv")):
+        try:
+            df = pl.read_csv(f, infer_schema_length=0)
+            if "stock_id" in df.columns:
+                hit_ids.extend(str(s) for s in df["stock_id"].to_list() if s)
+        except Exception:  # noqa: BLE001 — 壞 CSV 不擋疊圖
+            continue
+    industry = load_industry_mapping(cache_dir)
+    names = (
+        {
+            sid: (nm or "").replace("股份有限公司", "").replace("(股)公司", "").strip()
+            for sid, nm in industry.select(["stock_id", "stock_name"]).iter_rows()
+        }
+        if not industry.is_empty()
+        else {}
+    )
+    participation = build_participation(
+        [
+            ("庫存（holdings.csv）", holdings_ids, False),
+            ("觀察（watchlist.csv）", watch_ids, False),
+            (f"本週命中（{week_tag} 篩選聯集）", hit_ids, True),
+        ],
+        members,
+        table,
+        long_window=long_w,
+        names=names,
+    )
+
     md_path = render_rotation_report(
         table,
         week_tag=week_tag,
@@ -1180,6 +1217,7 @@ def sector_rotation_cmd(
         position_low_pct=float(quad.get("position_low_pct", 10.0)),
         top_n=top_n,
         data_date=str(flows["date"].max()),
+        participation=participation,
     )
     n_next = table.filter(pl.col("quadrant") == "下一棒").height
     n_trig = table.filter(pl.col("entry_triggered")).height

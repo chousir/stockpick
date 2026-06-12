@@ -83,7 +83,29 @@
 本週無次產業觸發校準訊號。
 {%- endif %}
 
-## 5. 資料來源與時間
+{% if participation %}
+## 5. 我的參與度（庫存 / 觀察 / 本週命中 × 次產業資金方向）
+
+{% for src in participation -%}
+### {{ src.source }}（{{ src.n_total }} 檔・流入次產業 {{ src.n_inflow }}・涉出貨警訊 {{ src.n_warning }}{{ "・未標 " ~ src.n_untagged if src.n_untagged else "" }}）
+
+{% if src.compact -%}
+{% for q, items in src.by_quadrant.items() -%}
+- **{{ q }}**：{{ items | join("、") }}
+{% endfor %}
+{%- else -%}
+{% for st in src.stocks -%}
+- **{{ st.label }}**：{% if st.tags %}{% for t in st.tags %}{{ t.sub }}（{{ t.quadrant if t.quadrant else "榜外" }}{{ "・流入" if t.inflow else ("・流出" if t.inflow is false else "") }}{{ "・★" if t.triggered else "" }}）{{ "、" if not loop.last }}{% endfor %}{% else %}未標次產業（concepts.yaml 未涵蓋，資金方向無法判讀）{% endif %}
+{% endfor %}
+{%- endif %}
+
+{% endfor -%}
+> 「流入次產業」＝至少一個所屬次產業 {{ lw }} 日法人淨流為正；「涉出貨警訊」＝至少一個所屬次產業
+> 落在流出×已漲象限。榜外＝該次產業成員數低於門檻未列輪動排名。次產業資金方向是族群層訊號，
+> 個股持有決策仍需個股層籌碼/基本面判讀。
+
+{% endif -%}
+## {{ "6" if participation else "5" }}. 資料來源與時間
 
 - 法人買賣超：TWSE T86 + TPEX 上櫃（data/cache/twse/institutional_*.parquet，{{ data_date }} 止）
 - 價量：日線快取（daily_* 上市全覆蓋＋stock_day_* 補上櫃候選股）；次產業分類：config/concepts.yaml 手標
