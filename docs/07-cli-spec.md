@@ -40,7 +40,6 @@ leaders:        ## 只跑領頭羊判斷
 
 # ─── 報告 ───────────────────────────────────────
 report STOCK_ID=2330:        ## 產單檔個股報告（有 API key 完整分析，否則資料草稿）
-report-batch:                ## 讀本週 group_analysis 推薦清單前 5 檔批次產
 
 # ─── 完整流程 ────────────────────────────────────
 week:           ## 完整週流程：fetch-twse → screen-all → fetch-candidates-history → group
@@ -71,8 +70,6 @@ open reports/2026-W21/group_analysis.md
 # 注意：第 5 節是族群輪動機械基準、非挑股池，勿直接照它挑
 make report STOCK_ID=2330
 make report STOCK_ID=3034
-# 或一次跑前 5 檔
-make report-batch
 
 # 若有 ANTHROPIC_API_KEY：上面指令會直接產完整分析。
 # 若無：產資料草稿，依 docs/10-sop.md 手動貼到 Claude 對話補寫。
@@ -121,7 +118,6 @@ tw-screener screen dry STRATEGY
 tw-screener analysis group [--week WEEK]
 tw-screener analysis leaders [--week WEEK]
 tw-screener report stock STOCK_ID [--week WEEK]
-tw-screener report batch [--week WEEK] [--top N]
 ```
 
 > `init`、`cache clean`、`backtest strategies` 子指令未實作（對應功能用 `make init`、

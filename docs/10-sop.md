@@ -113,13 +113,7 @@ reports/YYYY-Www/stocks/2330_台積電.md
 - **「給 Claude 的指示」段**（範本 prompt 已內建）
 - 多個 `<!-- TODO: Claude 補寫 -->` 待填段落
 
-也可以一次跑前 5 檔：
-
-```bash
-make report-batch
-```
-
-會自動讀 `group_analysis.md` 第 5 節，產出 5 份 draft。
+依本週 `picks.md`（Claude 精選清單）逐檔跑 `make report STOCK_ID=XXXX`，即產出多份 draft。
 
 ### Step 4：把 draft 貼到 Claude 對話
 
@@ -162,9 +156,9 @@ Claude 回覆完整 Markdown 後：
 
 ## 第 3 節 — 批次處理建議
 
-`make report-batch` 一次產 5 份 draft 後，建議的工作流：
+依本週 `picks.md` 逐檔跑 `make report STOCK_ID=XXXX` 產出多份 draft 後，建議的工作流：
 
-1. 5 個 Claude 對話視窗各開一檔
+1. 多個 Claude 對話視窗各開一檔
 2. 平行貼上 + 等 Claude 回覆
 3. 一份份貼回對應檔案
 

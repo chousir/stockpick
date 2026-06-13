@@ -129,11 +129,8 @@ cat reports/2026-W20/group_analysis.md
 ## Step 4 — 個股資料打包與報告產出
 
 ```bash
-# 單檔
+# 單檔（批次：依 picks.md 逐檔重跑此指令）
 make report STOCK_ID=2330
-
-# 或批次跑推薦清單前 5 檔
-make report-batch
 ```
 
 執行流程：

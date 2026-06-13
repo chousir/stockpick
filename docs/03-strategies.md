@@ -389,4 +389,4 @@ Section 0 描述會缺漏（標籤本身會 fallback 到首字母大寫）。
 - 兩兩交集（A∩B、A∩C、B∩C）
 - 三方交集（A∩B∩C）
 
-不含觀察判斷段——觀察由互動式 session 或 `make report-batch` 後 Claude 補。
+不含觀察判斷段——觀察由互動式 session 或個股報告（`make report STOCK_ID=`）後 Claude 補。

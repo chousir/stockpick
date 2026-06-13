@@ -155,12 +155,9 @@ def fetch_stock_bundle(stock_id: str, settings_path: Path) -> dict:
 ```bash
 # 單檔
 make report STOCK_ID=2330
-
-# 批次（讀本週 group_analysis.md 推薦前 N 檔）
-make report-batch
 ```
 
-> `report-list STOCKS="2330,3034,2454"`（自訂清單批次）**未實作**，如需要自行多次執行 `make report STOCK_ID=XXXX`。
+> 批次：依本週 `picks.md` 逐檔執行 `make report STOCK_ID=XXXX`（舊 `make report-batch` 已停用、`report-list` 自訂清單批次未實作）。
 
 產出路徑：`reports/YYYY-Www/stocks/{stock_id}_{name}.md`
 
