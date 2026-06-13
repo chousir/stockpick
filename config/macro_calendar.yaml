@@ -9,11 +9,14 @@
 #   name     : 事件名稱
 #   category : FOMC | CPI | PCE | 台股結算 | 法說 | 財報季 | 選舉 | MSCI | 題材 | 季節性
 #   severity : 高 | 中（對台股的雙向衝擊強度）
-#   verified : false = Claude 補的常見排程、日期待你校對；校對過改 true
+#   verified : false = Claude 補的常見排程、日期未經校對。**你不必手動校**——
+#              改由 ProPicks 分析時上網向官方來源查證日期（見 docs/11 任務 2 事件閘門）。
+#              若你已自行確認某事件日期，可改 true 讓分析端略過查證。
 #   note     : 一句補充（可省）
 #
-# ⚠️ verified: false 一律當「待查證」——FOMC/CPI 實際日期以官方公告為準
-#    （Fed、美國 BLS、TWSE、各公司 IR），台股結算為每月第三個週三（遇假日順延）。
+# ⚠️ verified: false 一律當「待查證」——分析端採用為閘門前須上網確認當次實際日期
+#    （Fed、美國 BLS、TWSE 結算＝每月第三個週三遇假順延、各公司 IR）。
+#    只查證「何時發生」的排程日期，不預測事件結果。
 #    過期事件留著無妨（會被日期窗自動濾掉）；定期把已過月份清掉即可。
 
 events:
