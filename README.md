@@ -67,8 +67,6 @@ cat reports/$(date +%Y-W%V)/group_analysis.md
 
 # Step 4：對 picks.md 內每檔產個股深度報告（5-10 秒/檔）
 make report STOCK_ID=2330
-# 或批次產前 5 檔
-make report-batch
 
 # Step 5：完成分析（依是否有 API key 分兩種模式）
 #   有 ANTHROPIC_API_KEY → Step 4 已產出完整分析報告，直接讀
@@ -89,7 +87,6 @@ make report-batch
 | `make rotation` | 次產業資金輪動報表（單獨重跑） | 盤後想單看資金流向 |
 | `make group` | 族群分析（單獨重跑，吃既有 CSV） | 改 concepts.yaml 後重產報告 |
 | `make report STOCK_ID=2330` | 單檔個股深度報告 | picks 選出後逐檔深掘 |
-| `make report-batch` | 批次產推薦前 5 檔報告 | 同上、懶人版 |
 | `make screen STRATEGY=d_quality_leader` | 跑單一策略 | 調策略 YAML 後測試 |
 | `make screen-dry STRATEGY=…` | 只組 Goodinfo URL 不打網 | 驗證 YAML 條件 |
 | `make rotation-calib` | ★ 起漲點回測校準（研究軌） | 每季重校準訊號門檻 |

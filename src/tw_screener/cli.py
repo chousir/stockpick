@@ -980,60 +980,21 @@ def report_stock(
 
 @report_app.command("batch")
 def report_batch(
-    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
-    top: int = typer.Option(5, "--top", help="取推薦清單前 N 檔"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="（已停用）設定檔路徑"),
+    top: int = typer.Option(5, "--top", help="（已停用）"),
 ) -> None:
-    """批次產出本週 group_analysis.md 推薦清單的個股報告。"""
-    import os
-    import re
+    """（已停用）原本批次產 group_analysis Section 5 機械推薦清單的個股報告。
 
-    import yaml as _yaml
-
-    from tw_screener.report.builder import build_stock_report
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        console.print(
-            "[yellow]未設定 ANTHROPIC_API_KEY，將產出資料草稿[/yellow]"
-        )
-
-    with open(settings, encoding="utf-8") as fh:
-        cfg = _yaml.safe_load(fh)
-
-    rdir = Path(cfg["paths"]["reports_dir"])
-    week_dirs = sorted(
-        [d for d in rdir.iterdir() if d.is_dir()],
-        key=lambda d: d.name,
-        reverse=True,
+    機械推薦清單已移除（docs/11 已 ⛔，挑股改由 Claude 在完整候選宇宙中精選）。
+    新流程：make week → 把 group_analysis.md＋candidates_enriched.csv 貼給 Claude Opus →
+    存成本週 picks.md → 再依 picks.md 逐檔跑 `make report STOCK_ID=XXXX`。
+    """
+    console.print(
+        "[yellow]report batch 已停用[/yellow]："
+        "機械推薦清單（舊 group_analysis Section 5）已移除。\n"
+        "請依本週 [bold]picks.md[/bold]（Claude 精選）逐檔跑 "
+        "[bold]make report STOCK_ID=XXXX[/bold]，流程見 docs/11-propicks-analysis.md。"
     )
-    if not week_dirs:
-        console.print("[red]找不到報告目錄，請先執行 make group[/red]")
-        raise typer.Exit(1)
-
-    week_dir = week_dirs[0]
-    week_tag = week_dir.name
-    report_file = week_dir / "group_analysis.md"
-    if not report_file.exists():
-        console.print(f"[red]找不到 {report_file}，請先執行 make group[/red]")
-        raise typer.Exit(1)
-
-    # Extract stock IDs from priority stocks section
-    text = report_file.read_text(encoding="utf-8")
-    # Pattern: "N. **XXXX 股名**（..." from section 5
-    stock_ids = re.findall(r"\*\*(\d{4,6})\s+[^*]+\*\*", text)[:top]
-
-    if not stock_ids:
-        console.print("[yellow]group_analysis.md 中找不到推薦個股[/yellow]")
-        raise typer.Exit(1)
-
-    console.print(f"[bold]批次報告：{week_tag}，共 {len(stock_ids)} 檔[/bold]")
-    for sid in stock_ids:
-        console.print(f"  產出 {sid}...")
-        try:
-            output = build_stock_report(sid, settings, week_tag=week_tag, api_key=api_key)
-            console.print(f"    [green]→ {output.name}[/green]")
-        except Exception as e:
-            console.print(f"    [red]失敗：{e}[/red]")
 
 
 # ─── sector 子指令（次產業資金流向輪動，docs/12-sector-rotation.md） ────────────

@@ -511,60 +511,6 @@ def _build_context(
             }
         )
 
-    # --- priority stocks (skip 未分類) ---
-    if not members.is_empty() and not groups.is_empty():
-        max_score = float(groups["score"].max() or 1.0)
-        group_score_map: dict[str, float] = {}
-        for g_row in groups.iter_rows(named=True):
-            group_score_map[g_row["industry_code"]] = float(g_row["score"]) / max_score
-
-        group_rank_map = {
-            g_row["industry_code"]: rank + 1
-            for rank, g_row in enumerate(top_groups_df.iter_rows(named=True))
-        }
-
-        priority_rows = []
-        for srow in members.iter_rows(named=True):
-            ind_code = srow["industry_code"]
-            ind_name = srow.get("industry_name", _UNCATEGORIZED)
-            # Skip 未分類 from priority recommendations
-            if ind_name == _UNCATEGORIZED:
-                continue
-            g_score_norm = group_score_map.get(ind_code, 0.0)
-            rank_in_group = int(srow.get("rank_in_group", 99) or 99)
-            strategy_count = int(srow.get("strategy_count", 1))
-
-            # 個股加分：族群內排名第 1 → 1.0；第 2 → 0.7；第 3 → 0.5；其餘 → 0.3
-            rank_bonus_map = {1: 1.0, 2: 0.7, 3: 0.5}
-            rank_bonus = rank_bonus_map.get(rank_in_group, 0.3)
-
-            p_score = (
-                g_score_norm * 0.6
-                + rank_bonus * 0.3
-                + (1.0 if strategy_count >= 2 else 0.0) * 0.1
-            )
-            priority_rows.append(
-                {
-                    "stock_id": srow["stock_id"],
-                    "name": srow["name"],
-                    "industry_name": ind_name,
-                    "group_rank": group_rank_map.get(ind_code, 99),
-                    "rank_in_group": rank_in_group,
-                    "strategy_count": strategy_count,
-                    "strategy_str": _strategy_str(srow, strategy_ids),
-                    "priority_score": p_score,
-                    "goodinfo_url": str(srow.get("goodinfo_url", "")),
-                }
-            )
-
-        priority_rows.sort(key=lambda x: x["priority_score"], reverse=True)
-        priority_rows = [r for r in priority_rows if r["group_rank"] <= top_groups]
-        priority_rows = priority_rows[:top_stocks]
-        for i, r in enumerate(priority_rows, start=1):
-            r["rank"] = i
-    else:
-        priority_rows = []
-
     # --- 跨族群強勢領漲股（純 5 日漲幅排序，補族群廣度鏡頭埋掉的權值領漲）---
     # 半導體這種「少數龍頭噴出、多數拉回」的大族群，5 日中位被稀釋→族群排名靠後，
     # 但領漲個股（如台積電）仍應被看見。此處不分族群、純動能排序攤出。
@@ -628,7 +574,6 @@ def _build_context(
         "concept_groups": concept_groups,
         "groups": group_list,
         "top_groups": top_groups,
-        "priority_stocks": priority_rows,
         "claude_groups": claude_groups,
         "radar_groups": radar_groups,
         "radar_deep_dive": radar_deep_dive,

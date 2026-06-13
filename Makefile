@@ -1,6 +1,6 @@
 .PHONY: init sync test test-unit test-integration lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry \
-        group leaders report report-batch week weekend backtest-strategies rotation-calib rotation backfill-otc-history
+        group leaders report week weekend backtest-strategies rotation-calib rotation backfill-otc-history
 
 # ─── 環境 ────────────────────────────────────────────────────────────────────
 
@@ -89,9 +89,6 @@ leaders:  ## 只跑領頭羊判斷
 
 report:  ## 產單檔個股報告（STOCK_ID=2330，首次跑該檔會花 5-10 秒補 3 個月歷史 OHLCV）
 	uv run tw-screener report stock $(STOCK_ID)
-
-report-batch:  ## 批次產本週推薦清單報告
-	uv run tw-screener report batch
 
 # ─── 完整流程 ─────────────────────────────────────────────────────────────────
 
