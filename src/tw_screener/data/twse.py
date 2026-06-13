@@ -222,6 +222,10 @@ def _parse_institutional(payload: dict[str, Any]) -> pl.DataFrame:
 _TPEX_BASE = "https://www.tpex.org.tw"
 _TPEX_STOCK_DAY_PATH = "/www/zh-tw/afterTrading/tradingStock"
 _TPEX_INST_URL = "https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading"
+# 上櫃法人「歷史」回查：OpenAPI 只回最新日，舊版 .php 端點吃 d=民國日期可回補（避險版，逐股）。
+_TPEX_INST_HIST_URL = (
+    "https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php"
+)
 _TPEX_DAILY_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
 # 單季基本面（毛利率/EPS）：TWSE OpenAPI（上市）+ TPEX OpenAPI（上櫃）。
 # ⚠ TPEX 端點命名不一致（187ap17 無 t、t187ap14 有 t），2026-06-12 實測為準。
@@ -402,6 +406,64 @@ def _parse_tpex_institutional(data: list[dict[str, Any]]) -> pl.DataFrame:
                 r.get("SecuritiesCompanyCode", "?"),
                 e,
             )
+    return (
+        pl.DataFrame(rows, schema=_INSTITUTIONAL_SCHEMA)
+        if rows
+        else pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+    )
+
+
+# 舊版 3itrade_hedge 端點的位置欄索引（避險版 24 欄；以 06-12 對 OpenAPI 快取逐筆驗證鎖定）：
+# 4=外資及陸資(不含外資自營商)買賣超〔同 OpenAPI「Foreign Dealers excluded」〕、13=投信買賣超、
+# 22=自營商合計買賣超、23=三大法人合計。上櫃外資自營商(7)實務上恆 0，故 4 與「外資合計」等值。
+_TPEX_HIST_COL = {"stock_id": 0, "name": 1, "foreign": 4, "trust": 13, "dealer": 22, "total": 23}
+
+
+def _parse_tpex_institutional_history(payload: dict[str, Any]) -> pl.DataFrame:
+    """解析 TPEX 舊版 3itrade_hedge_result.php JSON → DataFrame（與 _INSTITUTIONAL_SCHEMA 同）。
+
+    結構：{tables:[{date:'115/06/10', fields:[...], data:[[位置陣列], ...]}], stat}。
+    欄位用位置索引取（見 _TPEX_HIST_COL），數值為股、含千分位逗號。非交易日 data 為空 → 回空表。
+    刻意沿用 OpenAPI 版（fetch_otc_institutional）的 net 定義，使每日與回補資料可無縫合併。
+    """
+    tables = payload.get("tables") or []
+    if not tables or not isinstance(tables[0], dict):
+        return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+    t0 = tables[0]
+    data = t0.get("data") or []
+    if not data:  # 非交易日（週末/假日）→ stat 仍 ok 但 data 空
+        return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+    try:
+        trade_date = _roc_to_date(str(t0["date"]))
+    except (KeyError, ValueError, IndexError):
+        logger.warning("TPEX 上櫃法人歷史：無法解析日期 {}", t0.get("date"))
+        return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+
+    def _net(cell: object) -> int:
+        s = str(cell).strip().replace(",", "")
+        if not s or s in ("-", "--"):
+            return 0
+        try:
+            return int(float(s))
+        except ValueError:
+            return 0
+
+    c = _TPEX_HIST_COL
+    rows = []
+    for row in data:
+        if len(row) <= c["total"]:
+            continue
+        rows.append(
+            {
+                "date": trade_date,
+                "stock_id": str(row[c["stock_id"]]).strip(),
+                "stock_name": str(row[c["name"]]).strip(),
+                "foreign_net": _net(row[c["foreign"]]),
+                "trust_net": _net(row[c["trust"]]),
+                "dealer_net": _net(row[c["dealer"]]),
+                "total_net": _net(row[c["total"]]),
+            }
+        )
     return (
         pl.DataFrame(rows, schema=_INSTITUTIONAL_SCHEMA)
         if rows
@@ -1080,6 +1142,74 @@ class TWSEClient:
         save_parquet(df, cache_file)
         logger.info("上櫃法人快取 → {} ({} 檔)", cache_file, len(df))
         return df
+
+    def fetch_otc_institutional_history(self, days: int = 20) -> pl.DataFrame:
+        """回補近 days 個交易日的上櫃三大法人，逐日存 institutional_otc_{date}.parquet。
+
+        OpenAPI 版（fetch_otc_institutional）只回最新日、缺日不可回補；此處改打舊版
+        3itrade_hedge_result.php、帶 d=民國日期可回查歷史，net 定義刻意對齊 OpenAPI 版
+        以無縫合併。從 latest_trading_date 往回走日曆日：週末跳過、非交易日（data 空）不計入、
+        已快取的日直接讀檔（過去資料不再變動）。下游 load_institutional_history 的 glob
+        （institutional_*）自動涵蓋，無需改讀取端。
+        """
+        from datetime import timedelta
+
+        latest = self.latest_trading_date()
+        if latest is None:
+            logger.warning("fetch_otc_institutional_history: 無 trading_date，略過")
+            return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+
+        frames: list[pl.DataFrame] = []
+        collected = 0
+        steps = 0
+        max_lookback = days * 2 + 14  # 日曆日上限，避免連假無限往回
+        cur = latest
+        while collected < days and steps < max_lookback:
+            steps += 1
+            if cur.weekday() >= 5:  # 週六/日 TPEX 無資料
+                cur -= timedelta(days=1)
+                continue
+            date_str = cur.strftime("%Y%m%d")
+            cache_file = self.cache_dir / f"institutional_otc_{date_str}.parquet"
+            if cache_file.exists():
+                frames.append(load_parquet(cache_file))
+                collected += 1
+                cur -= timedelta(days=1)
+                continue
+            roc = f"{cur.year - 1911}/{cur.month:02d}/{cur.day:02d}"
+            self._throttle()
+            try:
+                resp = httpx.get(
+                    _TPEX_INST_HIST_URL,
+                    params={"l": "zh-tw", "o": "json", "se": "EW", "t": "D", "d": roc},
+                    headers={"User-Agent": self.user_agent},
+                    timeout=30.0,
+                    follow_redirects=True,
+                )
+                self._last_req = time.monotonic()
+                resp.raise_for_status()
+                payload = resp.json()
+            except Exception as e:  # noqa: BLE001 — 單日失敗不該擋整體回補
+                logger.warning("fetch_otc_institutional_history {} 網路錯誤：{}", roc, e)
+                cur -= timedelta(days=1)
+                continue
+            df = _parse_tpex_institutional_history(payload)
+            if not df.is_empty():
+                save_parquet(df, cache_file)
+                frames.append(df)
+                collected += 1
+            else:
+                logger.info("TPEX 上櫃法人 {} 無資料（非交易日），略過", roc)
+            cur -= timedelta(days=1)
+
+        logger.info("fetch_otc_institutional_history: 取得 {} 個交易日上櫃法人", collected)
+        if not frames:
+            return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+        return (
+            pl.concat(frames)
+            .unique(subset=["date", "stock_id"])
+            .sort(["date", "stock_id"])
+        )
 
     def _get_openapi_json(self, url: str, label: str) -> list[dict[str, Any]]:
         """打單一 OpenAPI URL（含限速），回 JSON list；失敗回空 list（warning 不 raise）。"""

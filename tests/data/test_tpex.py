@@ -10,6 +10,7 @@ from tw_screener.data.cache import save_parquet
 from tw_screener.data.twse import (
     TWSEClient,
     _parse_stock_day,
+    _parse_tpex_institutional_history,
     _parse_tpex_stock_day,
 )
 
@@ -97,6 +98,58 @@ def test_parse_tpex_stock_day_field_with_spaces():
     payload = _load_fixture()
     df = _parse_tpex_stock_day(payload, "3293")
     assert df["date"][0] == date(2025, 10, 1)
+
+
+# ─── _parse_tpex_institutional_history（舊版 3itrade_hedge 回補端點）────────────
+
+
+def _load_inst_hist() -> dict:
+    with open(FIXTURE_DIR / "3insti_hedge_115_06_10.json", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def test_parse_inst_hist_schema_matches_openapi():
+    """歷史回補解析結果 schema 必須與 OpenAPI 版 _INSTITUTIONAL_SCHEMA 一致（才能合併）。"""
+    df = _parse_tpex_institutional_history(_load_inst_hist())
+    assert df.columns == [
+        "date", "stock_id", "stock_name", "foreign_net", "trust_net", "dealer_net", "total_net",
+    ]
+    assert df.schema["foreign_net"] == pl.Int64
+
+
+def test_parse_inst_hist_values_and_date():
+    """ROC 日期轉西元、千分位逗號去除、欄位位置對應正確（含負值）。"""
+    df = _parse_tpex_institutional_history(_load_inst_hist())
+    assert df["date"][0] == date(2026, 6, 10)  # 115/06/10
+    row = df.filter(pl.col("stock_id") == "5347").row(0, named=True)
+    assert row["stock_name"] == "世界"
+    assert row["foreign_net"] == 6_705_976   # idx4 外資（不含外資自營商）
+    assert row["trust_net"] == -8_182_118    # idx13 投信
+    assert row["dealer_net"] == -373_767     # idx22 自營商合計
+    assert row["total_net"] == -1_849_909    # idx23 三大法人合計
+
+
+def test_parse_inst_hist_total_equals_sum():
+    """三大法人合計 == 外資 + 投信 + 自營（會計恆等式，鎖定欄位對應）。"""
+    df = _parse_tpex_institutional_history(_load_inst_hist())
+    for r in df.iter_rows(named=True):
+        assert r["foreign_net"] + r["trust_net"] + r["dealer_net"] == r["total_net"]
+
+
+def test_parse_inst_hist_non_trading_day_empty():
+    """非交易日：stat=ok 但 data 空 → 回空 DF（schema 正確），讓回補迴圈跳過該日。"""
+    payload = {"stat": "ok", "tables": [{"date": "115/06/14", "fields": [], "data": []}]}
+    df = _parse_tpex_institutional_history(payload)
+    assert df.is_empty()
+    assert "total_net" in df.columns
+
+
+def test_parse_inst_hist_no_tables():
+    df = _parse_tpex_institutional_history({"stat": "ok"})
+    assert df.is_empty()
+    assert df.columns == [
+        "date", "stock_id", "stock_name", "foreign_net", "trust_net", "dealer_net", "total_net",
+    ]
 
 
 # ─── fetch_stock_history dispatch ─────────────────────────────────────────────

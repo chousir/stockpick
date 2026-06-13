@@ -96,12 +96,13 @@ report:  ## 產單檔個股報告（STOCK_ID=2330，首次跑該檔會花 5-10 �
 
 # ─── 完整流程 ─────────────────────────────────────────────────────────────────
 
-week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → screen-all → fetch-candidates-history → rotation → group
+week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → screen-all → fetch-candidates-history → rotation → group
 ifndef GROUP
 	@echo "❌ 請指定 GROUP=defg（主流程）、def 或 abc（legacy）"
 	@exit 1
 endif
 	$(MAKE) fetch-twse
+	$(MAKE) fetch-institutional-history   # 回補近 20 日上市+上櫃法人；隔幾天沒跑也自動補齊
 	$(MAKE) screen-all GROUP=$(GROUP)
 	$(MAKE) fetch-candidates-history
 	-$(MAKE) rotation   # 先跑輪動（group 的 2.8 雷達要讀 sector_rotation.csv 並列；失敗不擋主流程）

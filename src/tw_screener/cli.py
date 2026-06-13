@@ -112,14 +112,23 @@ def data_fetch_institutional_history(
     days: int = typer.Option(20, "--days", help="回補的交易日數，預設 20"),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
-    """回補近 N 個交易日的三大法人買賣超（T86），供族群法人強度與報告使用。"""
+    """回補近 N 個交易日的三大法人買賣超（上市 T86 + 上櫃），供族群法人強度與報告使用。
+
+    上市 T86 與上櫃（舊版 3itrade_hedge）都吃日期可回補；缺日自動補、已快取的日跳過。
+    這支進 make week → 不必每天開機/跑也能補齊近 N 日法人（解上櫃「缺日不可回補」痛點）。
+    """
     from tw_screener.data.twse import create_client
 
     client = create_client(settings)
-    console.print(f"[bold]回補近 {days} 個交易日法人資料（T86）...[/bold]")
+    console.print(f"[bold]回補近 {days} 個交易日上市法人（T86）...[/bold]")
     df = client.fetch_institutional_history(days=days)
     n_days = df["date"].n_unique() if not df.is_empty() else 0
-    console.print(f"[green]完成：{n_days} 個交易日、{len(df)} 筆[/green]")
+    console.print(f"[green]  上市：{n_days} 個交易日、{len(df)} 筆[/green]")
+
+    console.print(f"[bold]回補近 {days} 個交易日上櫃法人（3itrade_hedge）...[/bold]")
+    df_otc = client.fetch_otc_institutional_history(days=days)
+    n_otc = df_otc["date"].n_unique() if not df_otc.is_empty() else 0
+    console.print(f"[green]  上櫃：{n_otc} 個交易日、{len(df_otc)} 筆[/green]")
 
 
 @data_app.command("backfill-otc-history")
