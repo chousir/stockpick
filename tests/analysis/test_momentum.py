@@ -7,6 +7,7 @@ import pytest
 
 from tw_screener.analysis.momentum import (
     aggregate_group_momentum,
+    compute_dividend_addback,
     compute_n_day_return,
 )
 
@@ -100,6 +101,77 @@ def test_zero_back_close_skipped():
     """過去某天收盤為 0 → 不能算（分母 0）。"""
     history = _make_history("2330", [0.0, 0.0, 0.0, 0.0, 0.0, 110.0])
     assert "2330" not in compute_n_day_return(["2330"], history, n=5)
+
+
+# ─── compute_dividend_addback ─────────────────────────────────────────────────
+
+
+def _divs(rows: list[tuple[str, date, float]]) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "stock_id": [r[0] for r in rows],
+            "ex_date": [r[1] for r in rows],
+            "cash_dividend": [r[2] for r in rows],
+        }
+    )
+
+
+def test_dividend_addback_in_window():
+    """除息日落在 5 日視窗內 → 加回 cash/c_back*100。"""
+    # 6/6..6/11，c_back=140（6/6）；6/8 除息 7.0 → addback = 7/140*100 = 5.0
+    history = _make_history("3036", [140.0, 138.0, 130.0, 131.0, 132.0, 133.0],
+                            start=date(2026, 6, 6))
+    divs = _divs([("3036", date(2026, 6, 8), 7.0)])
+    result = compute_dividend_addback(["3036"], history, divs, n=5)
+    assert "3036" in result
+    addback_pct, total_cash = result["3036"]
+    assert addback_pct == pytest.approx(5.0)
+    assert total_cash == pytest.approx(7.0)
+
+
+def test_dividend_ex_date_at_window_start_excluded():
+    """ex_date == 視窗起點日（c_back 之收盤已除息後）→ 缺口不在視窗，不加回。"""
+    history = _make_history("3036", [140.0, 138.0, 130.0, 131.0, 132.0, 133.0],
+                            start=date(2026, 6, 6))
+    divs = _divs([("3036", date(2026, 6, 6), 7.0)])
+    assert "3036" not in compute_dividend_addback(["3036"], history, divs, n=5)
+
+
+def test_dividend_before_window_excluded():
+    """ex_date 早於視窗起點 → 不在視窗。"""
+    history = _make_history("3036", [140.0, 138.0, 130.0, 131.0, 132.0, 133.0],
+                            start=date(2026, 6, 6))
+    divs = _divs([("3036", date(2026, 6, 1), 7.0)])
+    assert "3036" not in compute_dividend_addback(["3036"], history, divs, n=5)
+
+
+def test_stock_dividend_zero_cash_excluded():
+    """純配股（cash=0）不在現金還原範圍。"""
+    history = _make_history("1312", [50.0, 49.0, 48.0, 49.0, 50.0, 51.0],
+                            start=date(2026, 6, 6))
+    divs = _divs([("1312", date(2026, 6, 8), 0.0)])
+    assert "1312" not in compute_dividend_addback(["1312"], history, divs, n=5)
+
+
+def test_multiple_dividends_in_window_summed():
+    """視窗內多筆現金股利合計加回。"""
+    history = _make_history("2327", [100.0, 98.0, 96.0, 97.0, 98.0, 99.0],
+                            start=date(2026, 6, 6))
+    divs = _divs([("2327", date(2026, 6, 8), 3.0), ("2327", date(2026, 6, 10), 1.0)])
+    addback_pct, total_cash = compute_dividend_addback(["2327"], history, divs, n=5)["2327"]
+    assert total_cash == pytest.approx(4.0)
+    assert addback_pct == pytest.approx(4.0)  # (3+1)/100*100
+
+
+def test_empty_dividends_returns_empty():
+    history = _make_history("3036", [140.0, 138.0, 133.0], start=date(2026, 6, 6))
+    assert compute_dividend_addback(["3036"], history, pl.DataFrame()) == {}
+
+
+def test_dividend_addback_missing_columns_returns_empty():
+    history = _make_history("3036", [140.0, 138.0, 133.0], start=date(2026, 6, 6))
+    bad = pl.DataFrame({"stock_id": ["3036"], "ex_date": [date(2026, 6, 8)]})  # no cash
+    assert compute_dividend_addback(["3036"], history, bad) == {}
 
 
 # ─── aggregate_group_momentum ─────────────────────────────────────────────────

@@ -740,6 +740,38 @@ def filter_dividend_calendar(
     ).sort("ex_date")
 
 
+def load_recent_dividends(cache_dir: Path, since: date) -> pl.DataFrame:
+    """聯集所有 dividend_calendar_*.parquet 快取 → ex_date ≥ since 的除權息（去重）。
+
+    TWT48U_ALL 是滾動前瞻表，單一快照只保留約 2 個過去日；要還原 5 日動能視窗內的
+    除息缺口，需把近日多份快照聯集。回傳 (ex_date, stock_id, name, type, cash_dividend,
+    stock_dividend_ratio)，同 (stock_id, ex_date) 去重保留最新快照值。無快取 → 空表。
+    """
+    schema = {
+        "ex_date": pl.Date,
+        "stock_id": pl.Utf8,
+        "name": pl.Utf8,
+        "type": pl.Utf8,
+        "cash_dividend": pl.Float64,
+        "stock_dividend_ratio": pl.Float64,
+    }
+    files = sorted(Path(cache_dir).glob("dividend_calendar_*.parquet"))
+    frames: list[pl.DataFrame] = []
+    for f in files:  # 檔名按日期升冪 → keep="last" 留最新快照
+        try:
+            frames.append(pl.read_parquet(f).select(list(schema)))
+        except Exception as e:  # noqa: BLE001 — 單檔壞掉不該擋整體還原
+            logger.warning("讀取除權息快取失敗 {}：{}", f, e)
+    if not frames:
+        return pl.DataFrame(schema=schema)
+    return (
+        pl.concat(frames)
+        .unique(subset=["stock_id", "ex_date"], keep="last")
+        .filter(pl.col("ex_date") >= since)
+        .sort("ex_date")
+    )
+
+
 # ─── Client ───────────────────────────────────────────────────────────────────
 
 

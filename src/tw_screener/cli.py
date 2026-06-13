@@ -572,7 +572,8 @@ def _read_holdings_csv(path: Path) -> dict:
 
 
 def _enrich_named_list(
-    client, stock_ids, industry_df, institutional, g_pullback, name_map=None, vol_lookback=20
+    client, stock_ids, industry_df, institutional, g_pullback, name_map=None, vol_lookback=20,
+    dividends=None,
 ):
     """把任意股票清單 enrich 成 (members, synth_screener)，reuse group_stocks 同套指標。
 
@@ -643,6 +644,7 @@ def _enrich_named_list(
         volume_history=volume_history,
         g_pullback=g_pullback,
         vol_lookback=vol_lookback,
+        dividends=dividends,
     )
     return members, {"_list": synth}
 
@@ -653,12 +655,17 @@ def analysis_group(
 ) -> None:
     """讀最新一週的篩選 CSV + TWSE 快取，產出 group_analysis.md。"""
     from datetime import date as _date
+    from datetime import timedelta as _timedelta
 
     import yaml as _yaml
 
     from tw_screener.analysis.grouping import group_stocks
     from tw_screener.analysis.leader import find_leaders
-    from tw_screener.data.twse import create_client, filter_dividend_calendar
+    from tw_screener.data.twse import (
+        create_client,
+        filter_dividend_calendar,
+        load_recent_dividends,
+    )
     from tw_screener.report.group_report import render_group_report
 
     with open(settings, encoding="utf-8") as fh:
@@ -772,6 +779,17 @@ def analysis_group(
     else:
         console.print(f"  本週除權息：{len(dividends)} 檔候選股（未來 {dividend_lookahead} 天）")
 
+    # 除息還原：聯集近日除權息快照，取近 20 天 ex_date（涵蓋 5 交易日動能視窗），把視窗內
+    # 現金股利加回 momentum_5d，修正 6-8 月除息季的假負與排名失真。
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+    recent_dividends = load_recent_dividends(cache_dir, _date.today() - _timedelta(days=20))
+    if not recent_dividends.is_empty():
+        n_exdiv = recent_dividends.filter(
+            _pl.col("stock_id").is_in(candidate_ids)
+        )["stock_id"].n_unique()
+        if n_exdiv:
+            console.print(f"  除息還原：近 20 天 {n_exdiv} 檔候選股除權息，動能加回現金股利")
+
     from tw_screener.data.macro import filter_macro_calendar, load_macro_calendar
 
     macro_events = filter_macro_calendar(load_macro_calendar(), _date.today(), macro_lookahead)
@@ -797,6 +815,7 @@ def analysis_group(
         volume_history=volume_history,
         g_pullback=g_pullback,
         vol_lookback=vol_lookback,
+        dividends=recent_dividends,
     )
 
     if groups.is_empty():
@@ -885,6 +904,7 @@ def analysis_group(
             g_pullback,
             name_map=name_map,
             vol_lookback=vol_lookback,
+            dividends=recent_dividends,
         )
         out_csv = output_path.parent / f"{label}_enriched.csv"
         n = write_named_list_csv(

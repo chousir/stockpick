@@ -17,7 +17,7 @@ import math
 import polars as pl
 from loguru import logger
 
-from tw_screener.analysis.momentum import compute_n_day_return
+from tw_screener.analysis.momentum import compute_dividend_addback, compute_n_day_return
 
 _DEFAULT_WEIGHTS: dict[str, float] = {
     "momentum": 0.50,
@@ -171,6 +171,7 @@ def group_stocks(
     volume_history: pl.DataFrame | None = None,
     g_pullback: dict[str, float] | None = None,
     vol_lookback: int = 20,
+    dividends: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
     Group screened stocks by industry and compute group strength scores (動能主導).
@@ -184,6 +185,9 @@ def group_stocks(
         與輸入的 volume_history 列數無關 → 不論餵幾天都是一致的 N 日均量。
     g_pullback: 策略 G 的拉回 setup 門檻（見 _DEFAULT_G_PULLBACK）；若 screener 含
         in_g_growth_pullback，G 的有效命中會被收斂為「基本面命中 ∧ 季線上揚 ∧ 乖離帶內 ∧ 量縮」。
+    dividends: 含 stock_id / ex_date / cash_dividend（load_recent_dividends 的回傳）；提供時把
+        5 日視窗內現金股利加回 momentum_5d/rs（除息還原），並輸出 div_addback_pct / ex_div_cash。
+        未提供 → 兩欄為 0，momentum 維持原始價格報酬。
 
     Returns (groups_df, enriched_stocks_df):
     - groups_df: industry-level stats sorted by score desc (filtered by min_group_size)
@@ -264,6 +268,27 @@ def group_stocks(
             pl.Series("rs", rs_values, dtype=pl.Float64),  # 5-day return (alias kept)
             pl.Series("momentum_5d", rs_values, dtype=pl.Float64),
             pl.Series("momentum_days_used", days_values, dtype=pl.Int32),
+        ]
+    )
+
+    # 除息還原：6-8 月除息季，除息日股價缺口會讓 momentum_5d 假負並把除息股壓到排名後段。
+    # 把視窗內現金股利加回報酬（價＋息），momentum_5d/rs 一併還原；div_addback_pct/ex_div_cash
+    # 供報表標註「已還原除息」。此處 stock_df 仍與 stock_ids 同序，可用 positional Series 對齊。
+    if dividends is not None and not dividends.is_empty():
+        addback = compute_dividend_addback(
+            stock_ids, price_history, dividends, n=_MOMENTUM_DAYS
+        )
+    else:
+        addback = {}
+    add_vals = [addback.get(sid, (0.0, 0.0))[0] for sid in stock_ids]
+    cash_vals = [addback.get(sid, (0.0, 0.0))[1] for sid in stock_ids]
+    add_series = pl.Series("_div_add", add_vals, dtype=pl.Float64)
+    stock_df = stock_df.with_columns(
+        [
+            (pl.col("momentum_5d") + add_series).alias("momentum_5d"),
+            (pl.col("rs") + add_series).alias("rs"),
+            pl.Series("div_addback_pct", add_vals, dtype=pl.Float64),
+            pl.Series("ex_div_cash", cash_vals, dtype=pl.Float64),
         ]
     )
 

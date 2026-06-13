@@ -52,6 +52,71 @@ def compute_n_day_return(
     return result
 
 
+def compute_dividend_addback(
+    stock_ids: list[str],
+    price_history: pl.DataFrame,
+    dividends: pl.DataFrame,
+    n: int = 5,
+) -> dict[str, tuple[float, float]]:
+    """回傳每檔在 N 日動能視窗內的「現金股利還原加成」。
+
+    除息日股價缺口會讓 compute_n_day_return 的 N 日報酬假負（6-8 月除息季尤甚），
+    並把除息股壓到動能排名後段。此函式比照 compute_n_day_return 的視窗（同 gap），
+    找出 ex_date 落在視窗內的現金股利，回傳該加回報酬的百分比，讓呼叫端把 momentum
+    還原成總報酬（價＋息）。
+
+    Args:
+        stock_ids: 要計算的股票代號清單。
+        price_history: 必須含 stock_id / date / close 欄。
+        dividends: 必須含 stock_id / ex_date / cash_dividend 欄（cash 為元/股）。
+        n: 動能視窗交易日數（與 compute_n_day_return 對齊，預設 5）。
+
+    Returns:
+        {stock_id: (addback_pct, total_cash)} —— 僅含視窗內有現金股利的檔。
+        addback_pct = 視窗內現金股利合計 / 視窗起點收盤 × 100；total_cash = 合計股利（元）。
+        僅還原現金股利（息）；配股（權）不在此估算。
+    """
+    if price_history.is_empty() or not {"stock_id", "date", "close"}.issubset(
+        set(price_history.columns)
+    ):
+        return {}
+    if dividends.is_empty() or not {"stock_id", "ex_date", "cash_dividend"}.issubset(
+        set(dividends.columns)
+    ):
+        return {}
+
+    # 預先把每檔現金股利收進 dict，避免 per-stock filter 重複掃全表
+    div_by_stock: dict[str, list[tuple[object, float]]] = {}
+    for r in dividends.iter_rows(named=True):
+        cash = r.get("cash_dividend")
+        ex = r.get("ex_date")
+        if cash is None or cash <= 0 or ex is None:
+            continue
+        div_by_stock.setdefault(str(r["stock_id"]), []).append((ex, float(cash)))
+
+    result: dict[str, tuple[float, float]] = {}
+    ph_sorted = price_history.sort("date")
+    for stock_id in stock_ids:
+        events = div_by_stock.get(stock_id)
+        if not events:
+            continue
+        stock_df = ph_sorted.filter(pl.col("stock_id") == stock_id)
+        if len(stock_df) < 2:
+            continue
+        gap = min(n, len(stock_df) - 1)
+        date_back = stock_df["date"][-(gap + 1)]  # 視窗起點（c_back 的日期）
+        latest = stock_df["date"][-1]
+        c_back = stock_df["close"][-(gap + 1)]
+        if c_back is None or c_back == 0:
+            continue
+        # ex_date 嚴格晚於視窗起點收盤、且不晚於最新日 → 缺口落在視窗內，需加回
+        total_cash = sum(cash for ex, cash in events if date_back < ex <= latest)
+        if total_cash <= 0:
+            continue
+        result[stock_id] = (float(total_cash / c_back * 100), float(total_cash))
+    return result
+
+
 def aggregate_group_momentum(
     momentum_map: dict[str, tuple[float, int]],
     stock_ids_per_group: dict[str, list[str]],

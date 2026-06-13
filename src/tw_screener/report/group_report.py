@@ -739,6 +739,11 @@ def _build_enriched_rows(
             flags.append("強漲法人賣")
         if inst_missing:
             flags.append("法人缺漏")
+        # 除息還原：5 日視窗內現金股利已加回 momentum_5d（修假負）；標旗供人工查證
+        ex_div_cash = _num(r.get("ex_div_cash"), 2)
+        div_addback_pct = _num(r.get("div_addback_pct"), 2)
+        if ex_div_cash is not None and ex_div_cash > 0:
+            flags.append(f"除息還原{ex_div_cash}元")
 
         rows.append(
             {
@@ -748,7 +753,9 @@ def _build_enriched_rows(
                 "theme": theme_map.get(sid, ""),
                 "strategy": _strategy_str(r, strategy_ids),
                 "rank_in_group": int(r.get("rank_in_group", 0) or 0),
-                "momentum_5d_pct": mom,
+                "momentum_5d_pct": mom,  # 已含除息還原（見 div_addback_pct）
+                "ex_div_cash": ex_div_cash,            # 5 日內現金股利合計（元），無＝空
+                "div_addback_pct": div_addback_pct,    # 還原加回 momentum 的百分點
                 "change_pct": _num(r.get("change_pct"), 2),
                 "close": close,
                 "vol_ratio": vr if (vr or 0) > 0 else None,
@@ -805,6 +812,8 @@ def write_candidates_enriched_csv(
 # 來源/視窗不同造成同一檔量比/集中度/成交額分岔。只重用市場/籌碼/估值/flags，識別欄與策略欄保留。
 _CANONICAL_REUSE_FIELDS = (
     "momentum_5d_pct",
+    "ex_div_cash",
+    "div_addback_pct",
     "change_pct",
     "vol_ratio",
     "ma20_dist_pct",
