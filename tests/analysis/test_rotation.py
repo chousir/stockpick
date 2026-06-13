@@ -259,3 +259,25 @@ def test_load_market_history_includes_stock_day(tmp_path: Path):
     df = load_market_history(tmp_path, n_days=250)
     assert set(df["stock_id"].to_list()) == {"2330", "8299"}
     assert df.filter(pl.col("stock_id") == "8299")["volume"][0] == 3000
+
+
+def test_otc_institutional_lag(tmp_path: Path):
+    from tw_screener.analysis.rotation import otc_institutional_lag
+
+    assert otc_institutional_lag(tmp_path) == (0, None, None)
+    for d in ("20260609", "20260610", "20260611"):
+        pl.DataFrame({"x": [1]}).write_parquet(tmp_path / f"institutional_{d}.parquet")
+    pl.DataFrame({"x": [1]}).write_parquet(tmp_path / "institutional_otc_20260609.parquet")
+    lag, listed_max, otc_max = otc_institutional_lag(tmp_path)
+    assert lag == 2 and listed_max == "20260611" and otc_max == "20260609"
+
+
+def test_load_market_history_includes_otc_daily(tmp_path: Path):
+    pl.DataFrame({"date": [D0], "stock_id": ["2330"], "close": [1000.0], "volume": [1]}
+                 ).write_parquet(tmp_path / "daily_all_20260601.parquet")
+    pl.DataFrame({"date": [D0], "stock_id": ["8299"], "name": ["群聯"],
+                  "trade_volume": [3000], "close": [2310.0]}
+                 ).write_parquet(tmp_path / "otc_daily_20260601.parquet")
+    df = load_market_history(tmp_path, n_days=250)
+    assert set(df["stock_id"].to_list()) == {"2330", "8299"}
+    assert df.filter(pl.col("stock_id") == "8299")["volume"][0] == 3000

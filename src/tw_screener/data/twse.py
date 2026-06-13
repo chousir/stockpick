@@ -222,6 +222,124 @@ def _parse_institutional(payload: dict[str, Any]) -> pl.DataFrame:
 _TPEX_BASE = "https://www.tpex.org.tw"
 _TPEX_STOCK_DAY_PATH = "/www/zh-tw/afterTrading/tradingStock"
 _TPEX_INST_URL = "https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading"
+_TPEX_DAILY_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
+# 單季基本面（毛利率/EPS）：TWSE OpenAPI（上市）+ TPEX OpenAPI（上櫃）。
+# ⚠ TPEX 端點命名不一致（187ap17 無 t、t187ap14 有 t），2026-06-12 實測為準。
+_FUND_MARGIN_OTC_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_187ap17_O"
+_FUND_EPS_OTC_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap14_O"
+
+
+def _parse_tpex_daily_all(data: list[dict[str, Any]]) -> pl.DataFrame:
+    """解析 TPEX tpex_mainboard_daily_close_quotes → DataFrame（schema 同 _parse_daily_all）。
+
+    欄位對應：Date（ROC 緊湊）、SecuritiesCompanyCode、CompanyName、Close、Open/High/Low、
+    TradingShares（股）、TransactionAmount（元）、TransactionNumber。
+    無成交（Close 為 '--' 等）整列略過。
+    """
+    schema = {
+        "date": pl.Date,
+        "stock_id": pl.Utf8,
+        "name": pl.Utf8,
+        "trade_volume": pl.Int64,
+        "trade_value": pl.Int64,
+        "open": pl.Float64,
+        "high": pl.Float64,
+        "low": pl.Float64,
+        "close": pl.Float64,
+        "change": pl.Float64,
+        "transaction": pl.Int64,
+    }
+    rows = []
+    for r in data:
+        try:
+            close = _clean_float(r["Close"])
+            if close is None:
+                continue
+            rows.append(
+                {
+                    "date": _roc_compact_to_date(r["Date"]),
+                    "stock_id": r["SecuritiesCompanyCode"].strip(),
+                    "name": r["CompanyName"].strip(),
+                    "trade_volume": _clean_int(r["TradingShares"]),
+                    "trade_value": _clean_int(r["TransactionAmount"]),
+                    "open": _clean_float(r["Open"]),
+                    "high": _clean_float(r["High"]),
+                    "low": _clean_float(r["Low"]),
+                    "close": close,
+                    "change": _clean_float(r["Change"]),
+                    "transaction": _clean_int(r["TransactionNumber"]),
+                }
+            )
+        except (KeyError, ValueError) as e:
+            logger.warning(f"略過無效上櫃行情：{r.get('SecuritiesCompanyCode', '?')} — {e}")
+    return pl.DataFrame(rows, schema=schema)
+
+
+_FUNDAMENTALS_SCHEMA: dict[str, type[pl.DataType]] = {
+    "stock_id": pl.Utf8,
+    "year": pl.Int32,         # 西元
+    "quarter": pl.Int32,
+    "revenue_m": pl.Float64,  # 營業收入（百萬元）
+    "gross_margin_pct": pl.Float64,
+    "op_margin_pct": pl.Float64,
+    "eps": pl.Float64,        # 單季基本每股盈餘（元）
+}
+
+
+def _parse_quarterly_fundamentals(
+    margin_listed: list[dict[str, Any]],
+    margin_otc: list[dict[str, Any]],
+    eps_listed: list[dict[str, Any]],
+    eps_otc: list[dict[str, Any]],
+) -> pl.DataFrame:
+    """合併四端點 → 全市場單季基本面（毛利率/營益率/EPS）。
+
+    上市/上櫃欄名不同（上市「公司代號」「毛利率(%)(營業毛利)/(營業收入)」；
+    上櫃「SecuritiesCompanyCode」「毛利率」），統一成 _FUNDAMENTALS_SCHEMA。
+    EPS 以 (stock_id, year, quarter) join 進毛利列；缺一方則該欄 null。
+    """
+    rec: dict[tuple[str, int, int], dict[str, Any]] = {}
+
+    def _key(sid: str, y: str, q: str) -> tuple[str, int, int] | None:
+        try:
+            return (sid.strip(), int(y) + 1911, int(q))
+        except (TypeError, ValueError):
+            return None
+
+    for r in margin_listed:
+        k = _key(r.get("公司代號", ""), r.get("年度", ""), r.get("季別", ""))
+        if k:
+            rec[k] = {
+                "revenue_m": _clean_float(r.get("營業收入(百萬元)", "")),
+                "gross_margin_pct": _clean_float(r.get("毛利率(%)(營業毛利)/(營業收入)", "")),
+                "op_margin_pct": _clean_float(r.get("營業利益率(%)(營業利益)/(營業收入)", "")),
+            }
+    for r in margin_otc:
+        k = _key(r.get("SecuritiesCompanyCode", ""), r.get("Year", ""), r.get("季別", ""))
+        if k:
+            rec[k] = {
+                "revenue_m": _clean_float(r.get("營業收入百萬元", "")),
+                "gross_margin_pct": _clean_float(r.get("毛利率", "")),
+                "op_margin_pct": _clean_float(r.get("營業利益率", "")),
+            }
+    for r in eps_listed:
+        k = _key(r.get("公司代號", ""), r.get("年度", ""), r.get("季別", ""))
+        if k:
+            rec.setdefault(k, {})["eps"] = _clean_float(r.get("基本每股盈餘(元)", ""))
+    for r in eps_otc:
+        k = _key(r.get("SecuritiesCompanyCode", ""), r.get("Year", ""), r.get("季別", ""))
+        if k:
+            rec.setdefault(k, {})["eps"] = _clean_float(r.get("基本每股盈餘", ""))
+
+    if not rec:
+        return pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA)
+    rows = [
+        {"stock_id": sid, "year": y, "quarter": q, **{
+            c: v.get(c) for c in ("revenue_m", "gross_margin_pct", "op_margin_pct", "eps")
+        }}
+        for (sid, y, q), v in rec.items()
+    ]
+    return pl.DataFrame(rows, schema=_FUNDAMENTALS_SCHEMA).sort("stock_id")
 
 
 def _parse_tpex_institutional(data: list[dict[str, Any]]) -> pl.DataFrame:
@@ -931,6 +1049,81 @@ class TWSEClient:
         logger.info("上櫃法人快取 → {} ({} 檔)", cache_file, len(df))
         return df
 
+    def _get_openapi_json(self, url: str, label: str) -> list[dict[str, Any]]:
+        """打單一 OpenAPI URL（含限速），回 JSON list；失敗回空 list（warning 不 raise）。"""
+        self._throttle()
+        try:
+            resp = httpx.get(
+                url,
+                headers={"User-Agent": self.user_agent},
+                timeout=30.0,
+                follow_redirects=True,
+            )
+            self._last_req = time.monotonic()
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            logger.warning("{} 網路錯誤：{}", label, e)
+            return []
+        if not isinstance(data, list):
+            logger.warning("{} 回傳非 list，略過", label)
+            return []
+        return data
+
+    def fetch_otc_daily_all(self) -> pl.DataFrame:
+        """抓上櫃全市場日線（TPEX OpenAPI 最新一日），快取 otc_daily_{date}.parquet。
+
+        TPEX 僅供最新交易日、不可回補——逐日累積（同 institutional_otc）。
+        檔名用 otc_ 前綴而非 daily_otc_：避免被 fetch_daily_all 的 daily_*
+        TTL glob 誤撿成上市快取；讀取端（load_market_history）已含 otc_daily_* pattern。
+        """
+        latest_cache = self._latest_cache_file("otc_daily_*.parquet")
+        if latest_cache is not None and is_fresh(latest_cache, self.ttl_hours):
+            logger.info(f"命中快取 {latest_cache}")
+            return load_parquet(latest_cache)
+
+        data = self._get_openapi_json(_TPEX_DAILY_URL, "fetch_otc_daily_all")
+        df = _parse_tpex_daily_all(data)
+        if df.is_empty():
+            logger.warning("TPEX 上櫃日線解析結果為空")
+            return df
+        max_date = df["date"].max()
+        cache_file = self.cache_dir / f"otc_daily_{max_date.strftime('%Y%m%d')}.parquet"
+        save_parquet(df, cache_file)
+        logger.info("上櫃日線快取 → {} ({} 檔)", cache_file, len(df))
+        return df
+
+    def fetch_quarterly_fundamentals(self) -> pl.DataFrame:
+        """抓上市+上櫃單季基本面（毛利率/營益率/EPS，4 端點），快取 fundamentals_{Y}Q{q}.parquet。
+
+        各端點只回最新一季全體公司。TTL 用 ttl_hours×24（季資料、約週級重查即可）。
+        """
+        latest_cache = self._latest_cache_file("fundamentals_*.parquet")
+        if latest_cache is not None and is_fresh(latest_cache, self.ttl_hours * 24):
+            logger.info(f"命中快取 {latest_cache}")
+            return load_parquet(latest_cache)
+
+        margin_listed = self._get("/opendata/t187ap17_L")
+        eps_listed = self._get("/opendata/t187ap14_L")
+        margin_otc = self._get_openapi_json(_FUND_MARGIN_OTC_URL, "上櫃營益分析")
+        eps_otc = self._get_openapi_json(_FUND_EPS_OTC_URL, "上櫃損益表")
+        df = _parse_quarterly_fundamentals(margin_listed, margin_otc, eps_listed, eps_otc)
+        if df.is_empty():
+            logger.warning("單季基本面解析結果為空")
+            return df
+        y, q = df["year"].max(), df.filter(pl.col("year") == df["year"].max())["quarter"].max()
+        cache_file = self.cache_dir / f"fundamentals_{y}Q{q}.parquet"
+        save_parquet(df, cache_file)
+        logger.info("單季基本面快取 → {} ({} 檔)", cache_file, len(df))
+        return df
+
+    def load_latest_fundamentals(self) -> pl.DataFrame:
+        """純讀最新 fundamentals_*.parquet（不打網）；無快取回空表。"""
+        files = sorted(self.cache_dir.glob("fundamentals_*.parquet"))
+        if not files:
+            return pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA)
+        return load_parquet(files[-1])
+
     def load_volume_history(
         self, stock_ids: list[str], n_days: int = 21
     ) -> pl.DataFrame:
@@ -1254,8 +1447,10 @@ class TWSEClient:
             except Exception as e:
                 logger.warning(f"讀取 {f} 失敗：{e}")
 
-        # 補充：全市場日快取（包含 name 等欄位）
-        daily_files = sorted(self.cache_dir.glob("daily_*.parquet"))
+        # 補充：全市場日快取（包含 name 等欄位；otc_daily_* 為上櫃全市場）
+        daily_files = sorted(
+            [*self.cache_dir.glob("daily_*.parquet"), *self.cache_dir.glob("otc_daily_*.parquet")]
+        )
         daily_frames: list[pl.DataFrame] = []
         for f in daily_files:
             try:

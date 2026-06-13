@@ -1320,3 +1320,73 @@ def test_load_institutional_history_respects_n_days(tmp_path: Path):
 
     df = _make_client(tmp_path).load_institutional_history(n_days=2)
     assert sorted(df["date"].unique().to_list()) == [date(2026, 6, 8), date(2026, 6, 9)]
+
+
+# ─── TPEX 上櫃全市場日線 + 單季基本面（資料修復 milestone） ─────────────────────
+
+
+def test_parse_tpex_daily_all():
+    from tw_screener.data.twse import _parse_tpex_daily_all
+
+    data = [
+        {"Date": "1150612", "SecuritiesCompanyCode": "8299", "CompanyName": "群聯",
+         "Close": "2310.00", "Change": "+110.00", "Open": "2250.00", "High": "2330.00",
+         "Low": "2240.00", "TradingShares": "4981000", "TransactionAmount": "11650000000",
+         "TransactionNumber": "5466"},
+        {"Date": "1150612", "SecuritiesCompanyCode": "5274", "CompanyName": "信驊",
+         "Close": "--", "Change": "", "Open": "--", "High": "--", "Low": "--",
+         "TradingShares": "0", "TransactionAmount": "0", "TransactionNumber": "0"},
+    ]
+    df = _parse_tpex_daily_all(data)
+    assert len(df) == 1  # 無成交（Close='--'）整列略過
+    r = df.row(0, named=True)
+    assert r["stock_id"] == "8299"
+    assert r["date"] == date(2026, 6, 12)
+    assert r["close"] == 2310.0
+    assert r["trade_volume"] == 4981000
+    assert r["change"] == 110.0
+
+
+def test_fetch_otc_daily_all_cache_hit(tmp_path: Path):
+    """TTL 內命中 otc_daily_* 快取不打網；且不污染 fetch_daily_all 的 daily_* glob。"""
+    client = _make_client(tmp_path)
+    pl.DataFrame({"date": [date(2026, 6, 12)], "stock_id": ["8299"], "name": ["群聯"],
+                  "trade_volume": [1000], "trade_value": [100], "open": [1.0], "high": [1.0],
+                  "low": [1.0], "close": [1.0], "change": [0.0], "transaction": [1]}
+                 ).write_parquet(tmp_path / "otc_daily_20260612.parquet")
+    df = client.fetch_otc_daily_all()
+    assert df["stock_id"].to_list() == ["8299"]
+    # fetch_daily_all 的 _latest_cache_file("daily_*.parquet") 不應撿到 otc_daily_*
+    assert client._latest_cache_file("daily_*.parquet") is None
+
+
+def test_parse_quarterly_fundamentals_merges_four_endpoints():
+    from tw_screener.data.twse import _parse_quarterly_fundamentals
+
+    margin_listed = [{"年度": "115", "季別": "1", "公司代號": "2330",
+                      "營業收入(百萬元)": "839254.00",
+                      "毛利率(%)(營業毛利)/(營業收入)": "58.50",
+                      "營業利益率(%)(營業利益)/(營業收入)": "48.50"}]
+    eps_listed = [{"年度": "115", "季別": "1", "公司代號": "2330", "基本每股盈餘(元)": "13.94"}]
+    margin_otc = [{"Year": "115", "季別": "1", "SecuritiesCompanyCode": "8299",
+                   "營業收入百萬元": "15223.60", "毛利率": "32.10", "營業利益率": "20.00"}]
+    eps_otc = [{"Year": "115", "季別": "1", "SecuritiesCompanyCode": "8299",
+                "基本每股盈餘": "10.50"}]
+    df = _parse_quarterly_fundamentals(margin_listed, margin_otc, eps_listed, eps_otc)
+    assert df.height == 2
+    tsmc = df.filter(pl.col("stock_id") == "2330").row(0, named=True)
+    assert tsmc["year"] == 2026 and tsmc["quarter"] == 1
+    assert tsmc["gross_margin_pct"] == 58.5 and tsmc["eps"] == 13.94
+    phison = df.filter(pl.col("stock_id") == "8299").row(0, named=True)
+    assert phison["gross_margin_pct"] == 32.1 and phison["eps"] == 10.5
+
+
+def test_load_latest_fundamentals(tmp_path: Path):
+    client = _make_client(tmp_path)
+    assert client.load_latest_fundamentals().is_empty()
+    pl.DataFrame({"stock_id": ["2330"], "year": [2026], "quarter": [1],
+                  "revenue_m": [1.0], "gross_margin_pct": [58.5],
+                  "op_margin_pct": [48.5], "eps": [13.94]}).write_parquet(
+        tmp_path / "fundamentals_2026Q1.parquet")
+    df = client.load_latest_fundamentals()
+    assert df["eps"][0] == 13.94

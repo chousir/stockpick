@@ -48,10 +48,9 @@ def load_market_history(cache_dir: Path, n_days: int = 250) -> pl.DataFrame:
     """純讀日線快取 → (date, stock_id, close, volume)，取最近 n_days 個交易日。
 
     來源（優先序，同日去重 keep first）：
-    1. daily_*.parquet（含 daily_all_*）：全市場日快取，但僅上市（TWSE）
-    2. stock_day_*.parquet：個股月快取（fetch-candidates-history 累積），
-       補上櫃成員——上櫃日線只存在於曾入選候選的個股快取（已知部分覆蓋，
-       見 docs/12 §3 缺口；TPEX 全市場日線未快取）
+    1. daily_*.parquet（含 daily_all_*）：上市全市場日快取
+    2. otc_daily_*.parquet：上櫃全市場日快取（fetch_otc_daily_all 逐日累積）
+    3. stock_day_*.parquet：個股月快取（候選股回補 + backfill-otc-history）
     舊格式缺 volume 時補 null。無快取回空表。
     """
     frames: list[pl.DataFrame] = []
@@ -66,7 +65,7 @@ def load_market_history(cache_dir: Path, n_days: int = 250) -> pl.DataFrame:
             ]
         )
 
-    for pattern in ("daily_*.parquet", "stock_day_*.parquet"):
+    for pattern in ("daily_*.parquet", "otc_daily_*.parquet", "stock_day_*.parquet"):
         for f in sorted(cache_dir.glob(pattern)):
             try:
                 df = pl.read_parquet(f)
@@ -80,6 +79,20 @@ def load_market_history(cache_dir: Path, n_days: int = 250) -> pl.DataFrame:
     merged = pl.concat(frames).unique(subset=["date", "stock_id"], keep="first").sort("date")
     recent = merged["date"].unique().sort(descending=True).head(n_days).to_list()
     return merged.filter(pl.col("date").is_in(recent)).sort(["stock_id", "date"])
+
+
+def otc_institutional_lag(cache_dir: Path) -> tuple[int, str | None, str | None]:
+    """上櫃法人快取落後上市幾個交易日（TPEX 僅供最新日、缺日不可回補）。
+
+    回傳 (落後交易日數, 上市最新日, 上櫃最新日)；以檔名日期比對。
+    供 CLI 顯示警告：落後 ≥1 日代表該期間上櫃股的滾動資金流被低估。
+    """
+    listed = sorted(f.stem.split("_")[-1] for f in cache_dir.glob("institutional_2*.parquet"))
+    otc = sorted(f.stem.split("_")[-1] for f in cache_dir.glob("institutional_otc_*.parquet"))
+    if not listed or not otc:
+        return (0, listed[-1] if listed else None, otc[-1] if otc else None)
+    lag = sum(1 for d in listed if d > otc[-1])
+    return (lag, listed[-1], otc[-1])
 
 
 def compute_subindustry_baskets(

@@ -62,11 +62,24 @@ def data_fetch_twse(
 
     console.print("[bold]抓取三大法人買賣超...[/bold]")
     df_inst = client.fetch_institutional()
-    console.print(f"  法人：{len(df_inst)} 筆")
+    console.print(f"  法人（上市）：{len(df_inst)} 筆")
+
+    # 上櫃法人/日線：TPEX 僅供最新日、缺日不可回補——必須每次 fetch-twse 都抓
+    console.print("[bold]抓取上櫃法人買賣超...[/bold]")
+    df_inst_otc = client.fetch_otc_institutional()
+    console.print(f"  法人（上櫃）：{len(df_inst_otc)} 筆")
+
+    console.print("[bold]抓取上櫃全市場日線...[/bold]")
+    df_otc_daily = client.fetch_otc_daily_all()
+    console.print(f"  上櫃日線：{len(df_otc_daily)} 檔")
 
     console.print("[bold]抓取月營收...[/bold]")
     df_rev = client.fetch_revenue()
     console.print(f"  月營收：{len(df_rev)} 筆")
+
+    console.print("[bold]抓取單季基本面（毛利率/EPS）...[/bold]")
+    df_fund = client.fetch_quarterly_fundamentals()
+    console.print(f"  單季基本面：{len(df_fund)} 檔")
 
     console.print("[green]fetch-twse 完成[/green]")
 
@@ -107,6 +120,54 @@ def data_fetch_institutional_history(
     df = client.fetch_institutional_history(days=days)
     n_days = df["date"].n_unique() if not df.is_empty() else 0
     console.print(f"[green]完成：{n_days} 個交易日、{len(df)} 筆[/green]")
+
+
+@data_app.command("backfill-otc-history")
+def data_backfill_otc_history(
+    months: int = typer.Option(13, "--months", help="每檔回補月數（13≈年線）"),
+    limit: int = typer.Option(0, "--limit", help="只跑前 N 檔（測試用；0=全部）"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """一次性回補上櫃次產業成員的日線歷史（輪動籃子價格軸用，docs/12 §3 缺口）。
+
+    對「concepts.yaml 次產業成員 ∩ 上櫃」逐檔走 TPEX tradingStock（限速 1 秒/請求）。
+    過去月份永久快取——中斷重跑會自動跳過已完成的檔（fast path），天然可續跑。
+    全量首跑約 2-3 小時，建議掛背景；之後 fetch_otc_daily_all 每日累積即可，不需重跑。
+    """
+    import yaml as _yaml
+
+    from tw_screener.analysis.sector_universe import list_subindustries
+    from tw_screener.data.twse import create_client
+
+    client = create_client(settings)
+    with open(settings) as f:
+        _cfg = _yaml.safe_load(f)
+    cache_dir = Path(_cfg["paths"]["cache_dir"]) / "twse"
+
+    members = list_subindustries()
+    otc_files = sorted(cache_dir.glob("otc_industry_*.parquet"))
+    if members.is_empty() or not otc_files:
+        console.print("[red]缺 concepts.yaml 次產業或 otc_industry 快取[/red]")
+        raise typer.Exit(1)
+    import polars as _pl
+
+    otc_ids = set(_pl.read_parquet(otc_files[-1])["stock_id"].to_list())
+    targets = sorted(set(members["stock_id"].to_list()) & otc_ids)
+    if limit > 0:
+        targets = targets[:limit]
+    console.print(f"[bold]上櫃次產業成員回補：{len(targets)} 檔 × {months} 個月[/bold]")
+
+    done = failed = 0
+    for i, sid in enumerate(targets, 1):
+        try:
+            df = client.fetch_stock_history(sid, months=months)
+            done += 1
+            if i % 25 == 0 or i == len(targets):
+                console.print(f"  進度 {i}/{len(targets)}（最新：{sid} {len(df)} 日）")
+        except Exception as e:  # noqa: BLE001 — 單檔失敗不該中斷整批
+            failed += 1
+            console.print(f"[yellow]  {sid} 失敗：{e}[/yellow]")
+    console.print(f"[green]回補完成：成功 {done}、失敗 {failed}[/green]")
 
 
 @data_app.command("fetch-candidates-history")
@@ -782,10 +843,19 @@ def analysis_group(
             if "company_name" in rev_df.columns:
                 name_map.setdefault(sid, str(rr.get("company_name") or ""))
 
+    # 單季基本面（毛利率/EPS）：純讀快取，由 make fetch-twse 累積
+    fund_df = client.load_latest_fundamentals()
+    fundamentals_map: dict[str, dict] = (
+        {str(r["stock_id"]): r for r in fund_df.iter_rows(named=True)}
+        if not fund_df.is_empty()
+        else {}
+    )
+
     csv_path = output_path.parent / "candidates_enriched.csv"
     cand_rows = write_candidates_enriched_csv(
         leaders, themes_long, screener_results, csv_path,
         flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map,
+        fundamentals_map=fundamentals_map,
     )
     # 重疊股重用：庫存/觀察清單同檔一律沿用 candidates 那筆，避免跨 CSV 量比/集中度/成交額分岔
     canonical_rows = {row["stock_id"]: row for row in cand_rows}
@@ -819,7 +889,8 @@ def analysis_group(
         out_csv = output_path.parent / f"{label}_enriched.csv"
         n = write_named_list_csv(
             wl_members, themes_long, wl_synth, out_csv,
-            flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map, holdings_map=hmap,
+            flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map,
+            fundamentals_map=fundamentals_map, holdings_map=hmap,
             canonical_rows=canonical_rows,
         )
         console.print(f"[green]  {label}_enriched.csv：{n} 檔 → {out_csv}[/green]")
@@ -968,6 +1039,17 @@ def report_batch(
 # ─── sector 子指令（次產業資金流向輪動，docs/12-sector-rotation.md） ────────────
 
 
+def _warn_otc_lag(lag_info: tuple[int, str | None, str | None]) -> None:
+    """上櫃法人快取落後上市時印警告（TPEX 缺日不可回補，落後＝上櫃資金流被低估）。"""
+    lag, listed_max, otc_max = lag_info
+    if lag >= 1:
+        console.print(
+            f"[yellow]⚠ 上櫃法人快取落後上市 {lag} 個交易日"
+            f"（上市至 {listed_max}・上櫃至 {otc_max}）——TPEX 缺日不可回補，"
+            f"上櫃股近期資金流被低估；請每交易日跑 make fetch-twse[/yellow]"
+        )
+
+
 @sector_app.command("universe")
 def sector_universe_cmd(
     list_all: bool = typer.Option(False, "--list", help="列出所有次產業與成員"),
@@ -1028,6 +1110,7 @@ def sector_flows_cmd(
     from tw_screener.analysis.rotation import (
         compute_fund_flows,
         load_market_history,
+        otc_institutional_lag,
         rank_flows,
     )
     from tw_screener.analysis.sector_universe import list_subindustries
@@ -1059,6 +1142,7 @@ def sector_flows_cmd(
     if institutional.is_empty():
         console.print("[red]無法人快取（請先 make fetch-twse）[/red]")
         raise typer.Exit(1)
+    _warn_otc_lag(otc_institutional_lag(cache_dir))
 
     volume = (
         market.select(["date", "stock_id", "volume"]) if not market.is_empty() else None
@@ -1111,6 +1195,7 @@ def sector_rotation_cmd(
         compute_fund_flows,
         compute_subindustry_baskets,
         load_market_history,
+        otc_institutional_lag,
     )
     from tw_screener.analysis.sector_universe import (
         list_subindustries,
@@ -1144,6 +1229,7 @@ def sector_rotation_cmd(
     if members.is_empty() or market.is_empty() or institutional.is_empty():
         console.print("[red]缺資料：concepts.yaml / daily 快取 / 法人快取[/red]")
         raise typer.Exit(1)
+    _warn_otc_lag(otc_institutional_lag(cache_dir))
 
     baskets = compute_subindustry_baskets(
         members, market, clip_daily_return_pct=float(rot.get("clip_daily_return_pct", 10.0))

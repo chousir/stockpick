@@ -689,6 +689,7 @@ def _build_enriched_rows(
     screener_results: dict[str, pl.DataFrame],
     flags_cfg: dict | None = None,
     rev_yoy_map: dict | None = None,
+    fundamentals_map: dict | None = None,
 ) -> list[dict]:
     """組「每檔 × 技術/籌碼/估值/基本面 + flags」列（candidates / 庫存 / 觀察 共用）。"""
     if members.is_empty():
@@ -755,6 +756,9 @@ def _build_enriched_rows(
         ma20_price = _lvl(close, m20)
         ma60_price = _lvl(close, m60)
         ryoy = _num(rev_yoy_map.get(sid), 1) if rev_yoy_map else None
+        fund = fundamentals_map.get(sid) if fundamentals_map else None
+        gross_margin = _num(fund.get("gross_margin_pct"), 1) if fund else None
+        eps_q = _num(fund.get("eps"), 2) if fund else None
         amt = _num(r.get("amount_million"), 0)
         pe = _num(pe_map.get(sid), 1)
         pb = _num(pb_map.get(sid), 2)
@@ -811,6 +815,8 @@ def _build_enriched_rows(
                 "pe_ratio": pe,
                 "pb_ratio": pb,
                 "rev_yoy_pct": ryoy,
+                "gross_margin_pct": gross_margin,  # 最新單季毛利率（TWSE/TPEX OpenAPI）
+                "eps_q": eps_q,                    # 最新單季 EPS（元）
                 "volume_lots_today": vlots,
                 "inst_net_lots": inst_lots,
                 "inst_pct20d": inst_pct20d,
@@ -830,6 +836,7 @@ def write_candidates_enriched_csv(
     path: Path,
     flags_cfg: dict | None = None,
     rev_yoy_map: dict | None = None,
+    fundamentals_map: dict | None = None,
 ) -> list[dict]:
     """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
 
@@ -838,7 +845,9 @@ def write_candidates_enriched_csv(
     排雷、把腦力留給判斷。缺值（無快取）寫空白 → 標「需查證」而非編造。回傳已建立的列（list[dict]，
     供庫存/觀察清單重用同一筆來源值以保持跨 CSV 一致）。
     """
-    rows = _build_enriched_rows(members, themes_long, screener_results, flags_cfg, rev_yoy_map)
+    rows = _build_enriched_rows(
+        members, themes_long, screener_results, flags_cfg, rev_yoy_map, fundamentals_map
+    )
     if not rows:
         return []
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -861,6 +870,8 @@ _CANONICAL_REUSE_FIELDS = (
     "pe_ratio",
     "pb_ratio",
     "rev_yoy_pct",
+    "gross_margin_pct",
+    "eps_q",
     "volume_lots_today",
     "inst_net_lots",
     "inst_pct20d",
@@ -878,6 +889,7 @@ def write_named_list_csv(
     *,
     flags_cfg: dict | None = None,
     rev_yoy_map: dict | None = None,
+    fundamentals_map: dict | None = None,
     holdings_map: dict | None = None,
     canonical_rows: dict[str, dict] | None = None,
 ) -> int:
@@ -888,7 +900,9 @@ def write_named_list_csv(
     canonical_rows={stock_id: candidates_row} 時，重疊股重用 candidates 的市場/籌碼/估值/flags
     欄位，使三份 CSV 對同一檔股票數字一致。回傳寫入檔數。
     """
-    rows = _build_enriched_rows(members, themes_long, screener_results, flags_cfg, rev_yoy_map)
+    rows = _build_enriched_rows(
+        members, themes_long, screener_results, flags_cfg, rev_yoy_map, fundamentals_map
+    )
     if not rows:
         return 0
     if canonical_rows:
