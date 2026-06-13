@@ -220,6 +220,80 @@ def test_render_cp_section_empty_when_all_null(table: pl.DataFrame, tmp_path: Pa
     assert "本週無正分 CP 候選" in md
 
 
+# ─── A2 資金動能新鮮度標 ──────────────────────────────────────────────────────
+
+
+def _accel_membership() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "sub_industry": ["甲流入加速", "乙流入放緩", "丙流出轉向"],
+            "stock_id": ["1111", "2222", "3333"],
+        }
+    )
+
+
+def _accel_institutional() -> pl.DataFrame:
+    """甲：流入逐日放大（momentum>0）；乙：流入逐日縮小（<0）；丙：流出但收斂（淨負、momentum>0）。"""
+    rows = []
+    for i, d in enumerate(_dates()):
+        for sid, net in [("1111", 100 + i * 10), ("2222", 3000 - i * 10), ("3333", -2000 + i * 10)]:
+            rows.append(
+                {"date": d, "stock_id": sid, "foreign_net": net, "trust_net": net,
+                 "dealer_net": 0, "total_net": net}
+            )
+    return pl.DataFrame(rows)
+
+
+def _accel_price() -> pl.DataFrame:
+    """甲/乙 尾段拉升（已漲→主升續勢）；丙走平（未漲→冷卻，作反轉前哨）。"""
+    ds = _dates()
+    rows = []
+    for sid, flat in [("1111", False), ("2222", False), ("3333", True)]:
+        px = 100.0
+        for i, d in enumerate(ds):
+            if not flat and i >= N - 20:
+                px *= 1.015
+            rows.append({"date": d, "stock_id": sid, "close": px, "volume": 1000})
+    return pl.DataFrame(rows)
+
+
+@pytest.fixture()
+def accel_table() -> pl.DataFrame:
+    members = _accel_membership()
+    market = _accel_price()
+    flows = compute_fund_flows(
+        members, _accel_institutional(),
+        volume_history=market.select(["date", "stock_id", "volume"]),
+        short_window=5, long_window=20,
+    )
+    return build_rotation_table(
+        flows, compute_subindustry_baskets(members, market),
+        short_window=5, long_window=20, entry_signal={},
+        position_window=60, position_low_pct=10.0, min_members=1,
+    )
+
+
+def test_freshness_sign(accel_table: pl.DataFrame):
+    f = {r["sub_industry"]: r["freshness"] for r in accel_table.iter_rows(named=True)}
+    assert f["甲流入加速"] == "加速"   # 流入放大 → momentum>0
+    assert f["乙流入放緩"] == "放緩"   # 流入縮小 → momentum<0
+    assert f["丙流出轉向"] == "加速"   # 淨流出但收斂 → momentum>0（反轉前哨）
+
+
+def test_render_freshness_and_reversal(accel_table: pl.DataFrame, tmp_path: Path):
+    md = render_rotation_report(
+        accel_table, week_tag="2026-W24", output_dir=tmp_path / "a2",
+        short_window=5, long_window=20, entry_signal={}, position_low_pct=10.0,
+    ).read_text(encoding="utf-8")
+    assert "新鮮度" in md                       # CP 候選表新增欄
+    assert "甲流入加速（加速中）" in md          # 主升續勢標新鮮度
+    assert "乙流入放緩（放緩中）" in md
+    # 丙＝流出×未漲（冷卻）＋動能轉正 → 反轉前哨（僅冷卻象限掛此標，出貨警訊不掛）
+    assert "丙流出轉向" in md and "反轉前哨" in md
+    for banned in ("目標價", "強烈建議", "飆股", "保證"):
+        assert banned not in md
+
+
 def test_delta_rank_with_prev_snapshot(tmp_path: Path, table: pl.DataFrame):
     # 上週快照：甲排第 3 → 本週第 1 → ΔRank +2
     prev_dir = tmp_path / "2026-W23"

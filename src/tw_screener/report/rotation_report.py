@@ -90,6 +90,10 @@ def build_rotation_table(
     cp_score（A1 連續補漲分數）＝資金 z ×「位階剩餘空間」room，
     room = clip(1 − above_low_pct / cp_position_ceiling, 0, 1)。
     錢進越多（z 高）× 越貼低點（room 高）→ CP 越高（補漲機會）。z 或位階缺 → null。
+
+    freshness（A2 資金動能新鮮度）＝ flow_momentum 正負：「加速」（動能轉強，
+    流入續勢／流出收斂）vs「放緩」（動能轉弱）。流入象限 加速＝新鮮、放緩＝退潮；
+    流出象限 加速＝資金轉向（反轉前哨）。動能 0 或缺 → null。
     """
     if flows.is_empty() or baskets.is_empty():
         return pl.DataFrame()
@@ -142,7 +146,15 @@ def build_rotation_table(
         cp_expr = (pl.col(z_col) * room).round(2)
     else:  # z 欄缺（理論上不會，standardize_signals 必產）→ 全 null，誠實降級
         cp_expr = pl.lit(None, dtype=pl.Float64)
-    return table.with_columns(cp_expr.alias("cp_score"))
+    # A2：資金動能新鮮度＝flow_momentum（=Tide 資金加速度）正負
+    fresh_expr = (
+        pl.when(pl.col("flow_momentum") > 0)
+        .then(pl.lit("加速"))
+        .when(pl.col("flow_momentum") < 0)
+        .then(pl.lit("放緩"))
+        .otherwise(pl.lit(None, dtype=pl.Utf8))
+    )
+    return table.with_columns(cp_expr.alias("cp_score"), fresh_expr.alias("freshness"))
 
 
 def build_participation(

@@ -3,6 +3,7 @@
 {% macro marks(r) %}{{ "★" if r.entry_triggered else "" }}{{ "◆" if r.confirm_triggered else "" }}{% endmacro %}
 {% macro delta(r) %}{{ "%+d"|format(r.rank_delta) if r.rank_delta is not none else "—" }}{% endmacro %}
 {% macro conc(r) %}{{ "%.2f%%"|format(r["flow_concentration_" ~ lw ~ "d"] * 100) if r["flow_concentration_" ~ lw ~ "d"] is not none else "—" }}{% endmacro %}
+{% macro fresh(r) %}{{ "加速中" if r.freshness == "加速" else ("放緩中" if r.freshness == "放緩" else "—") }}{% endmacro %}
 # {{ week_tag }} 次產業資金流向輪動
 
 > 資料日期：{{ data_date }}・法人滾動視窗 {{ s }}/{{ lw }} 交易日・位階基準：距 60 日低點 {{ position_low_pct }}%
@@ -37,12 +38,13 @@
 ### 🎯 CP 候選排名（連續分數＝資金 z × 位階剩餘空間）
 
 {% if cp_rows -%}
-| # | 次產業 | CP 分數 | 資金z({{ lw }}d) | 距低 | 象限 | 訊號 |
-|---|---|---|---|---|---|---|
+| # | 次產業 | CP 分數 | 資金z({{ lw }}d) | 距低 | 新鮮度 | 象限 | 訊號 |
+|---|---|---|---|---|---|---|---|
 {% for r in cp_rows -%}
-| {{ loop.index }} | {{ r.sub_industry }} | {{ "%.2f"|format(r.cp_score) }} | {{ "%.2f"|format(r["net_flow_" ~ lw ~ "d_z"]) if r["net_flow_" ~ lw ~ "d_z"] is not none else "—" }} | {{ pct(r.above_low_pct) }} | {{ r.quadrant }} | {{ marks(r) }} |
+| {{ loop.index }} | {{ r.sub_industry }} | {{ "%.2f"|format(r.cp_score) }} | {{ "%.2f"|format(r["net_flow_" ~ lw ~ "d_z"]) if r["net_flow_" ~ lw ~ "d_z"] is not none else "—" }} | {{ pct(r.above_low_pct) }} | {{ fresh(r) }} | {{ r.quadrant }} | {{ marks(r) }} |
 {% endfor %}
 > CP 分數 = 資金 z 分數 × 位階剩餘空間 room（room = max(0, 1 − 距低% / {{ cp_ceiling }}%)）。**錢進越多 × 越貼低點 → CP 越高（補漲機會）**；但「錢進、價不動」也可能是賣壓沉重承接（接刀），族群訊號僅供觀察，需個股層籌碼確認。
+> 新鮮度＝資金動能（{{ s }}日 vs 前 {{ s }}日，即資金加速度）方向：**加速中＝資金續強（CP 仍新鮮）、放緩中＝退潮（恐已來不及）**。
 {%- else -%}
 本週無正分 CP 候選（無顯著資金流入、或流入族群位階皆已偏高）。
 {%- endif %}
@@ -77,7 +79,7 @@ quadrantChart
 
 {% if q_trend -%}
 {% for r in q_trend -%}
-- {{ r.sub_industry }}：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}・5日籃子 {{ pct(r.basket_ret_5d_pct) }} {{ marks(r) }}
+- {{ r.sub_industry }}（{{ fresh(r) }}）：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}・5日籃子 {{ pct(r.basket_ret_5d_pct) }} {{ marks(r) }}
 {% endfor %}
 {%- else -%}
 （無）
@@ -97,6 +99,10 @@ quadrantChart
 
 {% if q_cool -%}
 {{ q_cool | map(attribute="sub_industry") | join("、") }}
+{% set cool_rev = q_cool | selectattr("freshness", "equalto", "加速") | map(attribute="sub_industry") | list -%}
+{% if cool_rev %}
+> ⚠反轉前哨（低位階＋資金流出收斂・需確認，對應 Label-3 超跌反轉）：{{ cool_rev | join("、") }}
+{%- endif %}
 {%- else -%}
 （無）
 {%- endif %}
