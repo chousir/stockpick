@@ -94,8 +94,11 @@ make report STOCK_ID=2330
 | `make fetch-stock STOCK_ID=2330` | 抓單檔完整資料 | 臨時看一檔沒快取的股 |
 | `make fetch-institutional-history DAYS=20` | 回補近 N 日法人 | 法人快取斷檔時 |
 | `make build-themes` | 爬 Yahoo 概念股更新 concepts.yaml | 每月或新題材出現時（`DRY=1` 預演） |
+| `make audit-concepts` | 清查 concepts.yaml 無價成員（不改檔） | 久久檢查興櫃/下市/誤標 |
+| `bash scripts/fetch_cron.sh` | 盤後抓全市場資料（cron 用，見 §12） | 每交易日（排程或手動） |
 | `make test` / `make lint` / `make typecheck` | 測試 / ruff / mypy | 開發時 |
 | `uv run tw-screener sector universe --list` | 列出次產業宇宙與成員 | 檢查 concepts.yaml 覆蓋 |
+| `uv run tw-screener sector universe --audit` | 列出近日無價的次產業成員 | 清 concepts.yaml 前先看 |
 | `uv run tw-screener sector flows --week current --dry` | 終端機直接印資金流排名 | 不想開報表、快速看 |
 
 ---
@@ -208,6 +211,30 @@ FOMC/CPI/台股結算/法說等市場級事件 → `group_analysis.md` Section 0
 
 候選新訊號源（主動式 ETF 每日持股異動）。資料公開但後端 geo-fence 台灣，完整抓取需在
 台灣本機跑，目前擱置、與主流程隔離（見 `poc/active_etf/README.md`）。
+
+### 12. 每日資料排程（cron · 上櫃法人不可回補）
+
+上櫃法人（TPEX）只供最新交易日、**缺日不可回補**（TPEX 端無歷史日期參數）。沒在當天抓那天的
+上櫃資金流就永久缺、rotation 上櫃籃子被低估。`make week` 只在你想分析時跑、無法保證每交易日
+都抓到，故用 cron 每交易日盤後固定跑 `fetch-twse`：
+
+`scripts/fetch_cron.sh` 已備好（解析專案路徑、補 cron 精簡 PATH、`flock` 防重入、寫
+`logs/cron_fetch.log`）。T86 法人收盤後約 90 分鐘、**15:00 起穩定**（docs/02），故排 18:00 穩妥；
+crontab 加一行（交易日 18:00，盤後法人/月營收都已公布；依系統時區）：
+
+```bash
+crontab -e
+# ↓ 路徑換成你的絕對路徑
+0 18 * * 1-5  /bin/bash /path/to/stockpick/scripts/fetch_cron.sh
+```
+
+**WSL2 注意**：cron 預設不自動啟動，三選一——
+① 每次開 WSL 後 `sudo service cron start`（關 WSL 就停）；
+② `/etc/wsl.conf` 加 `[boot]` 段、設 `systemd=true` 後用 systemd 管 cron（重開 WSL 生效）；
+③ 用 Windows 工作排程器呼叫 `wsl.exe -d <distro> -- /bin/bash /path/to/stockpick/scripts/fetch_cron.sh`（WSL 沒開機也會被喚起，最穩）。
+
+漏抓自我檢查：`make rotation` / `sector flows` 會印「上櫃法人快取落後上市 N 個交易日」警告；
+看到就手動 `make fetch-twse`（但只能補到最新日，更早的缺口補不回）。
 
 ---
 
