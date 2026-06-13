@@ -1270,6 +1270,7 @@ def sector_rotation_cmd(
         cfg = yaml.safe_load(f)
     rot = cfg.get("rotation", {})
     quad = rot.get("quadrant", {})
+    cp_ceiling = float(rot.get("cp_score", {}).get("position_ceiling", 60.0))
     short_w = int(rot.get("short_window", 5))
     long_w = int(rot.get("long_window", 20))
     history_days = int(rot.get("history_days", 250))
@@ -1308,6 +1309,7 @@ def sector_rotation_cmd(
         entry_signal=rot.get("entry_signal", {}),
         position_window=int(quad.get("position_window", 60)),
         position_low_pct=float(quad.get("position_low_pct", 10.0)),
+        cp_position_ceiling=cp_ceiling,
         rank_by=rot.get("rank_by"),
         min_members=min_members,
         prev=prev,
@@ -1357,6 +1359,7 @@ def sector_rotation_cmd(
         long_window=long_w,
         entry_signal=rot.get("entry_signal", {}),
         position_low_pct=float(quad.get("position_low_pct", 10.0)),
+        cp_position_ceiling=cp_ceiling,
         top_n=top_n,
         data_date=str(flows["date"].max()),
         participation=participation,

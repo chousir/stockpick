@@ -32,7 +32,20 @@
 本週無「流出 × 已漲」次產業。
 {%- endif %}
 
-## 3. 輪動四象限
+## 3. 輪動四象限與 CP 候選
+
+### 🎯 CP 候選排名（連續分數＝資金 z × 位階剩餘空間）
+
+{% if cp_rows -%}
+| # | 次產業 | CP 分數 | 資金z({{ lw }}d) | 距低 | 象限 | 訊號 |
+|---|---|---|---|---|---|---|
+{% for r in cp_rows -%}
+| {{ loop.index }} | {{ r.sub_industry }} | {{ "%.2f"|format(r.cp_score) }} | {{ "%.2f"|format(r["net_flow_" ~ lw ~ "d_z"]) if r["net_flow_" ~ lw ~ "d_z"] is not none else "—" }} | {{ pct(r.above_low_pct) }} | {{ r.quadrant }} | {{ marks(r) }} |
+{% endfor %}
+> CP 分數 = 資金 z 分數 × 位階剩餘空間 room（room = max(0, 1 − 距低% / {{ cp_ceiling }}%)）。**錢進越多 × 越貼低點 → CP 越高（補漲機會）**；但「錢進、價不動」也可能是賣壓沉重承接（接刀），族群訊號僅供觀察，需個股層籌碼確認。
+{%- else -%}
+本週無正分 CP 候選（無顯著資金流入、或流入族群位階皆已偏高）。
+{%- endif %}
 
 {% if chart_points -%}
 ```mermaid

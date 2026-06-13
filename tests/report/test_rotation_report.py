@@ -130,6 +130,96 @@ def test_render_report_and_csv(table: pl.DataFrame, tmp_path: Path):
     assert {"sub_industry", "radar_rank", "quadrant"}.issubset(csv.columns)
 
 
+# ─── A1 連續 CP 補漲分數 ──────────────────────────────────────────────────────
+
+
+def _cp_membership() -> pl.DataFrame:
+    """兩檔同樣強流入，但甲走平（room≈1）、乙已漲（room<1）→ 隔離 room 效果。"""
+    return pl.DataFrame(
+        {"sub_industry": ["甲流入未漲", "乙流入已漲"], "stock_id": ["1111", "2222"]}
+    )
+
+
+def _cp_institutional() -> pl.DataFrame:
+    """兩檔『相同』的帶波動流入序列（std>0 → z 有定義），尾段加大 → 末日 z>0。"""
+    rows = []
+    for i, d in enumerate(_dates()):
+        net = 300 + 150 * ((i % 7) - 3) + (300 if i >= N - 20 else 0)
+        for sid in ("1111", "2222"):
+            rows.append(
+                {"date": d, "stock_id": sid, "foreign_net": net, "trust_net": net,
+                 "dealer_net": 0, "total_net": net}
+            )
+    return pl.DataFrame(rows)
+
+
+def _cp_price() -> pl.DataFrame:
+    ds = _dates()
+    rows = []
+    for sid, flat in [("1111", True), ("2222", False)]:
+        px = 100.0
+        for i, d in enumerate(ds):
+            if not flat and i >= N - 20:
+                px *= 1.015  # 尾段拉升 → 距低點變大 → room 變小
+            rows.append({"date": d, "stock_id": sid, "close": px, "volume": 1000})
+    return pl.DataFrame(rows)
+
+
+@pytest.fixture()
+def cp_table() -> pl.DataFrame:
+    members = _cp_membership()
+    market = _cp_price()
+    flows = compute_fund_flows(
+        members, _cp_institutional(),
+        volume_history=market.select(["date", "stock_id", "volume"]),
+        short_window=5, long_window=20,
+    )
+    return build_rotation_table(
+        flows, compute_subindustry_baskets(members, market),
+        short_window=5, long_window=20, entry_signal={},
+        position_window=60, position_low_pct=10.0, cp_position_ceiling=60.0,
+        min_members=1,
+    )
+
+
+def test_cp_score_room_favours_unrisen(cp_table: pl.DataFrame):
+    rows = {r["sub_industry"]: r for r in cp_table.iter_rows(named=True)}
+    cp_low = rows["甲流入未漲"]["cp_score"]
+    cp_high = rows["乙流入已漲"]["cp_score"]
+    # 流入強度相同（z 同），甲位階低 room 大 → CP 應高於已漲的乙
+    assert cp_low is not None and cp_high is not None
+    assert cp_low > cp_high > 0
+
+
+def test_cp_score_null_follows_z(table: pl.DataFrame):
+    # 誠實降級：z 缺（warmup / std=0）→ cp_score 也缺；此 fixture 位階皆有值，故 cp null ⇔ z null
+    assert "cp_score" in table.columns
+    assert table["above_low_pct"].null_count() == 0
+    assert table["cp_score"].is_null().to_list() == table["net_flow_20d_z"].is_null().to_list()
+
+
+def test_render_cp_section(cp_table: pl.DataFrame, tmp_path: Path):
+    md_path = render_rotation_report(
+        cp_table, week_tag="2026-W24", output_dir=tmp_path / "cp",
+        short_window=5, long_window=20, entry_signal={}, position_low_pct=10.0,
+        cp_position_ceiling=60.0,
+    )
+    md = md_path.read_text(encoding="utf-8")
+    assert "🎯 CP 候選排名" in md
+    assert "甲流入未漲" in md  # 正分候選入榜
+    assert "room = max(0, 1 −" in md  # 公式註腳
+    for banned in ("目標價", "強烈建議", "飆股", "保證"):
+        assert banned not in md
+
+
+def test_render_cp_section_empty_when_all_null(table: pl.DataFrame, tmp_path: Path):
+    md = render_rotation_report(
+        table, week_tag="2026-W24", output_dir=tmp_path / "cpx",
+        short_window=5, long_window=20, entry_signal={}, position_low_pct=10.0,
+    ).read_text(encoding="utf-8")
+    assert "本週無正分 CP 候選" in md
+
+
 def test_delta_rank_with_prev_snapshot(tmp_path: Path, table: pl.DataFrame):
     # 上週快照：甲排第 3 → 本週第 1 → ΔRank +2
     prev_dir = tmp_path / "2026-W23"

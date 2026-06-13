@@ -80,11 +80,17 @@ def build_rotation_table(
     entry_signal: dict,
     position_window: int = 60,
     position_low_pct: float = 10.0,
+    cp_position_ceiling: float = 60.0,
     rank_by: str | None = None,
     min_members: int = 5,
     prev: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
-    """組輪動主表：流向 × 位階 × 象限 × 校準訊號 × ΔRank（每次產業一列）。"""
+    """組輪動主表：流向 × 位階 × 象限 × CP 分數 × 校準訊號 × ΔRank（每次產業一列）。
+
+    cp_score（A1 連續補漲分數）＝資金 z ×「位階剩餘空間」room，
+    room = clip(1 − above_low_pct / cp_position_ceiling, 0, 1)。
+    錢進越多（z 高）× 越貼低點（room 高）→ CP 越高（補漲機會）。z 或位階缺 → null。
+    """
     if flows.is_empty() or baskets.is_empty():
         return pl.DataFrame()
     s, lw = short_window, long_window
@@ -115,7 +121,7 @@ def build_rotation_table(
 
     inflow = pl.col(f"net_flow_{lw}d") > 0
     risen = pl.col("above_low_pct") > position_low_pct
-    return table.with_columns(
+    table = table.with_columns(
         pl.when(inflow & ~risen)
         .then(pl.lit(Q_NEXT))
         .when(inflow & risen)
@@ -129,6 +135,14 @@ def build_rotation_table(
         (pl.col(f"net_flow_{s}d") / 1000).round(0).alias(f"net_flow_{s}d_lots"),
         (pl.col("flow_momentum") / 1000).round(0).alias("flow_momentum_lots"),
     )
+    # A1：連續 CP 補漲分數＝資金 z（跨族群可比）× 位階剩餘空間 room
+    z_col = f"net_flow_{lw}d_z"
+    if z_col in table.columns:
+        room = (1 - pl.col("above_low_pct") / cp_position_ceiling).clip(0.0, 1.0)
+        cp_expr = (pl.col(z_col) * room).round(2)
+    else:  # z 欄缺（理論上不會，standardize_signals 必產）→ 全 null，誠實降級
+        cp_expr = pl.lit(None, dtype=pl.Float64)
+    return table.with_columns(cp_expr.alias("cp_score"))
 
 
 def build_participation(
@@ -257,6 +271,7 @@ def render_rotation_report(
     long_window: int,
     entry_signal: dict,
     position_low_pct: float,
+    cp_position_ceiling: float = 60.0,
     top_n: int = 10,
     data_date: str = "",
     participation: list[dict] | None = None,
@@ -276,6 +291,12 @@ def render_rotation_report(
         q: table.filter(pl.col("quadrant") == q).sort("radar_rank")
         for q in (Q_NEXT, Q_TREND, Q_DISTRIBUTE, Q_COOL)
     }
+    # A1：CP 候選＝正分（資金流入 × 仍有位階空間）取前 top_n，跨象限排序
+    cp_rows = (
+        list(_rows(table.filter(pl.col("cp_score") > 0).sort("cp_score", descending=True).head(top_n)))
+        if "cp_score" in table.columns
+        else []
+    )
     sig_label = (
         f"{entry_signal.get('signal')}"
         f"（{entry_signal.get('mode', 'z')}>{entry_signal.get('threshold')}"
@@ -294,6 +315,8 @@ def render_rotation_report(
         lw=lw,
         top_n=top_n,
         position_low_pct=position_low_pct,
+        cp_ceiling=cp_position_ceiling,
+        cp_rows=cp_rows,
         sig_label=sig_label,
         confirm_label=entry_signal.get("confirm_signal", ""),
         top_rows=list(_rows(table.sort("radar_rank").head(top_n))),

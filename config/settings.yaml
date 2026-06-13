@@ -119,6 +119,8 @@ rotation:
   quadrant:                  # R3 四象限：資金軸＝長窗淨流正負；價格軸＝籃子位階
     position_window: 60      # 位階回看（交易日）
     position_low_pct: 10.0   # 距 60 日低 ≤ 此值＝「未漲」（與 R2 起漲 X=10% 對齊）
+  cp_score:                  # A1 連續 CP 補漲分數＝資金 z × 位階剩餘空間 room
+    position_ceiling: 60.0   # room = max(0, 1 − 距低% / 此值)；距低 ≥ 此值 → 補漲空間視為 0
   entry_signal:              # ★ R2 校準結果（2026-06-11・資料 2025-05-28~2026-06-10・34 起漲點）
     signal: trust_flow_20d   # 投信 20 日資金流：跨起漲定義（X=10/12%）最穩健的領先訊號
     mode: z                  # 門檻為自身 60 日滾動 z 分數（次產業間規模可比）
