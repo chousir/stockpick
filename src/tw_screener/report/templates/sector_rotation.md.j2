@@ -34,6 +34,22 @@
 
 ## 3. 輪動四象限
 
+{% if chart_points -%}
+```mermaid
+quadrantChart
+    title 次產業資金流向 × 位階四象限
+    x-axis 資金流出 --> 資金流入
+    y-axis 位階低（未漲） --> 位階高（已漲）
+    quadrant-1 主升續勢
+    quadrant-2 出貨警訊
+    quadrant-3 冷卻觀望
+    quadrant-4 下一棒候選
+{% for p in chart_points %}    "{{ p.label }}": [{{ p.x }}, {{ p.y }}]
+{% endfor -%}
+```
+> 點位＝各次產業在「資金流向(x)×位階(y)」的**相對**座標（同 Section 1 數據；x=0.5 為淨流轉正、y=0.5 為位階門檻 {{ position_low_pct }}%）。**右下「下一棒候選」象限為重點**——資金已流入但價格未漲。僅列資金流入前 {{ top_n }} ＋出貨警訊次產業，數值見下方各象限與 Section 1。
+
+{% endif -%}
 ### 🟢 下一棒候選（流入 × 未漲・重點觀察）
 
 {% if q_next -%}

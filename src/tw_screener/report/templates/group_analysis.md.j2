@@ -133,17 +133,9 @@
 
 <!-- TODO: Claude 補寫 -->
 
-## 5. 族群輪動機械基準（非個股品質排名・非挑股池）
+## 5. 族群輪動機械基準（已停用為挑股池）
 
-> ⚠️ 本清單純由系統公式排序（0.6×族群強度＋0.3×族群內排名＋0.1×多策略命中，**不含個股動能/籌碼/估值**），只反映「強族群的族群內前段班」，會把過熱、籌碼差的大族群龍頭排到前面。**僅供族群輪動參考，切勿當挑股池或進場優先序**；個股優劣請看 Section 6 深度解讀與 candidates_enriched.csv。
-
-{% if priority_stocks -%}
-{% for stock in priority_stocks -%}
-{{ stock.rank }}. **{{ stock.stock_id }} {{ stock.name }}**（族群 #{{ stock.group_rank }} {{ stock.industry_name }}・族群內 #{{ stock.rank_in_group }}{% if stock.strategy_count >= 2 %}・{{ stock.strategy_str }}{% endif %}）
-{% endfor %}
-{% else -%}
-（無足夠資料產生推薦清單）
-{% endif %}
+> ⚠️ 純系統公式排序（0.6×族群強度＋0.3×族群內排名＋0.1×多策略命中，**完全不含個股動能/籌碼/估值**），會把過熱、籌碼差的大族群龍頭捧到前面。**此節已不再列個股名單**以免被誤當進場優先序（docs/11 已 ⛔）——挑股一律改看 **Section 6 領先次產業深度解讀 ＋ candidates_enriched.csv 全宇宙 ＋ Section 2.8 輪動雷達**。
 
 ---
 

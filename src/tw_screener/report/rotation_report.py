@@ -211,6 +211,44 @@ def build_participation(
     return out
 
 
+def _quadrant_chart_points(
+    rows: list[dict], long_window: int, position_low_pct: float
+) -> list[dict]:
+    """把次產業 (淨流, 位階) 轉成 Mermaid quadrantChart 的 [0,1] 相對座標（Section 3 象限圖）。
+
+    x 軸＝資金流出→流入：x=0.5 對齊淨流=0；y 軸＝位階低→高：y=0.5 對齊門檻 position_low_pct。
+    如此確保點落入與 `quadrant` 欄一致的象限。幅度以本批最大絕對值正規化（避免「股」單位讓點全擠在
+    中線），夾限 [0.04, 0.96]。同次產業取首見、缺淨流或位階者略過。
+    """
+    flow_col = f"net_flow_{long_window}d"
+    seen: set[str] = set()
+    cand: list[tuple[str, float, float]] = []
+    for r in rows:
+        sub = r.get("sub_industry")
+        nf = r.get(flow_col)
+        al = r.get("above_low_pct")
+        if sub is None or sub in seen or nf is None or al is None:
+            continue
+        seen.add(str(sub))
+        cand.append((str(sub), float(nf), float(al)))
+    if not cand:
+        return []
+    max_nf = max((abs(nf) for _, nf, _ in cand), default=0.0) or 1.0
+    max_d = max((abs(al - position_low_pct) for _, _, al in cand), default=0.0) or 1.0
+
+    def _clamp(v: float) -> float:
+        return round(min(0.96, max(0.04, v)), 3)
+
+    return [
+        {
+            "label": sub,
+            "x": _clamp(0.5 + 0.42 * nf / max_nf),
+            "y": _clamp(0.5 + 0.42 * (al - position_low_pct) / max_d),
+        }
+        for sub, nf, al in cand
+    ]
+
+
 def render_rotation_report(
     table: pl.DataFrame,
     week_tag: str,
@@ -243,6 +281,11 @@ def render_rotation_report(
         f"（{entry_signal.get('mode', 'z')}>{entry_signal.get('threshold')}"
         f"{'・動能>0' if entry_signal.get('require_momentum') else ''}）"
     )
+    # Section 3 象限圖：取「資金流入前 N（含下一棒/主升）＋出貨警訊」兩組，去重後算相對座標
+    chart_rows = list(_rows(table.sort("radar_rank").head(top_n))) + list(
+        _rows(quadrants[Q_DISTRIBUTE])
+    )
+    chart_points = _quadrant_chart_points(chart_rows, lw, position_low_pct)
     # lstrip：模板開頭 macro 定義行會殘留空行
     md = tpl.render(
         week_tag=week_tag,
@@ -258,6 +301,7 @@ def render_rotation_report(
         q_next=list(_rows(quadrants[Q_NEXT])),
         q_trend=list(_rows(quadrants[Q_TREND])),
         q_cool=list(_rows(quadrants[Q_COOL])),
+        chart_points=chart_points,
         triggered=list(_rows(table.filter(pl.col("entry_triggered")).sort("radar_rank"))),
         has_prev=table["rank_delta"].null_count() < table.height if not table.is_empty() else False,
         participation=participation or [],
