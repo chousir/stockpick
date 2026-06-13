@@ -1034,13 +1034,20 @@ def _warn_otc_lag(lag_info: tuple[int, str | None, str | None]) -> None:
 @sector_app.command("universe")
 def sector_universe_cmd(
     list_all: bool = typer.Option(False, "--list", help="列出所有次產業與成員"),
+    audit: bool = typer.Option(
+        False, "--audit", help="清查：列出近日無日線收盤的次產業成員（興櫃/下市/誤標）"
+    ),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
-    """次產業宇宙總覽：concepts.yaml 手標次產業 + TWSE 28 類對照覆蓋率（純讀快取）。"""
+    """次產業宇宙總覽：concepts.yaml 手標次產業 + TWSE 28 類對照覆蓋率（純讀快取）。
+
+    --audit 另比對日線快取，列出無價成員供手動清 concepts.yaml（本指令不改檔）。
+    """
     import polars as pl
     import yaml
 
     from tw_screener.analysis.sector_universe import (
+        audit_priceless_members,
         list_subindustries,
         load_industry_mapping,
     )
@@ -1077,6 +1084,65 @@ def sector_universe_cmd(
         for sub, n in counts.iter_rows():
             sample = members.filter(pl.col("sub_industry") == sub)["stock_id"].head(6)
             console.print(f"  {sub}（{n} 檔）：{', '.join(sample)}{' …' if n > 6 else ''}")
+
+    if audit:
+        from tw_screener.analysis.rotation import load_market_history
+
+        rot = cfg.get("rotation", {})
+        lookback = int(rot.get("audit_lookback_days", 20))
+        market = load_market_history(cache_dir, n_days=lookback)
+        if market.is_empty():
+            console.print(
+                "[yellow]無日線快取（daily_*/otc_daily_*），無法清查無價成員；"
+                "請先 make fetch-twse[/yellow]"
+            )
+            return
+        priced = set(market["stock_id"].unique().to_list())
+        priceless = audit_priceless_members(members, priced)
+        n_priceless = priceless["stock_id"].n_unique()
+        console.print(
+            f"\n[bold]── 清查：近 {lookback} 交易日無日線收盤的次產業成員 ──[/bold]"
+        )
+        if priceless.is_empty():
+            console.print("[green]全數有價，無需清理[/green]")
+            return
+        console.print(
+            f"[yellow]{n_priceless}/{n_stocks} 檔無價（{n_priceless / n_stocks:.0%}）"
+            "——多為興櫃/下市/誤標，會讓籃子悄悄縮水[/yellow]"
+        )
+        # 受影響次產業（縮水家數 / 標記家數），按縮水比例排序
+        impact = (
+            priceless.group_by("sub_industry")
+            .agg(pl.col("stock_id").n_unique().alias("priceless"))
+            .join(
+                members.group_by("sub_industry").agg(
+                    pl.col("stock_id").n_unique().alias("tagged")
+                ),
+                on="sub_industry",
+                how="left",
+            )
+            .with_columns((pl.col("priceless") / pl.col("tagged")).alias("ratio"))
+            .sort("ratio", descending=True)
+        )
+        for r in impact.iter_rows(named=True):
+            console.print(
+                f"  {r['sub_industry']}：{r['priceless']}/{r['tagged']} 縮水（{r['ratio']:.0%}）"
+            )
+        # 逐檔（一檔多標籤併列），供手動定位 concepts.yaml
+        per_stock = priceless.group_by("stock_id").agg(
+            pl.col("sub_industry").sort().str.join("、").alias("labels")
+        ).sort("stock_id")
+        name_map = (
+            dict(industry.select(["stock_id", "stock_name"]).iter_rows())
+            if not industry.is_empty() and "stock_name" in industry.columns
+            else {}
+        )
+        console.print(
+            "[dim]逐檔（手動從 config/concepts.yaml 移除確認無誤者；本指令不改檔）：[/dim]"
+        )
+        for r in per_stock.iter_rows(named=True):
+            nm = name_map.get(r["stock_id"], "")
+            console.print(f"  {r['stock_id']} {nm}　[{r['labels']}]")
 
 
 @sector_app.command("flows")

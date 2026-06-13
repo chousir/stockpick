@@ -1,6 +1,7 @@
 .PHONY: init sync test test-unit test-integration lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry \
-        group leaders report week weekend backtest-strategies rotation-calib rotation backfill-otc-history
+        group leaders report week weekend backtest-strategies rotation-calib rotation backfill-otc-history \
+        audit-concepts
 
 # ─── 環境 ────────────────────────────────────────────────────────────────────
 
@@ -84,6 +85,9 @@ group:  ## 跑族群分析，產出 group_analysis.md
 
 leaders:  ## 只跑領頭羊判斷
 	uv run tw-screener analysis leaders
+
+audit-concepts:  ## 清查 concepts.yaml 次產業無價成員（興櫃/下市/誤標；只報告不改檔）
+	uv run tw-screener sector universe --audit
 
 # ─── 報告 ────────────────────────────────────────────────────────────────────
 

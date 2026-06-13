@@ -55,6 +55,25 @@ def list_subindustries(
     )
 
 
+def audit_priceless_members(
+    members: pl.DataFrame,
+    priced_ids: set[str] | list[str],
+) -> pl.DataFrame:
+    """回傳 members 中 stock_id 不在 priced_ids（近日有日線收盤）的列，按 sub_industry 排序。
+
+    無價成員多為興櫃／下市／誤標——它們會讓次產業籃子悄悄縮水（價格軸與資金流被低估）。
+    純報表用，**不改 concepts.yaml**。members 需含 sub_industry / stock_id；priced_ids 為
+    近日日線快取出現過的全部 stock_id（如 load_market_history 的 stock_id 去重）。
+    members 空 → 回原表。
+    """
+    if members.is_empty() or "stock_id" not in members.columns:
+        return members
+    priced = set(str(s) for s in priced_ids)
+    return members.filter(~pl.col("stock_id").is_in(list(priced))).sort(
+        ["sub_industry", "stock_id"]
+    )
+
+
 def load_industry_mapping(cache_dir: Path) -> pl.DataFrame:
     """純讀最新月份 industry_YYYYMM + otc_industry_YYYYMM 快取 → 全市場 28 類對照。
 

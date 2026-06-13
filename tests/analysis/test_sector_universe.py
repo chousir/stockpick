@@ -7,6 +7,7 @@ from pathlib import Path
 import polars as pl
 
 from tw_screener.analysis.sector_universe import (
+    audit_priceless_members,
     list_subindustries,
     load_industry_mapping,
 )
@@ -95,3 +96,36 @@ def test_load_industry_mapping_empty_dir(tmp_path: Path):
     df = load_industry_mapping(tmp_path)
     assert df.is_empty()
     assert "industry_name" in df.columns
+
+
+# ─── audit_priceless_members ──────────────────────────────────────────────────
+
+
+def _members(rows: list[tuple[str, str]]) -> pl.DataFrame:
+    return pl.DataFrame(rows, schema=["sub_industry", "stock_id"], orient="row")
+
+
+def test_audit_priceless_filters_to_no_price():
+    members = _members([("IC設計", "2330"), ("IC設計", "8888"), ("記憶體", "9999")])
+    # 2330 有價；8888/9999 無價（興櫃/下市/誤標）
+    out = audit_priceless_members(members, priced_ids={"2330", "2454"})
+    assert set(out["stock_id"].to_list()) == {"8888", "9999"}
+
+
+def test_audit_priceless_all_priced_returns_empty():
+    members = _members([("IC設計", "2330"), ("記憶體", "8299")])
+    out = audit_priceless_members(members, priced_ids=["2330", "8299"])
+    assert out.is_empty()
+
+
+def test_audit_priceless_keeps_multi_label_rows():
+    # 一檔多標籤 → 無價時每個 (sub_industry, stock_id) 列都保留，供逐檔併列
+    members = _members([("IC設計", "8888"), ("5G", "8888")])
+    out = audit_priceless_members(members, priced_ids=set())
+    assert out.height == 2
+    assert sorted(out["sub_industry"].to_list()) == ["5G", "IC設計"]
+
+
+def test_audit_priceless_empty_members():
+    empty = pl.DataFrame(schema={"sub_industry": pl.Utf8, "stock_id": pl.Utf8})
+    assert audit_priceless_members(empty, priced_ids={"2330"}).is_empty()

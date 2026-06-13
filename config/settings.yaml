@@ -115,6 +115,7 @@ rotation:
   clip_daily_return_pct: 10.0  # 籃子個股日報酬夾限＝台股漲跌停；防減資/分割未還原假跳動毒化指數
   top_n: 10                  # 報表/CLI 顯示前 N 名
   rank_by: net_flow_20d      # 排名鍵（ΔRank 基準；R2 校準後可能改）
+  audit_lookback_days: 20    # sector universe --audit：近 N 日無日線收盤＝無價成員清查視窗
   quadrant:                  # R3 四象限：資金軸＝長窗淨流正負；價格軸＝籃子位階
     position_window: 60      # 位階回看（交易日）
     position_low_pct: 10.0   # 距 60 日低 ≤ 此值＝「未漲」（與 R2 起漲 X=10% 對齊）
