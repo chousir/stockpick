@@ -29,6 +29,11 @@ sector_app = typer.Typer(
 )
 app.add_typer(sector_app, name="sector")
 
+cp_app = typer.Typer(
+    help="CP 值補漲股研究（docs/13-cp-value-research.md，個股層）", no_args_is_help=True
+)
+app.add_typer(cp_app, name="cp")
+
 # ─── 頂層指令 ─────────────────────────────────────────────────────────────────
 
 
@@ -1497,6 +1502,190 @@ def sector_calibrate_cmd(
             f"  {r['signal']}：命中 {r['hit_rate']:.0%}・recall {r['recall']:.0%}"
             f"・lift {lift}・領先中位 {r['median_lead_days']} 日（{r['n_triggers']} 觸發）"
         )
+
+
+@cp_app.command("calibrate")
+def cp_calibrate_cmd(
+    out_dir: Path = typer.Option(Path("research/cp_value"), help="校準報告輸出目錄"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """B2 個股版起漲事件回測（研究軌）：三 label 各掃因子訊號，產 research/cp_value/ 報告。"""
+    from datetime import date as _date
+
+    import polars as pl
+    import yaml
+
+    from tw_screener.analysis.rotation import (
+        compute_subindustry_baskets,
+        load_market_history,
+    )
+    from tw_screener.analysis.sector_universe import list_subindustries
+    from tw_screener.analysis.stock_panel import build_stock_panel, compute_coverage_meta
+    from tw_screener.backtest.stock_calib import (
+        detect_ambush_episodes,
+        detect_breakout_episodes,
+        detect_reversal_episodes,
+        render_cp_calibration_report,
+        scan_stock_signals,
+    )
+    from tw_screener.data.twse import create_client
+
+    with open(settings) as f:
+        cfg = yaml.safe_load(f)
+    cp = cfg.get("cp_value", {})
+    rot = cfg.get("rotation", {})
+    history_days = int(cp.get("history_days", 250))
+    z_window = int(cp.get("z_window", 60))
+    z_min_periods = int(cp.get("z_min_periods", 30))
+    lead_window = int(cp.get("lead_window", 15))
+    z_thr = tuple(cp.get("z_thresholds", [0.5, 1.0, 1.5, 2.0]))
+    vol_thr = tuple(cp.get("volume_thresholds", [1.0, 1.5, 2.0]))
+    position_low_pct = float(cp.get("position_low_pct", 15.0))
+    min_triggers = int(cp.get("min_triggers", 8))
+    min_lift = float(cp.get("min_lift", 1.3))
+    labels_cfg = cp.get("labels", {})
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+
+    console.print(f"[bold]載入上市資料（{history_days} 交易日）...[/bold]")
+    # 個股層只框上市：只讀 daily_*（otc_daily_/stock_day_ 不符此 glob），docs/13 §4 B1
+    market = load_market_history(cache_dir, n_days=history_days, patterns=("daily_*.parquet",))
+    institutional = create_client(settings).load_institutional_history(n_days=history_days)
+    members = list_subindustries()
+    if market.is_empty():
+        console.print("[red]缺上市日線快取（daily_*.parquet）[/red]")
+        raise typer.Exit(1)
+
+    baskets = (
+        compute_subindustry_baskets(
+            members, market, clip_daily_return_pct=float(rot.get("clip_daily_return_pct", 10.0))
+        )
+        if not members.is_empty()
+        else market.head(0)
+    )
+    console.print("[bold]建個股特徵面板...[/bold]")
+    panel = build_stock_panel(
+        market, institutional, members, baskets, z_window=z_window, z_min_periods=z_min_periods
+    )
+    if panel.is_empty():
+        console.print("[red]面板為空——檢查日線/法人快取[/red]")
+        raise typer.Exit(1)
+    coverage = compute_coverage_meta(panel, institutional, members, universe="listed")
+    console.print(
+        f"面板：{coverage['n_stocks']} 檔 × {coverage['n_trading_days']} 日"
+        f"・法人覆蓋 {coverage['inst_coverage_pct']}%"
+        f"・次產業覆蓋 {coverage['subind_coverage_pct']}%"
+    )
+
+    detectors = {
+        "ambush": (
+            "L1 埋伏",
+            "距 M 日低 ≤ tol% → 前瞻續漲（抓起漲前、價貼低）",
+            lambda lp: detect_ambush_episodes(
+                market,
+                m_days=int(lp.get("m_days", 60)),
+                tol_pct=float(lp.get("tol_pct", 5.0)),
+                x_pct=float(lp.get("x_pct", 15.0)),
+                n_days=int(lp.get("n_days", 20)),
+                cooldown_days=int(lp.get("cooldown_days", 20)),
+            ),
+        ),
+        "breakout": (
+            "L2 追突破",
+            "距 M 日低落在 [lo, hi]% 帶 → 前瞻續漲（抓起漲初）",
+            lambda lp: detect_breakout_episodes(
+                market,
+                m_days=int(lp.get("m_days", 60)),
+                lo_pct=float(lp.get("lo_pct", 3.0)),
+                hi_pct=float(lp.get("hi_pct", 8.0)),
+                x_pct=float(lp.get("x_pct", 12.0)),
+                n_days=int(lp.get("n_days", 10)),
+                cooldown_days=int(lp.get("cooldown_days", 15)),
+            ),
+        ),
+        "reversal": (
+            "L3 超跌反轉（選配）",
+            "距 L 日高 ≤ −drawdown% → 前瞻反彈（抓 V 底）",
+            lambda lp: detect_reversal_episodes(
+                market,
+                l_days=int(lp.get("l_days", 60)),
+                drawdown_pct=float(lp.get("drawdown_pct", 20.0)),
+                x_pct=float(lp.get("x_pct", 15.0)),
+                n_days=int(lp.get("n_days", 15)),
+                cooldown_days=int(lp.get("cooldown_days", 15)),
+            ),
+        ),
+    }
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tag = _date.today().strftime("%Y%m%d")
+    summary = [f"# 個股 CP 值起漲事件校準總表（{tag}）", ""]
+    for key, (name, desc, detect) in detectors.items():
+        lp = labels_cfg.get(key, {})
+        episodes = detect(lp)
+        report_params = {
+            "fwd_n_days": int(lp.get("n_days", 0)),
+            "fwd_x_pct": float(lp.get("x_pct", 0.0)),
+            "cooldown_days": int(lp.get("cooldown_days", 0)),
+            "lead_window": lead_window,
+        }
+        n_ep = episodes.height
+        console.print(f"\n[bold]{name}[/bold]：事件 {n_ep} 個")
+        if episodes.is_empty():
+            summary.append(f"- **{name}**：事件 0 個——前瞻門檻過嚴或資料不足，無法掃描。")
+            continue
+        scan = scan_stock_signals(
+            panel,
+            episodes,
+            z_thresholds=z_thr,
+            volume_thresholds=vol_thr,
+            position_low_pct=position_low_pct,
+            lead_window=lead_window,
+            occupy_days=int(lp.get("cooldown_days", 15)),
+            z_min_periods=z_min_periods,
+        )
+        report = render_cp_calibration_report(
+            scan, episodes, name, desc, report_params, coverage, min_triggers, min_lift
+        )
+        (out_dir / f"calibration_{tag}_{key}.md").write_text(report, encoding="utf-8")
+        scan.write_csv(out_dir / f"calibration_{tag}_{key}.csv")
+
+        qualified = scan.filter(
+            (pl.col("n_triggers") >= min_triggers)
+            & (pl.col("lift").is_not_null())
+            & (pl.col("lift") >= min_lift)
+            & (pl.col("median_lead_days") > 0)
+        ).sort("lift", descending=True)
+        if qualified.is_empty():
+            verdict = f"無因子過門檻（lift ≥{min_lift}・觸發 ≥{min_triggers}・領先 >0 日）"
+            top = "—"
+        else:
+            b = qualified.row(0, named=True)
+            top = (
+                f"{b['signal']}（lift {b['lift']:.2f}・領先中位 {b['median_lead_days']} 日"
+                f"・{b['hits']}/{b['n_triggers']} 命中）"
+            )
+            verdict = f"{qualified.height} 個因子過門檻"
+        summary.append(f"- **{name}**：事件 {n_ep} 個・{verdict}；最佳因子 {top}")
+        for r in scan.head(5).iter_rows(named=True):
+            lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
+            console.print(
+                f"  {r['signal']}：命中 {r['hit_rate']:.0%}・recall {r['recall']:.0%}"
+                f"・lift {lift}・領先中位 {r['median_lead_days']} 日（{r['n_triggers']} 觸發）"
+            )
+
+    # L3 裁決（docs/13 §3：lift≥門檻＋領先 >0＋需確認非單日 spike，否則不上線）
+    summary += [
+        "",
+        "## L3 超跌反轉裁決（docs/13 §3 三關）",
+        "",
+        "上表已套（1）lift ≥ 門檻、（2）中位領先 > 0 日兩關；",
+        "（3）「需確認非單日 spike」屬訊號設計層，本掃描未強制——若 L3 過前兩關，",
+        "上線前仍須在 B3 加「連 2 日續買 / breadth 同步轉正」確認，不接受單日資金 flip。",
+        "未過門檻則依 §3 剔除、不放寬標準。",
+        "",
+    ]
+    (out_dir / f"calibration_{tag}_summary.md").write_text("\n".join(summary), encoding="utf-8")
+    console.print(f"\n[green]報告 → {out_dir}/calibration_{tag}_*.md（含 _summary）[/green]")
 
 
 if __name__ == "__main__":

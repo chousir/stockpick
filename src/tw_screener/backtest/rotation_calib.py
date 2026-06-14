@@ -130,6 +130,44 @@ def compute_triggers(
     return df.filter(pl.col("_trigger")).select(["sub_industry", "date"])
 
 
+def compute_base_rate(
+    episodes: pl.DataFrame,
+    calendar: list[date],
+    keys: set[str] | list[str],
+    lead_window: int = 15,
+    occupy_days: int = 15,
+    warmup_pos: int = 0,
+    key_col: str = "sub_industry",
+) -> float:
+    """隨機基率：keys 範圍內合格日中「起漲點落在其後 lead_window 內」的比率。
+
+    null model＝在這群 key 的所有合格（非占用、非尾端）交易日裡隨機挑一天、
+    剛好落在某起漲點前 lead_window 內的機率。lift = 訊號命中率 / 此基率。
+    keys 給「全宇宙」（個股層 B2 = 全上市股）時，基率與單一訊號的觸發分布無關、
+    可一次算好重複用，且避免「廣訊號因觸發無起漲股而灌大 lift」。
+    """
+    pos = {d: i for i, d in enumerate(calendar)}
+    max_eval = len(calendar) - 1 - lead_window
+    ep_by_key: dict[str, list[int]] = {}
+    for k, d in episodes.select([key_col, "start_date"]).iter_rows():
+        if d in pos:
+            ep_by_key.setdefault(k, []).append(pos[d])
+    for v in ep_by_key.values():
+        v.sort()
+    eligible = 0
+    hit_days = 0
+    for k in keys:
+        eps = ep_by_key.get(k, [])
+        for p in range(warmup_pos, max_eval + 1):
+            if any(e < p <= e + occupy_days for e in eps):
+                continue
+            eligible += 1
+            j = bisect_left(eps, p)
+            if j < len(eps) and eps[j] - p <= lead_window:
+                hit_days += 1
+    return hit_days / eligible if eligible else 0.0
+
+
 def evaluate_triggers(
     triggers: pl.DataFrame,
     episodes: pl.DataFrame,
@@ -137,11 +175,16 @@ def evaluate_triggers(
     lead_window: int = 15,
     occupy_days: int = 15,
     warmup_pos: int = 0,
+    key_col: str = "sub_industry",
+    base_rate: float | None = None,
 ) -> dict:
-    """觸發 vs 起漲點的命中統計（pooled 跨次產業）。
+    """觸發 vs 起漲點的命中統計（pooled 跨 key_col）。
 
     命中＝觸發後 [0, lead_window] 交易日內有起漲點；起漲後 (start, start+occupy]
     的觸發、與歷史尾端不足 lead_window 的觸發剔除。
+    key_col：分群鍵——族群層＝"sub_industry"，個股層（B2）＝"stock_id"，其餘邏輯共用。
+    base_rate：可傳預先算好的隨機基率（個股層掃多訊號時一次算好全宇宙基率重複用，
+    省去逐訊號重算；None 則沿用族群層行為，就 episodes∪觸發 key 範圍即時算）。
     回傳 n_triggers / hits / false_positives / hit_rate / recall / lift /
     median_lead_days / n_episodes。
     """
@@ -149,7 +192,7 @@ def evaluate_triggers(
     max_eval = len(calendar) - 1 - lead_window
 
     ep_by_sub: dict[str, list[int]] = {}
-    for sub, d in episodes.select(["sub_industry", "start_date"]).iter_rows():
+    for sub, d in episodes.select([key_col, "start_date"]).iter_rows():
         if d in pos:
             ep_by_sub.setdefault(sub, []).append(pos[d])
     for v in ep_by_sub.values():
@@ -172,7 +215,7 @@ def evaluate_triggers(
     fps = 0
     leads: list[int] = []
     covered: set[tuple[str, int]] = set()
-    for sub, d in triggers.select(["sub_industry", "date"]).iter_rows():
+    for sub, d in triggers.select([key_col, "date"]).iter_rows():
         p = pos.get(d)
         if p is None or p < warmup_pos or p > max_eval or _in_occupied(sub, p):
             continue
@@ -185,18 +228,12 @@ def evaluate_triggers(
         else:
             fps += 1
 
-    # 隨機基率：合格日中「起漲點落在其後 lead_window 內」的比率
-    subs = set(ep_by_sub) | set(triggers["sub_industry"].unique().to_list())
-    eligible = 0
-    hit_days = 0
-    for sub in subs:
-        for p in range(warmup_pos, max_eval + 1):
-            if _in_occupied(sub, p):
-                continue
-            eligible += 1
-            if _next_episode_dist(sub, p) is not None:
-                hit_days += 1
-    base_rate = hit_days / eligible if eligible else 0.0
+    # 隨機基率：未預先給定則就 episodes∪觸發 key 範圍即時算（族群層行為）
+    if base_rate is None:
+        subs = set(ep_by_sub) | set(triggers[key_col].unique().to_list())
+        base_rate = compute_base_rate(
+            episodes, calendar, subs, lead_window, occupy_days, warmup_pos, key_col
+        )
 
     n_eval = hits + fps
     n_episodes = sum(len(v) for v in ep_by_sub.values())

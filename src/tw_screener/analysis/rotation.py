@@ -44,14 +44,21 @@ _MARKET_SCHEMA: dict[str, type[pl.DataType]] = {
 }
 
 
-def load_market_history(cache_dir: Path, n_days: int = 250) -> pl.DataFrame:
+def load_market_history(
+    cache_dir: Path,
+    n_days: int = 250,
+    patterns: tuple[str, ...] = ("daily_*.parquet", "otc_daily_*.parquet", "stock_day_*.parquet"),
+) -> pl.DataFrame:
     """純讀日線快取 → (date, stock_id, close, volume)，取最近 n_days 個交易日。
 
-    來源（優先序，同日去重 keep first）：
+    來源（預設優先序，同日去重 keep first）：
     1. daily_*.parquet（含 daily_all_*）：上市全市場日快取
     2. otc_daily_*.parquet：上櫃全市場日快取（fetch_otc_daily_all 逐日累積）
     3. stock_day_*.parquet：個股月快取（候選股回補 + backfill-otc-history）
     舊格式缺 volume 時補 null。無快取回空表。
+
+    patterns：要讀的快取檔 glob（預設三來源全收）。個股層研究只框上市時可傳
+    `("daily_*.parquet",)` 取上市全市場日線（otc_daily_/stock_day_ 不符此 glob）。
     """
     frames: list[pl.DataFrame] = []
 
@@ -65,7 +72,7 @@ def load_market_history(cache_dir: Path, n_days: int = 250) -> pl.DataFrame:
             ]
         )
 
-    for pattern in ("daily_*.parquet", "otc_daily_*.parquet", "stock_day_*.parquet"):
+    for pattern in patterns:
         for f in sorted(cache_dir.glob(pattern)):
             try:
                 df = pl.read_parquet(f)

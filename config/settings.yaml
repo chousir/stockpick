@@ -143,3 +143,34 @@ rotation:
     z_min_periods: 30        # z 暖機最低樣本
     min_triggers: 8          # 進建議名單最低觸發數
     min_lift: 1.5            # 進建議名單最低 lift（命中率/隨機基率）
+
+cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B；make cp-value-calib）
+  history_days: 250          # 載入上市日線/法人歷史天數（≈ 1 年；個股層只框上市）
+  z_window: 60               # panel 個股自身滾動 z 視窗（與 B1 stock_panel 一致）
+  z_min_periods: 30          # z 暖機最低樣本
+  lead_window: 15            # 訊號領先視窗（觸發後此窗內有事件＝命中）
+  z_thresholds: [0.5, 1.0, 1.5, 2.0]   # 資金 z 訊號掃描門檻
+  volume_thresholds: [1.0, 1.5, 2.0]   # 成交量 z 訊號掃描門檻
+  position_low_pct: 15.0     # 「+low」CP 變體：距 60 日低 ≤ 此值＝價未動（個股波動大於族群）
+  min_triggers: 8            # 進建議因子名單最低觸發數
+  min_lift: 1.3              # 進建議名單最低 lift；個股現實天花板較低（§1.2）；L3 裁決同門檻
+  labels:                    # episode 純價格定義（資金因子留訊號端，避免循環，使用者拍板）
+    ambush:                  # L1 埋伏：貼低基期 + 前瞻續漲（抓起漲前）
+      m_days: 60             # 低基期回看（交易日）
+      tol_pct: 5.0           # 距 M 日低點容忍（%）；個股波動大於族群 X=3%
+      x_pct: 15.0            # 前瞻漲幅門檻（個股波動大，>族群 10%）
+      n_days: 20             # 前瞻視窗（主訊號 20 日窗，領先 ~8 日夠用）
+      cooldown_days: 20      # 事件後冷卻（同波段不重複計）
+    breakout:                # L2 追突破：剛離低點帶 + 前瞻續漲（抓起漲初）
+      m_days: 60
+      lo_pct: 3.0            # 距低帶下界（剛離低）
+      hi_pct: 8.0            # 距低帶上界
+      x_pct: 12.0
+      n_days: 10             # 追突破用較短前瞻窗
+      cooldown_days: 15
+    reversal:                # L3 超跌反轉（選配）：深跌 + 前瞻反彈（抓 V 底）
+      l_days: 60             # 距高回看（交易日）
+      drawdown_pct: 20.0     # 距 L 日高 ≤ −此值＝深跌
+      x_pct: 15.0
+      n_days: 15
+      cooldown_days: 15

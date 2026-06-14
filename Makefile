@@ -1,7 +1,7 @@
 .PHONY: init sync test test-unit test-integration lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry \
         group leaders report week weekend backtest-strategies rotation-calib rotation backfill-otc-history \
-        audit-concepts
+        audit-concepts cp-value-calib
 
 # ─── 環境 ────────────────────────────────────────────────────────────────────
 
@@ -132,3 +132,6 @@ rotation-calib:  ## R2 起漲點回測校準（研究軌，產 research/rotation
 
 rotation:  ## 次產業資金流向輪動報表（產 reports/週次/sector_rotation.md+csv；docs/12）
 	uv run tw-screener sector rotation
+
+cp-value-calib:  ## B2 個股版起漲事件回測（研究軌，產 research/cp_value/ 三 label 校準報告；docs/13）
+	uv run tw-screener cp calibrate
