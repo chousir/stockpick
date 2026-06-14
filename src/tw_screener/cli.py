@@ -890,11 +890,20 @@ def analysis_group(
         else {}
     )
 
+    # 官方日估值比（PE/PB/殖利率）：純讀快取，由 make fetch-twse 累積（BWIBBU）。
+    # candidates 估值欄以此為主、Goodinfo 爬來值兜底（官方覆蓋 ~97%、口徑一致 trailing）。
+    val_df = client.load_latest_valuation_ratios()
+    valuation_map: dict[str, dict] = (
+        {str(r["stock_id"]): r for r in val_df.iter_rows(named=True)}
+        if not val_df.is_empty()
+        else {}
+    )
+
     csv_path = output_path.parent / "candidates_enriched.csv"
     cand_rows = write_candidates_enriched_csv(
         leaders, themes_long, screener_results, csv_path,
         flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map,
-        fundamentals_map=fundamentals_map,
+        fundamentals_map=fundamentals_map, valuation_map=valuation_map,
     )
     # 重疊股重用：庫存/觀察清單同檔一律沿用 candidates 那筆，避免跨 CSV 量比/集中度/成交額分岔
     canonical_rows = {row["stock_id"]: row for row in cand_rows}
@@ -930,8 +939,8 @@ def analysis_group(
         n = write_named_list_csv(
             wl_members, themes_long, wl_synth, out_csv,
             flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map,
-            fundamentals_map=fundamentals_map, holdings_map=hmap,
-            canonical_rows=canonical_rows,
+            fundamentals_map=fundamentals_map, valuation_map=valuation_map,
+            holdings_map=hmap, canonical_rows=canonical_rows,
         )
         console.print(f"[green]  {label}_enriched.csv：{n} 檔 → {out_csv}[/green]")
 

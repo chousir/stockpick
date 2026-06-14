@@ -635,6 +635,7 @@ def _build_enriched_rows(
     flags_cfg: dict | None = None,
     rev_yoy_map: dict | None = None,
     fundamentals_map: dict | None = None,
+    valuation_map: dict | None = None,
 ) -> list[dict]:
     """組「每檔 × 技術/籌碼/估值/基本面 + flags」列（candidates / 庫存 / 觀察 共用）。"""
     if members.is_empty():
@@ -646,7 +647,8 @@ def _build_enriched_rows(
     theme_map = _build_theme_str_map(members, themes_long, ranked)
     strategy_ids = sorted(screener_results.keys())
 
-    # 估值（PE/PB）來自 screener CSV，不在 members → 建 stock_id 對照（首見為準）
+    # 估值（PE/PB）：官方 BWIBBU（valuation_map）為主、Goodinfo screener CSV 兜底（官方缺才用）。
+    # Goodinfo 值仍從 screener CSV 收進 pe_map/pb_map 當 fallback。
     pe_map: dict[str, object] = {}
     pb_map: dict[str, object] = {}
     vol_map: dict[str, object] = {}  # 今日成交張，用來算法人集中度
@@ -705,8 +707,13 @@ def _build_enriched_rows(
         gross_margin = _num(fund.get("gross_margin_pct"), 1) if fund else None
         eps_q = _num(fund.get("eps"), 2) if fund else None
         amt = _num(r.get("amount_million"), 0)
-        pe = _num(pe_map.get(sid), 1)
-        pb = _num(pb_map.get(sid), 2)
+        # 估值：官方 BWIBBU 為主、Goodinfo 兜底（官方缺才用爬來值）；殖利率僅官方有
+        vrow = valuation_map.get(sid) if valuation_map else None
+        off_pe = vrow.get("pe") if vrow else None
+        off_pb = vrow.get("pbr") if vrow else None
+        pe = _num(off_pe if off_pe is not None else pe_map.get(sid), 1)
+        pb = _num(off_pb if off_pb is not None else pb_map.get(sid), 2)
+        dy = _num(vrow.get("dividend_yield"), 2) if vrow else None
         fn = _num(r.get("foreign_net"), 0)
         tn = _num(r.get("trust_net"), 0)
         instn = _num(r.get("inst_net"), 0)
@@ -766,6 +773,7 @@ def _build_enriched_rows(
                 "amount_million": amt,
                 "pe_ratio": pe,
                 "pb_ratio": pb,
+                "dividend_yield_pct": dy,  # 官方殖利率（BWIBBU/peratio）；Goodinfo 無此欄
                 "rev_yoy_pct": ryoy,
                 "gross_margin_pct": gross_margin,  # 最新單季毛利率（TWSE/TPEX OpenAPI）
                 "eps_q": eps_q,                    # 最新單季 EPS（元）
@@ -789,6 +797,7 @@ def write_candidates_enriched_csv(
     flags_cfg: dict | None = None,
     rev_yoy_map: dict | None = None,
     fundamentals_map: dict | None = None,
+    valuation_map: dict | None = None,
 ) -> list[dict]:
     """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
 
@@ -798,7 +807,8 @@ def write_candidates_enriched_csv(
     供庫存/觀察清單重用同一筆來源值以保持跨 CSV 一致）。
     """
     rows = _build_enriched_rows(
-        members, themes_long, screener_results, flags_cfg, rev_yoy_map, fundamentals_map
+        members, themes_long, screener_results, flags_cfg, rev_yoy_map,
+        fundamentals_map, valuation_map,
     )
     if not rows:
         return []
@@ -823,6 +833,7 @@ _CANONICAL_REUSE_FIELDS = (
     "amount_million",
     "pe_ratio",
     "pb_ratio",
+    "dividend_yield_pct",
     "rev_yoy_pct",
     "gross_margin_pct",
     "eps_q",
@@ -844,6 +855,7 @@ def write_named_list_csv(
     flags_cfg: dict | None = None,
     rev_yoy_map: dict | None = None,
     fundamentals_map: dict | None = None,
+    valuation_map: dict | None = None,
     holdings_map: dict | None = None,
     canonical_rows: dict[str, dict] | None = None,
 ) -> int:
@@ -855,7 +867,8 @@ def write_named_list_csv(
     欄位，使三份 CSV 對同一檔股票數字一致。回傳寫入檔數。
     """
     rows = _build_enriched_rows(
-        members, themes_long, screener_results, flags_cfg, rev_yoy_map, fundamentals_map
+        members, themes_long, screener_results, flags_cfg, rev_yoy_map,
+        fundamentals_map, valuation_map,
     )
     if not rows:
         return 0

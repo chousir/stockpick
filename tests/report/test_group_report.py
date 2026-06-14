@@ -69,3 +69,33 @@ def test_candidates_csv_blanks_and_flags_inst_missing(tmp_path):
     ok = by_id["2330"]
     assert ok["inst_net_lots"] == 5000  # 5,000,000 股 / 1000 = 5000 張
     assert "法人缺漏" not in (ok["flags"] or "")
+
+
+def test_valuation_map_official_primary_goodinfo_fallback(tmp_path):
+    """估值欄：官方 BWIBBU 為主、Goodinfo 兜底；殖利率僅官方有。"""
+    # Goodinfo screener 帶 pe_ratio/pb_ratio（兩檔都有）
+    sc = _screener_df(["2330", "2454"], [3.0, 2.0]).with_columns(
+        pl.Series("pe_ratio", [20.0, 18.0]),  # Goodinfo 值
+        pl.Series("pb_ratio", [4.0, 3.0]),
+    )
+    results = {"a_breakout": sc}
+    institutional = _institutional(["2330", "2454"], [5_000_000, 4_000_000])
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2, institutional=institutional,
+    )
+    # 官方只有 2330（pe/pbr/殖利率齊）；2454 官方缺 → 該檔退用 Goodinfo、殖利率空
+    valuation_map = {"2330": {"pe": 31.0, "pbr": 10.0, "dividend_yield": 1.5}}
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), results, out,
+                                  valuation_map=valuation_map)
+    by_id = {str(r["stock_id"]): r for r in pl.read_csv(out).iter_rows(named=True)}
+
+    # 2330：用官方 PE/PB（非 Goodinfo 20/4），殖利率有值
+    assert by_id["2330"]["pe_ratio"] == 31.0
+    assert by_id["2330"]["pb_ratio"] == 10.0
+    assert by_id["2330"]["dividend_yield_pct"] == 1.5
+    # 2454：官方缺 → 兜底 Goodinfo PE/PB（18/3）、殖利率空白
+    assert by_id["2454"]["pe_ratio"] == 18.0
+    assert by_id["2454"]["pb_ratio"] == 3.0
+    assert by_id["2454"]["dividend_yield_pct"] is None
