@@ -96,7 +96,7 @@ def test_one_row_per_stock_day_and_columns():
     assert panel.select(["date", "stock_id"]).n_unique() == panel.height
     for col in (
         "net_flow_2d", "net_flow_4d", "net_flow_4d_z", "flow_momentum",
-        "above_low_4d_pct", "above_ma2_pct", "above_ma3_pct",
+        "above_low_4d_pct", "above_high_4d_pct", "above_ma2_pct", "above_ma3_pct",
         "ret_2d", "rs_market_2d", "rs_subind_2d", "volume_z_2d",
     ):
         assert col in panel.columns, col
@@ -133,6 +133,8 @@ def test_price_position():
     assert row["above_ma2_pct"][0] == pytest.approx((110 / 107.5 - 1) * 100, abs=1e-6)
     # above_ma3: mean(103,105,110)=106 → (110/106-1)*100
     assert row["above_ma3_pct"][0] == pytest.approx((110 / 106 - 1) * 100, abs=1e-6)
+    # above_high_4d: 距 max(104,103,105,110)=110 → 末日即新高 → 0%
+    assert row["above_high_4d_pct"][0] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_ma_warmup_null():

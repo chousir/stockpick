@@ -1,7 +1,7 @@
 .PHONY: init sync test test-unit test-integration lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry \
         group leaders report week weekend backtest-strategies rotation-calib rotation backfill-otc-history \
-        audit-concepts cp-value-calib
+        audit-concepts cp-value-calib cp-value-candidates
 
 # ─── 環境 ────────────────────────────────────────────────────────────────────
 
@@ -135,3 +135,6 @@ rotation:  ## 次產業資金流向輪動報表（產 reports/週次/sector_rota
 
 cp-value-calib:  ## B2 個股版起漲事件回測（研究軌，產 research/cp_value/ 三 label 校準報告；docs/13）
 	uv run tw-screener cp calibrate
+
+cp-value-candidates:  ## B3 個股 CP 候選清單（生產軌，產 reports/週次/cp_candidates.md+csv；docs/13）
+	uv run tw-screener cp candidates

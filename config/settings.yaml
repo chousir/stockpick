@@ -174,3 +174,24 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
       x_pct: 15.0
       n_days: 15
       cooldown_days: 15
+  candidate:                 # B3 個股 CP 候選清單（生產軌；make cp-value-candidates）
+    max_candidates: 25       # **每型態**顯示上限（三型態各自獵場，避免貼低高分淹沒反轉；≤0 不截）
+    drawdown_pct: 20.0       # L3 反轉「深跌情境」＝距 60 日高 ≤ −此值（與 B2 reversal 對齊）
+    confirm_days: 2          # L3 反轉確認：近 N 個交易日法人合計連續淨買（過濾單日 spike，docs/13 §3）
+    rules:                   # ★ B2 校準勝出因子（2026-06-14・research/cp_value/；每季重校可改）
+      - name: L1埋伏          # foreign_flow_20d_z(z>0.5)+low≤15：lift 1.69・領先 7 日
+        label: ambush
+        flow_z_col: foreign_flow_20d_z
+        z_threshold: 0.5
+        modifier: low        # low=價貼低（≤position_low_pct）；mom=加速中；none=純資金 z
+      - name: L2追突破        # trust_flow_20d_z(z>1.0)+low≤15：lift 1.83・領先 7 日
+        label: breakout
+        flow_z_col: trust_flow_20d_z
+        z_threshold: 1.0
+        modifier: low
+      - name: L3反轉          # trust_flow_20d_z(z>1.5)+mom：lift 1.66・領先 7 日；＋深跌＋確認門檻
+        label: reversal
+        flow_z_col: trust_flow_20d_z
+        z_threshold: 1.5
+        modifier: mom
+        require_confirm: true

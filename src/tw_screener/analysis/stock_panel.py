@@ -112,7 +112,8 @@ def build_stock_panel(
         每 (date, stock_id) 一列，欄位：
         - 資金：{net,foreign,trust}_flow_{S}d/_{L}d（滾動加總，股）＋同名 _z（個股自身 z）
         - 加速度：{flow,foreign,trust}_momentum（短窗 − 前一短窗，股）
-        - 價格位階：above_low_{P}d_pct（距 P 日低 %）、above_ma{W}_pct（距各均線 %）
+        - 價格位階：above_low_{P}d_pct（距 P 日低 %）、above_high_{P}d_pct（距 P 日高 %，
+          ≤0；供 B3 L3 超跌反轉「深跌情境」判讀）、above_ma{W}_pct（距各均線 %）
         - 相對強度：ret_{R}d（個股報酬 %）、rs_market_{R}d、rs_subind_{R}d（差，pp）
         - 量能：volume_z_{S}d（短窗均量 z，非真周轉率，缺流通股數）
         空輸入 → 空 DataFrame。
@@ -164,7 +165,7 @@ def build_stock_panel(
         [_rolling_z(t, z_window, z_min_periods).alias(f"{t}_z") for t in z_targets]
     )
 
-    # 價格位階：距 position_window 日低 %、距各均線 %
+    # 價格位階：距 position_window 日低 %、距 position_window 日高 %（≤0）、距各均線 %
     pos_exprs: list[pl.Expr] = [
         (
             (
@@ -173,7 +174,15 @@ def build_stock_panel(
                 - 1
             )
             * 100
-        ).alias(f"above_low_{position_window}d_pct")
+        ).alias(f"above_low_{position_window}d_pct"),
+        (
+            (
+                pl.col("close")
+                / pl.col("close").rolling_max(position_window, min_samples=1).over("stock_id")
+                - 1
+            )
+            * 100
+        ).alias(f"above_high_{position_window}d_pct"),
     ]
     for w in ma_windows:
         ma = pl.col("close").rolling_mean(w, min_samples=w).over("stock_id")
@@ -208,7 +217,10 @@ def build_stock_panel(
     flow_cols = [f"{_FLOW_PREFIX[c]}_{w}d" for c in _NET_COLS for w in (s, lw)]
     z_cols = [f"{t}_z" for t in z_targets]
     mom_cols = [f"{_MOM_PREFIX[c]}_momentum" for c in _NET_COLS]
-    pos_cols = [f"above_low_{position_window}d_pct"] + [f"above_ma{w}_pct" for w in ma_windows]
+    pos_cols = [
+        f"above_low_{position_window}d_pct",
+        f"above_high_{position_window}d_pct",
+    ] + [f"above_ma{w}_pct" for w in ma_windows]
     rs_cols = [f"ret_{rs_window}d", f"rs_market_{rs_window}d", f"rs_subind_{rs_window}d"]
     ordered = (
         ["date", "stock_id", "close", "volume"]

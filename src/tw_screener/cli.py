@@ -1688,5 +1688,125 @@ def cp_calibrate_cmd(
     console.print(f"\n[green]報告 → {out_dir}/calibration_{tag}_*.md（含 _summary）[/green]")
 
 
+@cp_app.command("candidates")
+def cp_candidates_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """B3 個股 CP 候選清單（生產軌）：套 B2 勝出因子於最新快照，產 reports/週次/cp_candidates.*。"""
+    import polars as pl
+    import yaml
+
+    from tw_screener.analysis.rotation import compute_subindustry_baskets, load_market_history
+    from tw_screener.analysis.sector_universe import list_subindustries, load_industry_mapping
+    from tw_screener.analysis.stock_panel import build_stock_panel, compute_coverage_meta
+    from tw_screener.data.twse import create_client
+    from tw_screener.report.cp_candidates import (
+        attach_subind_quadrant,
+        build_cp_candidates,
+        latest_snapshot,
+        recent_buy_confirm,
+        render_cp_candidates_report,
+        tag_holding_status,
+    )
+    from tw_screener.screener.runner import derive_week_tag
+
+    with open(settings) as f:
+        cfg = yaml.safe_load(f)
+    cp = cfg.get("cp_value", {})
+    cand = cp.get("candidate", {})
+    rot = cfg.get("rotation", {})
+    history_days = int(cp.get("history_days", 250))
+    z_window = int(cp.get("z_window", 60))
+    z_min_periods = int(cp.get("z_min_periods", 30))
+    position_low_pct = float(cp.get("position_low_pct", 15.0))
+    cp_ceiling = float(rot.get("cp_score", {}).get("position_ceiling", 60.0))
+    rules = cand.get("rules", [])
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+    reports_dir = Path(cfg["paths"]["reports_dir"])
+
+    console.print(f"[bold]載入上市資料（{history_days} 交易日）...[/bold]")
+    # 個股層只框上市：只讀 daily_*（同 B2），docs/13 §4 B1
+    market = load_market_history(cache_dir, n_days=history_days, patterns=("daily_*.parquet",))
+    institutional = create_client(settings).load_institutional_history(n_days=history_days)
+    members = list_subindustries()
+    if market.is_empty():
+        console.print("[red]缺上市日線快取（daily_*.parquet）[/red]")
+        raise typer.Exit(1)
+
+    baskets = (
+        compute_subindustry_baskets(
+            members, market, clip_daily_return_pct=float(rot.get("clip_daily_return_pct", 10.0))
+        )
+        if not members.is_empty()
+        else market.head(0)
+    )
+    console.print("[bold]建個股特徵面板 + 取最新快照...[/bold]")
+    panel = build_stock_panel(
+        market, institutional, members, baskets, z_window=z_window, z_min_periods=z_min_periods
+    )
+    if panel.is_empty():
+        console.print("[red]面板為空——檢查日線/法人快取[/red]")
+        raise typer.Exit(1)
+    coverage = compute_coverage_meta(panel, institutional, members, universe="listed")
+
+    snapshot = latest_snapshot(panel)
+    confirm_days = int(cand.get("confirm_days", 2))
+    confirm = recent_buy_confirm(panel, institutional, confirm_days=confirm_days)
+    candidates = build_cp_candidates(
+        snapshot,
+        confirm,
+        rules,
+        position_low_pct=position_low_pct,
+        drawdown_pct=float(cand.get("drawdown_pct", 20.0)),
+        cp_ceiling=cp_ceiling,
+        max_candidates=int(cand.get("max_candidates", 40)),
+    )
+
+    week_tag = derive_week_tag(settings)
+    out_dir = reports_dir / week_tag
+    rotation_csv = out_dir / "sector_rotation.csv"
+    candidates = attach_subind_quadrant(candidates, members, rotation_csv)
+
+    # 疊庫存 / 觀察 / 本週命中（任一未維護則該來源空，不報錯）
+    wl_dir = Path(cfg["paths"].get("watchlist_dir", "watchlist"))
+    holdings_ids = list(_read_holdings_csv(wl_dir / "holdings.csv").keys())
+    watch_ids = _read_watchlist_csv(wl_dir / "watchlist.csv")
+    hit_ids: list[str] = []
+    for fp in sorted(out_dir.glob("screen_result_*.csv")):
+        try:
+            df = pl.read_csv(fp, infer_schema_length=0)
+            if "stock_id" in df.columns:
+                hit_ids.extend(str(s) for s in df["stock_id"].to_list() if s)
+        except Exception:  # noqa: BLE001 — 壞 CSV 不擋疊圖
+            continue
+    candidates = tag_holding_status(candidates, holdings_ids, watch_ids, hit_ids)
+
+    industry = load_industry_mapping(cache_dir)
+    names = (
+        {
+            sid: (nm or "").replace("股份有限公司", "").replace("(股)公司", "").strip()
+            for sid, nm in industry.select(["stock_id", "stock_name"]).iter_rows()
+        }
+        if not industry.is_empty()
+        else {}
+    )
+    md_path = render_cp_candidates_report(
+        candidates,
+        week_tag=week_tag,
+        output_dir=out_dir,
+        params={"drawdown_pct": float(cand.get("drawdown_pct", 20.0)),
+                "confirm_days": int(cand.get("confirm_days", 2))},
+        coverage=coverage,
+        rules=rules,
+        names=names,
+        data_date=str(panel["date"].max()),
+    )
+    console.print(f"[green]CP 候選清單 → {md_path}[/green]")
+    console.print(
+        f"  候選 {candidates.height} 檔・面板 {coverage['n_stocks']} 檔 × "
+        f"{coverage['n_trading_days']} 日・法人覆蓋 {coverage['inst_coverage_pct']}%"
+    )
+
+
 if __name__ == "__main__":
     app()
