@@ -14,16 +14,17 @@
 
 ```
                     ┌─────────────── 資料層（全部本地 parquet 快取）───────────────┐
-  TWSE/TPEX OpenAPI │ 日線 daily_*  法人 institutional_*(上市+上櫃)  月營收  產業別 │
+  TWSE/TPEX OpenAPI │ 日線 daily_*  法人 institutional_*(上市+上櫃)  月營收  產業別  官方估值比 valuation_ratios_* │
   Goodinfo（限速爬蟲）│ 策略篩選結果（YAML 條件 → URL → HTML → CSV）                │
   Yahoo 概念股       │ config/concepts.yaml 主題標籤（手標次產業＋自動爬概念股）      │
                     └──────────────────────────┬───────────────────────────────┘
                                                ▼
  make week GROUP=defg ＝ 以下五步串起來：
- ① fetch-twse                日線/法人/月營收/產業別 增量入快取
+ ① fetch-twse                日線/法人/月營收/產業別/官方估值比(PE/PB/殖利率) 增量入快取
  ② screen-all GROUP=defg     Goodinfo 跑 D/E/F/G 四策略 → screen_result_*.csv（純快照）
  ③ fetch-candidates-history  對命中股聯集補抓 13 個月個股日線（MA60/量比/動能用）
  ④ rotation                  ★ 次產業資金流向輪動（全市場宇宙）→ sector_rotation.md/csv
+ ④' cp-value-candidates      個股 CP 補漲候選＋C2 三重濾網 → cp_candidates.md（group Section 6 要讀）
  ⑤ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv
                                                ▼
  手動：把報告貼給 Claude（docs/11 prompt）→ picks.md（精選進場清單）
@@ -160,7 +161,8 @@ YAML 驅動的 Goodinfo 條件篩選：`config/strategies/*.yaml` 定義條件 �
 讀本週篩選 CSV ＋價量/法人快取，產 `group_analysis.md`：
 Section 0 策略代號/除權息/總經事件、1 入選分布、2 族群強度排名（2.5 跨族群強勢股、
 2.6 次產業強度、2.7 概念股題材、**2.8 輪動雷達＋全宇宙輪動並列**）、3 各族群前 3 名、
-5 機械基準排名、6 領先次產業深度解讀請求；同時產 `candidates_enriched.csv`
+4 觀察、5 Claude 次產業深度分析請求（輪動雷達驅動）、6 Claude CP 補漲候選分析請求
+（個股層・讀同夾 cp_candidates.md）；同時產 `candidates_enriched.csv`
 （全候選股 × 技術/籌碼/估值/flags 排雷欄，**AI 挑股的主要宇宙**）。
 
 ### 5. AI 挑股（手動・docs/11）
@@ -245,6 +247,7 @@ crontab -e
 | `screen_result_{d,e,f,g}_*.csv` | ② screen-all | 各策略入選快照（純 Goodinfo 12 欄，不被後處理改寫） |
 | `screen_log.md` | ② screen-all | 各策略檔數＋交集統計 |
 | `sector_rotation.md` / `.csv` | ④ rotation | **資金輪動地圖**：排名/四象限/★訊號/我的參與度；CSV 供下週 ΔRank |
+| `cp_candidates.md` / `.csv` | ④' cp-value-candidates | 個股 CP 補漲候選＋C2 三重濾網（官方 trailing PE/PB；group Section 6 要讀）|
 | `group_analysis.md` | ⑤ group | 族群分析主報告（Section 0-6） |
 | `candidates_enriched.csv` | ⑤ group | 全候選股 × 完整欄位＝**AI 挑股主宇宙** |
 | `holdings_enriched.csv` / `watchlist_enriched.csv` | ⑤ group | 庫存/觀察 enrich（有維護才產） |
