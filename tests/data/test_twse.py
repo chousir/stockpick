@@ -22,6 +22,7 @@ from tw_screener.data.twse import (
     _parse_revenue,
     _parse_stock_day,
     _parse_tpex_institutional,
+    _parse_valuation_ratios,
     _roc_compact_to_date,
     _roc_pubdate_to_ym,
     _roc_to_date,
@@ -112,6 +113,44 @@ def test_parse_daily_all_empty():
     assert df.is_empty()
     assert "stock_id" in df.columns
     assert "close" in df.columns
+
+
+def test_parse_valuation_ratios_merges_both_markets():
+    # 上市 BWIBBU_d：Date 西元緊湊、PEratio 空字串=虧損（PB 仍在）
+    bwibbu = [
+        {"Date": "20260612", "Code": "2330", "PEratio": "26.2",
+         "PBratio": "7.5", "DividendYield": "1.50"},
+        {"Date": "20260612", "Code": "1101", "PEratio": "",  # 虧損/無正盈餘 → null
+         "PBratio": "0.78", "DividendYield": "3.26"},
+    ]
+    # 上櫃 peratio：Date 民國緊湊、PriceEarningRatio 'N/A'=無
+    tpex = [
+        {"Date": "1150612", "SecuritiesCompanyCode": "5483", "PriceEarningRatio": "12.53",
+         "PriceBookRatio": "1.66", "YieldRatio": "5.98"},
+        {"Date": "1150612", "SecuritiesCompanyCode": "6488", "PriceEarningRatio": "N/A",
+         "PriceBookRatio": "2.10", "YieldRatio": "0.00"},
+    ]
+    df = _parse_valuation_ratios(bwibbu, tpex)
+    by = {r["stock_id"]: r for r in df.iter_rows(named=True)}
+
+    assert len(df) == 4
+    assert by["2330"]["market"] == "上市"
+    assert by["2330"]["date"] == date(2026, 6, 12)
+    assert by["2330"]["pe"] == pytest.approx(26.2)
+    assert by["1101"]["pe"] is None and by["1101"]["pbr"] == pytest.approx(0.78)
+    # 上櫃民國日期換算正確、N/A → null PE 但 PB 仍在
+    assert by["5483"]["market"] == "上櫃"
+    assert by["5483"]["date"] == date(2026, 6, 12)
+    assert by["6488"]["pe"] is None and by["6488"]["pbr"] == pytest.approx(2.10)
+
+
+def test_parse_valuation_ratios_skips_all_null_and_empty():
+    # PE 與 PB 皆無 → 整列略過（停牌/無資料）
+    bwibbu = [{"Date": "20260612", "Code": "9999", "PEratio": "", "PBratio": "",
+               "DividendYield": ""}]
+    df = _parse_valuation_ratios(bwibbu, [])
+    assert df.is_empty()
+    assert {"stock_id", "pe", "pbr", "dividend_yield", "market"} <= set(df.columns)
 
 
 def test_parse_dividend_calendar():

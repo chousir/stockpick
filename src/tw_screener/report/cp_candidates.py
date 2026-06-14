@@ -246,25 +246,27 @@ def attach_valuation(
     """疊 C1 估值層 → 三重濾網第三道「相對便宜」（docs/13 §C2）。
 
     candidates 已是 B3 命中＝**錢進來（資金 z）＋型態/位階（前兩道濾網）**；本函式 join
-    C1 的次產業相對 PE，標第三道。三態（triple_filter）：
-      ✓三重 ＝有相對位階且次產業 PE 百分位 ≤ cheap_pctile（錢進＋沒漲＋相對便宜全過）
-      估值缺＝無相對位階（缺 EPS／同儕不足）——誠實標未知，**不當貴亦不剔除候選**
+    C1 的次產業相對位階（官方 trailing PE 主、PB 補虧損股），標第三道。三態（triple_filter）：
+      ✓三重 ＝有相對位階且次產業百分位 ≤ cheap_pctile（錢進＋沒漲＋相對便宜全過）
+      估值缺＝無相對位階（同儕不足）——誠實標未知，**不當貴亦不剔除候選**
       —    ＝有相對位階但不在便宜帶
-    新增欄：pe / pe_subind_pctile / triple_filter。
+    新增欄：pe / pbr / val_metric / val_pctile / triple_filter。
     """
     if candidates.is_empty():
         return candidates
     if valuation.is_empty():
         v = candidates.select("stock_id").with_columns(
             pl.lit(None, dtype=pl.Float64).alias("pe"),
-            pl.lit(None, dtype=pl.Float64).alias("pe_subind_pctile"),
+            pl.lit(None, dtype=pl.Float64).alias("pbr"),
+            pl.lit(None, dtype=pl.Utf8).alias("val_metric"),
+            pl.lit(None, dtype=pl.Float64).alias("val_pctile"),
         )
     else:
-        v = valuation.select("stock_id", "pe", "pe_subind_pctile")
+        v = valuation.select("stock_id", "pe", "pbr", "val_metric", "val_pctile")
     return candidates.join(v, on="stock_id", how="left").with_columns(
-        pl.when(pl.col("pe_subind_pctile").is_null())
+        pl.when(pl.col("val_pctile").is_null())
         .then(pl.lit("估值缺"))
-        .when(pl.col("pe_subind_pctile") <= cheap_pctile)
+        .when(pl.col("val_pctile") <= cheap_pctile)
         .then(pl.lit("✓三重"))
         .otherwise(pl.lit("—"))
         .alias("triple_filter")
@@ -365,9 +367,9 @@ def render_cp_candidates_report(
         "> 欄位：CP＝cp_score（資金 z × 位階空間）・z＝資金 z・距低/距高＝距 60 日低/高 %",
         *(
             [
-                "> 三重＝C2 三重濾網（錢進＋沒漲＋相對便宜）：✓三重＝次產業 PE 百分位 ≤ 便宜門檻；"
-                "估值缺＝缺 EPS/同儕不足；次位＝同儕 PE 升冪百分位（0=最便宜，C1 單季年化代理；"
-                "同儕＝手標次產業優先、未標以 TWSE 產業別兜底）。"
+                "> 三重＝C2 三重濾網（錢進＋沒漲＋相對便宜）：✓三重＝次產業百分位 ≤ 便宜門檻；"
+                "估值缺＝同儕不足；估值＝官方 trailing PE 主／PB 補虧損股(標 PE/PB)；"
+                "次位＝同儕升冪百分位（0=最便宜；同儕＝手標次產業優先、未標以 TWSE 產業別兜底）。"
             ]
             if has_val
             else []
@@ -380,7 +382,7 @@ def render_cp_candidates_report(
         head = "| 股號 | 名稱 | 規則 | CP | z | 新鮮 | 距低% | 距高% | 確認 | 象限 | 持有 |"
         sep = "|---|---|---|---|---|---|---|---|---|---|---|"
         if has_val:
-            head += " PE | 次位 | 三重 |"
+            head += " 估值 | 次位 | 三重 |"
             sep += "---|---|---|"
         for key in ("ambush", "breakout", "reversal"):
             grp = candidates.filter(pl.col("primary_label") == key)
@@ -401,13 +403,15 @@ def render_cp_candidates_report(
                     f"| {confirm} | {r['subind_quadrant']} | {r['watch_status'] or '—'} |"
                 )
                 if has_val:
-                    pe = f"{r['pe']:.1f}" if r.get("pe") is not None else "—"
+                    metric = r.get("val_metric") or ""
+                    raw = r.get("pbr") if metric == "PB" else r.get("pe")
+                    val = f"{metric}{raw:.2f}" if (metric and raw is not None) else "—"
                     pct = (
-                        f"{r['pe_subind_pctile']:.0f}"
-                        if r.get("pe_subind_pctile") is not None
+                        f"{r['val_pctile']:.0f}"
+                        if r.get("val_pctile") is not None
                         else "—"
                     )
-                    row += f" {pe} | {pct} | {r['triple_filter']} |"
+                    row += f" {val} | {pct} | {r['triple_filter']} |"
                 lines.append(row)
             lines.append("")
 
@@ -423,9 +427,9 @@ def render_cp_candidates_report(
         *(
             [
                 "> 三重濾網「相對便宜」最適用埋伏/追突破；反轉本就深跌、便宜常與深跌同源，"
-                "非獨立加成。估值＝C1 單季年化代理（非真 TTM）、橫斷面相對非前瞻。",
-                "> 「便宜」亦可能是市場已反映風險，須配合個股基本面判讀。同儕：手標次產業優先、"
-                "未標股以 TWSE 產業別兜底（較粗，明細見 cp_valuation.csv peer_source）。",
+                "非獨立加成。估值＝官方 trailing PE（主）／PB（補虧損股）橫斷面相對，非前瞻。",
+                "> PB-便宜與 PE-便宜意義不同（PB 便宜可能資產偏重／折價）；「便宜」亦可能是市場已"
+                "反映風險，須配合個股基本面判讀。同儕：手標次產業優先、未標股以 TWSE 產業別兜底。",
             ]
             if has_val
             else []

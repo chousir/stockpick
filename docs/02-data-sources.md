@@ -111,6 +111,8 @@ data/cache/goodinfo/
 | 三大法人買賣超 | Legacy `www.twse.com.tw/fund/T86?response=json&date=YYYYMMDD&selectType=ALLBUT0999` | OpenAPI 版已失效（回 HTML）|
 | 個股月營收 | OpenAPI `/v1/opendata/t187ap05_L` | |
 | 融資融券餘額 | OpenAPI `/v1/exchangeReport/MI_MARGN` | |
+| 上市官方日估值比 | OpenAPI `/v1/exchangeReport/BWIBBU_d` | 官方 trailing 本益比/殖利率/股價淨值比；只回最新交易日（逐日累積）|
+| 上櫃官方日估值比 | TPEX OpenAPI `/openapi/v1/tpex_mainboard_peratio_analysis` | 同上（上櫃）；只回最新交易日 |
 
 > 已知陷阱見 `docs/99-troubleshooting.md` #1（T86 endpoint 變化）與 #2（STOCK_DAY_ALL 不支援歷史日期）。
 
@@ -156,6 +158,7 @@ Goodinfo 主要用在「條件組合篩選」這個它真正強的地方。
 | Yahoo 概念股主題成分 | 即時 | 鮮少變（季度級） | 24h 快取；手動 `make build-themes` 更新 |
 | TWSE 日線（STOCK_DAY_ALL）| 收盤後 ~30 分鐘 | 每交易日 | 累積 parquet |
 | TWSE T86 三大法人 | 收盤後約 90 分鐘（**15:00 起穩定**）| 每交易日 | 累積 parquet |
+| 官方日估值比（BWIBBU_d / peratio）| 收盤後 ~30 分鐘 | 每交易日 | 累積 parquet（自身歷史百分位用）|
 | 月營收（t187ap05_L） | 每月 10 號前 | 每月 | cron 或手動 |
 | 上市產業分類（t187ap03_L）| 月內穩定 | 每月 | 月更新 |
 | 除權息預告（TWT48U_ALL）| 隨時（前瞻 ~2 個月）| 每日小幅變動 | 事件層：只取候選股、未來約 2 週窗 |
@@ -205,6 +208,28 @@ Cache 命名共用 `stock_day_{stock_id}_{YYYYMM}.parquet`，下游 `load_candid
 `fetch_stock_ohlcv()`、`momentum.compute_n_day_return()` 一律無感。
 
 `fetch_stock_history_tpex()` 也對外公開，可單獨呼叫（測試或除錯用）。
+
+## 官方日估值比 BWIBBU（2026-06-14 新增）
+
+估值層（CP 值研究 C1）原本用「單季 EPS×4 年化」代理 PE，非真 trailing。改用官方日資料：
+
+### 端點
+| 市場 | 端點 | 日期格式 | PE 欄 | PB 欄 | 殖利率欄 | 缺值 |
+|---|---|---|---|---|---|---|
+| 上市 | TWSE OpenAPI `/v1/exchangeReport/BWIBBU_d` | `Date` 西元緊湊 `20260612` | `PEratio`（空字串=虧損/無正盈餘）| `PBratio`（幾乎全有）| `DividendYield` | 空字串 |
+| 上櫃 | TPEX OpenAPI `tpex_mainboard_peratio_analysis` | `Date` 民國緊湊 `1150612` | `PriceEarningRatio`（`N/A`=無）| `PriceBookRatio` | `YieldRatio` | `N/A` |
+
+兩者都**只回最新一交易日、不可回補** → `fetch_valuation_ratios()` 逐日累積成
+`valuation_ratios_{YYYYMMDD}.parquet`（同 daily_all/institutional 模式）。`_clean_float`
+已把空字串與 `N/A` 一律轉 null。`_parse_valuation_ratios()` 合併兩市成統一 schema
+（stock_id/date/market/pe/pbr/dividend_yield）。
+
+### 用途與設計
+- **PE 主、PB 補虧損股**：有正 trailing PE 用 PE 算次產業相對位階；虧損/無正盈餘者無 PE，
+  改用官方 PBR（`val_metric=PB`）——虧損股不再估值缺。詳見 `analysis/valuation.py`。
+- **自身歷史百分位**：逐日累積數月後可算（本期僅當日橫斷面，明標未取得）。
+- 進 `make fetch-twse`（緊接 fundamentals 後一步）；`cp candidates`/`cp valuation` 讀
+  `load_latest_valuation_ratios()` 最新一份做橫斷面。
 
 ---
 

@@ -214,21 +214,24 @@ def test_attach_subind_quadrant_no_rotation_csv(tmp_path):
 
 
 def test_attach_valuation_triple_filter_states():
-    cands = pl.DataFrame({"stock_id": ["CHEAP", "RICH", "NOVAL"]})
+    cands = pl.DataFrame({"stock_id": ["CHEAP", "RICH", "PB", "NOVAL"]})
     valuation = pl.DataFrame(
         {
-            "stock_id": ["CHEAP", "RICH"],  # NOVAL 缺估值
-            "pe": [8.0, 30.0],
-            "pe_subind_pctile": [10.0, 80.0],  # ≤30 便宜；>30 不便宜
+            "stock_id": ["CHEAP", "RICH", "PB"],  # NOVAL 缺估值
+            "pe": [8.0, 30.0, None],   # PB 為虧損股無 PE，退用 PBR
+            "pbr": [1.2, 3.0, 0.7],
+            "val_metric": ["PE", "PE", "PB"],
+            "val_pctile": [10.0, 80.0, 12.0],  # ≤30 便宜（含 PB 補的虧損股）；>30 不便宜
         }
     )
     out = attach_valuation(cands, valuation, cheap_pctile=30.0)
     m = dict(zip(out["stock_id"].to_list(), out["triple_filter"].to_list()))
     assert m["CHEAP"] == "✓三重"
     assert m["RICH"] == "—"
+    assert m["PB"] == "✓三重"  # 虧損股以 PB 補也能過三重濾網
     assert m["NOVAL"] == "估值缺"  # 無相對位階 → 誠實標未知、不剔除
     # 新增欄齊全
-    assert {"pe", "pe_subind_pctile", "triple_filter"} <= set(out.columns)
+    assert {"pe", "pbr", "val_metric", "val_pctile", "triple_filter"} <= set(out.columns)
 
 
 def test_attach_valuation_empty_valuation_marks_all_unknown():
@@ -284,7 +287,10 @@ def test_render_with_valuation_shows_triple_filter(tmp_path):
                                                         "stock_id": ["A"]}),
                                    tmp_path / "missing.csv")
     cands = tag_holding_status(cands, holdings=[], watch=[], hits=[])
-    valuation = pl.DataFrame({"stock_id": ["A"], "pe": [8.0], "pe_subind_pctile": [5.0]})
+    valuation = pl.DataFrame(
+        {"stock_id": ["A"], "pe": [8.0], "pbr": [1.5],
+         "val_metric": ["PE"], "val_pctile": [5.0]}
+    )
     cands = attach_valuation(cands, valuation, cheap_pctile=30.0)
     md = render_cp_candidates_report(
         cands, "2026-W24", tmp_path,
@@ -294,8 +300,9 @@ def test_render_with_valuation_shows_triple_filter(tmp_path):
     text = md.read_text(encoding="utf-8")
     assert "三重濾網全過 1" in text  # 表頭統計
     assert "✓三重" in text and "三重 |" in text  # 表格欄
+    assert "PE8.0" in text  # 估值欄顯示鏡頭+值
     csv = pl.read_csv(tmp_path / "cp_candidates.csv")
-    assert {"pe", "pe_subind_pctile", "triple_filter"} <= set(csv.columns)
+    assert {"pe", "pbr", "val_metric", "val_pctile", "triple_filter"} <= set(csv.columns)
 
 
 def test_render_without_valuation_unchanged(tmp_path):

@@ -86,6 +86,12 @@ def data_fetch_twse(
     df_fund = client.fetch_quarterly_fundamentals()
     console.print(f"  單季基本面：{len(df_fund)} 檔")
 
+    # 官方日估值比（trailing PE/PBR/殖利率，上市 BWIBBU_d + 上櫃 peratio）；逐日累積
+    console.print("[bold]抓取官方日估值比（PE/PBR/殖利率）...[/bold]")
+    df_val = client.fetch_valuation_ratios()
+    n_pe = df_val["pe"].drop_nulls().len() if len(df_val) else 0
+    console.print(f"  估值比：{len(df_val)} 檔（有 PE {n_pe}）")
+
     console.print("[green]fetch-twse 完成[/green]")
 
 
@@ -1787,20 +1793,16 @@ def cp_candidates_cmd(
             continue
     candidates = tag_holding_status(candidates, holdings_ids, watch_ids, hit_ids)
 
-    # C2 三重濾網：疊 C1 次產業相對 PE（橫斷面，取最新交易日收盤）
+    # C2 三重濾網：疊 C1 次產業相對估值（官方 trailing PE 主 / PB 補虧損股，橫斷面取最新一份）
     industry = load_industry_mapping(cache_dir)
     val_cfg = cp.get("valuation", {})
     cheap_pctile = float(val_cfg.get("cheap_pctile", 30.0))
-    latest = market["date"].max()
-    prices = market.filter(pl.col("date") == latest).select("stock_id", "close")
-    fundamentals = create_client(settings).load_latest_fundamentals()
+    ratios = create_client(settings).load_latest_valuation_ratios()
     # 估值同儕：手標次產業優先、未標上市股以 TWSE 產業別兜底（members 仍純手標供型態/籃子用）
     peer_members = build_peer_membership(members, industry)
     valuation = build_valuation(
-        prices,
-        fundamentals,
+        ratios,
         peer_members,
-        annualize_factor=float(val_cfg.get("annualize_factor", 4.0)),
         min_peers=int(val_cfg.get("min_peers", 5)),
         cheap_pctile=cheap_pctile,
     )
@@ -1842,11 +1844,9 @@ def cp_candidates_cmd(
 def cp_valuation_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
-    """C1 個股相對 PE 估值表：橫斷面 PE vs 次產業同儕中位數，產 reports/週次/cp_valuation.*。"""
-    import polars as pl
+    """C1 個股相對估值表：官方 trailing PE/PB vs 次產業中位數，產 cp_valuation.*。"""
     import yaml
 
-    from tw_screener.analysis.rotation import load_market_history
     from tw_screener.analysis.sector_universe import (
         build_peer_membership,
         list_subindustries,
@@ -1863,30 +1863,24 @@ def cp_valuation_cmd(
     cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
     reports_dir = Path(cfg["paths"]["reports_dir"])
 
-    # 個股層只框上市：只讀 daily_*（同 B2/B3）。取最新交易日做橫斷面比較。
-    market = load_market_history(cache_dir, n_days=5, patterns=("daily_*.parquet",))
-    if market.is_empty():
-        console.print("[red]缺上市日線快取（daily_*.parquet）[/red]")
+    # 官方日估值比（上市+上櫃），取最新一份做橫斷面比較
+    ratios = create_client(settings).load_latest_valuation_ratios()
+    if ratios.is_empty():
+        console.print("[red]缺官方估值比快取（valuation_ratios_*.parquet）——先跑 fetch-twse[/red]")
         raise typer.Exit(1)
-    latest = market["date"].max()
-    prices = market.filter(pl.col("date") == latest).select("stock_id", "close")
+    latest = ratios["date"].max()
 
-    fundamentals = create_client(settings).load_latest_fundamentals()
-    if fundamentals.is_empty():
-        console.print("[yellow]無 fundamentals_*.parquet 快取——PE 全標『未取得』[/yellow]")
     industry = load_industry_mapping(cache_dir)
     # 估值同儕：手標次產業優先，未標上市股以 TWSE 產業別兜底（覆蓋率 46%→~99%）
     peer_members = build_peer_membership(list_subindustries(), industry)
 
     valuation = build_valuation(
-        prices,
-        fundamentals,
+        ratios,
         peer_members,
-        annualize_factor=float(val.get("annualize_factor", 4.0)),
         min_peers=int(val.get("min_peers", 5)),
         cheap_pctile=float(val.get("cheap_pctile", 30.0)),
     )
-    meta = compute_valuation_meta(valuation, data_date=str(latest), universe="listed")
+    meta = compute_valuation_meta(valuation, data_date=str(latest), universe="上市+上櫃")
 
     week_tag = derive_week_tag(settings)
     out_dir = reports_dir / week_tag

@@ -231,6 +231,10 @@ _TPEX_DAILY_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close
 # ⚠ TPEX 端點命名不一致（187ap17 無 t、t187ap14 有 t），2026-06-12 實測為準。
 _FUND_MARGIN_OTC_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_187ap17_O"
 _FUND_EPS_OTC_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap14_O"
+# 官方日估值比（trailing PE / PBR / 殖利率）：上市 TWSE BWIBBU_d（OpenAPI base 下）+ 上櫃 TPEX。
+# 取代 valuation.compute_pe 的單季 EPS×4 年化代理 → 官方真 trailing PE；PBR 補虧損股；逐日累積。
+_BWIBBU_PATH = "/exchangeReport/BWIBBU_d"
+_TPEX_PERATIO_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis"
 
 
 def _parse_tpex_daily_all(data: list[dict[str, Any]]) -> pl.DataFrame:
@@ -344,6 +348,65 @@ def _parse_quarterly_fundamentals(
         for (sid, y, q), v in rec.items()
     ]
     return pl.DataFrame(rows, schema=_FUNDAMENTALS_SCHEMA).sort("stock_id")
+
+
+_VALUATION_RATIOS_SCHEMA: dict[str, type[pl.DataType]] = {
+    "date": pl.Date,
+    "stock_id": pl.Utf8,
+    "market": pl.Utf8,          # 上市 / 上櫃
+    "pe": pl.Float64,           # 官方 trailing 本益比；虧損/無正盈餘 → null
+    "pbr": pl.Float64,          # 官方股價淨值比（幾乎全有，補虧損股估值缺口）
+    "dividend_yield": pl.Float64,  # 官方殖利率（%）
+}
+
+
+def _parse_valuation_ratios(
+    bwibbu: list[dict[str, Any]], tpex_peratio: list[dict[str, Any]]
+) -> pl.DataFrame:
+    """合併官方日估值比 → 全市場 PE/PBR/殖利率（上市 BWIBBU_d + 上櫃 peratio_analysis）。
+
+    兩端點欄名/日期格式不同（上市 Date 西元緊湊 'YYYYMMDD'、PEratio/PBratio/DividendYield；
+    上櫃 Date 民國緊湊、PriceEarningRatio/PriceBookRatio/YieldRatio）；統一成同一 schema。
+    缺值：上市空字串、上櫃 'N/A' 一律經 _clean_float → null（守「沒抓到不要編」）。
+    PE 與 PBR 皆無的列（停牌/無資料）整列略過。
+    """
+    rows: list[dict[str, Any]] = []
+    for r in bwibbu:  # 上市 TWSE
+        try:
+            d = r["Date"].strip()
+            dt = date(int(d[:4]), int(d[4:6]), int(d[6:8]))  # 西元緊湊
+            pe = _clean_float(r.get("PEratio", ""))
+            pbr = _clean_float(r.get("PBratio", ""))
+            if pe is None and pbr is None:
+                continue
+            rows.append({
+                "date": dt,
+                "stock_id": r["Code"].strip(),
+                "market": "上市",
+                "pe": pe,
+                "pbr": pbr,
+                "dividend_yield": _clean_float(r.get("DividendYield", "")),
+            })
+        except (KeyError, ValueError) as e:
+            logger.warning(f"略過無效上市估值比：{r.get('Code', '?')} — {e}")
+    for r in tpex_peratio:  # 上櫃 TPEX
+        try:
+            dt = _roc_compact_to_date(r["Date"].strip())  # 民國緊湊
+            pe = _clean_float(r.get("PriceEarningRatio", ""))
+            pbr = _clean_float(r.get("PriceBookRatio", ""))
+            if pe is None and pbr is None:
+                continue
+            rows.append({
+                "date": dt,
+                "stock_id": r["SecuritiesCompanyCode"].strip(),
+                "market": "上櫃",
+                "pe": pe,
+                "pbr": pbr,
+                "dividend_yield": _clean_float(r.get("YieldRatio", "")),
+            })
+        except (KeyError, ValueError) as e:
+            logger.warning(f"略過無效上櫃估值比：{r.get('SecuritiesCompanyCode', '?')} — {e}")
+    return pl.DataFrame(rows, schema=_VALUATION_RATIOS_SCHEMA)
 
 
 def _parse_tpex_institutional(data: list[dict[str, Any]]) -> pl.DataFrame:
@@ -1284,6 +1347,41 @@ class TWSEClient:
         files = sorted(self.cache_dir.glob("fundamentals_*.parquet"))
         if not files:
             return pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA)
+        return load_parquet(files[-1])
+
+    def fetch_valuation_ratios(self) -> pl.DataFrame:
+        """抓官方日估值比（trailing PE/PBR/殖利率），上市 BWIBBU_d + 上櫃 peratio，逐日累積。
+
+        快取 valuation_ratios_{YYYYMMDD}.parquet（檔名用資料日，逐日累積→未來可算自身歷史
+        百分位）。TTL 同日線（ttl_hours），同交易日重跑讀快取。
+        取代 valuation.compute_pe 的 EPS×4 年化代理——官方 trailing PE、PBR 補虧損股。
+        """
+        latest_cache = self._latest_cache_file("valuation_ratios_*.parquet")
+        if latest_cache is not None and is_fresh(latest_cache, self.ttl_hours):
+            logger.info(f"命中快取 {latest_cache}")
+            return load_parquet(latest_cache)
+
+        listed = self._get(_BWIBBU_PATH)
+        otc = self._get_openapi_json(_TPEX_PERATIO_URL, "上櫃本益比")
+        df = _parse_valuation_ratios(listed, otc)
+        if df.is_empty():
+            logger.warning("官方日估值比解析結果為空")
+            return df
+        date_str = df.select(pl.col("date").max().dt.strftime("%Y%m%d")).item()
+        cache_file = self.cache_dir / f"valuation_ratios_{date_str}.parquet"
+        save_parquet(df, cache_file)
+        n_pe = df.filter(pl.col("pe").is_not_null()).height
+        logger.info("官方日估值比快取 → {} ({} 檔，有 PE {})", cache_file, len(df), n_pe)
+        return df
+
+    def load_latest_valuation_ratios(self) -> pl.DataFrame:
+        """純讀最新 valuation_ratios_*.parquet（不打網）；無快取回空表。
+
+        檔名含 YYYYMMDD，lexical sort = 時間序，取最新一份做橫斷面快照。
+        """
+        files = sorted(self.cache_dir.glob("valuation_ratios_*.parquet"))
+        if not files:
+            return pl.DataFrame(schema=_VALUATION_RATIOS_SCHEMA)
         return load_parquet(files[-1])
 
     def load_volume_history(
