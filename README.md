@@ -61,7 +61,7 @@ make week GROUP=defg
 # （def=D/E/F 不含 G；abc=A/B/C 經典三角，已列 legacy）
 
 # Step 3：ProPicks 風格全清單分析（推薦，Claude 網頁對話）
-#   貼 group_analysis.md + sector_rotation.md + candidates_enriched.csv
+#   貼 group_analysis.md + sector_rotation.md + candidates_enriched.csv + cp_candidates.md
 #   + holdings/watchlist_enriched.csv + 4 個 screen CSV
 #   配合 docs/11-propicks-analysis.md 的範本 prompt → 產出 reports/Www/picks.md
 cat reports/$(date +%Y-W%V)/group_analysis.md
