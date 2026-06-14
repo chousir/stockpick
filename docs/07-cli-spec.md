@@ -61,13 +61,13 @@ backtest-strategies: ## ⚠️ 三個月後實作，目前 exit 1 + 提示
 cd ~/tw-stock-screener
 git pull                       # 若用 git 同步多機
 
-make week                      # 一鍵：抓 TWSE + 三策略選股 + 族群分析
+make week GROUP=defg           # 一鍵：抓 TWSE + D/E/F/G 篩選 + 資金輪動 + 個股 CP + 族群分析
 
 # 完成後打開：
 open reports/2026-W21/group_analysis.md
 
 # 從 picks.md 精選進場清單（或 candidates_enriched.csv）挑 5-10 檔，逐檔產資料草稿
-# 注意：第 5 節是族群輪動機械基準、非挑股池，勿直接照它挑
+# 注意：族群/次產業強度排名(Section 2/2.6)是機械公式、非挑股池，勿直接照它挑
 make report STOCK_ID=2330
 make report STOCK_ID=3034
 

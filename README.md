@@ -19,13 +19,13 @@
   Yahoo 概念股       │ config/concepts.yaml 主題標籤（手標次產業＋自動爬概念股）      │
                     └──────────────────────────┬───────────────────────────────┘
                                                ▼
- make week GROUP=defg ＝ 以下五步串起來：
+ make week GROUP=defg ＝ 一條指令串起以下步驟（含法人回補）：
  ① fetch-twse                日線/法人/月營收/產業別/官方估值比(PE/PB/殖利率) 增量入快取
  ② screen-all GROUP=defg     Goodinfo 跑 D/E/F/G 四策略 → screen_result_*.csv（純快照）
  ③ fetch-candidates-history  對命中股聯集補抓 13 個月個股日線（MA60/量比/動能用）
  ④ rotation                  ★ 次產業資金流向輪動（全市場宇宙）→ sector_rotation.md/csv
- ④' cp-value-candidates      個股 CP 補漲候選＋C2 三重濾網 → cp_candidates.md（group Section 6 要讀）
- ⑤ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv
+ ⑤ cp-value-candidates       個股 CP 補漲候選＋C2 三重濾網 → cp_candidates.md（group Section 6 要讀）
+ ⑥ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv
                                                ▼
  手動：把報告貼給 Claude（docs/11 prompt）→ picks.md（精選進場清單）
  手動：make report STOCK_ID=XXXX → 個股深度報告
@@ -49,6 +49,33 @@
 - **週六/日 / 週一早上跑也 OK**：自動對齊「最近一個交易日」，報告落在正確的 `reports/YYYY-Www/`
 - **跨日重複跑**：第二次走 cache，不會重抓
 - 詳見 [docs/02-data-sources.md](./docs/02-data-sources.md) 的「最早可用時點」表
+
+## 主流程：一條指令 `make week GROUP=defg`
+
+平時**只需要這一條**（整合最完整的主流程，含資料抓取＋法人回補＋篩選＋資金輪動＋個股 CP 補漲＋族群分析）：
+
+```bash
+make week GROUP=defg          # def=D/E/F 不含 G；abc=A/B/C 已 legacy
+```
+
+跑完產出全在 `reports/YYYY-Www/`，分兩類：
+
+**📋 要貼給 Claude 分析的（配合 [docs/11](./docs/11-propicks-analysis.md) 範本 prompt）**
+
+| 檔案 | 是什麼 |
+|---|---|
+| `group_analysis.md` | 族群脈絡＋強度排名＋次產業/概念股/輪動雷達＋給 Claude 的分析請求（Section 5 次產業深度、6 CP 補漲） |
+| `sector_rotation.md` | 全市場資金輪動地圖（四象限/★訊號/週對週 ΔRank，**無入選偏誤**，對照 group Section 2.8） |
+| `candidates_enriched.csv` | **主要挑股宇宙**：全候選股 × 技術/籌碼/估值（官方 PE/PB/殖利率）/月營收/flags 排雷欄 |
+| `cp_candidates.md` | 個股 CP 補漲候選＋三重濾網（錢進＋沒漲＋相對便宜；埋伏/追突破/反轉三型態） |
+| `holdings_enriched.csv` / `watchlist_enriched.csv` | 我的庫存/觀察清單（有維護才產，**無論如何都要分析**） |
+| `screen_result_{d,e,f,g}_*.csv` | 各策略原始入選快照（看「哪檔中哪些策略」用） |
+
+**⚙️ 不必貼**：`theme_strength.csv`（內容已在 Section 2.8）、`screen_log.md`（檔數統計）。
+
+**送給 Claude 的流程**：把上表 6 類貼進 Claude 網頁對話 → 套 [docs/11](./docs/11-propicks-analysis.md) 範本 prompt → Claude
+產出 `picks.md`（精選進場清單，三路匯流：族群深度＋全宇宙掃描＋CP 補漲候選）→ 對 picks 內每檔
+`make report STOCK_ID=XXXX` 產個股深度報告。
 
 ## Quick Start（5 步）
 
@@ -83,7 +110,7 @@ make report STOCK_ID=2330
 
 | 指令 | 做什麼 | 何時用 |
 |---|---|---|
-| `make week GROUP=defg` | 完整週流程 ①~⑤ | **每週一次（主入口）** |
+| `make week GROUP=defg` | 完整週流程 ①~⑥ | **每週一次（主入口）** |
 | `make weekend GROUP=defg` | week ＋ git commit/push 結果 | 想自動存檔時 |
 | `make rotation` | 次產業資金輪動報表（單獨重跑） | 盤後想單看資金流向 |
 | `make group` | 族群分析（單獨重跑，吃既有 CSV） | 改 concepts.yaml 後重產報告 |
@@ -247,11 +274,11 @@ crontab -e
 | `screen_result_{d,e,f,g}_*.csv` | ② screen-all | 各策略入選快照（純 Goodinfo 12 欄，不被後處理改寫） |
 | `screen_log.md` | ② screen-all | 各策略檔數＋交集統計 |
 | `sector_rotation.md` / `.csv` | ④ rotation | **資金輪動地圖**：排名/四象限/★訊號/我的參與度；CSV 供下週 ΔRank |
-| `cp_candidates.md` / `.csv` | ④' cp-value-candidates | 個股 CP 補漲候選＋C2 三重濾網（官方 trailing PE/PB；group Section 6 要讀）|
-| `group_analysis.md` | ⑤ group | 族群分析主報告（Section 0-6） |
-| `candidates_enriched.csv` | ⑤ group | 全候選股 × 完整欄位＝**AI 挑股主宇宙** |
-| `holdings_enriched.csv` / `watchlist_enriched.csv` | ⑤ group | 庫存/觀察 enrich（有維護才產） |
-| `theme_strength.csv` | ⑤ group | 2.8 雷達快照（供下週 ΔRank，不必貼給 Claude） |
+| `cp_candidates.md` / `.csv` | ⑤ cp-value-candidates | 個股 CP 補漲候選＋C2 三重濾網（官方 trailing PE/PB；group Section 6 要讀）|
+| `group_analysis.md` | ⑥ group | 族群分析主報告（Section 0-6） |
+| `candidates_enriched.csv` | ⑥ group | 全候選股 × 完整欄位＝**AI 挑股主宇宙** |
+| `holdings_enriched.csv` / `watchlist_enriched.csv` | ⑥ group | 庫存/觀察 enrich（有維護才產） |
+| `theme_strength.csv` | ⑥ group | 2.8 雷達快照（供下週 ΔRank，不必貼給 Claude） |
 | `picks.md` | 手動 Step 3 | AI 精選進場清單 |
 | `stocks/XXXX_名稱.md` | make report | 個股深度報告 |
 
