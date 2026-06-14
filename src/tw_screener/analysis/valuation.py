@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import polars as pl
 
+from tw_screener.analysis.sector_universe import PEER_FALLBACK_PREFIX
+
 _PE_SCHEMA: dict[str, type[pl.DataType]] = {
     "stock_id": pl.Utf8,
     "close": pl.Float64,
@@ -150,6 +152,21 @@ def build_valuation(
         .otherwise(pl.lit(""))
         .alias("cheap_flag")
     )
+    # peer_source：同儕來自手標次產業（細）或 TWSE 產業別兜底（粗）——讓相對便宜可信度透明
+    if not membership.is_empty():
+        src = membership.group_by("stock_id").agg(
+            (~pl.col("sub_industry").str.starts_with(PEER_FALLBACK_PREFIX)).any().alias("_fine")
+        )
+        out = out.join(src, on="stock_id", how="left").with_columns(
+            pl.when(pl.col("pe_subind_pctile").is_null())
+            .then(None)
+            .when(pl.col("_fine"))
+            .then(pl.lit("次產業"))
+            .otherwise(pl.lit("產業別"))
+            .alias("peer_source")
+        ).drop("_fine")
+    else:
+        out = out.with_columns(pl.lit(None, dtype=pl.Utf8).alias("peer_source"))
     return out.sort("pe_subind_pctile", descending=False, nulls_last=True)
 
 
@@ -164,6 +181,8 @@ def compute_valuation_meta(
         "橫斷面相對排名對年化常數不敏感，僅顯示 PE 絕對值受影響",
         "僅「相對便宜（trailing 橫斷面）」，非前瞻估值（分析師前瞻 EPS 無資料源，不瞎掰）",
         "缺 EPS／EPS≤0 明標未取得／虧損打平，不補零、不給負 PE",
+        "同儕分組：手標次產業（細）優先，未標上市股以 TWSE 產業別兜底"
+        "（粗，peer_source=產業別）",
     ]
     if valuation.is_empty():
         return {"universe": universe, "data_date": data_date, "n_stocks": 0, "notes": notes}

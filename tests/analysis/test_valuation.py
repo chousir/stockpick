@@ -128,6 +128,23 @@ def test_build_valuation_cheap_flag_and_meta() -> None:
     assert "未取得" in joined and "前瞻" in joined
 
 
+def test_peer_source_marks_fine_vs_fallback() -> None:
+    # 兩個同儕組：手標「A」與 TWSE 產業別兜底「產業別:鋼鐵」，各 5 檔
+    prices = _prices(
+        {s: 40.0 for s in ("a1", "a2", "a3", "a4", "a5", "f1", "f2", "f3", "f4", "f5")}
+    )
+    fund = _fund({s: float(i % 5 + 1) for i, s in enumerate(
+        ("a1", "a2", "a3", "a4", "a5", "f1", "f2", "f3", "f4", "f5"))})
+    membership = _membership(
+        [("A", s) for s in ("a1", "a2", "a3", "a4", "a5")]
+        + [("產業別:鋼鐵", s) for s in ("f1", "f2", "f3", "f4", "f5")]
+    )
+    out = build_valuation(prices, fund, membership, min_peers=5)
+    by = {r["stock_id"]: r for r in out.iter_rows(named=True)}
+    assert by["a1"]["peer_source"] == "次產業"
+    assert by["f1"]["peer_source"] == "產業別"
+
+
 def test_empty_inputs() -> None:
     empty_price = pl.DataFrame(schema={"stock_id": pl.Utf8, "close": pl.Float64})
     assert compute_pe(empty_price, _fund({"a": 1.0})).is_empty()

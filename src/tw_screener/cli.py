@@ -1697,7 +1697,11 @@ def cp_candidates_cmd(
     import yaml
 
     from tw_screener.analysis.rotation import compute_subindustry_baskets, load_market_history
-    from tw_screener.analysis.sector_universe import list_subindustries, load_industry_mapping
+    from tw_screener.analysis.sector_universe import (
+        build_peer_membership,
+        list_subindustries,
+        load_industry_mapping,
+    )
     from tw_screener.analysis.stock_panel import build_stock_panel, compute_coverage_meta
     from tw_screener.analysis.valuation import build_valuation
     from tw_screener.data.twse import create_client
@@ -1784,22 +1788,24 @@ def cp_candidates_cmd(
     candidates = tag_holding_status(candidates, holdings_ids, watch_ids, hit_ids)
 
     # C2 三重濾網：疊 C1 次產業相對 PE（橫斷面，取最新交易日收盤）
+    industry = load_industry_mapping(cache_dir)
     val_cfg = cp.get("valuation", {})
     cheap_pctile = float(val_cfg.get("cheap_pctile", 30.0))
     latest = market["date"].max()
     prices = market.filter(pl.col("date") == latest).select("stock_id", "close")
     fundamentals = create_client(settings).load_latest_fundamentals()
+    # 估值同儕：手標次產業優先、未標上市股以 TWSE 產業別兜底（members 仍純手標供型態/籃子用）
+    peer_members = build_peer_membership(members, industry)
     valuation = build_valuation(
         prices,
         fundamentals,
-        members,
+        peer_members,
         annualize_factor=float(val_cfg.get("annualize_factor", 4.0)),
         min_peers=int(val_cfg.get("min_peers", 5)),
         cheap_pctile=cheap_pctile,
     )
     candidates = attach_valuation(candidates, valuation, cheap_pctile=cheap_pctile)
 
-    industry = load_industry_mapping(cache_dir)
     names = (
         {
             sid: (nm or "").replace("股份有限公司", "").replace("(股)公司", "").strip()
@@ -1841,7 +1847,11 @@ def cp_valuation_cmd(
     import yaml
 
     from tw_screener.analysis.rotation import load_market_history
-    from tw_screener.analysis.sector_universe import list_subindustries, load_industry_mapping
+    from tw_screener.analysis.sector_universe import (
+        build_peer_membership,
+        list_subindustries,
+        load_industry_mapping,
+    )
     from tw_screener.analysis.valuation import build_valuation, compute_valuation_meta
     from tw_screener.data.twse import create_client
     from tw_screener.report.cp_valuation import render_valuation_report
@@ -1864,12 +1874,14 @@ def cp_valuation_cmd(
     fundamentals = create_client(settings).load_latest_fundamentals()
     if fundamentals.is_empty():
         console.print("[yellow]無 fundamentals_*.parquet 快取——PE 全標『未取得』[/yellow]")
-    members = list_subindustries()
+    industry = load_industry_mapping(cache_dir)
+    # 估值同儕：手標次產業優先，未標上市股以 TWSE 產業別兜底（覆蓋率 46%→~99%）
+    peer_members = build_peer_membership(list_subindustries(), industry)
 
     valuation = build_valuation(
         prices,
         fundamentals,
-        members,
+        peer_members,
         annualize_factor=float(val.get("annualize_factor", 4.0)),
         min_peers=int(val.get("min_peers", 5)),
         cheap_pctile=float(val.get("cheap_pctile", 30.0)),
@@ -1878,7 +1890,6 @@ def cp_valuation_cmd(
 
     week_tag = derive_week_tag(settings)
     out_dir = reports_dir / week_tag
-    industry = load_industry_mapping(cache_dir)
     names = (
         {
             sid: (nm or "").replace("股份有限公司", "").replace("(股)公司", "").strip()

@@ -7,7 +7,9 @@ from pathlib import Path
 import polars as pl
 
 from tw_screener.analysis.sector_universe import (
+    PEER_FALLBACK_PREFIX,
     audit_priceless_members,
+    build_peer_membership,
     list_subindustries,
     load_industry_mapping,
 )
@@ -129,3 +131,45 @@ def test_audit_priceless_keeps_multi_label_rows():
 def test_audit_priceless_empty_members():
     empty = pl.DataFrame(schema={"sub_industry": pl.Utf8, "stock_id": pl.Utf8})
     assert audit_priceless_members(empty, priced_ids={"2330"}).is_empty()
+
+
+# ── build_peer_membership（估值同儕兜底）────────────────────────────────────────
+
+
+def test_peer_membership_fallback_only_untagged():
+    hand = _members([("IC設計", "2330"), ("IC設計", "2454")])
+    ind = _industry_df(
+        [
+            ("2330", "台積電", "24", "半導體業"),  # 已手標 → 不兜底
+            ("2454", "聯發科", "24", "半導體業"),  # 已手標 → 不兜底
+            ("9999", "某鋼鐵", "10", "鋼鐵工業"),  # 未標 → 產業別兜底
+            ("8888", "某空白", "99", ""),  # industry_name 空 → 不兜底（誠實留估值缺）
+        ]
+    )
+    out = build_peer_membership(hand, ind)
+    m = {(r["sub_industry"], r["stock_id"]) for r in out.iter_rows(named=True)}
+    # 手標保留
+    assert ("IC設計", "2330") in m and ("IC設計", "2454") in m
+    # 未標 → 前綴產業別
+    assert (f"{PEER_FALLBACK_PREFIX}鋼鐵工業", "9999") in m
+    # 已手標股不再被兜底成產業別
+    assert all(
+        not (sub.startswith(PEER_FALLBACK_PREFIX) and sid in {"2330", "2454"})
+        for sub, sid in m
+    )
+    # industry_name 空者完全不出現
+    assert not any(sid == "8888" for _, sid in m)
+
+
+def test_peer_membership_empty_inputs():
+    empty_m = pl.DataFrame(schema={"sub_industry": pl.Utf8, "stock_id": pl.Utf8})
+    empty_i = pl.DataFrame(
+        schema={"stock_id": pl.Utf8, "stock_name": pl.Utf8,
+                "industry_code": pl.Utf8, "industry_name": pl.Utf8}
+    )
+    # 全空 → 空表
+    assert build_peer_membership(empty_m, empty_i).is_empty()
+    # 只有產業別（無手標）→ 全部兜底
+    ind = _industry_df([("9999", "某鋼鐵", "10", "鋼鐵工業")])
+    out = build_peer_membership(empty_m, ind)
+    assert out.height == 1 and out["sub_industry"][0] == f"{PEER_FALLBACK_PREFIX}鋼鐵工業"

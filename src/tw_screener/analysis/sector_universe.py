@@ -74,6 +74,53 @@ def audit_priceless_members(
     )
 
 
+PEER_FALLBACK_PREFIX = "產業別:"
+
+
+def build_peer_membership(
+    hand_tagged: pl.DataFrame, industry: pl.DataFrame
+) -> pl.DataFrame:
+    """估值用 peer 分組：手標次產業優先，未標股以 TWSE 28 類產業別兜底（docs/13 §C1 覆蓋率）。
+
+    僅供**估值相對位階**用——讓未手標的個股也有同儕中位數可比，把「估值缺」大幅減少；
+    輪動型態標籤/籃子仍用純手標 list_subindustries（粒度較細、語意不同），不混用。
+
+    Args:
+        hand_tagged: list_subindustries 輸出 (sub_industry, stock_id)
+        industry: load_industry_mapping 輸出 (stock_id, ..., industry_name)
+
+    Returns:
+        (sub_industry, stock_id)：手標股保留其次產業（可多列）；未手標股各得一列，
+        sub_industry＝「{PEER_FALLBACK_PREFIX}{TWSE 產業別}」（前綴以利區分粗/細同儕，
+        且避免與手標次產業同名碰撞）。industry_name 缺/空者不兜底（誠實留「估值缺」）。
+    """
+    frames: list[pl.DataFrame] = []
+    tagged_ids: list[str] = []
+    if not hand_tagged.is_empty():
+        frames.append(hand_tagged.select("sub_industry", "stock_id"))
+        tagged_ids = hand_tagged["stock_id"].unique().to_list()
+    if not industry.is_empty():
+        fb = (
+            industry.filter(
+                pl.col("industry_name").is_not_null()
+                & (pl.col("industry_name") != "")
+                & ~pl.col("stock_id").is_in(tagged_ids)
+            )
+            .select(
+                (pl.lit(PEER_FALLBACK_PREFIX) + pl.col("industry_name")).alias("sub_industry"),
+                "stock_id",
+            )
+        )
+        frames.append(fb)
+    if not frames:
+        return pl.DataFrame(schema=_MEMBERSHIP_SCHEMA)
+    return (
+        pl.concat(frames)
+        .unique(["sub_industry", "stock_id"], maintain_order=True)
+        .sort(["sub_industry", "stock_id"])
+    )
+
+
 def load_industry_mapping(cache_dir: Path) -> pl.DataFrame:
     """純讀最新月份 industry_YYYYMM + otc_industry_YYYYMM 快取 → 全市場 28 類對照。
 
