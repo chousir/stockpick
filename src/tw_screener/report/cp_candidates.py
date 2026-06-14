@@ -240,6 +240,37 @@ def attach_subind_quadrant(
     return candidates.with_columns(pl.Series("subind_quadrant", vals))
 
 
+def attach_valuation(
+    candidates: pl.DataFrame, valuation: pl.DataFrame, cheap_pctile: float = 30.0
+) -> pl.DataFrame:
+    """疊 C1 估值層 → 三重濾網第三道「相對便宜」（docs/13 §C2）。
+
+    candidates 已是 B3 命中＝**錢進來（資金 z）＋型態/位階（前兩道濾網）**；本函式 join
+    C1 的次產業相對 PE，標第三道。三態（triple_filter）：
+      ✓三重 ＝有相對位階且次產業 PE 百分位 ≤ cheap_pctile（錢進＋沒漲＋相對便宜全過）
+      估值缺＝無相對位階（缺 EPS／同儕不足）——誠實標未知，**不當貴亦不剔除候選**
+      —    ＝有相對位階但不在便宜帶
+    新增欄：pe / pe_subind_pctile / triple_filter。
+    """
+    if candidates.is_empty():
+        return candidates
+    if valuation.is_empty():
+        v = candidates.select("stock_id").with_columns(
+            pl.lit(None, dtype=pl.Float64).alias("pe"),
+            pl.lit(None, dtype=pl.Float64).alias("pe_subind_pctile"),
+        )
+    else:
+        v = valuation.select("stock_id", "pe", "pe_subind_pctile")
+    return candidates.join(v, on="stock_id", how="left").with_columns(
+        pl.when(pl.col("pe_subind_pctile").is_null())
+        .then(pl.lit("估值缺"))
+        .when(pl.col("pe_subind_pctile") <= cheap_pctile)
+        .then(pl.lit("✓三重"))
+        .otherwise(pl.lit("—"))
+        .alias("triple_filter")
+    )
+
+
 def tag_holding_status(
     candidates: pl.DataFrame,
     holdings: list[str],
@@ -289,6 +320,10 @@ def render_cp_candidates_report(
     n_hit = (
         candidates.filter(pl.col("watch_status").str.contains("本週命中")).height if n_total else 0
     )
+    has_val = "triple_filter" in candidates.columns
+    n_triple = (
+        candidates.filter(pl.col("triple_filter") == "✓三重").height if (n_total and has_val) else 0
+    )
 
     rule_lines = []
     for r in rules:
@@ -312,7 +347,13 @@ def render_cp_candidates_report(
         f"- 法人覆蓋 {coverage.get('inst_coverage_pct', 0)}%・"
         f"次產業標記覆蓋 {coverage.get('subind_coverage_pct', 0)}%",
         f"- 本週候選 **{n_total}** 檔"
-        + (f"（庫存 {n_hold}・觀察 {n_watch}・本週命中 {n_hit}）" if n_total else ""),
+        + (
+            f"（庫存 {n_hold}・觀察 {n_watch}・本週命中 {n_hit}"
+            + (f"・三重濾網全過 {n_triple}" if has_val else "")
+            + "）"
+            if n_total
+            else ""
+        ),
         "",
         "## 因子規則（B2 校準勝出組合；門檻見 settings.cp_value.candidate）",
         "",
@@ -322,32 +363,51 @@ def render_cp_candidates_report(
         "",
         "> 三型態是各自獵場，分開列；同股若多型態命中，歸最高分型態、規則欄保留全部。",
         "> 欄位：CP＝cp_score（資金 z × 位階空間）・z＝資金 z・距低/距高＝距 60 日低/高 %",
+        *(
+            [
+                "> 三重＝C2 三重濾網（錢進＋沒漲＋相對便宜）：✓三重＝次產業 PE 百分位 ≤ 便宜門檻；"
+                "估值缺＝缺 EPS/同儕不足；次位＝次產業 PE 升冪百分位（0=最便宜，C1 單季年化代理）。"
+            ]
+            if has_val
+            else []
+        ),
         "",
     ]
     if n_total == 0:
         lines.append("（本週無個股同時滿足任一規則——錢進且價貼低/深跌反轉的標的暫缺。）")
     else:
+        head = "| 股號 | 名稱 | 規則 | CP | z | 新鮮 | 距低% | 距高% | 確認 | 象限 | 持有 |"
+        sep = "|---|---|---|---|---|---|---|---|---|---|---|"
+        if has_val:
+            head += " PE | 次位 | 三重 |"
+            sep += "---|---|---|"
         for key in ("ambush", "breakout", "reversal"):
             grp = candidates.filter(pl.col("primary_label") == key)
             lines += [f"### {_LABEL_NAMES[key]}（{grp.height} 檔）", ""]
             if grp.is_empty():
                 lines += ["（本型態本週無候選。）", ""]
                 continue
-            lines += [
-                "| 股號 | 名稱 | 規則 | CP | z | 新鮮 | 距低% | 距高% | 確認 | 象限 | 持有 |",
-                "|---|---|---|---|---|---|---|---|---|---|---|",
-            ]
+            lines += [head, sep]
             for r in grp.iter_rows(named=True):
                 cp = f"{r['cp_score']:.2f}" if r["cp_score"] is not None else "—"
                 fz = f"{r['flow_z']:.2f}" if r["flow_z"] is not None else "—"
                 al = f"{r['above_low_pct']:.1f}" if r["above_low_pct"] is not None else "—"
                 ah = f"{r['above_high_pct']:.1f}" if r["above_high_pct"] is not None else "—"
                 confirm = "✓" if r["confirm_buy"] else "—"
-                lines.append(
+                row = (
                     f"| {r['stock_id']} | {names.get(r['stock_id'], '')} | {r['rules']} "
                     f"| {cp} | {fz} | {r['freshness'] or '—'} | {al} | {ah} "
                     f"| {confirm} | {r['subind_quadrant']} | {r['watch_status'] or '—'} |"
                 )
+                if has_val:
+                    pe = f"{r['pe']:.1f}" if r.get("pe") is not None else "—"
+                    pct = (
+                        f"{r['pe_subind_pctile']:.0f}"
+                        if r.get("pe_subind_pctile") is not None
+                        else "—"
+                    )
+                    row += f" {pe} | {pct} | {r['triple_filter']} |"
+                lines.append(row)
             lines.append("")
 
     lines += [
@@ -359,6 +419,15 @@ def render_cp_candidates_report(
         "> 因子來自 B2 回測（現實天花板 lift ~1.3–1.5，疊高勝率非預測）；隨資料累積每季重校。",
         "> L3 反轉為三型態中確定性最低（真反轉與逃命反彈當下難分），已套深跌情境＋",
         "> 連續續買確認，仍需謹慎。資金 z＝個股自身 60 日滾動 z；新鮮度＝法人合計加速度正負。",
+        *(
+            [
+                "> 三重濾網「相對便宜」最適用埋伏/追突破；反轉本就深跌、便宜常與深跌同源，"
+                "非獨立加成。估值＝C1 單季年化代理（非真 TTM）、橫斷面相對非前瞻，「便宜」",
+                "亦可能是市場已反映風險，須配合個股基本面判讀。",
+            ]
+            if has_val
+            else []
+        ),
         "",
     ]
     md_path = output_dir / "cp_candidates.md"

@@ -1699,9 +1699,11 @@ def cp_candidates_cmd(
     from tw_screener.analysis.rotation import compute_subindustry_baskets, load_market_history
     from tw_screener.analysis.sector_universe import list_subindustries, load_industry_mapping
     from tw_screener.analysis.stock_panel import build_stock_panel, compute_coverage_meta
+    from tw_screener.analysis.valuation import build_valuation
     from tw_screener.data.twse import create_client
     from tw_screener.report.cp_candidates import (
         attach_subind_quadrant,
+        attach_valuation,
         build_cp_candidates,
         latest_snapshot,
         recent_buy_confirm,
@@ -1781,6 +1783,22 @@ def cp_candidates_cmd(
             continue
     candidates = tag_holding_status(candidates, holdings_ids, watch_ids, hit_ids)
 
+    # C2 三重濾網：疊 C1 次產業相對 PE（橫斷面，取最新交易日收盤）
+    val_cfg = cp.get("valuation", {})
+    cheap_pctile = float(val_cfg.get("cheap_pctile", 30.0))
+    latest = market["date"].max()
+    prices = market.filter(pl.col("date") == latest).select("stock_id", "close")
+    fundamentals = create_client(settings).load_latest_fundamentals()
+    valuation = build_valuation(
+        prices,
+        fundamentals,
+        members,
+        annualize_factor=float(val_cfg.get("annualize_factor", 4.0)),
+        min_peers=int(val_cfg.get("min_peers", 5)),
+        cheap_pctile=cheap_pctile,
+    )
+    candidates = attach_valuation(candidates, valuation, cheap_pctile=cheap_pctile)
+
     industry = load_industry_mapping(cache_dir)
     names = (
         {
@@ -1801,10 +1819,16 @@ def cp_candidates_cmd(
         names=names,
         data_date=str(panel["date"].max()),
     )
+    n_triple = (
+        candidates.filter(pl.col("triple_filter") == "✓三重").height
+        if "triple_filter" in candidates.columns
+        else 0
+    )
     console.print(f"[green]CP 候選清單 → {md_path}[/green]")
     console.print(
-        f"  候選 {candidates.height} 檔・面板 {coverage['n_stocks']} 檔 × "
-        f"{coverage['n_trading_days']} 日・法人覆蓋 {coverage['inst_coverage_pct']}%"
+        f"  候選 {candidates.height} 檔（三重濾網全過 {n_triple}）・"
+        f"面板 {coverage['n_stocks']} 檔 × {coverage['n_trading_days']} 日・"
+        f"法人覆蓋 {coverage['inst_coverage_pct']}%"
     )
 
 

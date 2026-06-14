@@ -8,6 +8,7 @@ import polars as pl
 
 from tw_screener.report.cp_candidates import (
     attach_subind_quadrant,
+    attach_valuation,
     build_cp_candidates,
     latest_snapshot,
     recent_buy_confirm,
@@ -212,6 +213,30 @@ def test_attach_subind_quadrant_no_rotation_csv(tmp_path):
     assert out["subind_quadrant"][0] == "—"  # 無快照可對 → 誠實降級
 
 
+def test_attach_valuation_triple_filter_states():
+    cands = pl.DataFrame({"stock_id": ["CHEAP", "RICH", "NOVAL"]})
+    valuation = pl.DataFrame(
+        {
+            "stock_id": ["CHEAP", "RICH"],  # NOVAL 缺估值
+            "pe": [8.0, 30.0],
+            "pe_subind_pctile": [10.0, 80.0],  # ≤30 便宜；>30 不便宜
+        }
+    )
+    out = attach_valuation(cands, valuation, cheap_pctile=30.0)
+    m = dict(zip(out["stock_id"].to_list(), out["triple_filter"].to_list()))
+    assert m["CHEAP"] == "✓三重"
+    assert m["RICH"] == "—"
+    assert m["NOVAL"] == "估值缺"  # 無相對位階 → 誠實標未知、不剔除
+    # 新增欄齊全
+    assert {"pe", "pe_subind_pctile", "triple_filter"} <= set(out.columns)
+
+
+def test_attach_valuation_empty_valuation_marks_all_unknown():
+    cands = pl.DataFrame({"stock_id": ["A", "B"]})
+    out = attach_valuation(cands, pl.DataFrame(), cheap_pctile=30.0)
+    assert out["triple_filter"].to_list() == ["估值缺", "估值缺"]
+
+
 def test_tag_holding_status():
     cands = pl.DataFrame({"stock_id": ["A", "B", "C", "D"]})
     out = tag_holding_status(cands, holdings=["A"], watch=["B"], hits=["A", "C"])
@@ -249,6 +274,45 @@ def test_render_writes_md_and_csv(tmp_path):
     assert "觀察清單" in text  # 人設但書
     csv = pl.read_csv(tmp_path / "cp_candidates.csv")
     assert "stock_name" in csv.columns and csv["stock_name"][0] == "台積電"
+
+
+def test_render_with_valuation_shows_triple_filter(tmp_path):
+    snap = _snap([{"stock_id": "A", "foreign_flow_20d_z": 1.0, "above_low_60d_pct": 4.0,
+                   "flow_momentum": 100.0}])
+    cands = build_cp_candidates(snap, _confirm({"A": True}), RULES)
+    cands = attach_subind_quadrant(cands, pl.DataFrame({"sub_industry": ["半導體"],
+                                                        "stock_id": ["A"]}),
+                                   tmp_path / "missing.csv")
+    cands = tag_holding_status(cands, holdings=[], watch=[], hits=[])
+    valuation = pl.DataFrame({"stock_id": ["A"], "pe": [8.0], "pe_subind_pctile": [5.0]})
+    cands = attach_valuation(cands, valuation, cheap_pctile=30.0)
+    md = render_cp_candidates_report(
+        cands, "2026-W24", tmp_path,
+        params={"drawdown_pct": 20.0, "confirm_days": 2}, coverage=_coverage(),
+        rules=RULES, names={"A": "台積電"}, data_date="2026-06-12",
+    )
+    text = md.read_text(encoding="utf-8")
+    assert "三重濾網全過 1" in text  # 表頭統計
+    assert "✓三重" in text and "三重 |" in text  # 表格欄
+    csv = pl.read_csv(tmp_path / "cp_candidates.csv")
+    assert {"pe", "pe_subind_pctile", "triple_filter"} <= set(csv.columns)
+
+
+def test_render_without_valuation_unchanged(tmp_path):
+    # 未疊估值（B3 原路徑）→ 不出三重欄，保持向後相容
+    snap = _snap([{"stock_id": "A", "foreign_flow_20d_z": 1.0, "above_low_60d_pct": 4.0}])
+    cands = build_cp_candidates(snap, _confirm({"A": True}), RULES)
+    cands = attach_subind_quadrant(cands, pl.DataFrame(schema={"sub_industry": pl.Utf8,
+                                                               "stock_id": pl.Utf8}),
+                                   tmp_path / "missing.csv")
+    cands = tag_holding_status(cands, holdings=[], watch=[], hits=[])
+    md = render_cp_candidates_report(
+        cands, "2026-W24", tmp_path,
+        params={"drawdown_pct": 20.0, "confirm_days": 2}, coverage=_coverage(),
+        rules=RULES, names={}, data_date="2026-06-12",
+    )
+    text = md.read_text(encoding="utf-8")
+    assert "三重" not in text and "三重濾網全過" not in text
 
 
 def test_render_empty_candidates(tmp_path):
