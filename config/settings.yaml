@@ -195,3 +195,8 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
         z_threshold: 1.5
         modifier: mom
         require_confirm: true
+  valuation:                 # C1 個股相對 PE 估值（生產軌；make cp-value-valuation・docs/13 §C1）
+    annualize_factor: 4.0    # 單季 EPS → 年化乘數（×4 代理）；橫斷面相對排名對此常數不敏感
+    min_peers: 5             # 次產業同儕 PE 有效數下限，低於不計相對位階（樣本太小無代表性）
+    cheap_pctile: 30.0       # 次產業 PE 升冪百分位 ≤ 此值標「相對便宜」（0=次產業內最便宜）
+    max_rows: 40             # cp_valuation.md 列出前 N（依百分位遞增）；≤0 不截

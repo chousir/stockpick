@@ -1808,5 +1808,70 @@ def cp_candidates_cmd(
     )
 
 
+@cp_app.command("valuation")
+def cp_valuation_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """C1 個股相對 PE 估值表：橫斷面 PE vs 次產業同儕中位數，產 reports/週次/cp_valuation.*。"""
+    import polars as pl
+    import yaml
+
+    from tw_screener.analysis.rotation import load_market_history
+    from tw_screener.analysis.sector_universe import list_subindustries, load_industry_mapping
+    from tw_screener.analysis.valuation import build_valuation, compute_valuation_meta
+    from tw_screener.data.twse import create_client
+    from tw_screener.report.cp_valuation import render_valuation_report
+    from tw_screener.screener.runner import derive_week_tag
+
+    with open(settings) as f:
+        cfg = yaml.safe_load(f)
+    val = cfg.get("cp_value", {}).get("valuation", {})
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+    reports_dir = Path(cfg["paths"]["reports_dir"])
+
+    # 個股層只框上市：只讀 daily_*（同 B2/B3）。取最新交易日做橫斷面比較。
+    market = load_market_history(cache_dir, n_days=5, patterns=("daily_*.parquet",))
+    if market.is_empty():
+        console.print("[red]缺上市日線快取（daily_*.parquet）[/red]")
+        raise typer.Exit(1)
+    latest = market["date"].max()
+    prices = market.filter(pl.col("date") == latest).select("stock_id", "close")
+
+    fundamentals = create_client(settings).load_latest_fundamentals()
+    if fundamentals.is_empty():
+        console.print("[yellow]無 fundamentals_*.parquet 快取——PE 全標『未取得』[/yellow]")
+    members = list_subindustries()
+
+    valuation = build_valuation(
+        prices,
+        fundamentals,
+        members,
+        annualize_factor=float(val.get("annualize_factor", 4.0)),
+        min_peers=int(val.get("min_peers", 5)),
+        cheap_pctile=float(val.get("cheap_pctile", 30.0)),
+    )
+    meta = compute_valuation_meta(valuation, data_date=str(latest), universe="listed")
+
+    week_tag = derive_week_tag(settings)
+    out_dir = reports_dir / week_tag
+    industry = load_industry_mapping(cache_dir)
+    names = (
+        {
+            sid: (nm or "").replace("股份有限公司", "").replace("(股)公司", "").strip()
+            for sid, nm in industry.select(["stock_id", "stock_name"]).iter_rows()
+        }
+        if not industry.is_empty()
+        else {}
+    )
+    md_path = render_valuation_report(
+        valuation, week_tag, out_dir, meta, names=names, max_rows=int(val.get("max_rows", 40))
+    )
+    console.print(f"[green]相對 PE 估值表 → {md_path}[/green]")
+    console.print(
+        f"  有 PE {meta['n_with_pe']}/{meta['n_stocks']} 檔・"
+        f"有相對位階 {meta['n_with_relative']} 檔・相對便宜 {meta['n_cheap']} 檔"
+    )
+
+
 if __name__ == "__main__":
     app()
