@@ -66,7 +66,7 @@ make week GROUP=defg          # def=D/E/F 不含 G；abc=A/B/C 已 legacy
 |---|---|
 | `group_analysis.md` | 族群脈絡＋強度排名＋次產業/概念股/輪動雷達＋給 Claude 的分析請求（Section 5 次產業深度、6 CP 補漲） |
 | `sector_rotation.md` | 全市場資金輪動地圖（四象限/★訊號/週對週 ΔRank，**無入選偏誤**，對照 group Section 2.8） |
-| `candidates_enriched.csv` | **主要挑股宇宙**：全候選股 × 技術/籌碼/估值（官方 PE/PB/殖利率）/月營收/flags 排雷欄 |
+| `candidates_enriched.csv` | **主要挑股宇宙**：全候選股 × 技術/籌碼/估值（官方 PE/PB/殖利率＋次產業相對便宜位階）/月營收/flags 排雷欄 |
 | `cp_candidates.md` | 個股 CP 補漲候選＋三重濾網（錢進＋沒漲＋相對便宜；埋伏/追突破/反轉三型態） |
 | `holdings_enriched.csv` / `watchlist_enriched.csv` | 我的庫存/觀察清單（有維護才產，**無論如何都要分析**） |
 | `screen_result_{d,e,f,g}_*.csv` | 各策略原始入選快照（看「哪檔中哪些策略」用） |

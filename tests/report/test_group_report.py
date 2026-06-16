@@ -84,18 +84,26 @@ def test_valuation_map_official_primary_goodinfo_fallback(tmp_path):
         results, pl.DataFrame(), pl.DataFrame(),
         industry_df=_INDUSTRY_DF, min_group_size=2, institutional=institutional,
     )
-    # 官方只有 2330（pe/pbr/殖利率齊）；2454 官方缺 → 該檔退用 Goodinfo、殖利率空
-    valuation_map = {"2330": {"pe": 31.0, "pbr": 10.0, "dividend_yield": 1.5}}
+    # 官方只有 2330（build_valuation 列：pe/pbr/殖利率＋次產業相對位階）；2454 官方缺
+    valuation_map = {
+        "2330": {"pe": 31.0, "pbr": 10.0, "dividend_yield": 1.5,
+                 "val_metric": "PE", "val_pctile": 12.0, "cheap_flag": "相對便宜"},
+    }
     out = tmp_path / "candidates_enriched.csv"
     write_candidates_enriched_csv(members, pl.DataFrame(), results, out,
                                   valuation_map=valuation_map)
     by_id = {str(r["stock_id"]): r for r in pl.read_csv(out).iter_rows(named=True)}
 
-    # 2330：用官方 PE/PB（非 Goodinfo 20/4），殖利率有值
+    # 2330：用官方 PE/PB（非 Goodinfo 20/4），殖利率＋次產業相對位階 inline
     assert by_id["2330"]["pe_ratio"] == 31.0
     assert by_id["2330"]["pb_ratio"] == 10.0
     assert by_id["2330"]["dividend_yield_pct"] == 1.5
-    # 2454：官方缺 → 兜底 Goodinfo PE/PB（18/3）、殖利率空白
+    assert by_id["2330"]["val_metric"] == "PE"
+    assert by_id["2330"]["val_pctile"] == 12.0
+    assert by_id["2330"]["cheap_flag"] == "相對便宜"
+    # 2454：官方缺 → 兜底 Goodinfo PE/PB（18/3）、殖利率＋相對位階空白
     assert by_id["2454"]["pe_ratio"] == 18.0
     assert by_id["2454"]["pb_ratio"] == 3.0
     assert by_id["2454"]["dividend_yield_pct"] is None
+    assert by_id["2454"]["val_pctile"] is None
+    assert by_id["2454"]["cheap_flag"] in (None, "")

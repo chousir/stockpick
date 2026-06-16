@@ -714,6 +714,10 @@ def _build_enriched_rows(
         pe = _num(off_pe if off_pe is not None else pe_map.get(sid), 1)
         pb = _num(off_pb if off_pb is not None else pb_map.get(sid), 2)
         dy = _num(vrow.get("dividend_yield"), 2) if vrow else None
+        # 次產業相對位階（官方 build_valuation；PE 主、PB 補虧損股）：每檔候選 inline 帶相對便宜
+        val_metric = (vrow.get("val_metric") or "") if vrow else ""
+        val_pctile = _num(vrow.get("val_pctile"), 0) if vrow else None
+        cheap_flag = (vrow.get("cheap_flag") or "") if vrow else ""
         fn = _num(r.get("foreign_net"), 0)
         tn = _num(r.get("trust_net"), 0)
         instn = _num(r.get("inst_net"), 0)
@@ -774,6 +778,9 @@ def _build_enriched_rows(
                 "pe_ratio": pe,
                 "pb_ratio": pb,
                 "dividend_yield_pct": dy,  # 官方殖利率（BWIBBU/peratio）；Goodinfo 無此欄
+                "val_metric": val_metric,  # 相對位階用 PE 或 PB（虧損股退 PB）
+                "val_pctile": val_pctile,  # 次產業升冪百分位（0=同業最便宜；官方 trailing 橫斷面）
+                "cheap_flag": cheap_flag,  # 相對便宜 / 相對便宜(PB) / 空（同儕不足）
                 "rev_yoy_pct": ryoy,
                 "gross_margin_pct": gross_margin,  # 最新單季毛利率（TWSE/TPEX OpenAPI）
                 "eps_q": eps_q,                    # 最新單季 EPS（元）
@@ -834,6 +841,9 @@ _CANONICAL_REUSE_FIELDS = (
     "pe_ratio",
     "pb_ratio",
     "dividend_yield_pct",
+    "val_metric",
+    "val_pctile",
+    "cheap_flag",
     "rev_yoy_pct",
     "gross_margin_pct",
     "eps_q",

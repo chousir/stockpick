@@ -890,12 +890,23 @@ def analysis_group(
         else {}
     )
 
-    # 官方日估值比（PE/PB/殖利率）：純讀快取，由 make fetch-twse 累積（BWIBBU）。
-    # candidates 估值欄以此為主、Goodinfo 爬來值兜底（官方覆蓋 ~97%、口徑一致 trailing）。
+    # 官方日估值比（PE/PB/殖利率）：純讀快取，由 make fetch-twse 累積（BWIBBU）。candidates 估值欄
+    # 以此為主、Goodinfo 兜底（官方覆蓋 ~97%、口徑一致 trailing）。再過 build_valuation 算次產業
+    # 相對位階（PE 主、PB 補虧損股）→ 每檔候選 inline 帶「次位/相對便宜」，免另跑 cp_valuation。
+    from tw_screener.analysis.sector_universe import build_peer_membership, list_subindustries
+    from tw_screener.analysis.valuation import build_valuation
+
     val_df = client.load_latest_valuation_ratios()
+    val_cfg = cfg.get("cp_value", {}).get("valuation", {})
+    valuation = build_valuation(
+        val_df,
+        build_peer_membership(list_subindustries(), industry_df),
+        min_peers=int(val_cfg.get("min_peers", 5)),
+        cheap_pctile=float(val_cfg.get("cheap_pctile", 30.0)),
+    )
     valuation_map: dict[str, dict] = (
-        {str(r["stock_id"]): r for r in val_df.iter_rows(named=True)}
-        if not val_df.is_empty()
+        {str(r["stock_id"]): r for r in valuation.iter_rows(named=True)}
+        if not valuation.is_empty()
         else {}
     )
 
