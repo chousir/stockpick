@@ -87,6 +87,7 @@ def build_stock_panel(
     baskets: pl.DataFrame,
     short_window: int = 5,
     long_window: int = 20,
+    windows: tuple[int, ...] | None = None,
     ma_windows: tuple[int, ...] = (20, 60, 240),
     position_window: int = 60,
     rs_window: int = 20,
@@ -94,14 +95,16 @@ def build_stock_panel(
     z_min_periods: int = 30,
     clip_daily_return_pct: float = 10.0,
 ) -> pl.DataFrame:
-    """個股每日特徵長表（docs/13 §4 B1）。
+    """個股每日特徵長表（docs/13 §4 B1；M-MH Phase D 多窗化）。
 
     Args:
         price_history: (date, stock_id, close, volume) 上市全市場日線（呼叫端框上市）
         institutional: (date, stock_id, foreign_net, trust_net, dealer_net, total_net) 單位股
         membership: (sub_industry, stock_id) long table（多標籤股多列）
         baskets: rotation.compute_subindustry_baskets 輸出（含 basket_index）
-        short_window / long_window: 資金/量能滾動視窗（交易日），嵌入欄名
+        short_window / long_window: unsuffixed momentum / flow_decel / volume_z 的錨窗
+        windows: 多窗鏡頭集合（交易日）；每窗各產 flow 滾動加總／自身 z／momentum。
+            None → (short, long)。short/long 一律納入，故 _{S}d/_{L}d 逐值不變（純加法）。
         ma_windows: 均線視窗（距均線 %）；240 日需足夠歷史，暖機不足時該欄 null
         position_window: 位階回看視窗（距 N 日低 %）
         rs_window: 相對強度報酬視窗（個股 vs 大盤 / 次產業）
@@ -110,17 +113,21 @@ def build_stock_panel(
 
     Returns:
         每 (date, stock_id) 一列，欄位：
-        - 資金：{net,foreign,trust}_flow_{S}d/_{L}d（滾動加總，股）＋同名 _z（個股自身 z）
-        - 加速度：{flow,foreign,trust}_momentum（短窗 − 前一短窗，股）
+        - 資金：{net,foreign,trust}_flow_{w}d（各窗滾動加總，股）＋同名 _z（個股自身 z）
+        - 加速度：{flow,foreign,trust}_momentum_{w}d（各窗：本窗 − 前一同窗）＋
+          unsuffixed {flow,foreign,trust}_momentum（＝短窗值，向後相容 cp_candidates）
+        - 背離：flow_decel（短窗總淨流動能的環比變化，二階；<0＝買盤減速）、
+          price_flow_div_{w}d（N 日價漲幅 − N 日總淨流 z 成長；>0＝價漲但資金未跟＝背離）
         - 價格位階：above_low_{P}d_pct（距 P 日低 %）、above_high_{P}d_pct（距 P 日高 %，
           ≤0；供 B3 L3 超跌反轉「深跌情境」判讀）、above_ma{W}_pct（距各均線 %）
-        - 相對強度：ret_{R}d（個股報酬 %）、rs_market_{R}d、rs_subind_{R}d（差，pp）
+        - 相對強度：ret_{w}d（各窗個股報酬 %）、rs_market_{R}d、rs_subind_{R}d（差，pp）
         - 量能：volume_z_{S}d（短窗均量 z，非真周轉率，缺流通股數）
         空輸入 → 空 DataFrame。
     """
     if price_history.is_empty():
         return pl.DataFrame()
     s, lw = short_window, long_window
+    wins = tuple(sorted({s, lw} | set(windows or ())))
 
     base = (
         price_history.select(["date", "stock_id", "close", "volume"])
@@ -139,30 +146,46 @@ def build_stock_panel(
             [pl.col(c).fill_null(0) for c in _NET_COLS]
         )
 
-    # 資金：滾動加總（短/長窗）＋ 加速度（短窗 − 前一短窗）
+    # 資金：各窗滾動加總 ＋ 各窗加速度（本窗 − 前一同窗）
     panel = panel.with_columns(
         [
             pl.col(c).rolling_sum(w, min_samples=1).over("stock_id").alias(f"_{c}_{w}")
             for c in _NET_COLS
-            for w in (s, lw)
+            for w in wins
         ]
     ).with_columns(
         [
-            (pl.col(f"_{c}_{s}") - pl.col(f"_{c}_{s}").shift(s).over("stock_id")).alias(
-                f"{_MOM_PREFIX[c]}_momentum"
+            (pl.col(f"_{c}_{w}") - pl.col(f"_{c}_{w}").shift(w).over("stock_id")).alias(
+                f"{_MOM_PREFIX[c]}_momentum_{w}d"
             )
+            for c in _NET_COLS
+            for w in wins
+        ]
+    )
+    # unsuffixed momentum＝短窗值（向後相容 cp_candidates / stock_calib 既有讀法）
+    panel = panel.with_columns(
+        [
+            pl.col(f"{_MOM_PREFIX[c]}_momentum_{s}d").alias(f"{_MOM_PREFIX[c]}_momentum")
             for c in _NET_COLS
         ]
     )
     # 對外輸出的滾動加總改名（_total_net_20 → net_flow_20d…）
     panel = panel.rename(
-        {f"_{c}_{w}": f"{_FLOW_PREFIX[c]}_{w}d" for c in _NET_COLS for w in (s, lw)}
+        {f"_{c}_{w}": f"{_FLOW_PREFIX[c]}_{w}d" for c in _NET_COLS for w in wins}
     )
 
-    # 資金 z：個股自身滾動 z（跨個股可比；std=0 或暖機 → null 不誤判）
-    z_targets = [f"{_FLOW_PREFIX[c]}_{w}d" for c in _NET_COLS for w in (s, lw)]
+    # 資金 z：個股自身滾動 z（各窗；跨個股可比；std=0 或暖機 → null 不誤判）
+    z_targets = [f"{_FLOW_PREFIX[c]}_{w}d" for c in _NET_COLS for w in wins]
     panel = panel.with_columns(
         [_rolling_z(t, z_window, z_min_periods).alias(f"{t}_z") for t in z_targets]
+    )
+
+    # 背離因子①：flow_decel＝短窗總淨流動能的環比變化（二階差分）。
+    # <0＝短窗買盤在減速（過熱-退潮早訊）；>0＝加速。錨在 short（與 unsuffixed momentum 一致）。
+    panel = panel.with_columns(
+        (
+            pl.col("flow_momentum") - pl.col("flow_momentum").shift(s).over("stock_id")
+        ).alias("flow_decel")
     )
 
     # 價格位階：距 position_window 日低 %、距 position_window 日高 %（≤0）、距各均線 %
@@ -194,12 +217,17 @@ def build_stock_panel(
         pl.col("volume").rolling_mean(s, min_samples=1).over("stock_id").alias("_avg_vol")
     ).with_columns(_rolling_z("_avg_vol", z_window, z_min_periods).alias(f"volume_z_{s}d"))
 
-    # 相對強度：個股報酬 − 大盤 / 次產業同窗報酬
+    # 個股報酬：各窗 + rs_window（rs 用 rs_window；price_flow_div 用各窗）
+    ret_windows = tuple(sorted({rs_window} | set(wins)))
     panel = panel.with_columns(
-        ((pl.col("close") / pl.col("close").shift(rs_window).over("stock_id") - 1) * 100).alias(
-            f"ret_{rs_window}d"
-        )
+        [
+            ((pl.col("close") / pl.col("close").shift(w).over("stock_id") - 1) * 100).alias(
+                f"ret_{w}d"
+            )
+            for w in ret_windows
+        ]
     )
+    # 相對強度：個股報酬 − 大盤 / 次產業同窗報酬（錨在 rs_window）
     panel = panel.join(
         _market_returns(price_history, rs_window, clip_daily_return_pct), on="date", how="left"
     )
@@ -213,21 +241,43 @@ def build_stock_panel(
         (pl.col(f"ret_{rs_window}d") - pl.col("subind_ret")).alias(f"rs_subind_{rs_window}d"),
     )
 
+    # 背離因子②：price_flow_div_{w}d＝N 日價漲幅 − N 日總淨流 z 成長。
+    # 價漲（%）但資金 z 未同步成長（z 單位）→ 值偏正＝量價/資金背離（過熱-退潮佐證）。
+    # 註：% 與 z 量綱不同，為序數型背離訊號，門檻待 Phase 2 校準。
+    panel = panel.with_columns(
+        [
+            (
+                pl.col(f"ret_{w}d")
+                - (
+                    pl.col(f"net_flow_{w}d_z")
+                    - pl.col(f"net_flow_{w}d_z").shift(w).over("stock_id")
+                )
+            ).alias(f"price_flow_div_{w}d")
+            for w in wins
+        ]
+    )
+
     # 收尾：丟暫存欄、固定欄序、依 (stock_id, date) 排序
-    flow_cols = [f"{_FLOW_PREFIX[c]}_{w}d" for c in _NET_COLS for w in (s, lw)]
+    flow_cols = [f"{_FLOW_PREFIX[c]}_{w}d" for c in _NET_COLS for w in wins]
     z_cols = [f"{t}_z" for t in z_targets]
-    mom_cols = [f"{_MOM_PREFIX[c]}_momentum" for c in _NET_COLS]
+    mom_cols = [f"{_MOM_PREFIX[c]}_momentum_{w}d" for c in _NET_COLS for w in wins] + [
+        f"{_MOM_PREFIX[c]}_momentum" for c in _NET_COLS
+    ]
+    div_cols = ["flow_decel"] + [f"price_flow_div_{w}d" for w in wins]
     pos_cols = [
         f"above_low_{position_window}d_pct",
         f"above_high_{position_window}d_pct",
     ] + [f"above_ma{w}_pct" for w in ma_windows]
-    rs_cols = [f"ret_{rs_window}d", f"rs_market_{rs_window}d", f"rs_subind_{rs_window}d"]
+    ret_cols = [f"ret_{w}d" for w in ret_windows]
+    rs_cols = [f"rs_market_{rs_window}d", f"rs_subind_{rs_window}d"]
     ordered = (
         ["date", "stock_id", "close", "volume"]
         + flow_cols
         + z_cols
         + mom_cols
+        + div_cols
         + pos_cols
+        + ret_cols
         + rs_cols
         + [f"volume_z_{s}d"]
     )
