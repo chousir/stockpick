@@ -43,6 +43,33 @@
 **同強＝最強確認；雷達強輪動弱＝只有篩中股在動（防單檔灌水）；輪動強雷達弱＝資金已進但
 候選未跟上（更早期訊號）**。
 
+---
+
+## 首次設定（一次性）
+
+```bash
+make sync && make init          # 裝依賴（uv）、建目錄/.env
+```
+
+接著兩個**個人化設定**——不設也能跑 `make week`，但設了 AI 分析會更貼你的實際部位：
+
+**① 我的庫存／觀察清單**（放 `watchlist/`，已 gitignore、不外流）
+建這兩個 CSV，`make week` 會自動 enrich（算報酬率/MA60 停損價）、標進輪動「我的參與度」，
+貼給 Claude 時走 prompt 任務 0（庫存給續抱/加碼/減碼/停利/停損、觀察給進場時機）：
+
+```
+watchlist/holdings.csv     stock_id,buy_price,shares,note    # 例：2330,1050,2,核心持股
+watchlist/watchlist.csv    stock_id,note                     # 例：3035,等回測季線
+```
+> 只有 `stock_id` 必填，其餘可空；沒建這兩檔 → 跳過庫存/觀察 enrich，主流程照常跑。
+
+**② 次產業標籤 `config/concepts.yaml`**（已預先標好、開箱即用）
+每檔股票的「次產業＋概念股」多標籤（並存於 TWSE 官方 28 類之上）。**已內建**電子細分
+（記憶體/記憶體模組/IC設計/封測/晶圓代工…）＋金融＋航運＋15 個概念股主題，**第一次就能跑、
+不必先填**。次產業是**輪動引擎的分群依據**——想拆更細或修正分類時，**手動編 `concepts:` 段**
+（`股號: 標籤` 或 `股號: [標籤, ...]`，一檔可多標籤）；`make group` 末尾會列出「電子股未標
+次產業」提醒你增量補。概念股標籤則由 `make build-themes` 自動爬 Yahoo 維護。詳見 [§7](#7-主題模型維護configconceptsyaml)。
+
 ## 何時跑 `make week`
 
 - **推薦時段**：交易日收盤後 **15:00 起**（TWSE T86 法人 ~15:00 穩定，Goodinfo 也同步更新完成）
@@ -77,32 +104,20 @@ make week GROUP=defg          # def=D/E/F 不含 G；abc=A/B/C 已 legacy
 產出 `picks.md`（精選進場清單，三路匯流：族群深度＋全宇宙掃描＋CP 補漲候選）→ 對 picks 內每檔
 `make report STOCK_ID=XXXX` 產個股深度報告。
 
-## Quick Start（5 步）
+## 每週指令速查
+
+首次設定做完後，平時就這幾條（產出與貼 Claude 細節見上方「主流程」）：
 
 ```bash
-# Step 1：首次 clone 後做一次
-make sync && make init
-
-# Step 2：每週跑一次（抓資料 → 篩選 → 資金輪動 → 族群分析）
-make week GROUP=defg
-# （def=D/E/F 不含 G；abc=A/B/C 經典三角，已列 legacy）
-
-# Step 3：ProPicks 風格全清單分析（推薦，Claude 網頁對話）
-#   貼 group_analysis.md + sector_rotation.md + candidates_enriched.csv + cp_candidates.md
-#   + holdings/watchlist_enriched.csv + 4 個 screen CSV
-#   配合 docs/11-propicks-analysis.md 的範本 prompt → 產出 reports/Www/picks.md
-cat reports/$(date +%Y-W%V)/group_analysis.md
-
-# Step 4：對 picks.md 內每檔產個股深度報告（5-10 秒/檔）
-make report STOCK_ID=2330
-
-# Step 5：完成分析（依是否有 API key 分兩種模式）
-#   有 ANTHROPIC_API_KEY → Step 4 已產出完整分析報告，直接讀
-#   無 API key → Step 4 產出資料草稿；貼到 Claude 對話依範本補寫後貼回
+make week GROUP=defg                              # ①~⑥ 一鍵跑完
+cat reports/$(date +%Y-W%V)/group_analysis.md     # 打開本週族群報告
+# → 把「主流程」表列的 6 類產出貼給 Claude（套 docs/11 範本 prompt）→ 得 picks.md
+make report STOCK_ID=2330                         # 對 picks 選出的每檔產個股深度報告（5-10 秒）
 ```
 
-**每週使用流程詳解 → [docs/10-sop.md](./docs/10-sop.md)**
-**遇到問題（被擋、空資料、未分類等）→ [docs/99-troubleshooting.md](./docs/99-troubleshooting.md)**
+> **個股報告兩模式**：設了 `ANTHROPIC_API_KEY` → `make report` 直接產完整分析；沒設 → 產資料草稿，貼 Claude 對話依範本補寫。
+
+**每週 SOP 詳解 → [docs/10-sop.md](./docs/10-sop.md)**　|　**完整挑股 prompt → [docs/11-propicks-analysis.md](./docs/11-propicks-analysis.md)**　|　**問題排解 → [docs/99-troubleshooting.md](./docs/99-troubleshooting.md)**
 
 ---
 
