@@ -54,7 +54,7 @@ reports/YYYY-Www/
 
 ### Step C：依序貼入檔案內容
 
-順序：先 prompt → 再 group_analysis.md → 再 **candidates_enriched.csv** → 再 **holdings/watchlist_enriched.csv（若有）** → 再 4 個 CSV（D/E/F/G）。
+順序：先 prompt → 再 group_analysis.md → 再 **sector_rotation.md** → 再 **candidates_enriched.csv** → 再 **cp_candidates.md** → 再 **holdings/watchlist_enriched.csv（若有）** → 再 4 個 CSV（D/E/F/G）。
 
 ### Step D：等 Claude 回覆，存到本週目錄
 

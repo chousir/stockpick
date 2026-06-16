@@ -110,8 +110,10 @@ make week GROUP=defg          # def=D/E/F 不含 G；abc=A/B/C 已 legacy
 
 ```bash
 make week GROUP=defg                              # ①~⑥ 一鍵跑完
-cat reports/$(date +%Y-W%V)/group_analysis.md     # 打開本週族群報告
-# → 把「主流程」表列的 6 類產出貼給 Claude（套 docs/11 範本 prompt）→ 得 picks.md
+# 貼給 Claude 的 6 類檔（全在 reports/YYYY-Www/，詳見上方主流程表）：
+#   group_analysis.md  sector_rotation.md  candidates_enriched.csv
+#   cp_candidates.md  holdings/watchlist_enriched.csv  screen_result_*.csv
+# → 套 docs/11 範本 prompt → 得 picks.md
 make report STOCK_ID=2330                         # 對 picks 選出的每檔產個股深度報告（5-10 秒）
 ```
 

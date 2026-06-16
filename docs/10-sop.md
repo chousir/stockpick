@@ -40,28 +40,33 @@ make week GROUP=defg   # 主流程：D/E/F/G（ProPicks 復刻組＋成長拉回
 等同於：
 
 ```bash
-make fetch-twse     # 抓 TWSE 全市場日線、法人、月營收
+make fetch-twse                # 抓 TWSE 全市場日線、法人、月營收
 make screen-all GROUP=defg     # 跑指定組策略，產 screen_result_*.csv
 make fetch-candidates-history  # 補抓候選股 13 個月歷史 OHLCV（MA60 斜率用）
-make group                     # 族群分析，產 group_analysis.md
+make rotation                  # 次產業資金輪動，產 sector_rotation.md/csv
+make cp-value-candidates       # 個股 CP 補漲候選，產 cp_candidates.md
+make group                     # 族群分析，產 group_analysis.md＋candidates_enriched.csv
 ```
 
 **產出**：
 
 ```
 reports/YYYY-Www/
-  ├─ screen_result_*.csv        ← 4 個 CSV（GROUP=defg → d/e/f/g；legacy abc → a/b/c）
-  ├─ group_analysis.md          ← Step 2 看這個（族群脈絡）
-  ├─ candidates_enriched.csv    ← 全候選股 × 完整技術/籌碼/估值/flags（主要挑股宇宙）
-  └─ holdings/watchlist_enriched.csv  ← 有維護 watchlist/ 才產（庫存/觀察清單・必分析）
+  ├─ screen_result_*.csv              ← 4 個 CSV（GROUP=defg → d/e/f/g；legacy abc → a/b/c）
+  ├─ sector_rotation.md               ← ★ 全市場資金輪動地圖（四象限/★訊號/ΔRank）貼給 Claude
+  ├─ cp_candidates.md                 ← ★ 個股 CP 補漲候選＋三重濾網（group Section 6 要讀）貼給 Claude
+  ├─ group_analysis.md                ← Step 2 看這個（族群脈絡）貼給 Claude
+  ├─ candidates_enriched.csv          ← 全候選股 × 完整技術/籌碼/估值/flags（主要挑股宇宙）貼給 Claude
+  └─ holdings/watchlist_enriched.csv  ← 有維護 watchlist/ 才產（庫存/觀察清單・必分析）貼給 Claude
 ```
 
 ### Step 2：產出進場清單（兩種模式擇一）
 
 **模式 2a（推薦）：ProPicks 風格全清單分析**
 
-把 `group_analysis.md` + `candidates_enriched.csv` +（若有）`holdings/watchlist_enriched.csv`
-+ 4 個 `screen_result_*.csv` 貼到 Claude Opus 網頁對話，配合範本 prompt 讓 AI 在「完整候選宇宙」中挑：
+把 `group_analysis.md` + `sector_rotation.md` + `candidates_enriched.csv` + `cp_candidates.md`
++（若有）`holdings/watchlist_enriched.csv` + 4 個 `screen_result_*.csv` 貼到 Claude Opus 網頁對話，
+配合範本 prompt 讓 AI 在「完整候選宇宙」中挑：
 
 - **任務 0（必做）**：庫存決策（續抱/加碼/減碼/停利/停損）＋觀察清單進場時機
 - 精選進場清單（寧缺勿濫）+ 為何入選 + 進場思路 + 主要風險
