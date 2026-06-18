@@ -406,3 +406,13 @@ claude
 | 1 因子 | ~2h | code＋回歸測試 |
 | 2 校準 | ~1.5h | 回測＋判讀（可能中止）|
 | 3 生產分級 | ~2.5h | 條件性，僅過閘才做 |
+
+### 精修輪（2026-06-18・使用者 5 點建議）
+
+承 Phase 3，使用者再提 5 點，對帳後做 1+2+3（量比當預測是反指標、PE 已在三重濾網，皆不重做）：
+
+1. **持有/觀察健檢段**（點 1、4）：group_analysis 加 **Section 7**——叫 Claude 開 `holdings_enriched.csv`／`watchlist_enriched.csv` 逐檔健檢（續抱/收緊/停利/轉弱、接近進場/再等/剔除），**與命中策略同等深度**（命中尤其 E＝均線多頭天生已起漲、進場偏晚）；含「多鏡頭交集優先於單一聯集」（點 4）與「新鮮度過濾」（點 2：裸 5 日漲≈隨機、要搭剛離低+資金+貼低）。
+2. **過熱-退潮警示**（點 5、量比正用）：`cp_candidates.py` `compute_overheat_warning`／`build_overheat_watch`／`render_overheat_section`——對稱早訊號，旗標「已漲到 60 日高位＋短窗 flow_decel<0 減速＋（量價背離 price_flow_div>0｜量縮 volume_z<0）」的庫存/觀察股（停利提醒）。**未校準啟發式、明標非賣訊**（使用者拍板先出啟發式）。settings `cp_value.overheat_watch`。
+3. **多鏡頭確認**（點 4）：落在 Section 7 prompt 指示（標「幾個鏡頭確認」、交集排前），不另加表欄避免膨脹。
+
+實跑：過熱-退潮本週命中庫存/觀察 5 檔（如 2492 華新科 近 5 日 +33%、距高 0%、減速+背離+量縮）。測試 +5＝446 綠、ruff/mypy 零淨增。詳 docs/13 Phase D 末。

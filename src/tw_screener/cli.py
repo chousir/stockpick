@@ -1803,7 +1803,9 @@ def cp_candidates_cmd(
         attach_valuation,
         build_cp_candidates,
         build_early_inflow_watch,
+        build_overheat_watch,
         compute_early_inflow,
+        compute_overheat_warning,
         latest_snapshot,
         recent_buy_confirm,
         render_cp_candidates_report,
@@ -1897,6 +1899,18 @@ def cp_candidates_cmd(
         cand_ids = set(candidates["stock_id"].to_list()) if not candidates.is_empty() else set()
         early_watch = build_early_inflow_watch(early, holdings_ids, watch_ids, cand_ids)
 
+    # 精修・點 5：過熱-退潮警示（庫存/觀察已漲到高位但短窗退潮＝停利提醒；未校準啟發式）
+    oh_cfg = cp.get("overheat_watch", {})
+    overheat_watch = None
+    if bool(oh_cfg.get("enabled", True)):
+        overheat = compute_overheat_warning(
+            snapshot,
+            near_high_pct=float(oh_cfg.get("near_high_pct", 8.0)),
+            div_floor=float(oh_cfg.get("div_floor", 0.0)),
+            vol_contract_floor=float(oh_cfg.get("vol_contract_floor", 0.0)),
+        )
+        overheat_watch = build_overheat_watch(overheat, holdings_ids, watch_ids)
+
     # C2 三重濾網：疊 C1 次產業相對估值（官方 trailing PE 主 / PB 補虧損股，橫斷面取最新一份）
     industry = load_industry_mapping(cache_dir)
     val_cfg = cp.get("valuation", {})
@@ -1931,6 +1945,7 @@ def cp_candidates_cmd(
         names=names,
         data_date=str(panel["date"].max()),
         early_watch=early_watch,
+        overheat_watch=overheat_watch,
     )
     n_triple = (
         candidates.filter(pl.col("triple_filter") == "✓三重").height
@@ -1939,9 +1954,10 @@ def cp_candidates_cmd(
     )
     console.print(f"[green]CP 候選清單 → {md_path}[/green]")
     n_ew = early_watch.height if early_watch is not None else 0
+    n_oh = overheat_watch.height if overheat_watch is not None else 0
     console.print(
         f"  候選 {candidates.height} 檔（三重濾網全過 {n_triple}）・"
-        f"短窗早訊（庫存/觀察）{n_ew} 檔・"
+        f"短窗早訊（庫存/觀察）{n_ew} 檔・過熱-退潮（庫存/觀察）{n_oh} 檔・"
         f"面板 {coverage['n_stocks']} 檔 × {coverage['n_trading_days']} 日・"
         f"法人覆蓋 {coverage['inst_coverage_pct']}%"
     )

@@ -209,6 +209,8 @@ surface 成「短窗早訊號」低信心觀察欄（`cp_candidates.py` compute_
 限庫存∪觀察、排除已是候選者；cp_candidates.md 末段＋group_analysis Section 6 第 5 點），**不取代距低硬擋、
 不動候選 gating**；明標「校準未證更早更準，只當已持有/觀察股資金異動的回查提醒、非進場理由」。
 
+**精修輪（2026-06-18，使用者 5 點建議）**：①持有/觀察健檢段（group_analysis Section 7，與命中同等深度）；②**過熱-退潮警示**（cp_candidates compute_overheat_warning＝對稱早訊號：已漲到高位＋短窗減速＋量價背離/量縮＝出貨型態，**未校準啟發式、非賣訊**——背離因子在「早偵測進場」被校準否證，但「頂部警示」未測、機械合理故先出啟發式）；③多鏡頭交集優先（Section 7 prompt）。量比經校準是進場反指標（lift<1）故不進 CP 分、只當退潮確認；PE 已在三重濾網不重做。詳 docs/08 M-MH 精修輪。
+
 ⚠️ **統計力但書**：1 年單一樣本，每季資料累積後重跑 `make cp-value-calib` 重校；不把單次數字當聖經。
 
 ---

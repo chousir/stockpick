@@ -421,6 +421,111 @@ def render_early_inflow_section(
     return lines
 
 
+def compute_overheat_warning(
+    snapshot: pl.DataFrame,
+    near_high_pct: float = 8.0,
+    div_floor: float = 0.0,
+    vol_contract_floor: float = 0.0,
+) -> pl.DataFrame:
+    """過熱-退潮警示旗標（精修・點 5；未校準啟發式）：股已漲到 60 日區間高位、但短窗買盤在
+    減速、且出現量價背離或量縮＝「20d 動能還在、但最後幾天像在獲利了結」。
+
+    **誠實**：M-MH 校準只測過這些背離因子的「早偵測進場」（未證更早更準），**未驗證它們是
+    頂部預測**；此處純機械啟發式風險標註，非賣出訊號。條件全 settings 化、不寫死。
+
+    需面板欄：above_high_*d_pct / flow_decel / price_flow_div_5d / volume_z_5d /（選）ret_5d。
+    回傳每命中股一列：stock_id / above_high_pct / price_flow_div / volume_z / ret_5d / reasons
+    （觸發的退潮跡象）。缺必要欄或無命中 → 空表。
+    """
+    if snapshot.is_empty():
+        return pl.DataFrame()
+    high_col = _prefix_col(snapshot, "above_high_")
+    need = {"flow_decel", "price_flow_div_5d", "volume_z_5d"}
+    if high_col is None or not need <= set(snapshot.columns):
+        return pl.DataFrame()
+
+    rows: list[dict] = []
+    for rec in snapshot.iter_rows(named=True):
+        ah = rec.get(high_col)
+        decel = rec.get("flow_decel")
+        if ah is None or ah < -near_high_pct:  # 未到區間高位 → 非過熱
+            continue
+        if decel is None or decel >= 0:  # 短窗買盤未減速 → 非退潮
+            continue
+        div = rec.get("price_flow_div_5d")
+        vol = rec.get("volume_z_5d")
+        reasons: list[str] = []
+        if div is not None and div > div_floor:
+            reasons.append("量價背離")
+        if vol is not None and vol < vol_contract_floor:
+            reasons.append("量縮")
+        if not reasons:  # 只減速、無背離/量縮 → 訊號不足，不示警
+            continue
+        rows.append(
+            {
+                "stock_id": rec["stock_id"],
+                "above_high_pct": round(ah, 1),
+                "price_flow_div": round(div, 1) if div is not None else None,
+                "volume_z": round(vol, 2) if vol is not None else None,
+                "ret_5d": round(rec["ret_5d"], 1) if rec.get("ret_5d") is not None else None,
+                "reasons": "＋".join(["短窗減速", *reasons]),
+            }
+        )
+    return pl.DataFrame(rows).sort("above_high_pct", descending=True) if rows else pl.DataFrame()
+
+
+def build_overheat_watch(
+    overheat: pl.DataFrame, holdings: list[str], watch: list[str]
+) -> pl.DataFrame:
+    """過熱-退潮警示中，限你的庫存/觀察清單者（停利/收緊留意；精修・點 5）。
+
+    加 watch_status（庫存/觀察），依距高遞減。空輸入或無命中 → 空表。
+    """
+    if overheat.is_empty():
+        return pl.DataFrame()
+    hset, wset = set(holdings), set(watch)
+    sub = overheat.filter(pl.col("stock_id").is_in(list(hset | wset)))
+    if sub.is_empty():
+        return pl.DataFrame()
+    status = [
+        "/".join([t for t, s in (("庫存", hset), ("觀察", wset)) if sid in s])
+        for sid in sub["stock_id"].to_list()
+    ]
+    return sub.with_columns(pl.Series("watch_status", status)).sort(
+        "above_high_pct", descending=True
+    )
+
+
+def render_overheat_section(watch: pl.DataFrame, names: dict[str, str] | None = None) -> list[str]:
+    """cp_candidates.md 的「過熱-退潮警示（持有/觀察・未校準）」區塊行（精修・點 5）。"""
+    names = names or {}
+    lines = [
+        "## 過熱-退潮警示（持有/觀察・停利留意・未校準啟發式）",
+        "",
+        "> 股已漲到 60 日區間高位、但短窗法人買盤在減速、且出現量價背離或量縮＝「20d 動能還在、",
+        "> 但最後幾天像在獲利了結」。**未經回測驗證為頂部預測、純機械風險標註，非賣出訊號**——",
+        "> 只當「你持有/觀察的股該回頭檢查是否停利/收緊」的提醒，仍須個股籌碼/基本面判讀。",
+        "> 只列你的庫存/觀察清單中命中者。",
+        "",
+    ]
+    if watch.is_empty():
+        lines += ["（庫存/觀察清單中本週無過熱-退潮跡象。）", ""]
+        return lines
+    lines += [
+        "| 股號 | 名稱 | 持有 | 距高% | 近 5 日% | 退潮跡象 |",
+        "|---|---|---|---|---|---|",
+    ]
+    for r in watch.iter_rows(named=True):
+        ah = f"{r['above_high_pct']:.1f}" if r["above_high_pct"] is not None else "—"
+        r5 = f"{r['ret_5d']:.1f}" if r["ret_5d"] is not None else "—"
+        lines.append(
+            f"| {r['stock_id']} | {names.get(r['stock_id'], '')} | {r['watch_status']} "
+            f"| {ah} | {r5} | {r['reasons']} |"
+        )
+    lines.append("")
+    return lines
+
+
 def render_cp_candidates_report(
     candidates: pl.DataFrame,
     week_tag: str,
@@ -431,12 +536,14 @@ def render_cp_candidates_report(
     names: dict[str, str] | None = None,
     data_date: str = "",
     early_watch: pl.DataFrame | None = None,
+    overheat_watch: pl.DataFrame | None = None,
 ) -> Path:
     """渲染 cp_candidates.md（人讀）+ 寫 cp_candidates.csv（機器讀），回傳 md 路徑。
 
     candidates 須已過 attach_subind_quadrant + tag_holding_status。空清單仍出報告
     （誠實標「本週無候選」），不靜默。early_watch 非 None 時附「短窗早訊號」區塊
-    （M-MH Phase 3 加值欄；庫存/觀察的 20d 未確認低信心早訊）。
+    （M-MH Phase 3；庫存/觀察的 20d 未確認低信心早訊）；overheat_watch 非 None 時附
+    「過熱-退潮警示」區塊（精修・點 5；庫存/觀察已漲到高位且短窗退潮的停利提醒）。
     """
     names = names or {}
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -544,6 +651,8 @@ def render_cp_candidates_report(
 
     if early_watch is not None:
         lines += ["", *render_early_inflow_section(early_watch, names)]
+    if overheat_watch is not None:
+        lines += ["", *render_overheat_section(overheat_watch, names)]
 
     lines += [
         "",
