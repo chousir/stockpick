@@ -319,3 +319,109 @@ claude
 - 遇到要加新依賴 → 問，不要直接加。
 - 遇到要改 docs/ → 除非該 milestone 明確允許，否則先問。
 - 完成後給簡潔報告：「改了哪些檔 / 加了哪些測試 / 怎麼驗 / 我認為的下一步」。
+
+---
+
+# 後續 Milestone（規劃書外擴充）
+
+> M0–M7 為初版骨架。以下為上線後依實戰需求新增的 milestone，仍守「一次一個、做完停下驗收」。
+
+## M-MH：多窗起漲偵測（Multi-Horizon Early-Detection）
+
+> docs/13 CP 值研究 Phase D。與 BWIBBU 官方日 PE milestone **無硬相依**（動 pipeline 不同段），純優先序。
+
+### 動機
+2501 國建實證：20 日資金窗會被「舊賣單稀釋」——剛從賣轉買的買盤要 ~2 週才養肥到排得上名（6/5 才 +6444 張），錯過 6/1–6/3 起漲；短窗（外資 3/5d）5/28 就翻正、即時滿格顯示。20d 不是訊號不存在，是**反轉初期被自己的過去壓住、低估約兩週**。目標＝多窗讓偵測早 ~4 日且排序更準，**並存不取代** 20d。
+
+### 總成功標準
+- [ ] 拿 W24 既有資料重跑：2501 在 6/5（理想 6/1–6/3）即以「起漲」進埋伏/CP 清單前段；同檔 6/12 被分級「過熱/退潮」（短窗減速＋價量背離＋量縮），**不**標起漲。
+- [ ] 校準證明多窗組合在歷史起漲樣本上**領先中位 ≥ 20d-z＋2 日、且 lift 不低於現任 foreign_flow_20d_z（1.69）**；否則不上線（見 Phase 2 中止條件）。
+- [ ] 窗集合與所有門檻在 `config/settings.yaml`，零寫死。
+- [ ] `make test` 綠；既有 5d/20d 欄與輸出不變（純加法）。
+
+### 跨階段約束
+- **並存非取代**：20d-z 全程保留，多窗為新增鏡頭。
+- **不寫死**：窗集合、z 門檻、背離/量縮/距低帶全進 settings；連「用哪幾窗」都由 Phase 2 校準決定。
+- **外科**：不動 E/F/G 的 YAML 篩選、不動 goodinfo 爬蟲、不加新依賴。
+
+---
+
+### Phase 1：因子層——兩窗一般化成窗集合（純加法）
+
+**目標**：`compute_fund_flows` 從寫死 (短=5,長=20) 改吃窗集合 `[1,3,5,10,20]`；stock_panel 跟進，產各窗自身 z ＋跨窗加速度/背離因子。只增窗、不改計算語意。
+
+**可動檔案範圍**
+- `src/tw_screener/analysis/rotation.py`：`compute_fund_flows` 的 `(s, lw)` → `windows: tuple[int,...]`；欄名仍嵌實際天數，舊 `_5d/_20d` 為子集不變。
+- `src/tw_screener/analysis/stock_panel.py`：z 與 momentum 對每窗算；新增背離因子（`flow_decel`＝短窗環比減速、`price_flow_div`＝N 日價漲幅 − N 日資金 z 成長）。
+- `config/settings.yaml`：`rotation.windows` / `cp_value.windows`（預設 `[1,3,5,10,20]`）。
+- `tests/`：斷言新窗欄存在、5d/20d 逐值與改前一致（回歸保護）。
+
+**成功標準**
+- [ ] panel 多出 1/3/10d 系列＋背離欄；5d/20d 逐值不變。
+- [ ] 改 settings 窗集合，欄名誠實跟著變；`make test` 綠。
+
+**注意**：這階段不動 rule 判讀、不動線上 cp_candidates 輸出。
+
+---
+
+### Phase 2：校準層——讓資料挑窗（★硬閘門，可能中止）
+
+> **結果（2026-06-17）＝❌ 三 label 全未過閘、中止條件成立**：GATE 改判「早偵測力」（使用者拍板）後重跑——減量後短窗 lift 1.62–1.64 ≈ 20d 的 1.67（打平、非贏）、跨窗配對中位領先僅 0–1 日（~50% coin flip）。唯一真發現＝`short_only` ~30%（20d 漏掉、只有短窗抓到的起漲＝額外覆蓋非更早）。裁決與數據詳 [docs/13 Phase D](13-cp-value-research.md)。線上判讀不動；Phase 3 原樣不做。
+
+**目標**：跑 `make cp-value-calib`（`tw-screener cp calibrate`），把多窗因子丟進既有 B2 起漲事件回測，量各窗/組合的 lift、領先中位日數、假動作率，跟現任 `foreign_flow_20d_z` 比。
+
+**可動檔案範圍**
+- `src/tw_screener/backtest/rotation_calib.py` / cp calibrate 路徑：掃描候選從單窗擴成窗集合（研究軌，不碰生產）。
+- 產出 `research/cp_value/`（本地、不進 git）。
+
+**成功標準（GATE）**
+- [ ] 產出多窗 vs 20d 對照表（lift／領先中位／假動作率）。
+- [ ] **過閘判定**：存在組合「領先中位 ≥ 20d-z＋2 日 **且** lift ≥ 1.69 **且** 假動作率不顯著惡化」→ 進 Phase 3、勝者寫 settings。
+- [ ] **中止條件**：無組合過閘 → 停，把「短窗在台股母體被假動作吃掉領先」結論寫 docs/13，**不改線上判讀**。
+
+**注意**：起漲樣本太少（`min_triggers`）→ 信賴度低，標「資料累積後重校」，不強上。
+
+---
+
+### Phase 3：生產（窄做加值欄；Phase 2 ❌ 後改版・使用者拍板）
+
+> **原設計（趨勢分級取代「距低>15 硬擋」）作廢**：其前提＝短窗有領先力，Phase 2 證實不成立（短窗無系統性領先、減量沒贏 lift）。改採**窄做加值欄**——只把唯一真發現（`short_only` ~30%＝20d 漏掉、短窗抓到）surface 成低信心觀察欄，**不取代距低硬擋、不動候選 gating**。
+
+**已做（2026-06-18）**
+1. `cp_candidates.py`：`compute_early_inflow`（短窗 z>門檻 ＋ flow_decel≥0 未減速 ＋ 同 prefix 20d-z<上限＝長窗未追上）／`build_early_inflow_watch`（限庫存∪觀察、排除已是候選者）／`render_early_inflow_section`。
+2. `cli.py` cp candidates：算早訊號→`render_cp_candidates_report(early_watch=...)`，md 末段加「短窗早訊號（庫存/觀察・低信心）」區塊。
+3. `group_analysis.md.j2` Section 6 加第 5 點：早訊號低信心、**只當「已持有/觀察股資金異動、回頭查一眼」提醒，非新進場理由**。
+4. `config/settings.yaml`：`cp_value.early_watch`（enabled/prefixes；z 門檻等沿用 `early_gate`）。
+
+**成功標準**
+- [x] `make cp-value-candidates` 跑通：早訊號區塊正確產出（實跑庫存/觀察本週 0 檔＝誠實，市場面 19 檔證邏輯有效）。
+- [x] 守人設：低信心標註、非進場訊號、多空並陳、門檻全 settings。
+- [x] `make test` 綠（441）、ruff/mypy 零淨增。
+
+**注意**：守人設——早訊號是低信心觀察標註，不下買賣結論、不寫死門檻；校準已證未更早更準，僅補覆蓋。
+
+### 工時估
+| Phase | 估時 | 性質 |
+|---|---|---|
+| 1 因子 | ~2h | code＋回歸測試 |
+| 2 校準 | ~1.5h | 回測＋判讀（可能中止）|
+| 3 生產分級 | ~2.5h | 條件性，僅過閘才做 |
+
+### 精修輪（2026-06-18・使用者 5 點建議）
+
+承 Phase 3，使用者再提 5 點，對帳後做 1+2+3（量比當預測是反指標、PE 已在三重濾網，皆不重做）：
+
+1. **持有/觀察健檢段**（點 1、4）：group_analysis 加 **Section 7**——叫 Claude 開 `holdings_enriched.csv`／`watchlist_enriched.csv` 逐檔健檢（續抱/收緊/停利/轉弱、接近進場/再等/剔除），**與命中策略同等深度**（命中尤其 E＝均線多頭天生已起漲、進場偏晚）；含「多鏡頭交集優先於單一聯集」（點 4）與「新鮮度過濾」（點 2：裸 5 日漲≈隨機、要搭剛離低+資金+貼低）。
+2. **過熱-退潮警示**（點 5、量比正用）：`cp_candidates.py` `compute_overheat_warning`／`build_overheat_watch`／`render_overheat_section`——對稱早訊號，旗標「已漲到 60 日高位＋短窗 flow_decel<0 減速＋（量價背離 price_flow_div>0｜量縮 volume_z<0）」的庫存/觀察股（停利提醒）。**未校準啟發式、明標非賣訊**（使用者拍板先出啟發式）。settings `cp_value.overheat_watch`。
+3. **多鏡頭確認**（點 4）：落在 Section 7 prompt 指示（標「幾個鏡頭確認」、交集排前），不另加表欄避免膨脹。
+
+實跑：過熱-退潮本週命中庫存/觀察 5 檔（如 2492 華新科 近 5 日 +33%、距高 0%、減速+背離+量縮）。測試 +5＝446 綠、ruff/mypy 零淨增。詳 docs/13 Phase D 末。
+
+### 退潮警示補校準（2026-06-18・把「先出的啟發式」拿去回測）
+
+承精修輪點 2「未校準先出」，補做對稱 L1 的 **L4 頂部/出貨 label** 校準（`cp calibrate` 新增區塊，研究軌；`stock_calib.detect_top_episodes`／`scan_top_signals`／`render_top_calibration_report`，settings `cp_value.labels.top`＋`top_calib`，掃描沿用 `overheat_watch` 生產門檻＝直接驗生產規則）。**裁決＝維持低信心啟發式、不升級為賣訊**（2237 事件、基率 8.17%）：
+
+- 生產 `★overheat`（高位＋減速＋背離｜量縮）lift **2.15**，**輸給裸『貼高』near_high 3.05、也輸法人賣超×高位 2.39**；背離三因子單獨幾乎無力（div 1.40／decel 1.36／量縮 1.08≈隨機）。
+- **對稱 Phase 2 結論：位階在做工、背離因子不是驅動**（起漲端貼低、退潮端貼高皆然）。
+- **汙染但書**：絕對下跌含大盤系統性回檔，near_high 高 lift 多半是 beta（高位股大盤回檔時跌最兇）、非個股出貨——故任何變體都不升級為賣訊；要分離需「相對大盤落後」label（選配、未跑）。
+- 結論：`overheat_watch` 原樣不動（低信心停利-回查、非賣訊）。校準價值＝證實「不升級」是對的並記錄為何。測試 +5＝451 綠、ruff 全過、mypy 零淨增（既有 11 處與本次無關）。詳 [docs/13 Phase D 末](13-cp-value-research.md)。

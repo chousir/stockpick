@@ -21,6 +21,8 @@
 
 from __future__ import annotations
 
+import re
+
 import polars as pl
 
 from tw_screener.backtest.rotation_calib import compute_base_rate, evaluate_triggers
@@ -32,25 +34,39 @@ _EPISODE_SCHEMA: dict[str, type[pl.DataType]] = {
     "fwd_return_pct": pl.Float64,
 }
 
-# 資金 z 訊號欄 → 其對應加速度欄（panel 既有欄名，B1 stock_panel.py）
-_FLOW_Z_SIGNALS: tuple[tuple[str, str], ...] = (
-    ("net_flow_5d_z", "flow_momentum"),
-    ("net_flow_20d_z", "flow_momentum"),
-    ("foreign_flow_5d_z", "foreign_momentum"),
-    ("foreign_flow_20d_z", "foreign_momentum"),
-    ("trust_flow_5d_z", "trust_momentum"),
-    ("trust_flow_20d_z", "trust_momentum"),
-)
+# 資金 z 欄字首 → 其對應加速度欄（unsuffixed＝短窗值，B1 stock_panel.py）
+_MOM_BY_PREFIX: dict[str, str] = {
+    "net_flow": "flow_momentum",
+    "foreign_flow": "foreign_momentum",
+    "trust_flow": "trust_momentum",
+}
 _MOMENTUM_SIGNALS: tuple[str, ...] = ("flow_momentum", "foreign_momentum", "trust_momentum")
+# 多窗資金 z 欄名（M-MH Phase D：net_flow_3d_z / foreign_flow_10d_z…）
+_FLOW_Z_RE = re.compile(r"^(net_flow|foreign_flow|trust_flow)_(\d+)d_z$")
+
+
+def _flow_z_cols(cols: set[str]) -> list[tuple[str, str, int]]:
+    """從面板欄推導 (z 欄, 對應加速度欄, 視窗天數)，多窗一般化（M-MH Phase 2）。
+
+    取代舊寫死 5d/20d 清單：哪幾窗有欄就掃哪幾窗。依 (prefix, window) 穩定排序。
+    """
+    out: list[tuple[str, str, int]] = []
+    for c in cols:
+        m = _FLOW_Z_RE.match(c)
+        if m:
+            out.append((c, _MOM_BY_PREFIX[m.group(1)], int(m.group(2))))
+    return sorted(out, key=lambda t: (t[0].split("_")[0], t[2]))
 
 
 def _scan_episodes(
-    priced: pl.DataFrame, x_pct: float, n_days: int, cooldown_days: int
+    priced: pl.DataFrame, x_pct: float, n_days: int, cooldown_days: int, direction: str = "up"
 ) -> pl.DataFrame:
-    """共用核心：每檔逐日找「合格情境日（_ctx）且前瞻 n_days 內漲 ≥ x_pct」的首日。
+    """共用核心：每檔逐日找「合格情境日（_ctx）且前瞻 n_days 內達報酬門檻」的首日。
 
     priced 須含 stock_id / date / close / _ctx(bool)，且已去重、drop_null close、
     依 (stock_id, date) 排序。連續合格取首日，命中後 cooldown_days 內不重複計。
+    direction="up"（起漲，預設）＝前瞻最大漲幅 ≥ x_pct；"down"（頂部/出貨，M-MH 退潮校準）
+    ＝前瞻最大跌幅 ≥ x_pct（fwd_return_pct 記負值，即谷底相對基準的報酬）。
     """
     if priced.is_empty():
         return pl.DataFrame(schema=_EPISODE_SCHEMA)
@@ -64,9 +80,14 @@ def _scan_episodes(
         i = 0
         while i < n - 1:
             if ctx[i]:
-                fwd_max = max(close[i + 1 : min(i + 1 + n_days, n)])
-                fwd_ret = fwd_max / close[i] - 1.0
-                if fwd_ret >= x_pct / 100:
+                window = close[i + 1 : min(i + 1 + n_days, n)]
+                if direction == "up":
+                    fwd_ret = max(window) / close[i] - 1.0
+                    hit = fwd_ret >= x_pct / 100
+                else:  # down：前瞻谷底相對基準的跌幅
+                    fwd_ret = min(window) / close[i] - 1.0
+                    hit = fwd_ret <= -x_pct / 100
+                if hit:
                     rows.append(
                         {
                             "stock_id": sid,
@@ -141,9 +162,35 @@ def detect_reversal_episodes(
     return _scan_episodes(_prep(price_history, ctx), x_pct, n_days, cooldown_days)
 
 
+def detect_top_episodes(
+    price_history: pl.DataFrame,
+    m_days: int = 60,
+    tol_pct: float = 8.0,
+    drop_pct: float = 10.0,
+    n_days: int = 10,
+    cooldown_days: int = 15,
+) -> pl.DataFrame:
+    """L4 頂部/出貨（M-MH 退潮警示校準）：當日收盤 ≥ 近 m_days 高 ×(1−tol%)（已在區間
+    高位）→ 前瞻 n_days 內谷底跌 ≥ drop%。
+
+    與 L1 埋伏對稱（情境換成貼高、前瞻換成下跌），純價格定義——退潮/背離因子一律留在
+    訊號端被 scan_top_signals 掃描，避免「label 含資金條件 → 資金訊號 lift 灌水」的循環。
+    tol_pct 對齊 overheat_watch.near_high_pct（生產啟發式的「已在高位」定義）。
+    """
+    high = pl.col("close").rolling_max(m_days, min_samples=m_days).over("stock_id")
+    ctx = pl.col("close") >= high * (1 - tol_pct / 100)
+    return _scan_episodes(_prep(price_history, ctx), drop_pct, n_days, cooldown_days, "down")
+
+
 def _position_low_col(panel: pl.DataFrame) -> str | None:
     """panel 的「距 N 日低 %」欄名（B1 隨 position_window 命名，如 above_low_60d_pct）。"""
     cols = [c for c in panel.columns if c.startswith("above_low_") and c.endswith("d_pct")]
+    return cols[0] if cols else None
+
+
+def _position_high_col(panel: pl.DataFrame) -> str | None:
+    """panel 的「距 N 日高 %」欄名（如 above_high_60d_pct；貼高時 ≈ 0、低於高為負）。"""
+    cols = [c for c in panel.columns if c.startswith("above_high_") and c.endswith("d_pct")]
     return cols[0] if cols else None
 
 
@@ -152,15 +199,24 @@ def _build_signal_jobs(
     z_thresholds: tuple[float, ...],
     volume_thresholds: tuple[float, ...],
     position_low_pct: float,
+    early_gate: dict | None = None,
 ) -> list[tuple[str, list[pl.Expr]]]:
-    """組（訊號名, AND 條件式串）清單。只納入 panel 實際存在的欄。"""
+    """組（訊號名, AND 條件式串）清單。只納入 panel 實際存在的欄。
+
+    early_gate（M-MH Phase 2）：非 None 時，對「短窗（< 最長窗）」資金 z 加早偵測閘變體
+    （減量＝把高觸發的短窗壓成高精度早訊號）：
+      +early   ＝短窗 z 高 ＋ flow_decel ≥ floor（買盤未減速）＋ 同 prefix 20d-z < ceiling
+                 （長窗尚未追上＝舊賣單稀釋態，2501 機制）
+      +early+low＝上 ＋ 價貼低
+      +nodiv   ＝短窗 z 高 ＋ price_flow_div_{w}d ≤ ceiling（價未先噴、資金領先價）
+    """
     cols = set(panel.columns)
     low_col = _position_low_col(panel)
+    flow_cols = _flow_z_cols(cols)
+    long_window = max((w for _, _, w in flow_cols), default=0)
     jobs: list[tuple[str, list[pl.Expr]]] = []
 
-    for col, mom_col in _FLOW_Z_SIGNALS:
-        if col not in cols:
-            continue
+    for col, mom_col, w in flow_cols:
         for t in z_thresholds:
             jobs.append((f"{col} (z>{t})", [pl.col(col) > t]))
             if mom_col in cols:  # +mom：資金 z 且加速中（A2 新鮮度濾鏡）
@@ -174,6 +230,34 @@ def _build_signal_jobs(
                         [pl.col(col) > t, pl.col(low_col) <= position_low_pct],
                     )
                 )
+            if early_gate is not None and w < long_window:
+                prefix = col[: -len(f"_{w}d_z")]
+                long_z = f"{prefix}_{long_window}d_z"
+                div_col = f"price_flow_div_{w}d"
+                ceiling = float(early_gate.get("long_z_ceiling", 0.5))
+                decel_floor = float(early_gate.get("decel_floor", 0.0))
+                if long_z in cols and "flow_decel" in cols:
+                    early = [
+                        pl.col(col) > t,
+                        pl.col("flow_decel") >= decel_floor,
+                        pl.col(long_z) < ceiling,
+                    ]
+                    jobs.append((f"{col} (z>{t}) +early", early))
+                    if low_col is not None:
+                        jobs.append(
+                            (
+                                f"{col} (z>{t}) +early+low",
+                                early + [pl.col(low_col) <= position_low_pct],
+                            )
+                        )
+                if div_col in cols:
+                    div_ceiling = float(early_gate.get("div_ceiling", 0.0))
+                    jobs.append(
+                        (
+                            f"{col} (z>{t}) +nodiv",
+                            [pl.col(col) > t, pl.col(div_col) <= div_ceiling],
+                        )
+                    )
 
     for mom_col in _MOMENTUM_SIGNALS:  # 純加速度基準（A2：單獨 ≈ 隨機，列為對照）
         if mom_col in cols:
@@ -212,10 +296,12 @@ def scan_stock_signals(
     lead_window: int = 15,
     occupy_days: int = 15,
     z_min_periods: int = 30,
+    early_gate: dict | None = None,
 ) -> pl.DataFrame:
     """掃描（panel 訊號 × 門檻）對 episodes 的命中統計表（docs/13 B2）。
 
     隨機基率以**全上市宇宙**一次算好（compute_base_rate），對所有訊號一致。
+    early_gate 非 None 時加多窗早偵測閘變體（M-MH Phase 2，見 _build_signal_jobs）。
     回傳含 signal/n_triggers/hits/hit_rate/recall/base_rate/lift/median_lead_days/f1，
     依 f1 遞減排序。空輸入回空表。
     """
@@ -235,7 +321,7 @@ def scan_stock_signals(
 
     rows = []
     for label, conditions in _build_signal_jobs(
-        panel, z_thresholds, volume_thresholds, position_low_pct
+        panel, z_thresholds, volume_thresholds, position_low_pct, early_gate
     ):
         triggers = _stock_triggers(panel, conditions)
         stats = evaluate_triggers(
@@ -256,6 +342,255 @@ def scan_stock_signals(
         .otherwise(0.0)
         .alias("f1")
     ).sort("f1", descending=True)
+
+
+def _build_top_signal_jobs(
+    panel: pl.DataFrame,
+    near_high_pct: float = 8.0,
+    decel_thresholds: tuple[float, ...] = (0.0,),
+    div_floor: float = 0.0,
+    vol_floor: float = 0.0,
+    sell_z_thresholds: tuple[float, ...] = (1.0, 1.5),
+    sell_prefixes: tuple[str, ...] = ("foreign_flow", "net_flow"),
+) -> list[tuple[str, list[pl.Expr]]]:
+    """組頂部/出貨退潮訊號（名, AND 條件串）。只納 panel 實有欄。
+
+    對照組讓裁決誠實：(1) 純「在區間高位」基準（貼高本身就會跌？）；(2) 退潮三因子各自
+    單獨（無位階）的原始預測力；(3) 法人短窗賣超基準（高位×賣超）；(4) 生產啟發式
+    （compute_overheat_warning：高位＋短窗減速＋量價背離/量縮）及其組件。啟發式要 lift>1
+    才對「前瞻下跌」有預測力，且須贏過 (1)(3) 才算背離因子本身加值（非只是貼高/賣超在做工）。
+    """
+    cols = set(panel.columns)
+    high_col = _position_high_col(panel)
+    jobs: list[tuple[str, list[pl.Expr]]] = []
+    nh: pl.Expr | None = None
+    if high_col is not None:
+        nh = pl.col(high_col) >= -near_high_pct
+        jobs.append((f"near_high (≤{near_high_pct:g}%)", [nh]))
+
+    has_decel = "flow_decel" in cols
+    has_div = "price_flow_div_5d" in cols
+    has_vol = "volume_z_5d" in cols
+    div_expr = pl.col("price_flow_div_5d") > div_floor
+    vol_expr = pl.col("volume_z_5d") < vol_floor
+
+    # 退潮三因子各自單獨（無位階）＝原始預測力
+    if has_div:
+        jobs.append((f"price_flow_div_5d (>{div_floor:g})", [div_expr]))
+    if has_vol:
+        jobs.append((f"volume_z_5d (<{vol_floor:g})", [vol_expr]))
+    if has_decel:
+        for dt in decel_thresholds:
+            jobs.append((f"flow_decel (<{dt:g})", [pl.col("flow_decel") < dt]))
+
+    # 法人短窗賣超基準（賣超、賣超×高位）
+    for prefix in sell_prefixes:
+        zc = f"{prefix}_5d_z"
+        if zc in cols:
+            for st in sell_z_thresholds:
+                jobs.append((f"{zc} (z<−{st:g})", [pl.col(zc) < -st]))
+                if nh is not None:
+                    jobs.append((f"{zc} (z<−{st:g}) +high", [pl.col(zc) < -st, nh]))
+
+    # 生產啟發式（compute_overheat_warning 的確切規則）＋其組件，全條件於高位
+    if nh is not None and has_decel:
+        for dt in decel_thresholds:
+            base = [nh, pl.col("flow_decel") < dt]
+            tag = f"decel<{dt:g}"
+            jobs.append((f"high+{tag}", base))
+            if has_div:
+                jobs.append((f"high+{tag}+div>{div_floor:g}", [*base, div_expr]))
+            if has_vol:
+                jobs.append((f"high+{tag}+vol<{vol_floor:g}", [*base, vol_expr]))
+            if has_div and has_vol:  # ★ 生產 overheat_warning 規則：減速 ＋（背離｜量縮）
+                jobs.append((f"★overheat high+{tag}+(div|vol)", [*base, div_expr | vol_expr]))
+    return jobs
+
+
+def scan_top_signals(
+    panel: pl.DataFrame,
+    episodes: pl.DataFrame,
+    near_high_pct: float = 8.0,
+    decel_thresholds: tuple[float, ...] = (0.0,),
+    div_floor: float = 0.0,
+    vol_floor: float = 0.0,
+    sell_z_thresholds: tuple[float, ...] = (1.0, 1.5),
+    sell_prefixes: tuple[str, ...] = ("foreign_flow", "net_flow"),
+    lead_window: int = 10,
+    occupy_days: int = 15,
+    z_min_periods: int = 30,
+) -> pl.DataFrame:
+    """掃描頂部/出貨退潮訊號對 episodes 的命中統計（M-MH 退潮校準；對稱 scan_stock_signals）。
+
+    隨機基率以**全上市宇宙**一次算好（compute_base_rate），對所有訊號一致。回傳欄同
+    scan_stock_signals（signal/n_triggers/hits/hit_rate/recall/base_rate/lift/median_lead_days
+    /f1），依 lift 遞減排序（頂部警示重精度/lift > recall）。空輸入回空表。
+    """
+    if panel.is_empty() or episodes.is_empty():
+        return pl.DataFrame()
+    calendar = sorted(panel["date"].unique().to_list())
+    warmup_pos = min(z_min_periods, len(calendar) - 1)
+    base_rate = compute_base_rate(
+        episodes,
+        calendar,
+        panel["stock_id"].unique().to_list(),
+        lead_window,
+        occupy_days,
+        warmup_pos,
+        key_col="stock_id",
+    )
+    rows = []
+    for label, conditions in _build_top_signal_jobs(
+        panel,
+        near_high_pct,
+        decel_thresholds,
+        div_floor,
+        vol_floor,
+        sell_z_thresholds,
+        sell_prefixes,
+    ):
+        triggers = _stock_triggers(panel, conditions)
+        stats = evaluate_triggers(
+            triggers,
+            episodes,
+            calendar,
+            lead_window,
+            occupy_days,
+            warmup_pos,
+            key_col="stock_id",
+            base_rate=base_rate,
+        )
+        rows.append({"signal": label, **stats})
+    out = pl.DataFrame(rows)
+    return out.with_columns(
+        pl.when((pl.col("hit_rate") + pl.col("recall")) > 0)
+        .then(2 * pl.col("hit_rate") * pl.col("recall") / (pl.col("hit_rate") + pl.col("recall")))
+        .otherwise(0.0)
+        .alias("f1")
+    ).sort("lift", descending=True, nulls_last=True)
+
+
+def compute_cross_window_lead(
+    panel: pl.DataFrame,
+    episodes: pl.DataFrame,
+    threshold: float = 1.0,
+    lookback: int = 30,
+    min_lead_days: int = 2,
+) -> pl.DataFrame:
+    """跨窗配對領先（M-MH Phase 2 GATE 核心）——直接驗「短窗 z 早於 20d-z 達標」假說。
+
+    對每個起漲事件、每個 prefix（外資/投信/合計），量「事件前 lookback 交易日內，短窗 z
+    首次 ≥ threshold 的日」對上「同 prefix 最長窗(20d) z 首次 ≥ threshold 的日」的距離：
+      領先 = 長窗首達索引 − 短窗首達索引（>0＝短窗較早偵測到同一次起漲）。
+    這量的是「短窗 vs 長窗」的相對領先（2501 機制），**非** scan 的「觸發 vs 事件」領先
+    （後者兩窗皆 ~7-8 日、由價貼低主導、答不出 GATE 想問的問題）。
+
+    回傳每短窗訊號一列：n_short_fired（短窗達標的事件數）/n_paired（短窗、長窗皆達標可算
+    領先）/short_only（短窗達標但 20d 始終未達＝長窗被舊賣單稀釋、最強領先）/median_lead_days
+    /pct_short_leads（領先 >0 占比）/pct_lead_ge（領先 ≥ min_lead_days 占比）。空輸入回空表。
+    """
+    if panel.is_empty() or episodes.is_empty():
+        return pl.DataFrame()
+    flow_cols = _flow_z_cols(set(panel.columns))
+    long_window = max((w for _, _, w in flow_cols), default=0)
+    if long_window == 0:
+        return pl.DataFrame()
+    calendar = sorted(panel["date"].unique().to_list())
+    pos = {d: i for i, d in enumerate(calendar)}
+    ep_pairs = [
+        (sid, pos[sd])
+        for sid, sd in episodes.select(["stock_id", "start_date"]).iter_rows()
+        if sd in pos
+    ]
+
+    rows: list[dict] = []
+    for col, _mom, w in flow_cols:
+        if w >= long_window:
+            continue
+        prefix = col[: -len(f"_{w}d_z")]
+        long_col = f"{prefix}_{long_window}d_z"
+        if long_col not in panel.columns:
+            continue
+        by_stock: dict[str, list[tuple[int, float | None, float | None]]] = {}
+        for sid, d, sz, lz in (
+            panel.select(["stock_id", "date", col, long_col]).sort(["stock_id", "date"]).iter_rows()
+        ):
+            by_stock.setdefault(sid, []).append((pos[d], sz, lz))
+
+        leads: list[int] = []
+        short_only = 0
+        n_short_fired = 0
+        for sid, ep_pos in ep_pairs:
+            recs = by_stock.get(sid)
+            if not recs:
+                continue
+            lo = ep_pos - lookback
+            win = [r for r in recs if lo <= r[0] < ep_pos]
+            t_short = next((p for p, sz, _ in win if sz is not None and sz >= threshold), None)
+            if t_short is None:
+                continue
+            n_short_fired += 1
+            t_long = next((p for p, _, lz in win if lz is not None and lz >= threshold), None)
+            if t_long is None:
+                short_only += 1
+            else:
+                leads.append(t_long - t_short)
+        if n_short_fired == 0:
+            continue
+        n_paired = len(leads)
+        leads.sort()
+        rows.append(
+            {
+                "short_signal": col,
+                "long_signal": long_col,
+                "n_short_fired": n_short_fired,
+                "n_paired": n_paired,
+                "short_only": short_only,
+                "median_lead_days": leads[n_paired // 2] if leads else None,
+                "pct_short_leads": (sum(x > 0 for x in leads) / n_paired) if n_paired else 0.0,
+                "pct_lead_ge": (
+                    (sum(x >= min_lead_days for x in leads) / n_paired) if n_paired else 0.0
+                ),
+            }
+        )
+    if not rows:
+        return pl.DataFrame()
+    return pl.DataFrame(rows).sort("median_lead_days", descending=True, nulls_last=True)
+
+
+def render_cross_window_lead(
+    lead_df: pl.DataFrame, threshold: float, min_lead_days: int
+) -> list[str]:
+    """跨窗配對領先表的 markdown 行（M-MH Phase 2）。空表回誠實佔位。"""
+    if lead_df.is_empty():
+        return [
+            "",
+            "## 跨窗配對領先（短窗 z 是否早於 20d-z 達標）",
+            "",
+            "（無可配對事件——資料不足或面板無短窗 z 欄）",
+            "",
+        ]
+    lines = [
+        "",
+        f"## 跨窗配對領先（z≥{threshold:g}；領先 = 20d 首達日 − 短窗首達日，>0＝短窗較早）",
+        "",
+        "| 短窗訊號 | 短窗達標 | 可配對 | 僅短窗達標 | 中位領先(日) | 短窗較早% | "
+        f"領先≥{min_lead_days}日% |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for r in lead_df.iter_rows(named=True):
+        ml = str(r["median_lead_days"]) if r["median_lead_days"] is not None else "—"
+        lines.append(
+            f"| {r['short_signal']} | {r['n_short_fired']} | {r['n_paired']} | {r['short_only']} "
+            f"| {ml} | {r['pct_short_leads']:.0%} | {r['pct_lead_ge']:.0%} |"
+        )
+    lines += [
+        "",
+        "> 「僅短窗達標」＝事件前 lookback 內短窗 z 達標但 20d-z 始終未達＝長窗被舊賣單稀釋、"
+        "短窗最強領先的證據。",
+        "",
+    ]
+    return lines
 
 
 def render_cp_calibration_report(
@@ -327,6 +662,94 @@ def render_cp_calibration_report(
         "> 現實天花板約 1.3–1.5（疊高勝率的觀察清單，非預測、非目標價）。",
         "> 量能因子＝成交量 z（非真周轉率，缺流通在外股數）；大盤基準＝等權全上市指數。",
         "> 隨資料累積每季重跑校準，不把單次回測數字當聖經。",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def render_top_calibration_report(
+    scan: pl.DataFrame,
+    episodes: pl.DataFrame,
+    params: dict,
+    coverage: dict,
+    min_triggers: int = 8,
+) -> str:
+    """頂部/出貨退潮警示校準報告 markdown（M-MH 精修・退潮警示）。
+
+    含對照裁決：把生產啟發式（★overheat 列）的 lift 對上「純貼高」與「法人賣超」基準，
+    答「這套背離因子是否真有頂部預測力、且贏過只看位階/賣超」。誠實標：絕對下跌含大盤
+    系統性回檔；這是停利風險標註的事後檢驗，非賣訊、非目標價。
+    """
+    base_rate = scan["base_rate"][0] if not scan.is_empty() else 0.0
+    lines = [
+        "# 個股頂部/出貨事件回測校準 — L4 退潮警示（M-MH 精修）",
+        "",
+        "- 獵物定義：距 M 日高 ≤ tol%（已在區間高位）→ 前瞻 N 日谷底跌 ≥ drop%（絕對下跌）",
+        f"- 宇宙：{coverage.get('universe', 'listed')}・"
+        f"{coverage.get('n_stocks', 0)} 檔・{coverage.get('n_trading_days', 0)} 交易日"
+        f"（{coverage.get('date_min', '?')} ~ {coverage.get('date_max', '?')}）",
+        f"- 前瞻 N={params['fwd_n_days']} 交易日・跌幅門檻 drop={params['fwd_x_pct']}%・"
+        f"貼高 tol={params.get('tol_pct', '?')}%・冷卻 {params['cooldown_days']} 日・"
+        f"領先視窗 {params['lead_window']} 日",
+        f"- 事件樣本：{episodes.height} 個"
+        f"（{episodes['stock_id'].n_unique() if not episodes.is_empty() else 0} 檔）",
+        "",
+        f"## 退潮訊號掃描（基率 {base_rate:.2%}＝高位股前瞻下跌無條件機率；lift=命中率/基率）",
+        "",
+        "| 訊號 | 觸發 | 命中 | 誤報 | 命中率 | recall | lift | 中位領先(日) | F1 |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for r in scan.iter_rows(named=True):
+        lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
+        lead = str(r["median_lead_days"]) if r["median_lead_days"] is not None else "—"
+        lines.append(
+            f"| {r['signal']} | {r['n_triggers']} | {r['hits']} | {r['false_positives']} "
+            f"| {r['hit_rate']:.1%} | {r['recall']:.1%} | {lift} | {lead} | {r['f1']:.3f} |"
+        )
+
+    def _lift_of(pred: pl.Expr) -> tuple[str, float] | None:
+        sub = scan.filter(
+            pred & (pl.col("n_triggers") >= min_triggers) & pl.col("lift").is_not_null()
+        )
+        if sub.is_empty():
+            return None
+        r = sub.sort("lift", descending=True).row(0, named=True)
+        return r["signal"], float(r["lift"])
+
+    overheat = _lift_of(pl.col("signal").str.starts_with("★overheat"))
+    near_high = _lift_of(pl.col("signal").str.starts_with("near_high"))
+    sell = _lift_of(pl.col("signal").str.contains("z<") & pl.col("signal").str.contains(r"\+high"))
+    lines += [
+        "",
+        f"## 對照裁決（觸發 ≥{min_triggers}・lift = 高位股下跌機率的倍數）",
+        "",
+    ]
+    if overheat is None:
+        lines.append("- 生產啟發式（★overheat）觸發不足，無法裁決——標「資料累積後重校」。")
+    else:
+        nh_txt = f"{near_high[1]:.2f}（{near_high[0]}）" if near_high else "—"
+        sl_txt = f"{sell[1]:.2f}（{sell[0]}）" if sell else "—"
+        beat_nh = near_high is None or overheat[1] > near_high[1]
+        beat_sl = sell is None or overheat[1] > sell[1]
+        lines += [
+            f"- **生產啟發式 ★overheat**：lift {overheat[1]:.2f}",
+            f"- 純貼高基準 near_high：lift {nh_txt}",
+            f"- 法人短窗賣超×高位基準：lift {sl_txt}",
+            "",
+            f"→ 啟發式 {'>' if beat_nh else '≤'} 純貼高、{'>' if beat_sl else '≤'} 賣超基準；"
+            + (
+                "背離因子在頂部有加值、可考慮升級。"
+                if (overheat[1] > 1.0 and beat_nh and beat_sl)
+                else "未明顯贏過位階/賣超基準——**維持低信心啟發式註記、不升級為訊號**。"
+            ),
+        ]
+    lines += [
+        "",
+        "---",
+        "",
+        "> 誠實但書：(1) 絕對下跌含大盤系統性回檔，高 lift 不等於『個股獨走弱』；",
+        "> (2) 這是停利**風險標註**的事後檢驗，非賣訊、非目標價、非進場反向操作依據；",
+        "> (3) 個股事件稀疏、1 年單一樣本，lift 差距可能是雜訊；每季重跑校準。",
         "",
     ]
     return "\n".join(lines)

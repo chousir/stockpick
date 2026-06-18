@@ -1548,11 +1548,16 @@ def cp_calibrate_cmd(
     from tw_screener.analysis.sector_universe import list_subindustries
     from tw_screener.analysis.stock_panel import build_stock_panel, compute_coverage_meta
     from tw_screener.backtest.stock_calib import (
+        compute_cross_window_lead,
         detect_ambush_episodes,
         detect_breakout_episodes,
         detect_reversal_episodes,
+        detect_top_episodes,
         render_cp_calibration_report,
+        render_cross_window_lead,
+        render_top_calibration_report,
         scan_stock_signals,
+        scan_top_signals,
     )
     from tw_screener.data.twse import create_client
 
@@ -1569,6 +1574,12 @@ def cp_calibrate_cmd(
     position_low_pct = float(cp.get("position_low_pct", 15.0))
     min_triggers = int(cp.get("min_triggers", 8))
     min_lift = float(cp.get("min_lift", 1.3))
+    windows = tuple(int(x) for x in cp.get("windows", [1, 3, 5, 10, 20]))
+    early_cfg = cp.get("early_gate", {})
+    early_on = bool(early_cfg.get("enabled", True))
+    early_z = float(early_cfg.get("z_threshold", 1.0))
+    early_lookback = int(early_cfg.get("lead_lookback", 30))
+    early_min_lead = int(early_cfg.get("min_lead_days", 2))
     labels_cfg = cp.get("labels", {})
     cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
 
@@ -1588,9 +1599,15 @@ def cp_calibrate_cmd(
         if not members.is_empty()
         else market.head(0)
     )
-    console.print("[bold]建個股特徵面板...[/bold]")
+    console.print(f"[bold]建個股特徵面板（窗集合 {list(windows)}）...[/bold]")
     panel = build_stock_panel(
-        market, institutional, members, baskets, z_window=z_window, z_min_periods=z_min_periods
+        market,
+        institutional,
+        members,
+        baskets,
+        windows=windows,
+        z_window=z_window,
+        z_min_periods=z_min_periods,
     )
     if panel.is_empty():
         console.print("[red]面板為空——檢查日線/法人快取[/red]")
@@ -1644,7 +1661,18 @@ def cp_calibrate_cmd(
 
     out_dir.mkdir(parents=True, exist_ok=True)
     tag = _date.today().strftime("%Y%m%d")
-    summary = [f"# 個股 CP 值起漲事件校準總表（{tag}）", ""]
+    summary = [
+        f"# 個股 CP 值起漲事件校準總表（{tag}）",
+        "",
+        f"- 窗集合 {list(windows)}"
+        + (
+            f"・M-MH 早偵測閘 開（z≥{early_z:g}・領先回看 {early_lookback} 日・"
+            f"過閘需中位領先 ≥{early_min_lead} 日）"
+            if early_on
+            else "・M-MH 早偵測閘 關"
+        ),
+        "",
+    ]
     for key, (name, desc, detect) in detectors.items():
         lp = labels_cfg.get(key, {})
         episodes = detect(lp)
@@ -1668,10 +1696,20 @@ def cp_calibrate_cmd(
             lead_window=lead_window,
             occupy_days=int(lp.get("cooldown_days", 15)),
             z_min_periods=z_min_periods,
+            early_gate=early_cfg if early_on else None,
         )
         report = render_cp_calibration_report(
             scan, episodes, name, desc, report_params, coverage, min_triggers, min_lift
         )
+        # M-MH Phase 2：跨窗配對領先（直接驗短窗是否早於 20d-z 達標＝GATE 核心）
+        lead_df = pl.DataFrame()
+        if early_on:
+            lead_df = compute_cross_window_lead(
+                panel, episodes, early_z, early_lookback, early_min_lead
+            )
+            report += "\n" + "\n".join(
+                render_cross_window_lead(lead_df, early_z, early_min_lead)
+            )
         (out_dir / f"calibration_{tag}_{key}.md").write_text(report, encoding="utf-8")
         scan.write_csv(out_dir / f"calibration_{tag}_{key}.csv")
 
@@ -1692,7 +1730,108 @@ def cp_calibrate_cmd(
             )
             verdict = f"{qualified.height} 個因子過門檻"
         summary.append(f"- **{name}**：事件 {n_ep} 個・{verdict}；最佳因子 {top}")
+
+        # M-MH Phase 2 GATE：改判「早偵測力」——短窗中位領先 20d ≥ min_lead 且早閘子集 lift>基率
+        if early_on:
+            lead_pass = (
+                lead_df.filter(pl.col("median_lead_days") >= early_min_lead)
+                .sort("median_lead_days", descending=True)
+                if not lead_df.is_empty()
+                else pl.DataFrame()
+            )
+            early_lift = scan.filter(
+                pl.col("signal").str.contains(r"\+early")
+                & (pl.col("n_triggers") >= min_triggers)
+                & (pl.col("lift") > 1.0)
+            ).sort("lift", descending=True)
+            passed = not lead_pass.is_empty() and not early_lift.is_empty()
+            if lead_pass.is_empty():
+                ld = f"無短窗中位領先 ≥{early_min_lead} 日"
+            else:
+                lt = lead_pass.row(0, named=True)
+                ld = (
+                    f"{lt['short_signal']} 領先 {lt['median_lead_days']} 日"
+                    f"（vs {lt['long_signal']}）"
+                )
+            if early_lift.is_empty():
+                lf = "無早閘因子 lift>1"
+            else:
+                ft = early_lift.row(0, named=True)
+                lf = f"{ft['signal']} lift {ft['lift']:.2f}（{ft['hits']}/{ft['n_triggers']}）"
+            summary.append(
+                f"  - M-MH GATE（領先 ≥{early_min_lead} 日 ＋ 早閘 lift>1）："
+                f"{'✅ 過閘' if passed else '❌ 未過閘'}；領先：{ld}；早閘：{lf}"
+            )
         for r in scan.head(5).iter_rows(named=True):
+            lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
+            console.print(
+                f"  {r['signal']}：命中 {r['hit_rate']:.0%}・recall {r['recall']:.0%}"
+                f"・lift {lift}・領先中位 {r['median_lead_days']} 日（{r['n_triggers']} 觸發）"
+            )
+
+    # ★ L4 頂部/出貨退潮警示校準（M-MH 精修・對稱 L1；驗證 overheat_watch 啟發式是否真有頂部預測力）
+    top_lp = labels_cfg.get("top", {})
+    tc = cp.get("top_calib", {})
+    oh = cp.get("overheat_watch", {})  # 掃描沿用生產 overheat_watch 門檻＝直接驗生產規則
+    top_eps = detect_top_episodes(
+        market,
+        m_days=int(top_lp.get("m_days", 60)),
+        tol_pct=float(top_lp.get("tol_pct", 8.0)),
+        drop_pct=float(top_lp.get("drop_pct", 10.0)),
+        n_days=int(top_lp.get("n_days", 10)),
+        cooldown_days=int(top_lp.get("cooldown_days", 15)),
+    )
+    console.print(f"\n[bold]L4 頂部/出貨[/bold]：事件 {top_eps.height} 個")
+    if top_eps.is_empty():
+        summary.append("- **L4 頂部/出貨**：事件 0 個——前瞻跌幅門檻過嚴或資料不足，無法掃描。")
+    else:
+        top_scan = scan_top_signals(
+            panel,
+            top_eps,
+            near_high_pct=float(oh.get("near_high_pct", 8.0)),
+            decel_thresholds=tuple(tc.get("decel_thresholds", [0.0])),
+            div_floor=float(oh.get("div_floor", 0.0)),
+            vol_floor=float(oh.get("vol_contract_floor", 0.0)),
+            sell_z_thresholds=tuple(tc.get("sell_z_thresholds", [1.0, 1.5])),
+            sell_prefixes=tuple(tc.get("sell_prefixes", ["foreign_flow", "net_flow"])),
+            lead_window=int(top_lp.get("n_days", 10)),
+            occupy_days=int(top_lp.get("cooldown_days", 15)),
+            z_min_periods=z_min_periods,
+        )
+        top_params = {
+            "fwd_n_days": int(top_lp.get("n_days", 10)),
+            "fwd_x_pct": float(top_lp.get("drop_pct", 10.0)),
+            "tol_pct": float(top_lp.get("tol_pct", 8.0)),
+            "cooldown_days": int(top_lp.get("cooldown_days", 15)),
+            "lead_window": int(top_lp.get("n_days", 10)),
+        }
+        top_report = render_top_calibration_report(
+            top_scan, top_eps, top_params, coverage, min_triggers
+        )
+        (out_dir / f"calibration_{tag}_top.md").write_text(top_report, encoding="utf-8")
+        top_scan.write_csv(out_dir / f"calibration_{tag}_top.csv")
+        oh_row = (
+            top_scan.filter(
+                pl.col("signal").str.starts_with("★overheat")
+                & (pl.col("n_triggers") >= min_triggers)
+                & pl.col("lift").is_not_null()
+            )
+            .sort("lift", descending=True)
+            .head(1)
+        )
+        if oh_row.is_empty():
+            summary.append(
+                f"- **L4 頂部/出貨**：事件 {top_eps.height} 個・生產啟發式觸發不足或無 lift，"
+                "標『資料累積後重校』。"
+            )
+        else:
+            b = oh_row.row(0, named=True)
+            summary.append(
+                f"- **L4 頂部/出貨**：事件 {top_eps.height} 個・生產啟發式 ★overheat "
+                f"lift {b['lift']:.2f}（{b['hits']}/{b['n_triggers']} 命中・"
+                f"領先中位 {b['median_lead_days']} 日）；對照裁決見 calibration_{tag}_top.md。"
+            )
+        for r in top_scan.head(5).iter_rows(named=True):
             lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
             console.print(
                 f"  {r['signal']}：命中 {r['hit_rate']:.0%}・recall {r['recall']:.0%}"
@@ -1735,6 +1874,10 @@ def cp_candidates_cmd(
         attach_subind_quadrant,
         attach_valuation,
         build_cp_candidates,
+        build_early_inflow_watch,
+        build_overheat_watch,
+        compute_early_inflow,
+        compute_overheat_warning,
         latest_snapshot,
         recent_buy_confirm,
         render_cp_candidates_report,
@@ -1813,6 +1956,33 @@ def cp_candidates_cmd(
             continue
     candidates = tag_holding_status(candidates, holdings_ids, watch_ids, hit_ids)
 
+    # M-MH Phase 3：短窗早訊號加值欄（庫存/觀察的 20d 未確認低信心早訊；補 20d 漏掉的覆蓋）
+    early_cfg = cp.get("early_gate", {})
+    ew_cfg = cp.get("early_watch", {})
+    early_watch = None
+    if bool(ew_cfg.get("enabled", True)):
+        early = compute_early_inflow(
+            snapshot,
+            prefixes=tuple(ew_cfg.get("prefixes", ["foreign_flow", "net_flow"])),
+            z_threshold=float(early_cfg.get("z_threshold", 1.0)),
+            long_z_ceiling=float(early_cfg.get("long_z_ceiling", 0.5)),
+            decel_floor=float(early_cfg.get("decel_floor", 0.0)),
+        )
+        cand_ids = set(candidates["stock_id"].to_list()) if not candidates.is_empty() else set()
+        early_watch = build_early_inflow_watch(early, holdings_ids, watch_ids, cand_ids)
+
+    # 精修・點 5：過熱-退潮警示（庫存/觀察已漲到高位但短窗退潮＝停利提醒；未校準啟發式）
+    oh_cfg = cp.get("overheat_watch", {})
+    overheat_watch = None
+    if bool(oh_cfg.get("enabled", True)):
+        overheat = compute_overheat_warning(
+            snapshot,
+            near_high_pct=float(oh_cfg.get("near_high_pct", 8.0)),
+            div_floor=float(oh_cfg.get("div_floor", 0.0)),
+            vol_contract_floor=float(oh_cfg.get("vol_contract_floor", 0.0)),
+        )
+        overheat_watch = build_overheat_watch(overheat, holdings_ids, watch_ids)
+
     # C2 三重濾網：疊 C1 次產業相對估值（官方 trailing PE 主 / PB 補虧損股，橫斷面取最新一份）
     industry = load_industry_mapping(cache_dir)
     val_cfg = cp.get("valuation", {})
@@ -1846,6 +2016,8 @@ def cp_candidates_cmd(
         rules=rules,
         names=names,
         data_date=str(panel["date"].max()),
+        early_watch=early_watch,
+        overheat_watch=overheat_watch,
     )
     n_triple = (
         candidates.filter(pl.col("triple_filter") == "✓三重").height
@@ -1853,8 +2025,11 @@ def cp_candidates_cmd(
         else 0
     )
     console.print(f"[green]CP 候選清單 → {md_path}[/green]")
+    n_ew = early_watch.height if early_watch is not None else 0
+    n_oh = overheat_watch.height if overheat_watch is not None else 0
     console.print(
         f"  候選 {candidates.height} 檔（三重濾網全過 {n_triple}）・"
+        f"短窗早訊（庫存/觀察）{n_ew} 檔・過熱-退潮（庫存/觀察）{n_oh} 檔・"
         f"面板 {coverage['n_stocks']} 檔 × {coverage['n_trading_days']} 日・"
         f"法人覆蓋 {coverage['inst_coverage_pct']}%"
     )

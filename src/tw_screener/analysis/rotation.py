@@ -156,25 +156,29 @@ def compute_fund_flows(
     volume_history: pl.DataFrame | None = None,
     short_window: int = 5,
     long_window: int = 20,
+    windows: tuple[int, ...] | None = None,
 ) -> pl.DataFrame:
-    """次產業法人資金流向衍生訊號（docs/12 §2.3）。
+    """次產業法人資金流向衍生訊號（docs/12 §2.3；M-MH Phase D 多窗化）。
 
     Args:
         membership: (sub_industry, stock_id)
         institutional: (date, stock_id, foreign_net, trust_net, ..., total_net)
             上市+上櫃合併（load_institutional_history 輸出），單位：股
         volume_history: (date, stock_id, volume) 可選；缺時 concentration 欄為 null
-        short_window / long_window: 滾動視窗（交易日），嵌入輸出欄名
+        short_window / long_window: momentum / breadth / concentration 的錨窗（交易日）
+        windows: 多窗鏡頭集合（交易日）；每窗各產 flow 滾動加總欄。None → (short, long)。
+            short/long 一律納入（為子集），故既有 _{S}d/_{L}d 逐值不變（純加法）。
 
     Returns:
         每 (sub_industry, date) 一列：
-        - {net,foreign,trust}_flow_{S}d / _{L}d：成員法人淨額滾動加總（股）
-        - {flow,foreign,trust}_momentum：短窗淨額 − 前一短窗淨額（加速度）
+        - {net,foreign,trust}_flow_{w}d：各窗成員法人淨額滾動加總（股；含 short/long 子集）
+        - {flow,foreign,trust}_momentum：短窗淨額 − 前一短窗淨額（加速度，錨在 short）
         - flow_breadth_{S}d / _{L}d、foreign_breadth_{S}d：滾動淨買超成員比 [0,1]
         - flow_concentration_{S}d / _{L}d：法人淨買股數/成交股數（資金力度，±）
         - members：籃子成員數（分母）
     """
     s, lw = short_window, long_window
+    wins = tuple(sorted({s, lw} | set(windows or ())))
     if membership.is_empty() or institutional.is_empty():
         return pl.DataFrame(
             schema={"sub_industry": pl.Utf8, "date": pl.Date, "members": pl.UInt32}
@@ -196,12 +200,12 @@ def compute_fund_flows(
         .sort(["stock_id", "date"])
     )
 
-    # 個股層滾動加總 + 動能（短窗 − 前一短窗）
+    # 個股層滾動加總（各窗）+ 動能（短窗 − 前一短窗）
     nets = nets.with_columns(
         [
             pl.col(c).rolling_sum(w, min_samples=1).over("stock_id").alias(f"_{c}_{w}")
             for c in _NET_COLS
-            for w in (s, lw)
+            for w in wins
         ]
     ).with_columns(
         [
@@ -236,7 +240,7 @@ def compute_fund_flows(
     aggs: list[pl.Expr] = [pl.col("stock_id").n_unique().alias("members")]
     for c in _NET_COLS:
         fp = _FLOW_PREFIX[c]
-        for w in (s, lw):
+        for w in wins:
             aggs.append(pl.col(f"_{c}_{w}").sum().alias(f"{fp}_{w}d"))
         aggs.append(pl.col(f"_{c}_mom").sum().alias(f"{_MOM_PREFIX[c]}_momentum"))
     # breadth：滾動淨買超成員比

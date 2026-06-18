@@ -114,6 +114,57 @@ def test_flow_rolling_and_momentum():
     assert row["flow_momentum"][0] == 250
 
 
+# ---- M-MH Phase 1：多窗 + 背離因子 ----
+
+def test_multi_window_additive_and_new_columns():
+    """windows 多窗只增欄；2d/4d 子集逐值不變（純加法）。"""
+    prices = _price(
+        {
+            "1111": [100, 102, 104, 103, 105, 110],
+            "2222": [50, 50, 51, 50, 52, 55],
+            "3333": [200, 198, 202, 205, 210, 215],
+            "4444": [30, 31, 30, 32, 33, 34],
+        }
+    )
+    inst = _institutional({"1111": [100, 200, None, -50, 80, 120]})
+    membership = _membership()
+    baskets = compute_subindustry_baskets(membership, prices)
+    base = build_stock_panel(prices, inst, membership, baskets, **PARAMS)  # windows=None→(2,4)
+    multi = build_stock_panel(prices, inst, membership, baskets, windows=(1, 3), **PARAMS)
+    # 新窗系列 + 每窗 momentum + 背離欄出現
+    for col in (
+        "net_flow_1d", "net_flow_3d", "net_flow_3d_z", "trust_flow_1d_z",
+        "flow_momentum_3d", "foreign_momentum_1d", "ret_1d", "ret_3d",
+        "price_flow_div_3d", "flow_decel",
+    ):
+        assert col in multi.columns, col
+    # 子集逐值不變（含 z / ret / 位階 / 量能）
+    shared = [
+        "net_flow_2d", "net_flow_4d", "net_flow_4d_z", "foreign_flow_2d_z",
+        "flow_momentum", "ret_2d", "above_low_4d_pct", "volume_z_2d",
+    ]
+    keyed = ["stock_id", "date", *shared]
+    assert multi.select(keyed).sort(keyed[:2]).equals(base.select(keyed).sort(keyed[:2]))
+
+
+def test_unsuffixed_momentum_is_short_window_alias():
+    panel = _panel()  # short=2 → unsuffixed momentum 應＝ momentum_2d
+    assert panel["flow_momentum"].equals(panel["flow_momentum_2d"].alias("flow_momentum"))
+
+
+def test_flow_decel_and_price_flow_div():
+    """flow_decel＝短窗動能二階差；price_flow_div＝N 日報酬 − N 日 z 成長（手算 1111 D5）。"""
+    s1 = _panel().filter(pl.col("stock_id") == "1111").sort("date")
+    d5 = s1.filter(pl.col("date") == D0 + timedelta(days=5))
+    # total_net 1111=[100,200,0,-50,80,120]；momentum(D3)=-350、(D5)=250 → decel=250-(-350)=600
+    assert d5["flow_decel"][0] == pytest.approx(600.0)
+    # price_flow_div_2d = ret_2d − (net_flow_2d_z(D5) − net_flow_2d_z(D3))
+    z5 = d5["net_flow_2d_z"][0]
+    z3 = s1.filter(pl.col("date") == D0 + timedelta(days=3))["net_flow_2d_z"][0]
+    expected = d5["ret_2d"][0] - (z5 - z3)
+    assert d5["price_flow_div_2d"][0] == pytest.approx(expected, abs=1e-9)
+
+
 def test_missing_institutional_filled_zero():
     panel = _panel()
     # 2222 完全無法人紀錄 → net 欄全 0（補 0 慣例）

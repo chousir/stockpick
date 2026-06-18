@@ -168,6 +168,21 @@ def test_fund_flows_empty_inputs():
     assert compute_fund_flows(_membership(), pl.DataFrame()).is_empty()
 
 
+def test_fund_flows_multi_window_additive():
+    """M-MH Phase 1：windows 多窗只增欄；short/long 子集逐值不變（純加法）。"""
+    base = compute_fund_flows(_membership(), _institutional(6), short_window=2, long_window=4)
+    multi = compute_fund_flows(
+        _membership(), _institutional(6), short_window=2, long_window=4, windows=(1, 3)
+    )
+    # 新窗 flow 欄出現（三 net 欄都有）
+    for col in ("net_flow_1d", "net_flow_3d", "foreign_flow_3d", "trust_flow_1d"):
+        assert col in multi.columns, col
+    # 既有 2d/4d 子集 + momentum/breadth（錨在 short/long）逐值不變
+    shared = ["net_flow_2d", "net_flow_4d", "foreign_flow_2d", "flow_momentum", "flow_breadth_2d"]
+    keyed = ["sub_industry", "date", *shared]
+    assert multi.select(keyed).sort(keyed[:2]).equals(base.select(keyed).sort(keyed[:2]))
+
+
 # ─── rank_flows + ΔRank（復用 attach_rank_delta） ─────────────────────────────
 
 
