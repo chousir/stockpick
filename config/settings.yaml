@@ -189,6 +189,10 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
       x_pct: 15.0
       n_days: 15
       cooldown_days: 15
+  early_watch:               # ★ M-MH Phase 3 短窗早訊號加值欄（GATE ❌ 但 short_only ~30% 真覆蓋）
+    enabled: true            # 開：cp_candidates.md 加「庫存/觀察・20d 未確認」低信心早訊區塊
+    prefixes: [foreign_flow, net_flow]  # 早訊掃描的法人別（投信雜訊高、預設不納）
+    # z 門檻 / 20d 上限 / 未減速 floor 沿用 cp_value.early_gate（同一定義，不另立）
   candidate:                 # B3 個股 CP 候選清單（生產軌；make cp-value-candidates）
     max_candidates: 25       # **每型態**顯示上限（三型態各自獵場，避免貼低高分淹沒反轉；≤0 不截）
     drawdown_pct: 20.0       # L3 反轉「深跌情境」＝距 60 日高 ≤ −此值（與 B2 reversal 對齊）

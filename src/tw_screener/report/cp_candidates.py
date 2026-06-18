@@ -18,10 +18,14 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import polars as pl
 from loguru import logger
+
+# 多窗資金 z 欄名（M-MH：foreign_flow_5d_z / net_flow_20d_z…）
+_FLOW_Z_RE = re.compile(r"^(net_flow|foreign_flow|trust_flow)_(\d+)d_z$")
 
 # label key → 報表顯示型態名
 _LABEL_NAMES: dict[str, str] = {"ambush": "埋伏", "breakout": "追突破", "reversal": "反轉"}
@@ -296,6 +300,127 @@ def tag_holding_status(
     return candidates.with_columns(pl.Series("watch_status", vals))
 
 
+def compute_early_inflow(
+    snapshot: pl.DataFrame,
+    prefixes: tuple[str, ...] = ("foreign_flow", "net_flow"),
+    z_threshold: float = 1.0,
+    long_z_ceiling: float = 0.5,
+    decel_floor: float = 0.0,
+) -> pl.DataFrame:
+    """短窗早訊號旗標（M-MH Phase 3）：短窗（< 最長窗）資金 z 已轉強、但同 prefix 最長窗
+    （20d）z 仍未達標＝「資金剛進、20d 尚未追上」（校準的 short_only 態）。
+
+    守誠實：M-MH Phase 2 校準此訊號**未證實更早或更準**（lift 與 20d 打平、無系統性領先）；
+    僅補 20d 結構漏掉的 ~30% 覆蓋，**低信心、非進場訊號**。條件全 settings 化、不寫死。
+
+    回傳每命中股一列：stock_id / early_signal（觸發短窗 z 欄）/ early_short_z / early_long_z /
+    flow_decel / above_low_pct，依短窗 z 遞減。缺 flow_decel 欄或無命中 → 空表。
+    """
+    if snapshot.is_empty() or "flow_decel" not in snapshot.columns:
+        return pl.DataFrame()
+    low_col = _prefix_col(snapshot, "above_low_")
+    by_prefix: dict[str, list[int]] = {}
+    for c in snapshot.columns:
+        m = _FLOW_Z_RE.match(c)
+        if m and m.group(1) in prefixes:
+            by_prefix.setdefault(m.group(1), []).append(int(m.group(2)))
+
+    rows: list[dict] = []
+    for rec in snapshot.iter_rows(named=True):
+        decel = rec.get("flow_decel")
+        if decel is None or decel < decel_floor:  # 減速中 → 非新鮮買盤
+            continue
+        best_sig: str | None = None
+        best_sz: float | None = None
+        best_lz: float | None = None
+        for prefix, wins in by_prefix.items():
+            longw = max(wins)
+            lz = rec.get(f"{prefix}_{longw}d_z")
+            if lz is None or lz >= long_z_ceiling:  # 長窗已追上 → 非早訊號
+                continue
+            for w in wins:
+                if w >= longw:
+                    continue
+                sz = rec.get(f"{prefix}_{w}d_z")
+                if sz is not None and sz > z_threshold and (best_sz is None or sz > best_sz):
+                    best_sig, best_sz, best_lz = f"{prefix}_{w}d_z", sz, lz
+        if best_sig is None or best_sz is None:
+            continue
+        rows.append(
+            {
+                "stock_id": rec["stock_id"],
+                "early_signal": best_sig,
+                "early_short_z": round(best_sz, 2),
+                "early_long_z": round(best_lz, 2) if best_lz is not None else None,
+                "flow_decel": round(decel, 2),
+                "above_low_pct": (
+                    round(rec[low_col], 1) if low_col and rec.get(low_col) is not None else None
+                ),
+            }
+        )
+    return pl.DataFrame(rows).sort("early_short_z", descending=True) if rows else pl.DataFrame()
+
+
+def build_early_inflow_watch(
+    early: pl.DataFrame,
+    holdings: list[str],
+    watch: list[str],
+    candidate_ids: set[str],
+) -> pl.DataFrame:
+    """早訊號中，限你的庫存/觀察清單、且未進上方候選者（補 20d 漏掉的覆蓋；M-MH Phase 3）。
+
+    加 watch_status（庫存/觀察），依短窗 z 遞減。空輸入或無命中 → 空表。
+    """
+    if early.is_empty():
+        return pl.DataFrame()
+    hset, wset = set(holdings), set(watch)
+    sub = early.filter(
+        pl.col("stock_id").is_in(list(hset | wset))
+        & ~pl.col("stock_id").is_in(list(candidate_ids))
+    )
+    if sub.is_empty():
+        return pl.DataFrame()
+    status = [
+        "/".join([t for t, s in (("庫存", hset), ("觀察", wset)) if sid in s])
+        for sid in sub["stock_id"].to_list()
+    ]
+    return sub.with_columns(pl.Series("watch_status", status)).sort(
+        "early_short_z", descending=True
+    )
+
+
+def render_early_inflow_section(
+    watch: pl.DataFrame, names: dict[str, str] | None = None
+) -> list[str]:
+    """cp_candidates.md 的「短窗早訊號（庫存/觀察・低信心）」區塊行（M-MH Phase 3）。"""
+    names = names or {}
+    lines = [
+        "## 短窗早訊號（庫存/觀察・20d 尚未確認・低信心）",
+        "",
+        "> 短窗（5 日）法人資金 z 已轉強、但同法人別 20d-z 仍未達標＝「資金剛進、20d 還沒追上」。",
+        "> **M-MH Phase 2 校準：此訊號未證實更早或更準**（lift 與 20d 打平、無系統性領先），",
+        "> 僅補 20d 結構漏掉的 ~30% 覆蓋。**低信心、非進場訊號**，須個股查證。",
+        "> 只列你的庫存/觀察清單中、未進上方候選者。",
+        "",
+    ]
+    if watch.is_empty():
+        lines += ["（庫存/觀察清單中本週無此類早訊號。）", ""]
+        return lines
+    lines += [
+        "| 股號 | 名稱 | 持有 | 早訊號（短窗 z） | 20d-z（未達標） | 距低% |",
+        "|---|---|---|---|---|---|",
+    ]
+    for r in watch.iter_rows(named=True):
+        al = f"{r['above_low_pct']:.1f}" if r["above_low_pct"] is not None else "—"
+        lz = f"{r['early_long_z']:.2f}" if r["early_long_z"] is not None else "—"
+        lines.append(
+            f"| {r['stock_id']} | {names.get(r['stock_id'], '')} | {r['watch_status']} "
+            f"| {r['early_signal']}={r['early_short_z']:.2f} | {lz} | {al} |"
+        )
+    lines.append("")
+    return lines
+
+
 def render_cp_candidates_report(
     candidates: pl.DataFrame,
     week_tag: str,
@@ -305,11 +430,13 @@ def render_cp_candidates_report(
     rules: list[dict],
     names: dict[str, str] | None = None,
     data_date: str = "",
+    early_watch: pl.DataFrame | None = None,
 ) -> Path:
     """渲染 cp_candidates.md（人讀）+ 寫 cp_candidates.csv（機器讀），回傳 md 路徑。
 
     candidates 須已過 attach_subind_quadrant + tag_holding_status。空清單仍出報告
-    （誠實標「本週無候選」），不靜默。
+    （誠實標「本週無候選」），不靜默。early_watch 非 None 時附「短窗早訊號」區塊
+    （M-MH Phase 3 加值欄；庫存/觀察的 20d 未確認低信心早訊）。
     """
     names = names or {}
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -414,6 +541,9 @@ def render_cp_candidates_report(
                     row += f" {val} | {pct} | {r['triple_filter']} |"
                 lines.append(row)
             lines.append("")
+
+    if early_watch is not None:
+        lines += ["", *render_early_inflow_section(early_watch, names)]
 
     lines += [
         "",

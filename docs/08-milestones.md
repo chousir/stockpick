@@ -383,25 +383,22 @@ claude
 
 ---
 
-### Phase 3：生產＋分級（僅 Phase 2 過閘才做）
+### Phase 3：生產（窄做加值欄；Phase 2 ❌ 後改版・使用者拍板）
 
-**目標**
-1. 勝出多窗因子**併入** `cp_value.candidate.rules`（與 20d 並列，新增非取代）。
-2. 多窗實作趨勢分級，取代「距低>15 硬擋」：起漲（短窗加速＋距低小＋20d 未噴）／主升（全窗正、價隨量）／過熱-退潮（短窗減速＋價量背離＋量縮＋距低大）。
-3. 分級回扣 pick 判讀：E/F/G 命中但落「過熱-退潮」→ 標「追高/回檔再議」、不列可動作起漲。
+> **原設計（趨勢分級取代「距低>15 硬擋」）作廢**：其前提＝短窗有領先力，Phase 2 證實不成立（短窗無系統性領先、減量沒贏 lift）。改採**窄做加值欄**——只把唯一真發現（`short_only` ~30%＝20d 漏掉、短窗抓到）surface 成低信心觀察欄，**不取代距低硬擋、不動候選 gating**。
 
-**可動檔案範圍**
-- `src/tw_screener/report/cp_candidates.py`：候選表增「階段」欄。
-- `src/tw_screener/report/templates/group_analysis.md.j2`：Section 4 起漲定義加多窗條件；Section 5/6 加「分級回扣可動作」指示（搭背離＋量，非單看距低）。
-- `config/settings.yaml`：分級門檻（背離閾值、量縮閾值、距低帶）全進設定。
-- `docs/13-cp-value-research.md`：補 Phase D 校準結論與分級定義。
+**已做（2026-06-18）**
+1. `cp_candidates.py`：`compute_early_inflow`（短窗 z>門檻 ＋ flow_decel≥0 未減速 ＋ 同 prefix 20d-z<上限＝長窗未追上）／`build_early_inflow_watch`（限庫存∪觀察、排除已是候選者）／`render_early_inflow_section`。
+2. `cli.py` cp candidates：算早訊號→`render_cp_candidates_report(early_watch=...)`，md 末段加「短窗早訊號（庫存/觀察・低信心）」區塊。
+3. `group_analysis.md.j2` Section 6 加第 5 點：早訊號低信心、**只當「已持有/觀察股資金異動、回頭查一眼」提醒，非新進場理由**。
+4. `config/settings.yaml`：`cp_value.early_watch`（enabled/prefixes；z 門檻等沿用 `early_gate`）。
 
 **成功標準**
-- [ ] W24 重跑：2501 6/12 落「過熱-退潮」、6/5 落「起漲」前段。
-- [ ] 盤整未減速、量沒縮的對照檔不被誤殺。
-- [ ] `make week` 跑通、`make test` 綠。
+- [x] `make cp-value-candidates` 跑通：早訊號區塊正確產出（實跑庫存/觀察本週 0 檔＝誠實，市場面 19 檔證邏輯有效）。
+- [x] 守人設：低信心標註、非進場訊號、多空並陳、門檻全 settings。
+- [x] `make test` 綠（441）、ruff/mypy 零淨增。
 
-**注意**：守人設——分級是觀察標註，多空並陳、不下買賣結論、不寫死門檻。
+**注意**：守人設——早訊號是低信心觀察標註，不下買賣結論、不寫死門檻；校準已證未更早更準，僅補覆蓋。
 
 ### 工時估
 | Phase | 估時 | 性質 |

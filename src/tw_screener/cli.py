@@ -1802,6 +1802,8 @@ def cp_candidates_cmd(
         attach_subind_quadrant,
         attach_valuation,
         build_cp_candidates,
+        build_early_inflow_watch,
+        compute_early_inflow,
         latest_snapshot,
         recent_buy_confirm,
         render_cp_candidates_report,
@@ -1880,6 +1882,21 @@ def cp_candidates_cmd(
             continue
     candidates = tag_holding_status(candidates, holdings_ids, watch_ids, hit_ids)
 
+    # M-MH Phase 3：短窗早訊號加值欄（庫存/觀察的 20d 未確認低信心早訊；補 20d 漏掉的覆蓋）
+    early_cfg = cp.get("early_gate", {})
+    ew_cfg = cp.get("early_watch", {})
+    early_watch = None
+    if bool(ew_cfg.get("enabled", True)):
+        early = compute_early_inflow(
+            snapshot,
+            prefixes=tuple(ew_cfg.get("prefixes", ["foreign_flow", "net_flow"])),
+            z_threshold=float(early_cfg.get("z_threshold", 1.0)),
+            long_z_ceiling=float(early_cfg.get("long_z_ceiling", 0.5)),
+            decel_floor=float(early_cfg.get("decel_floor", 0.0)),
+        )
+        cand_ids = set(candidates["stock_id"].to_list()) if not candidates.is_empty() else set()
+        early_watch = build_early_inflow_watch(early, holdings_ids, watch_ids, cand_ids)
+
     # C2 三重濾網：疊 C1 次產業相對估值（官方 trailing PE 主 / PB 補虧損股，橫斷面取最新一份）
     industry = load_industry_mapping(cache_dir)
     val_cfg = cp.get("valuation", {})
@@ -1913,6 +1930,7 @@ def cp_candidates_cmd(
         rules=rules,
         names=names,
         data_date=str(panel["date"].max()),
+        early_watch=early_watch,
     )
     n_triple = (
         candidates.filter(pl.col("triple_filter") == "✓三重").height
@@ -1920,8 +1938,10 @@ def cp_candidates_cmd(
         else 0
     )
     console.print(f"[green]CP 候選清單 → {md_path}[/green]")
+    n_ew = early_watch.height if early_watch is not None else 0
     console.print(
         f"  候選 {candidates.height} 檔（三重濾網全過 {n_triple}）・"
+        f"短窗早訊（庫存/觀察）{n_ew} 檔・"
         f"面板 {coverage['n_stocks']} 檔 × {coverage['n_trading_days']} 日・"
         f"法人覆蓋 {coverage['inst_coverage_pct']}%"
     )

@@ -330,3 +330,91 @@ def test_render_empty_candidates(tmp_path):
     )
     assert "本週無" in md.read_text(encoding="utf-8")
     assert (tmp_path / "cp_candidates.csv").exists()
+
+
+# ── M-MH Phase 3：短窗早訊號加值欄 ──────────────────────────────────────────────
+
+
+def _early_snap(stocks: list[dict]) -> pl.DataFrame:
+    """早訊號用快照：含短/長窗 z + flow_decel + 距低欄；缺欄補預設（同 schema）。"""
+    defaults = {
+        "foreign_flow_5d_z": 0.0, "foreign_flow_20d_z": 0.0,
+        "net_flow_5d_z": 0.0, "net_flow_20d_z": 0.0,
+        "flow_decel": 1.0, "above_low_60d_pct": 30.0,
+    }
+    rows = [{"date": date(2026, 6, 12), "stock_id": s["stock_id"], **defaults, **s} for s in stocks]
+    return pl.DataFrame(rows)
+
+
+def test_early_inflow_flags_short_strong_long_silent():
+    from tw_screener.report.cp_candidates import compute_early_inflow
+
+    snap = _early_snap([
+        {"stock_id": "A", "foreign_flow_5d_z": 2.0, "foreign_flow_20d_z": 0.0},   # 早訊號
+        {"stock_id": "B", "foreign_flow_5d_z": 2.0, "foreign_flow_20d_z": 1.0},   # 20d 已追上→否
+        {"stock_id": "C", "foreign_flow_5d_z": 2.0, "foreign_flow_20d_z": 0.0,
+         "flow_decel": -1.0},                                                      # 減速→否
+        {"stock_id": "D", "foreign_flow_5d_z": 0.3, "foreign_flow_20d_z": 0.0},   # 短窗 z 不足→否
+    ])
+    out = compute_early_inflow(
+        snap, prefixes=("foreign_flow",), z_threshold=1.0, long_z_ceiling=0.5, decel_floor=0.0
+    )
+    assert out["stock_id"].to_list() == ["A"]
+    r = out.row(0, named=True)
+    assert r["early_signal"] == "foreign_flow_5d_z"
+    assert r["early_short_z"] == 2.0 and r["early_long_z"] == 0.0
+
+
+def test_early_inflow_missing_decel_returns_empty():
+    from tw_screener.report.cp_candidates import compute_early_inflow
+
+    snap = pl.DataFrame({"date": [date(2026, 6, 12)], "stock_id": ["A"],
+                         "foreign_flow_5d_z": [2.0], "foreign_flow_20d_z": [0.0]})
+    assert compute_early_inflow(snap).is_empty()  # 無 flow_decel 欄 → 誠實回空
+
+
+def test_early_inflow_watch_filters_to_tracked_non_candidates():
+    from tw_screener.report.cp_candidates import build_early_inflow_watch, compute_early_inflow
+
+    snap = _early_snap([
+        {"stock_id": "HOLD", "foreign_flow_5d_z": 2.0},
+        {"stock_id": "WATCH", "foreign_flow_5d_z": 1.5},
+        {"stock_id": "CAND", "foreign_flow_5d_z": 2.5},   # 早訊號但已是候選→排除
+        {"stock_id": "OTHER", "foreign_flow_5d_z": 2.0},  # 早訊號但不在清單→排除
+    ])
+    early = compute_early_inflow(snap, prefixes=("foreign_flow",), z_threshold=1.0)
+    watch = build_early_inflow_watch(
+        early, holdings=["HOLD"], watch=["WATCH"], candidate_ids={"CAND"}
+    )
+    assert set(watch["stock_id"].to_list()) == {"HOLD", "WATCH"}
+    smap = dict(zip(watch["stock_id"].to_list(), watch["watch_status"].to_list()))
+    assert smap["HOLD"] == "庫存" and smap["WATCH"] == "觀察"
+    assert watch["stock_id"].to_list()[0] == "HOLD"  # 依短窗 z 遞減（2.0 > 1.5）
+
+
+def test_early_inflow_watch_empty():
+    from tw_screener.report.cp_candidates import build_early_inflow_watch
+
+    assert build_early_inflow_watch(pl.DataFrame(), [], [], set()).is_empty()
+
+
+def test_render_includes_early_inflow_section(tmp_path):
+    from tw_screener.report.cp_candidates import build_early_inflow_watch, compute_early_inflow
+
+    snap = _snap([{"stock_id": "A", "foreign_flow_20d_z": 1.0, "above_low_60d_pct": 4.0}])
+    cands = build_cp_candidates(snap, _confirm({"A": True}), RULES)
+    cands = attach_subind_quadrant(
+        cands, pl.DataFrame(schema={"sub_industry": pl.Utf8, "stock_id": pl.Utf8}),
+        tmp_path / "missing.csv",
+    )
+    cands = tag_holding_status(cands, holdings=[], watch=[], hits=[])
+    early_snap = _early_snap([{"stock_id": "HOLD", "foreign_flow_5d_z": 2.0}])
+    early = compute_early_inflow(early_snap, prefixes=("foreign_flow",), z_threshold=1.0)
+    ew = build_early_inflow_watch(early, holdings=["HOLD"], watch=[], candidate_ids=set())
+    md = render_cp_candidates_report(
+        cands, "2026-W24", tmp_path,
+        params={"drawdown_pct": 20.0, "confirm_days": 2}, coverage=_coverage(),
+        rules=RULES, names={"HOLD": "測試股"}, data_date="2026-06-12", early_watch=ew,
+    )
+    text = md.read_text(encoding="utf-8")
+    assert "短窗早訊號" in text and "HOLD" in text and "未證實更早或更準" in text
