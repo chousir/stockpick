@@ -91,10 +91,10 @@ make week GROUP=defg          # def=D/E/F 不含 G；abc=A/B/C 已 legacy
 
 | 檔案 | 是什麼 |
 |---|---|
-| `group_analysis.md` | 族群脈絡＋強度排名＋次產業/概念股/輪動雷達＋給 Claude 的分析請求（Section 5 次產業深度、6 CP 補漲） |
+| `group_analysis.md` | 族群脈絡＋強度排名＋次產業/概念股/輪動雷達＋給 Claude 的分析請求（Section 5 次產業深度、6 CP 補漲、7 持有/觀察健檢） |
 | `sector_rotation.md` | 全市場資金輪動地圖（四象限/★訊號/週對週 ΔRank，**無入選偏誤**，對照 group Section 2.8） |
 | `candidates_enriched.csv` | **主要挑股宇宙**：全候選股 × 技術/籌碼/估值（官方 PE/PB/殖利率＋次產業相對便宜位階）/月營收/flags 排雷欄 |
-| `cp_candidates.md` | 個股 CP 補漲候選＋三重濾網（錢進＋沒漲＋相對便宜；埋伏/追突破/反轉三型態） |
+| `cp_candidates.md` | 個股 CP 補漲候選＋三重濾網（錢進＋沒漲＋相對便宜；埋伏/追突破/反轉三型態）＋末段短窗早訊號／過熱-退潮警示（限庫存/觀察・低信心） |
 | `holdings_enriched.csv` / `watchlist_enriched.csv` | 我的庫存/觀察清單（有維護才產，**無論如何都要分析**） |
 | `screen_result_{d,e,f,g}_*.csv` | 各策略原始入選快照（看「哪檔中哪些策略」用） |
 
@@ -206,7 +206,8 @@ YAML 驅動的 Goodinfo 條件篩選：`config/strategies/*.yaml` 定義條件 �
 Section 0 策略代號/除權息/總經事件、1 入選分布、2 族群強度排名（2.5 跨族群強勢股、
 2.6 次產業強度、2.7 概念股題材、**2.8 輪動雷達＋全宇宙輪動並列**）、3 各族群前 3 名、
 4 觀察、5 Claude 次產業深度分析請求（輪動雷達驅動）、6 Claude CP 補漲候選分析請求
-（個股層・讀同夾 cp_candidates.md）；同時產 `candidates_enriched.csv`
+（個股層・讀同夾 cp_candidates.md）、7 持有/觀察清單健檢請求（你的部位・與命中策略同等深度）；
+同時產 `candidates_enriched.csv`
 （全候選股 × 技術/籌碼/估值/flags 排雷欄，**AI 挑股的主要宇宙**）。
 
 ### 5. AI 挑股（手動・docs/11）
@@ -291,7 +292,7 @@ crontab -e
 | `screen_result_{d,e,f,g}_*.csv` | ② screen-all | 各策略入選快照（純 Goodinfo 12 欄，不被後處理改寫） |
 | `screen_log.md` | ② screen-all | 各策略檔數＋交集統計 |
 | `sector_rotation.md` / `.csv` | ④ rotation | **資金輪動地圖**：排名/四象限/★訊號/我的參與度；CSV 供下週 ΔRank |
-| `cp_candidates.md` / `.csv` | ⑤ cp-value-candidates | 個股 CP 補漲候選＋C2 三重濾網（官方 trailing PE/PB；group Section 6 要讀）|
+| `cp_candidates.md` / `.csv` | ⑤ cp-value-candidates | 個股 CP 補漲候選＋C2 三重濾網（官方 trailing PE/PB；group Section 6 要讀）＋短窗早訊號／過熱-退潮警示（限庫存/觀察・低信心觀察，非進場/賣訊）|
 | `group_analysis.md` | ⑥ group | 族群分析主報告（Section 0-6） |
 | `candidates_enriched.csv` | ⑥ group | 全候選股 × 完整欄位＝**AI 挑股主宇宙** |
 | `holdings_enriched.csv` / `watchlist_enriched.csv` | ⑥ group | 庫存/觀察 enrich（有維護才產） |
@@ -366,11 +367,12 @@ make typecheck   # mypy
 | [`docs/05-group-analysis.md`](./docs/05-group-analysis.md) | 族群分析、族群內排名 |
 | [`docs/06-report-spec.md`](./docs/06-report-spec.md) | 個股深度報告框架與輸出規範 |
 | [`docs/07-cli-spec.md`](./docs/07-cli-spec.md) | Makefile 指令、CLI 介面 |
-| [`docs/08-milestones.md`](./docs/08-milestones.md) | 建置期 M0-M7 milestones（已完成） |
+| [`docs/08-milestones.md`](./docs/08-milestones.md) | 建置期 M0-M7＋上線後 M-MH 多窗起漲偵測 milestones（已完成） |
 | [`docs/09-coding-conventions.md`](./docs/09-coding-conventions.md) | 程式碼風格、命名、測試規範 |
 | [`docs/10-sop.md`](./docs/10-sop.md) | **每週使用 SOP**（手動 Claude 對話模式、含範本 prompt） |
 | [`docs/11-propicks-analysis.md`](./docs/11-propicks-analysis.md) | **ProPicks 全清單分析**（Step 3 完整 prompt + 流程） |
 | [`docs/12-sector-rotation.md`](./docs/12-sector-rotation.md) | **次產業資金輪動**規劃書＋方法論（R0-R6、起漲點校準、四象限） |
+| [`docs/13-cp-value-research.md`](./docs/13-cp-value-research.md) | **個股 CP 補漲研究**＋方法論（三重濾網、官方 PE 估值層、M-MH 多窗起漲/退潮校準裁決） |
 | [`docs/99-troubleshooting.md`](./docs/99-troubleshooting.md) | 常見問題與解法 |
 
 ## 給 Claude Code 的使用指示

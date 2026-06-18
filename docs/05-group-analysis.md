@@ -59,6 +59,10 @@
 
 ## 6. Claude CP 補漲候選分析請求（個股層・讀同夾 cp_candidates.md）
 （「法人資金已進、股價尚未反映」的補漲觀察清單：埋伏/追突破/反轉三型態＋C2 三重濾網，請 Claude 分析）
+
+## 7. Claude 持有/觀察清單健檢請求（你的部位・與命中策略同等深度）
+（讀同夾 holdings_enriched.csv / watchlist_enriched.csv，逐檔判續抱/收緊/停利、接近進場/再等/剔除；
+含多鏡頭交集優先、新鮮度過濾，對照 cp_candidates.md 末段過熱-退潮警示。M-MH 精修輪新增）
 ```
 
 ## 演算法
@@ -214,7 +218,7 @@ def render_group_report(
 
 ```
 你執行: make group
-程式: 產出 group_analysis.md（Section 1-3、5-6 都填好）
+程式: 產出 group_analysis.md（Section 1-3、5-7 都填好）
 程式: Section 4 留空，附上「待 Claude 補寫」標記
 你開 Claude Code: 「補寫 reports/2026-W21/group_analysis.md 的觀察段」
 Claude: 讀資料、補寫

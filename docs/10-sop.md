@@ -89,6 +89,7 @@ Claude 回覆存到 `reports/YYYY-Www/picks.md`。
 - **第 4 節**：觀察
 - **第 5 節**：Claude 次產業深度分析請求（2.8 雷達挑 top-N 領先次產業、逐塊列成員股）
 - **第 6 節**：Claude CP 補漲候選分析請求（個股層，讀同夾 cp_candidates.md）
+- **第 7 節**：Claude 持有/觀察清單健檢請求（讀同夾 holdings/watchlist_enriched.csv，逐檔續抱/收緊/停利、接近進場/再等/剔除，與命中策略同等深度＝任務 0 的報告內版）
 
 挑股以 picks.md 精選清單或 candidates_enriched.csv 為準（族群/次產業強度排名是機械公式、僅輪動參考，勿直接照挑），記下股號（如 `2330`、`3008`、`6147`...）。
 
