@@ -1552,9 +1552,12 @@ def cp_calibrate_cmd(
         detect_ambush_episodes,
         detect_breakout_episodes,
         detect_reversal_episodes,
+        detect_top_episodes,
         render_cp_calibration_report,
         render_cross_window_lead,
+        render_top_calibration_report,
         scan_stock_signals,
+        scan_top_signals,
     )
     from tw_screener.data.twse import create_client
 
@@ -1760,6 +1763,75 @@ def cp_calibrate_cmd(
                 f"{'✅ 過閘' if passed else '❌ 未過閘'}；領先：{ld}；早閘：{lf}"
             )
         for r in scan.head(5).iter_rows(named=True):
+            lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
+            console.print(
+                f"  {r['signal']}：命中 {r['hit_rate']:.0%}・recall {r['recall']:.0%}"
+                f"・lift {lift}・領先中位 {r['median_lead_days']} 日（{r['n_triggers']} 觸發）"
+            )
+
+    # ★ L4 頂部/出貨退潮警示校準（M-MH 精修・對稱 L1；驗證 overheat_watch 啟發式是否真有頂部預測力）
+    top_lp = labels_cfg.get("top", {})
+    tc = cp.get("top_calib", {})
+    oh = cp.get("overheat_watch", {})  # 掃描沿用生產 overheat_watch 門檻＝直接驗生產規則
+    top_eps = detect_top_episodes(
+        market,
+        m_days=int(top_lp.get("m_days", 60)),
+        tol_pct=float(top_lp.get("tol_pct", 8.0)),
+        drop_pct=float(top_lp.get("drop_pct", 10.0)),
+        n_days=int(top_lp.get("n_days", 10)),
+        cooldown_days=int(top_lp.get("cooldown_days", 15)),
+    )
+    console.print(f"\n[bold]L4 頂部/出貨[/bold]：事件 {top_eps.height} 個")
+    if top_eps.is_empty():
+        summary.append("- **L4 頂部/出貨**：事件 0 個——前瞻跌幅門檻過嚴或資料不足，無法掃描。")
+    else:
+        top_scan = scan_top_signals(
+            panel,
+            top_eps,
+            near_high_pct=float(oh.get("near_high_pct", 8.0)),
+            decel_thresholds=tuple(tc.get("decel_thresholds", [0.0])),
+            div_floor=float(oh.get("div_floor", 0.0)),
+            vol_floor=float(oh.get("vol_contract_floor", 0.0)),
+            sell_z_thresholds=tuple(tc.get("sell_z_thresholds", [1.0, 1.5])),
+            sell_prefixes=tuple(tc.get("sell_prefixes", ["foreign_flow", "net_flow"])),
+            lead_window=int(top_lp.get("n_days", 10)),
+            occupy_days=int(top_lp.get("cooldown_days", 15)),
+            z_min_periods=z_min_periods,
+        )
+        top_params = {
+            "fwd_n_days": int(top_lp.get("n_days", 10)),
+            "fwd_x_pct": float(top_lp.get("drop_pct", 10.0)),
+            "tol_pct": float(top_lp.get("tol_pct", 8.0)),
+            "cooldown_days": int(top_lp.get("cooldown_days", 15)),
+            "lead_window": int(top_lp.get("n_days", 10)),
+        }
+        top_report = render_top_calibration_report(
+            top_scan, top_eps, top_params, coverage, min_triggers
+        )
+        (out_dir / f"calibration_{tag}_top.md").write_text(top_report, encoding="utf-8")
+        top_scan.write_csv(out_dir / f"calibration_{tag}_top.csv")
+        oh_row = (
+            top_scan.filter(
+                pl.col("signal").str.starts_with("★overheat")
+                & (pl.col("n_triggers") >= min_triggers)
+                & pl.col("lift").is_not_null()
+            )
+            .sort("lift", descending=True)
+            .head(1)
+        )
+        if oh_row.is_empty():
+            summary.append(
+                f"- **L4 頂部/出貨**：事件 {top_eps.height} 個・生產啟發式觸發不足或無 lift，"
+                "標『資料累積後重校』。"
+            )
+        else:
+            b = oh_row.row(0, named=True)
+            summary.append(
+                f"- **L4 頂部/出貨**：事件 {top_eps.height} 個・生產啟發式 ★overheat "
+                f"lift {b['lift']:.2f}（{b['hits']}/{b['n_triggers']} 命中・"
+                f"領先中位 {b['median_lead_days']} 日）；對照裁決見 calibration_{tag}_top.md。"
+            )
+        for r in top_scan.head(5).iter_rows(named=True):
             lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
             console.print(
                 f"  {r['signal']}：命中 {r['hit_rate']:.0%}・recall {r['recall']:.0%}"

@@ -416,3 +416,12 @@ claude
 3. **多鏡頭確認**（點 4）：落在 Section 7 prompt 指示（標「幾個鏡頭確認」、交集排前），不另加表欄避免膨脹。
 
 實跑：過熱-退潮本週命中庫存/觀察 5 檔（如 2492 華新科 近 5 日 +33%、距高 0%、減速+背離+量縮）。測試 +5＝446 綠、ruff/mypy 零淨增。詳 docs/13 Phase D 末。
+
+### 退潮警示補校準（2026-06-18・把「先出的啟發式」拿去回測）
+
+承精修輪點 2「未校準先出」，補做對稱 L1 的 **L4 頂部/出貨 label** 校準（`cp calibrate` 新增區塊，研究軌；`stock_calib.detect_top_episodes`／`scan_top_signals`／`render_top_calibration_report`，settings `cp_value.labels.top`＋`top_calib`，掃描沿用 `overheat_watch` 生產門檻＝直接驗生產規則）。**裁決＝維持低信心啟發式、不升級為賣訊**（2237 事件、基率 8.17%）：
+
+- 生產 `★overheat`（高位＋減速＋背離｜量縮）lift **2.15**，**輸給裸『貼高』near_high 3.05、也輸法人賣超×高位 2.39**；背離三因子單獨幾乎無力（div 1.40／decel 1.36／量縮 1.08≈隨機）。
+- **對稱 Phase 2 結論：位階在做工、背離因子不是驅動**（起漲端貼低、退潮端貼高皆然）。
+- **汙染但書**：絕對下跌含大盤系統性回檔，near_high 高 lift 多半是 beta（高位股大盤回檔時跌最兇）、非個股出貨——故任何變體都不升級為賣訊；要分離需「相對大盤落後」label（選配、未跑）。
+- 結論：`overheat_watch` 原樣不動（低信心停利-回查、非賣訊）。校準價值＝證實「不升級」是對的並記錄為何。測試 +5＝451 綠、ruff 全過、mypy 零淨增（既有 11 處與本次無關）。詳 [docs/13 Phase D 末](13-cp-value-research.md)。

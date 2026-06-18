@@ -189,6 +189,16 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
       x_pct: 15.0
       n_days: 15
       cooldown_days: 15
+    top:                     # ★ L4 頂部/出貨（M-MH 精修・退潮警示校準；前瞻絕對下跌、與 L1 對稱）
+      m_days: 60             # 高基期回看（交易日）
+      tol_pct: 8.0           # 距 M 日高 ≤ 此％＝已在區間高位（對齊 overheat_watch.near_high_pct）
+      drop_pct: 10.0         # 前瞻谷底跌幅門檻（個股波動大）
+      n_days: 10             # 前瞻視窗（出貨/回檔較快，對齊 breakout）
+      cooldown_days: 15      # 事件後冷卻（同波段不重複計）
+  top_calib:                 # ★ L4 退潮訊號掃描門檻（研究軌；near_high/div/vol 沿用 overheat_watch 生產值）
+    sell_z_thresholds: [1.0, 1.5]       # 法人短窗賣超基準：foreign/net_flow_5d_z < −此值
+    sell_prefixes: [foreign_flow, net_flow]  # 賣超基準的法人別
+    decel_thresholds: [0.0]             # flow_decel < 此值＝短窗買盤減速（生產規則用 0.0）
   early_watch:               # ★ M-MH Phase 3 短窗早訊號加值欄（GATE ❌ 但 short_only ~30% 真覆蓋）
     enabled: true            # 開：cp_candidates.md 加「庫存/觀察・20d 未確認」低信心早訊區塊
     prefixes: [foreign_flow, net_flow]  # 早訊掃描的法人別（投信雜訊高、預設不納）

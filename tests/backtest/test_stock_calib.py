@@ -16,7 +16,9 @@ from tw_screener.backtest.stock_calib import (
     detect_ambush_episodes,
     detect_breakout_episodes,
     detect_reversal_episodes,
+    detect_top_episodes,
     scan_stock_signals,
+    scan_top_signals,
 )
 
 
@@ -274,3 +276,88 @@ def test_universe_base_rate_dilutes_with_more_stocks():
     two = compute_base_rate(episodes, days, ["A", "B"], lead_window=5, occupy_days=5, warmup_pos=2,
                             key_col="stock_id")
     assert 0 < two < one  # 加入無事件股 B 後基率被稀釋
+
+
+# ── M-MH 精修：L4 頂部/出貨退潮警示校準（前瞻絕對下跌、與 L1 對稱）─────────────
+
+
+def test_top_detects_high_base_then_drop():
+    # 8 日貼高 100，再跌到 80（−20%）——情境貼高、前瞻谷底跌幅過門檻
+    closes = [100] * 8 + [97, 92, 86, 80]
+    ep = detect_top_episodes(
+        _prices({"A": closes}), m_days=5, tol_pct=8.0, drop_pct=10.0, n_days=5, cooldown_days=5
+    )
+    assert ep.height == 1
+    row = ep.row(0, named=True)
+    assert row["stock_id"] == "A"
+    assert row["base_close"] == 100.0
+    assert row["fwd_return_pct"] <= -10.0  # 谷底相對基準的跌幅（負值）
+
+
+def test_top_no_drop_no_episode():
+    # 一直貼高但沒跌 → 非頂部事件
+    ep = detect_top_episodes(
+        _prices({"A": [100] * 12}), m_days=5, tol_pct=8.0, drop_pct=10.0, n_days=5, cooldown_days=5
+    )
+    assert ep.is_empty()
+
+
+def _top_fixture() -> tuple[pl.DataFrame, pl.DataFrame]:
+    """A：idx5/6 出現退潮型態（貼高＋短窗減速＋量價背離/量縮）、idx7 出貨下跌（領先 2 日）；
+    B：常在低位、無退潮（稀釋基率）。"""
+    days = [date(2025, 1, 1) + timedelta(days=i) for i in range(20)]
+    rows = []
+    for sid in ("A", "B"):
+        for i, d in enumerate(days):
+            hot = sid == "A" and i in (5, 6)
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "above_high_60d_pct": -1.0 if sid == "A" else -50.0,  # A 一直貼高位
+                    "flow_decel": -1.0 if hot else 1.0,  # A 在 idx5/6 短窗買盤減速
+                    "price_flow_div_5d": 2.0 if hot else -1.0,  # 量價背離（價漲資金未跟）
+                    "volume_z_5d": -1.0 if hot else 0.0,  # 量縮
+                    "foreign_flow_5d_z": -2.0 if hot else 0.0,  # 外資短窗賣超
+                    "net_flow_5d_z": -2.0 if hot else 0.0,
+                }
+            )
+    panel = pl.DataFrame(rows)
+    episodes = pl.DataFrame(
+        {"stock_id": ["A"], "start_date": [days[7]]},
+        schema={"stock_id": pl.Utf8, "start_date": pl.Date},
+    )
+    return panel, episodes
+
+
+def test_scan_top_overheat_signal_leads_drop():
+    panel, episodes = _top_fixture()
+    scan = scan_top_signals(
+        panel, episodes, near_high_pct=8.0, lead_window=5, occupy_days=5, z_min_periods=2
+    )
+    assert not scan.is_empty()
+    assert {"signal", "lift", "recall", "median_lead_days", "f1"} <= set(scan.columns)
+    oh = scan.filter(pl.col("signal").str.starts_with("★overheat"))
+    assert oh.height == 1
+    row = oh.row(0, named=True)
+    assert row["hits"] == 1
+    assert row["median_lead_days"] == 2
+    assert row["lift"] is not None and row["lift"] > 1.0
+
+
+def test_scan_top_builds_baselines_and_components():
+    panel, episodes = _top_fixture()
+    scan = scan_top_signals(
+        panel, episodes, near_high_pct=8.0, lead_window=5, occupy_days=5, z_min_periods=2
+    )
+    signals = set(scan["signal"].to_list())
+    assert any(s.startswith("near_high") for s in signals)  # 純貼高基準
+    assert any(s.startswith("★overheat") for s in signals)  # 生產啟發式
+    assert "flow_decel (<0)" in signals  # 退潮因子單獨
+    assert any("foreign_flow_5d_z" in s and "+high" in s for s in signals)  # 賣超×高位基準
+
+
+def test_scan_top_empty_inputs_return_empty():
+    panel, episodes = _top_fixture()
+    assert scan_top_signals(pl.DataFrame(), episodes).is_empty()
+    assert scan_top_signals(panel, pl.DataFrame()).is_empty()
