@@ -11,6 +11,8 @@ import polars as pl
 
 from tw_screener.backtest.rotation_calib import compute_base_rate
 from tw_screener.backtest.stock_calib import (
+    _flow_z_cols,
+    compute_cross_window_lead,
     detect_ambush_episodes,
     detect_breakout_episodes,
     detect_reversal_episodes,
@@ -158,6 +160,104 @@ def test_scan_empty_inputs_return_empty():
     panel, episodes = _scan_fixture()
     assert scan_stock_signals(pl.DataFrame(), episodes).is_empty()
     assert scan_stock_signals(panel, pl.DataFrame()).is_empty()
+
+
+# ── M-MH Phase 2：多窗一般化 + 早偵測閘 + 跨窗配對領先 ────────────────────────
+
+
+def test_flow_z_cols_discovers_all_windows():
+    cols = {"net_flow_1d_z", "net_flow_20d_z", "foreign_flow_5d_z", "close", "date"}
+    out = _flow_z_cols(cols)
+    wmap = {c: w for c, _, w in out}
+    assert wmap == {"net_flow_1d_z": 1, "net_flow_20d_z": 20, "foreign_flow_5d_z": 5}
+    # 加速度欄依 prefix 對映（unsuffixed 短窗值）
+    assert dict((c, m) for c, m, _ in out)["foreign_flow_5d_z"] == "foreign_momentum"
+
+
+def _mw_fixture() -> tuple[pl.DataFrame, pl.DataFrame]:
+    """A：5d-z idx5 上穿、20d-z 仍 0（長窗未追上）、idx7 起漲；B：稀釋基率。"""
+    days = [date(2025, 1, 1) + timedelta(days=i) for i in range(20)]
+    rows = []
+    for sid in ("A", "B"):
+        for i, d in enumerate(days):
+            sz = 2.0 if (sid == "A" and i in (5, 6)) else 0.0
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "foreign_flow_5d_z": sz,
+                    "foreign_flow_20d_z": 0.0,  # 長窗整段未達標
+                    "foreign_momentum": 100.0 if sz > 0 else 0.0,
+                    "flow_decel": 1.0,  # 未減速
+                    "price_flow_div_5d": -1.0,  # 價未先噴
+                    "above_low_60d_pct": 4.0 if sid == "A" else 50.0,
+                    "volume_z_5d": sz,
+                }
+            )
+    panel = pl.DataFrame(rows)
+    episodes = pl.DataFrame(
+        {"stock_id": ["A"], "start_date": [days[7]]},
+        schema={"stock_id": pl.Utf8, "start_date": pl.Date},
+    )
+    return panel, episodes
+
+
+def test_early_gate_adds_variants_only_when_enabled():
+    panel, episodes = _mw_fixture()
+    early = {"long_z_ceiling": 0.5, "decel_floor": 0.0, "div_ceiling": 0.0}
+    on = scan_stock_signals(
+        panel, episodes, z_thresholds=(1.0,), volume_thresholds=(1.0,), lead_window=5,
+        occupy_days=5, z_min_periods=2, early_gate=early,
+    )
+    sigs = set(on["signal"].to_list())
+    assert "foreign_flow_5d_z (z>1.0) +early" in sigs
+    assert "foreign_flow_5d_z (z>1.0) +early+low" in sigs
+    assert "foreign_flow_5d_z (z>1.0) +nodiv" in sigs
+    # 短窗早閘命中（事件 idx7、觸發 idx5 在領先窗內）
+    er = on.filter(pl.col("signal") == "foreign_flow_5d_z (z>1.0) +early").row(0, named=True)
+    assert er["hits"] == 1 and er["lift"] is not None and er["lift"] > 1.0
+    # 關閉 → 無早閘變體（向後相容）
+    off = scan_stock_signals(
+        panel, episodes, z_thresholds=(1.0,), volume_thresholds=(1.0,), lead_window=5,
+        occupy_days=5, z_min_periods=2,
+    )
+    assert not any("+early" in s for s in off["signal"].to_list())
+
+
+def test_cross_window_lead_short_leads_long():
+    """5d-z 自 idx5 達標、20d-z 自 idx9 達標（A）；B 短窗達標但 20d 整段未達（short_only）。"""
+    days = [date(2025, 1, 1) + timedelta(days=i) for i in range(20)]
+    rows = []
+    for i, d in enumerate(days):
+        rows.append(
+            {"date": d, "stock_id": "A",
+             "foreign_flow_5d_z": 2.0 if i >= 5 else 0.0,
+             "foreign_flow_20d_z": 2.0 if i >= 9 else 0.0}
+        )
+        rows.append(
+            {"date": d, "stock_id": "B",
+             "foreign_flow_5d_z": 2.0 if i >= 5 else 0.0,
+             "foreign_flow_20d_z": 0.0}
+        )
+    panel = pl.DataFrame(rows)
+    episodes = pl.DataFrame(
+        {"stock_id": ["A", "B"], "start_date": [days[14], days[14]]},
+        schema={"stock_id": pl.Utf8, "start_date": pl.Date},
+    )
+    lead = compute_cross_window_lead(panel, episodes, threshold=1.0, lookback=20, min_lead_days=2)
+    assert not lead.is_empty()
+    r = lead.row(0, named=True)
+    assert r["short_signal"] == "foreign_flow_5d_z"
+    assert r["long_signal"] == "foreign_flow_20d_z"
+    assert r["n_short_fired"] == 2 and r["n_paired"] == 1 and r["short_only"] == 1
+    assert r["median_lead_days"] == 4  # 20d 首達 idx9 − 5d 首達 idx5
+    assert r["pct_short_leads"] == 1.0 and r["pct_lead_ge"] == 1.0
+
+
+def test_cross_window_lead_empty_inputs():
+    panel, episodes = _mw_fixture()
+    assert compute_cross_window_lead(pl.DataFrame(), episodes).is_empty()
+    assert compute_cross_window_lead(panel, pl.DataFrame()).is_empty()
 
 
 # ── 基率（全宇宙、一次算好）──────────────────────────────────────────────────

@@ -1548,10 +1548,12 @@ def cp_calibrate_cmd(
     from tw_screener.analysis.sector_universe import list_subindustries
     from tw_screener.analysis.stock_panel import build_stock_panel, compute_coverage_meta
     from tw_screener.backtest.stock_calib import (
+        compute_cross_window_lead,
         detect_ambush_episodes,
         detect_breakout_episodes,
         detect_reversal_episodes,
         render_cp_calibration_report,
+        render_cross_window_lead,
         scan_stock_signals,
     )
     from tw_screener.data.twse import create_client
@@ -1569,6 +1571,12 @@ def cp_calibrate_cmd(
     position_low_pct = float(cp.get("position_low_pct", 15.0))
     min_triggers = int(cp.get("min_triggers", 8))
     min_lift = float(cp.get("min_lift", 1.3))
+    windows = tuple(int(x) for x in cp.get("windows", [1, 3, 5, 10, 20]))
+    early_cfg = cp.get("early_gate", {})
+    early_on = bool(early_cfg.get("enabled", True))
+    early_z = float(early_cfg.get("z_threshold", 1.0))
+    early_lookback = int(early_cfg.get("lead_lookback", 30))
+    early_min_lead = int(early_cfg.get("min_lead_days", 2))
     labels_cfg = cp.get("labels", {})
     cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
 
@@ -1588,9 +1596,15 @@ def cp_calibrate_cmd(
         if not members.is_empty()
         else market.head(0)
     )
-    console.print("[bold]建個股特徵面板...[/bold]")
+    console.print(f"[bold]建個股特徵面板（窗集合 {list(windows)}）...[/bold]")
     panel = build_stock_panel(
-        market, institutional, members, baskets, z_window=z_window, z_min_periods=z_min_periods
+        market,
+        institutional,
+        members,
+        baskets,
+        windows=windows,
+        z_window=z_window,
+        z_min_periods=z_min_periods,
     )
     if panel.is_empty():
         console.print("[red]面板為空——檢查日線/法人快取[/red]")
@@ -1644,7 +1658,18 @@ def cp_calibrate_cmd(
 
     out_dir.mkdir(parents=True, exist_ok=True)
     tag = _date.today().strftime("%Y%m%d")
-    summary = [f"# 個股 CP 值起漲事件校準總表（{tag}）", ""]
+    summary = [
+        f"# 個股 CP 值起漲事件校準總表（{tag}）",
+        "",
+        f"- 窗集合 {list(windows)}"
+        + (
+            f"・M-MH 早偵測閘 開（z≥{early_z:g}・領先回看 {early_lookback} 日・"
+            f"過閘需中位領先 ≥{early_min_lead} 日）"
+            if early_on
+            else "・M-MH 早偵測閘 關"
+        ),
+        "",
+    ]
     for key, (name, desc, detect) in detectors.items():
         lp = labels_cfg.get(key, {})
         episodes = detect(lp)
@@ -1668,10 +1693,20 @@ def cp_calibrate_cmd(
             lead_window=lead_window,
             occupy_days=int(lp.get("cooldown_days", 15)),
             z_min_periods=z_min_periods,
+            early_gate=early_cfg if early_on else None,
         )
         report = render_cp_calibration_report(
             scan, episodes, name, desc, report_params, coverage, min_triggers, min_lift
         )
+        # M-MH Phase 2：跨窗配對領先（直接驗短窗是否早於 20d-z 達標＝GATE 核心）
+        lead_df = pl.DataFrame()
+        if early_on:
+            lead_df = compute_cross_window_lead(
+                panel, episodes, early_z, early_lookback, early_min_lead
+            )
+            report += "\n" + "\n".join(
+                render_cross_window_lead(lead_df, early_z, early_min_lead)
+            )
         (out_dir / f"calibration_{tag}_{key}.md").write_text(report, encoding="utf-8")
         scan.write_csv(out_dir / f"calibration_{tag}_{key}.csv")
 
@@ -1692,6 +1727,38 @@ def cp_calibrate_cmd(
             )
             verdict = f"{qualified.height} 個因子過門檻"
         summary.append(f"- **{name}**：事件 {n_ep} 個・{verdict}；最佳因子 {top}")
+
+        # M-MH Phase 2 GATE：改判「早偵測力」——短窗中位領先 20d ≥ min_lead 且早閘子集 lift>基率
+        if early_on:
+            lead_pass = (
+                lead_df.filter(pl.col("median_lead_days") >= early_min_lead)
+                .sort("median_lead_days", descending=True)
+                if not lead_df.is_empty()
+                else pl.DataFrame()
+            )
+            early_lift = scan.filter(
+                pl.col("signal").str.contains(r"\+early")
+                & (pl.col("n_triggers") >= min_triggers)
+                & (pl.col("lift") > 1.0)
+            ).sort("lift", descending=True)
+            passed = not lead_pass.is_empty() and not early_lift.is_empty()
+            if lead_pass.is_empty():
+                ld = f"無短窗中位領先 ≥{early_min_lead} 日"
+            else:
+                lt = lead_pass.row(0, named=True)
+                ld = (
+                    f"{lt['short_signal']} 領先 {lt['median_lead_days']} 日"
+                    f"（vs {lt['long_signal']}）"
+                )
+            if early_lift.is_empty():
+                lf = "無早閘因子 lift>1"
+            else:
+                ft = early_lift.row(0, named=True)
+                lf = f"{ft['signal']} lift {ft['lift']:.2f}（{ft['hits']}/{ft['n_triggers']}）"
+            summary.append(
+                f"  - M-MH GATE（領先 ≥{early_min_lead} 日 ＋ 早閘 lift>1）："
+                f"{'✅ 過閘' if passed else '❌ 未過閘'}；領先：{ld}；早閘：{lf}"
+            )
         for r in scan.head(5).iter_rows(named=True):
             lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
             console.print(

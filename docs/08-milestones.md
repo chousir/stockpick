@@ -366,6 +366,8 @@ claude
 
 ### Phase 2：校準層——讓資料挑窗（★硬閘門，可能中止）
 
+> **結果（2026-06-17）＝❌ 三 label 全未過閘、中止條件成立**：GATE 改判「早偵測力」（使用者拍板）後重跑——減量後短窗 lift 1.62–1.64 ≈ 20d 的 1.67（打平、非贏）、跨窗配對中位領先僅 0–1 日（~50% coin flip）。唯一真發現＝`short_only` ~30%（20d 漏掉、只有短窗抓到的起漲＝額外覆蓋非更早）。裁決與數據詳 [docs/13 Phase D](13-cp-value-research.md)。線上判讀不動；Phase 3 原樣不做。
+
 **目標**：跑 `make cp-value-calib`（`tw-screener cp calibrate`），把多窗因子丟進既有 B2 起漲事件回測，量各窗/組合的 lift、領先中位日數、假動作率，跟現任 `foreign_flow_20d_z` 比。
 
 **可動檔案範圍**
