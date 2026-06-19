@@ -104,6 +104,48 @@ def test_strong_leader_vs_overheated_flag(tmp_path):
     assert "強勢領頭" not in (by_id["CCC"]["flags"] or "")
 
 
+def test_cross_trade_relative_liquidity_gate(tmp_path):
+    """修法4：土洋對作加相對流通量門檻——弱邊張數須達近 20 日總量 ≥4% 才算對作。
+    權值股小量反向（台積電型）不再誤標；小型股對作仍標；量資料缺則退回絕對判定。"""
+    # 三檔皆外資投信反向且雙邊 >5000 張（過絕對門檻）；差別在弱邊相對 20 日量
+    members = pl.DataFrame(
+        {
+            "stock_id": ["TSMC", "SMALL", "NOVOL"],
+            "name": ["權值", "小型", "缺量"],
+            "industry_name": ["半導體業"] * 3,
+            "momentum_5d": [3.0, 3.0, 3.0],
+            "ma60_dist_pct": [11.0, 8.0, 8.0],  # 皆 <40，避開過熱旗標干擾
+            "ma20_dist_pct": [3.0, 2.0, 2.0],
+            "vol_ratio": [1.21, 1.0, 1.0],
+            "foreign_net": [-41_697_000, 10_000_000, 10_000_000],  # 股
+            "trust_net": [7_826_000, -8_000_000, -8_000_000],
+            "inst_net": [-33_871_000, 2_000_000, 2_000_000],
+        }
+    )
+    # 今日量（張）走 screener 的 volume_lots；NOVOL 不在 screener → 無量 → 退回絕對判定
+    sc = pl.DataFrame(
+        {
+            "stock_id": ["TSMC", "SMALL"],
+            "name": ["權值", "小型"],
+            "close": [100.0, 100.0],
+            "change_pct": [1.0, 1.0],
+            "volume_lots": [49983, 5829],
+            "goodinfo_url": ["http://g/TSMC", "http://g/SMALL"],
+            "strategy_id": ["a_breakout", "a_breakout"],
+        }
+    )
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), {"a_breakout": sc}, out)
+    by_id = {str(r["stock_id"]): r for r in pl.read_csv(out).iter_rows(named=True)}
+
+    # TSMC：弱邊投信 7,826 張 / 20日總量 ≈0.95% < 4% → 不標（誤殺解除）
+    assert "土洋對作" not in (by_id["TSMC"]["flags"] or "")
+    # SMALL：弱邊 8,000 張 / 20日總量 ≈6.9% ≥ 4% → 仍標
+    assert "土洋對作" in (by_id["SMALL"]["flags"] or "")
+    # NOVOL：無量資料 → 退回絕對判定（雙邊過 5000 張）→ 仍標，不因缺資料漏標
+    assert "土洋對作" in (by_id["NOVOL"]["flags"] or "")
+
+
 def test_valuation_map_official_primary_goodinfo_fallback(tmp_path):
     """估值欄：官方 BWIBBU 為主、Goodinfo 兜底；殖利率僅官方有。"""
     # Goodinfo screener 帶 pe_ratio/pb_ratio（兩檔都有）

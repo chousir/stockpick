@@ -673,6 +673,7 @@ def _build_enriched_rows(
     low_liq = float(fc.get("low_liquidity_amount", 100))
     high_pe = float(fc.get("high_pe", 50))
     cross_lots = float(fc.get("cross_trade_lots", 5000)) * 1000.0  # 張 → 股
+    cross_rel_pct = float(fc.get("cross_trade_rel_pct", 4))  # 弱邊張數須達近 20 日總量此% 才算對作
     rally = float(fc.get("strong_rally_pct", 15))
     strong_leader_yoy = float(fc.get("strong_leader_yoy_pct", 20))
 
@@ -726,12 +727,12 @@ def _build_enriched_rows(
         foreign_lots = _lots(r.get("foreign_net"))
         trust_lots = _lots(r.get("trust_net"))
         vlots = _num(vol_map.get(sid), 0)
-        # 法人淨買超佔近 20 日成交量%（集中度）：20日均量=今日量/vol_ratio，×20≈20日總量
+        # 近 20 日總成交量（張）：20日均量=今日量/vol_ratio，×20。供集中度與土洋對作相對門檻共用
+        tot20 = (vlots / vr) * 20.0 if (vlots and vr and vr > 0) else None
+        # 法人淨買超佔近 20 日成交量%（集中度）
         inst_pct20d = None
-        if inst_lots is not None and vlots and vr and vr > 0:
-            tot20 = (vlots / vr) * 20.0
-            if tot20 > 0:
-                inst_pct20d = round(inst_lots / tot20 * 100, 1)
+        if inst_lots is not None and tot20 and tot20 > 0:
+            inst_pct20d = round(inst_lots / tot20 * 100, 1)
 
         # 法人快取缺漏（join 不到，非真實零買賣超）：四欄顯示空白，由 flag 標示供人工查證
         inst_missing = bool(r.get("inst_missing"))
@@ -754,7 +755,12 @@ def _build_enriched_rows(
         if pe is not None and pe > high_pe:
             flags.append("高PE")
         if fn is not None and tn is not None and fn * tn < 0 and min(abs(fn), abs(tn)) > cross_lots:
-            flags.append("土洋對作")
+            # 修法4：弱邊張數須達近 20 日總量的相對門檻才算對作——濾掉權值股小量反向誤判
+            # （如台積電投信 7,826 張對其流通量＝雜訊級）。量資料缺則退回絕對判定、不漏標。
+            weak_lots = min(abs(fn), abs(tn)) / 1000.0
+            rel_ok = (not tot20) or tot20 <= 0 or (weak_lots / tot20 * 100 >= cross_rel_pct)
+            if rel_ok:
+                flags.append("土洋對作")
         if mom is not None and mom > rally and instn is not None and instn < 0:
             flags.append("強漲法人賣")
         if inst_missing:
