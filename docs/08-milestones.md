@@ -425,3 +425,23 @@ claude
 - **對稱 Phase 2 結論：位階在做工、背離因子不是驅動**（起漲端貼低、退潮端貼高皆然）。
 - **汙染但書**：絕對下跌含大盤系統性回檔，near_high 高 lift 多半是 beta（高位股大盤回檔時跌最兇）、非個股出貨——故任何變體都不升級為賣訊；要分離需「相對大盤落後」label（選配、未跑）。
 - 結論：`overheat_watch` 原樣不動（低信心停利-回查、非賣訊）。校準價值＝證實「不升級」是對的並記錄為何。測試 +5＝451 綠、ruff 全過、mypy 零淨增（既有 11 處與本次無關）。詳 [docs/13 Phase D 末](13-cp-value-research.md)。
+
+---
+
+## M-修法5：pick.md 盲點 5 修法（領頭羊起漲在強勢中被誤殺）
+
+> 源自 [reports/2026-W25/pick_review.md](../reports/2026-W25/pick_review.md) 診斷：W25 半導體硬需求多頭週，系統交出 0 個半導體進場、把記憶體領頭羊整桶 exile。根因＝「只會在弱勢撿便宜、不會在強勢順勢確認」。**只改判讀/呈現層，不動篩選器邏輯、不增資料源。**
+
+### 動機
+`過熱`（距季線>40%）硬否決把確認上行週期的領頭羊全打死；四象限只看 20 日累積符號、漏掉近端資金轉向；`土洋對作` 對權值股小量反向誤殺；prompt 把「禁編數字」與「禁結構推理」綁死、連定性週期都不敢講。
+
+### 成功標準
+- [x] **修法 1+2**：`過熱` 改脈絡化雙閘＋`強勢領頭` 例外旗標＋買強勢進場階梯（`group_report.py` + `docs/11`）。
+- [x] **修法 3**：sector_rotation 加 `flow_turn` 近 5 日資金轉向覆蓋（🔺資金回流／退潮 前哨標）（`rotation_report.py` + 模板 + `docs/11/12`）。
+- [x] **修法 4**：`土洋對作` 加相對流通量門檻（弱邊張數 ÷ 20 日均量），解權值股小量反向誤殺（`group_report.py` + settings）。
+- [x] **修法 5**：`docs/11` 開「結構/週期」窄門——可定性講週期、仍禁編數字、結論回三鏡頭、空方不少於多方。
+- [x] 門檻全進 `config/settings.yaml`（`overheated_ma60_pct` / `strong_leader_yoy_pct` / `cross_trade_lots`），零寫死。
+- [x] `make test` 綠（test_group_report +75、test_rotation_report +72）。
+
+### 收官（2026-06-19）
+5 修法全數實作，整段收成單一 merge bubble「Merge pick.md 盲點 5 修法 milestone」併入 `main`（原為 4 顆零散 merge，事後重整為 1 顆）。**注意：過去週的 `reports/*/pick.md` 不會回溯反映新旗標/讀法，須 W26+ 重跑才生效。**
