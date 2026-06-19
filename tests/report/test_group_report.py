@@ -71,6 +71,81 @@ def test_candidates_csv_blanks_and_flags_inst_missing(tmp_path):
     assert "法人缺漏" not in (ok["flags"] or "")
 
 
+def test_strong_leader_vs_overheated_flag(tmp_path):
+    """距季線 >40%：外資投信同向買 + 營收 YoY 達標 → 『強勢領頭』（非過熱）；
+    否則（缺 YoY / 法人非同向）→ 『過熱』。修法1：過熱由硬否決改為需確認的脈絡。"""
+    # 直接建 members（注入 ma60_dist_pct，省去 OHLCV 歷史）；張數同 _institutional 以股為單位
+    members = pl.DataFrame(
+        {
+            "stock_id": ["AAA", "BBB", "CCC"],
+            "name": ["強領", "缺營收", "非同向"],
+            "industry_name": ["半導體業"] * 3,
+            "momentum_5d": [39.0, 35.0, 20.0],
+            "ma60_dist_pct": [78.0, 62.0, 50.0],  # 三檔皆 >40（原本一律過熱）
+            "ma20_dist_pct": [30.0, 25.0, 15.0],
+            "foreign_net": [173_128_000, 147_877_000, 10_000_000],
+            "trust_net": [75_549_000, 24_858_000, -8_000_000],  # CCC 投信賣＝非同向
+            "inst_net": [248_677_000, 172_735_000, 2_000_000],
+        }
+    )
+    rev_yoy_map = {"AAA": 182.0, "CCC": 50.0}  # BBB 無 YoY；CCC YoY 夠但法人非同向
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), {}, out, rev_yoy_map=rev_yoy_map)
+    by_id = {str(r["stock_id"]): r for r in pl.read_csv(out).iter_rows(named=True)}
+
+    # AAA：同向買 + YoY 達標 → 強勢領頭（不再被打成過熱）
+    assert "強勢領頭" in (by_id["AAA"]["flags"] or "")
+    assert "過熱" not in (by_id["AAA"]["flags"] or "")
+    # BBB：同向買但無 YoY → 過熱（非強勢領頭）
+    assert "過熱" in (by_id["BBB"]["flags"] or "")
+    assert "強勢領頭" not in (by_id["BBB"]["flags"] or "")
+    # CCC：YoY 夠但外資投信非同向（投信賣）→ 過熱
+    assert "過熱" in (by_id["CCC"]["flags"] or "")
+    assert "強勢領頭" not in (by_id["CCC"]["flags"] or "")
+
+
+def test_cross_trade_relative_liquidity_gate(tmp_path):
+    """修法4：土洋對作加相對流通量門檻——弱邊張數須達近 20 日總量 ≥4% 才算對作。
+    權值股小量反向（台積電型）不再誤標；小型股對作仍標；量資料缺則退回絕對判定。"""
+    # 三檔皆外資投信反向且雙邊 >5000 張（過絕對門檻）；差別在弱邊相對 20 日量
+    members = pl.DataFrame(
+        {
+            "stock_id": ["TSMC", "SMALL", "NOVOL"],
+            "name": ["權值", "小型", "缺量"],
+            "industry_name": ["半導體業"] * 3,
+            "momentum_5d": [3.0, 3.0, 3.0],
+            "ma60_dist_pct": [11.0, 8.0, 8.0],  # 皆 <40，避開過熱旗標干擾
+            "ma20_dist_pct": [3.0, 2.0, 2.0],
+            "vol_ratio": [1.21, 1.0, 1.0],
+            "foreign_net": [-41_697_000, 10_000_000, 10_000_000],  # 股
+            "trust_net": [7_826_000, -8_000_000, -8_000_000],
+            "inst_net": [-33_871_000, 2_000_000, 2_000_000],
+        }
+    )
+    # 今日量（張）走 screener 的 volume_lots；NOVOL 不在 screener → 無量 → 退回絕對判定
+    sc = pl.DataFrame(
+        {
+            "stock_id": ["TSMC", "SMALL"],
+            "name": ["權值", "小型"],
+            "close": [100.0, 100.0],
+            "change_pct": [1.0, 1.0],
+            "volume_lots": [49983, 5829],
+            "goodinfo_url": ["http://g/TSMC", "http://g/SMALL"],
+            "strategy_id": ["a_breakout", "a_breakout"],
+        }
+    )
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), {"a_breakout": sc}, out)
+    by_id = {str(r["stock_id"]): r for r in pl.read_csv(out).iter_rows(named=True)}
+
+    # TSMC：弱邊投信 7,826 張 / 20日總量 ≈0.95% < 4% → 不標（誤殺解除）
+    assert "土洋對作" not in (by_id["TSMC"]["flags"] or "")
+    # SMALL：弱邊 8,000 張 / 20日總量 ≈6.9% ≥ 4% → 仍標
+    assert "土洋對作" in (by_id["SMALL"]["flags"] or "")
+    # NOVOL：無量資料 → 退回絕對判定（雙邊過 5000 張）→ 仍標，不因缺資料漏標
+    assert "土洋對作" in (by_id["NOVOL"]["flags"] or "")
+
+
 def test_valuation_map_official_primary_goodinfo_fallback(tmp_path):
     """估值欄：官方 BWIBBU 為主、Goodinfo 兜底；殖利率僅官方有。"""
     # Goodinfo screener 帶 pe_ratio/pb_ratio（兩檔都有）

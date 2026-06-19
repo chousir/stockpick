@@ -294,6 +294,78 @@ def test_render_freshness_and_reversal(accel_table: pl.DataFrame, tmp_path: Path
         assert banned not in md
 
 
+# ─── 修法 3：資金轉向覆蓋（flow_turn） ────────────────────────────────────────
+
+
+def _turn_membership() -> pl.DataFrame:
+    return pl.DataFrame(
+        {"sub_industry": ["戊主升轉退潮", "己出貨轉回流"], "stock_id": ["5555", "6666"]}
+    )
+
+
+def _turn_institutional() -> pl.DataFrame:
+    """戊：長期買超但近 5 日轉賣（退潮）；己：長期賣超但近 5 日轉買（資金回流）。"""
+    rows = []
+    for i, d in enumerate(_dates()):
+        last5 = i >= N - 5
+        for sid, net in [("5555", -500 if last5 else 1000), ("6666", 500 if last5 else -1000)]:
+            rows.append(
+                {"date": d, "stock_id": sid, "foreign_net": net, "trust_net": net,
+                 "dealer_net": 0, "total_net": net}
+            )
+    return pl.DataFrame(rows)
+
+
+def _turn_price() -> pl.DataFrame:
+    """兩檔尾段拉升（已漲）：戊→主升續勢、己→出貨警訊。"""
+    ds = _dates()
+    rows = []
+    for sid in ("5555", "6666"):
+        px = 100.0
+        for i, d in enumerate(ds):
+            if i >= N - 20:
+                px *= 1.015
+            rows.append({"date": d, "stock_id": sid, "close": px, "volume": 1000})
+    return pl.DataFrame(rows)
+
+
+@pytest.fixture()
+def turn_table() -> pl.DataFrame:
+    members = _turn_membership()
+    market = _turn_price()
+    flows = compute_fund_flows(
+        members, _turn_institutional(),
+        volume_history=market.select(["date", "stock_id", "volume"]),
+        short_window=5, long_window=20,
+    )
+    return build_rotation_table(
+        flows, compute_subindustry_baskets(members, market),
+        short_window=5, long_window=20, entry_signal={},
+        position_window=60, position_low_pct=10.0, min_members=1,
+    )
+
+
+def test_flow_turn_sign_divergence(turn_table: pl.DataFrame):
+    t = {r["sub_industry"]: r for r in turn_table.iter_rows(named=True)}
+    # 20d>0 但 5d<0：主升續勢象限，但近端退潮（解「20 日累積到後面其實在賣」）
+    assert t["戊主升轉退潮"]["quadrant"] == Q_TREND
+    assert t["戊主升轉退潮"]["flow_turn"] == "退潮"
+    # 20d<0 但 5d>0：出貨警訊象限，但近端資金回流（解「累積仍負但近 5 日已轉買」）
+    assert t["己出貨轉回流"]["quadrant"] == Q_DISTRIBUTE
+    assert t["己出貨轉回流"]["flow_turn"] == "資金回流"
+
+
+def test_render_flow_turn_markers(turn_table: pl.DataFrame, tmp_path: Path):
+    md = render_rotation_report(
+        turn_table, week_tag="2026-W24", output_dir=tmp_path / "turn",
+        short_window=5, long_window=20, entry_signal={}, position_low_pct=10.0,
+    ).read_text(encoding="utf-8")
+    assert "資金回流" in md  # 出貨警訊段揭露近端轉買
+    assert "退潮" in md  # 主升續勢段揭露近端轉賣
+    for banned in ("目標價", "強烈建議", "飆股", "保證"):
+        assert banned not in md
+
+
 def test_delta_rank_with_prev_snapshot(tmp_path: Path, table: pl.DataFrame):
     # 上週快照：甲排第 3 → 本週第 1 → ΔRank +2
     prev_dir = tmp_path / "2026-W23"
