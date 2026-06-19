@@ -94,6 +94,13 @@ def build_rotation_table(
     freshness（A2 資金動能新鮮度）＝ flow_momentum 正負：「加速」（動能轉強，
     流入續勢／流出收斂）vs「放緩」（動能轉弱）。流入象限 加速＝新鮮、放緩＝退潮；
     流出象限 加速＝資金轉向（反轉前哨）。動能 0 或缺 → null。
+
+    flow_turn（修法 3・資金轉向覆蓋）＝長窗(lw)與短窗(s)淨流「符號背離」前哨。
+    四象限 x 軸只看 lw 日淨流正負，會把「lw 日仍負但近 s 日已轉買」誤判為純出貨、
+    把「lw 日正但近 s 日轉賣」誤判為純主升。故獨立標：
+    「資金回流」＝ lw 日<0 且 s 日>0（出貨警訊可能緩解，逐檔複核）；
+    「退潮」＝ lw 日>0 且 s 日<0（主升動能近端轉弱，留意）；同號或缺 → null。
+    與 freshness 區分：freshness 看「加速度」（s 日 vs 前 s 日），flow_turn 看「近端實際買賣方向」。
     """
     if flows.is_empty() or baskets.is_empty():
         return pl.DataFrame()
@@ -154,7 +161,20 @@ def build_rotation_table(
         .then(pl.lit("放緩"))
         .otherwise(pl.lit(None, dtype=pl.Utf8))
     )
-    return table.with_columns(cp_expr.alias("cp_score"), fresh_expr.alias("freshness"))
+    # 修法 3：資金轉向覆蓋＝長窗 vs 短窗淨流符號背離（解「20 日累積到後面其實在賣/在買」盲點）
+    long_flow, short_flow = pl.col(f"net_flow_{lw}d"), pl.col(f"net_flow_{s}d")
+    turn_expr = (
+        pl.when((long_flow < 0) & (short_flow > 0))
+        .then(pl.lit("資金回流"))  # 20 日流出但近 5 日轉買→出貨警訊可能緩解
+        .when((long_flow > 0) & (short_flow < 0))
+        .then(pl.lit("退潮"))  # 20 日流入但近 5 日轉賣→主升近端轉弱
+        .otherwise(pl.lit(None, dtype=pl.Utf8))
+    )
+    return table.with_columns(
+        cp_expr.alias("cp_score"),
+        fresh_expr.alias("freshness"),
+        turn_expr.alias("flow_turn"),
+    )
 
 
 def build_participation(

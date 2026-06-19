@@ -4,6 +4,7 @@
 {% macro delta(r) %}{{ "%+d"|format(r.rank_delta) if r.rank_delta is not none else "—" }}{% endmacro %}
 {% macro conc(r) %}{{ "%.2f%%"|format(r["flow_concentration_" ~ lw ~ "d"] * 100) if r["flow_concentration_" ~ lw ~ "d"] is not none else "—" }}{% endmacro %}
 {% macro fresh(r) %}{{ "加速中" if r.freshness == "加速" else ("放緩中" if r.freshness == "放緩" else "—") }}{% endmacro %}
+{% macro turn(r) %}{{ "・近5日轉買↑(資金回流)" if r.flow_turn == "資金回流" else ("・近5日轉賣↓(退潮)" if r.flow_turn == "退潮" else "") }}{% endmacro %}
 # {{ week_tag }} 次產業資金流向輪動
 
 > 資料日期：{{ data_date }}・法人滾動視窗 {{ s }}/{{ lw }} 交易日・位階基準：距 60 日低點 {{ position_low_pct }}%
@@ -18,17 +19,18 @@
 | # | 次產業 | 檔數 | {{ lw }}日淨流(張) | {{ s }}日淨流(張) | 動能(張) | breadth | 力度 | 5日籃子 | 距低 | 象限 | 訊號 | ΔRank |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for r in top_rows -%}
-| {{ r.radar_rank }} | {{ r.sub_industry }} | {{ r.members }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ lots(r.flow_momentum_lots) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ conc(r) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ pct(r.above_low_pct) }} | {{ r.quadrant }} | {{ marks(r) }} | {{ delta(r) }} |
+| {{ r.radar_rank }} | {{ r.sub_industry }} | {{ r.members }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ lots(r.flow_momentum_lots) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ conc(r) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ pct(r.above_low_pct) }} | {{ r.quadrant }}{{ turn(r) }} | {{ marks(r) }} | {{ delta(r) }} |
 {% endfor %}
 
 ## 2. 出貨警訊（資金流出 × 位階已高）
 
 {% if outflow_rows -%}
-| 次產業 | {{ lw }}日淨流(張) | 距低 | breadth | 5日籃子 |
-|---|---|---|---|---|
+| 次產業 | {{ lw }}日淨流(張) | {{ s }}日淨流(張) | 動能(張) | 距低 | breadth | 5日籃子 | 近{{ s }}日轉向 |
+|---|---|---|---|---|---|---|---|
 {% for r in outflow_rows -%}
-| {{ r.sub_industry }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ pct(r.above_low_pct) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ pct(r.basket_ret_5d_pct) }} |
+| {{ r.sub_industry }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ lots(r.flow_momentum_lots) }} | {{ pct(r.above_low_pct) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ "🔺資金回流（近 " ~ s ~ " 日轉買）" if r.flow_turn == "資金回流" else "—" }} |
 {% endfor %}
+> ⚠ **判讀**：「{{ lw }}日淨流」是累積值，會把「累積仍負、但近 {{ s }} 日已轉買」的次產業一律標出貨。看「{{ s }}日淨流／動能」與「近 {{ s }} 日轉向」欄——標 **🔺資金回流** 者代表 {{ lw }} 日逆風**可能已在緩解**，受惠標的不該一律打入觀察，須逐檔複核近端籌碼。
 {%- else -%}
 本週無「流出 × 已漲」次產業。
 {%- endif %}
@@ -69,7 +71,7 @@ quadrantChart
 
 {% if q_next -%}
 {% for r in q_next -%}
-- **{{ r.sub_industry }}**：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}・breadth {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }}・力度 {{ conc(r) }} {{ marks(r) }}
+- **{{ r.sub_industry }}**：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}・breadth {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }}・力度 {{ conc(r) }}{{ turn(r) }} {{ marks(r) }}
 {% endfor %}
 {%- else -%}
 本週無——資金流入的次產業位階皆已偏高（或無流入）。
@@ -79,7 +81,7 @@ quadrantChart
 
 {% if q_trend -%}
 {% for r in q_trend -%}
-- {{ r.sub_industry }}（{{ fresh(r) }}）：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}・5日籃子 {{ pct(r.basket_ret_5d_pct) }} {{ marks(r) }}
+- {{ r.sub_industry }}（{{ fresh(r) }}）：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}・5日籃子 {{ pct(r.basket_ret_5d_pct) }}{{ turn(r) }} {{ marks(r) }}
 {% endfor %}
 {%- else -%}
 （無）
@@ -89,7 +91,7 @@ quadrantChart
 
 {% if outflow_rows -%}
 {% for r in outflow_rows -%}
-- {{ r.sub_industry }}：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}
+- {{ r.sub_industry }}：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・{{ s }}日淨流 {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}{{ turn(r) }}
 {% endfor %}
 {%- else -%}
 （無）
