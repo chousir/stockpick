@@ -32,6 +32,7 @@ yahoo:
 # candidates_enriched.csv 的 flags 排雷門檻（程式預算，供 ProPicks 快速排雷；皆為「軟警示」非硬刪）
 propicks_flags:
   overheated_ma60_pct: 40      # 距季線 > 此% → 過熱（追高風險）
+  strong_leader_yoy_pct: 20    # 過熱例外：距季線高但外資投信同向買 + 營收 YoY ≥ 此% → 改標「強勢領頭」（順勢分批，不預設踢核心）
   low_liquidity_amount: 100    # 成交額(百萬) < 此值 → 低流動（大資金滑價）
   high_pe: 50                  # 本益比 > 此值 → 高PE（題材/估值偏貴）
   cross_trade_lots: 5000       # 外資、投信反向且兩者皆 > 此張數 → 土洋對作

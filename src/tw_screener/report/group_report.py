@@ -674,6 +674,7 @@ def _build_enriched_rows(
     high_pe = float(fc.get("high_pe", 50))
     cross_lots = float(fc.get("cross_trade_lots", 5000)) * 1000.0  # 張 → 股
     rally = float(fc.get("strong_rally_pct", 15))
+    strong_leader_yoy = float(fc.get("strong_leader_yoy_pct", 20))
 
     def _num(v: object, nd: int = 1) -> float | None:
         if v is None or (isinstance(v, float) and v != v):
@@ -739,7 +740,15 @@ def _build_enriched_rows(
 
         flags: list[str] = []
         if m60 is not None and m60 > overheated:
-            flags.append("過熱")
+            # 距季線高：區分「強勢領頭（順勢分批，不預設踢核心）」與「過熱（追高風險）」。
+            # 起漲領頭羊天生距季線遠，若外資投信同向買 + 營收 YoY 達標，不該與投信獨拉的
+            # 小型過熱股一視同仁判死（見 docs/11 排雷段「強勢領頭」例外與買強勢 ladder）。
+            strong_leader = (
+                fn is not None and fn > 0
+                and tn is not None and tn > 0
+                and ryoy is not None and ryoy >= strong_leader_yoy
+            )
+            flags.append("強勢領頭" if strong_leader else "過熱")
         if amt is not None and amt < low_liq:
             flags.append("低流動")
         if pe is not None and pe > high_pe:
@@ -809,8 +818,9 @@ def write_candidates_enriched_csv(
     """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
 
     補 group_analysis.md 只列部分股的盲點：每檔都有 5 日漲幅/距月線/距季線/量比/法人(張)拆分/
-    PE/PB/主題，並程式預算 flags（過熱/低流動/高PE/土洋對作/強漲法人賣/法人缺漏）讓 AI 快速
-    排雷、把腦力留給判斷。缺值（無快取）寫空白 → 標「需查證」而非編造。回傳已建立的列（list[dict]，
+    PE/PB/主題，並程式預算 flags（過熱/強勢領頭/低流動/高PE/土洋對作/強漲法人賣/法人缺漏）讓 AI
+    快速排雷、把腦力留給判斷（「強勢領頭」＝距季線高但籌碼+基本面確認的例外，非排雷理由）。
+    缺值（無快取）寫空白 → 標「需查證」而非編造。回傳已建立的列（list[dict]，
     供庫存/觀察清單重用同一筆來源值以保持跨 CSV 一致）。
     """
     rows = _build_enriched_rows(

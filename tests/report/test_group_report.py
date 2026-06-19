@@ -71,6 +71,39 @@ def test_candidates_csv_blanks_and_flags_inst_missing(tmp_path):
     assert "法人缺漏" not in (ok["flags"] or "")
 
 
+def test_strong_leader_vs_overheated_flag(tmp_path):
+    """距季線 >40%：外資投信同向買 + 營收 YoY 達標 → 『強勢領頭』（非過熱）；
+    否則（缺 YoY / 法人非同向）→ 『過熱』。修法1：過熱由硬否決改為需確認的脈絡。"""
+    # 直接建 members（注入 ma60_dist_pct，省去 OHLCV 歷史）；張數同 _institutional 以股為單位
+    members = pl.DataFrame(
+        {
+            "stock_id": ["AAA", "BBB", "CCC"],
+            "name": ["強領", "缺營收", "非同向"],
+            "industry_name": ["半導體業"] * 3,
+            "momentum_5d": [39.0, 35.0, 20.0],
+            "ma60_dist_pct": [78.0, 62.0, 50.0],  # 三檔皆 >40（原本一律過熱）
+            "ma20_dist_pct": [30.0, 25.0, 15.0],
+            "foreign_net": [173_128_000, 147_877_000, 10_000_000],
+            "trust_net": [75_549_000, 24_858_000, -8_000_000],  # CCC 投信賣＝非同向
+            "inst_net": [248_677_000, 172_735_000, 2_000_000],
+        }
+    )
+    rev_yoy_map = {"AAA": 182.0, "CCC": 50.0}  # BBB 無 YoY；CCC YoY 夠但法人非同向
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), {}, out, rev_yoy_map=rev_yoy_map)
+    by_id = {str(r["stock_id"]): r for r in pl.read_csv(out).iter_rows(named=True)}
+
+    # AAA：同向買 + YoY 達標 → 強勢領頭（不再被打成過熱）
+    assert "強勢領頭" in (by_id["AAA"]["flags"] or "")
+    assert "過熱" not in (by_id["AAA"]["flags"] or "")
+    # BBB：同向買但無 YoY → 過熱（非強勢領頭）
+    assert "過熱" in (by_id["BBB"]["flags"] or "")
+    assert "強勢領頭" not in (by_id["BBB"]["flags"] or "")
+    # CCC：YoY 夠但外資投信非同向（投信賣）→ 過熱
+    assert "過熱" in (by_id["CCC"]["flags"] or "")
+    assert "強勢領頭" not in (by_id["CCC"]["flags"] or "")
+
+
 def test_valuation_map_official_primary_goodinfo_fallback(tmp_path):
     """估值欄：官方 BWIBBU 為主、Goodinfo 兜底；殖利率僅官方有。"""
     # Goodinfo screener 帶 pe_ratio/pb_ratio（兩檔都有）
