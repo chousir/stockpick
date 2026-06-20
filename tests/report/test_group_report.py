@@ -62,6 +62,8 @@ def test_candidates_csv_blanks_and_flags_inst_missing(tmp_path):
     miss = by_id["2454"]
     assert miss["inst_net_lots"] is None
     assert miss["foreign_net_lots"] is None
+    assert miss["foreign_net_5d_lots"] is None  # 修法6：缺漏時近端窗也空白
+    assert miss["foreign_net_10d_lots"] is None
     assert miss["trust_net_lots"] is None
     assert miss["inst_pct20d"] is None
     assert "法人缺漏" in (miss["flags"] or "")
@@ -69,6 +71,39 @@ def test_candidates_csv_blanks_and_flags_inst_missing(tmp_path):
     ok = by_id["2330"]
     assert ok["inst_net_lots"] == 5000  # 5,000,000 股 / 1000 = 5000 張
     assert "法人缺漏" not in (ok["flags"] or "")
+
+
+def test_candidates_csv_foreign_multiwindow_columns(tmp_path):
+    """修法6：candidates CSV 應有 foreign_net_5d/10d_lots 與 ret_10d_pct 三欄。"""
+    dates = [date(2026, 5, d) for d in range(1, 13)]
+    fnet = [10_000_000] * 7 + [-4_000_000] * 5  # 股：20日+50000張、5日−20000張
+    inst = pl.DataFrame(
+        {
+            "date": dates,
+            "stock_id": ["2330"] * 12,
+            "stock_name": ["台積電"] * 12,
+            "foreign_net": fnet,
+            "trust_net": [0] * 12,
+            "dealer_net": [0] * 12,
+            "total_net": fnet,
+        }
+    )
+    closes = [170.0, 176.0, 173.0, 168.0, 165.0, 160.0, 158.0, 156.0, 159.0, 158.0, 163.0, 162.0]
+    history = pl.DataFrame({"stock_id": ["2330"] * 12, "date": dates, "close": closes})
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    _, members = group_stocks(
+        results, history, pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2, institutional=inst,
+    )
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), results, out)
+    df = pl.read_csv(out)
+    for col in ("foreign_net_5d_lots", "foreign_net_10d_lots", "ret_10d_pct"):
+        assert col in df.columns
+    row = {str(r["stock_id"]): r for r in df.iter_rows(named=True)}["2330"]
+    assert row["foreign_net_lots"] == 50000      # 20 日累計（正）
+    assert row["foreign_net_5d_lots"] == -20000  # 近 5 日轉賣（近端真相）
+    assert row["ret_10d_pct"] < 0                # 近 10 日下跌
 
 
 def test_strong_leader_vs_overheated_flag(tmp_path):
