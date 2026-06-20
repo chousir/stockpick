@@ -445,3 +445,34 @@ claude
 
 ### 收官（2026-06-19）
 5 修法全數實作，整段收成單一 merge bubble「Merge pick.md 盲點 5 修法 milestone」併入 `main`（原為 4 顆零散 merge，事後重整為 1 顆）。**注意：過去週的 `reports/*/pick.md` 不會回溯反映新旗標/讀法，須 W26+ 重跑才生效。**
+
+---
+
+## M-修法6：個股法人多窗揭露＋趨勢回撤（解 20 日法人標籤幻覺＋下跌反彈誤判健康回踩）
+
+> 承診斷（reports/2026-W25 對帳）：W25 重跑後**仍**把緯創（外資5日 **−57,862**／20日 +43,553）、鴻海標「雙強買·教科書健康回踩」進核心/接近，實為「從高點摔 −8%、外資近端出貨的弱反彈」。根因＝(a) 個股法人欄純 20 日累計、**修法3 flow_turn 只修次產業沒延伸到個股**；(b) 趨勢階段只看 5 日動能（反彈）＋貼 MA20，**分不出健康回踩 vs 下跌反彈**。只改揭露/判讀層，不動篩選器。
+
+### 驗證底氣（事件研究・250 交易日・相對大盤 alpha）
+- 外資窗背離（20正5負）vs 一致買：未來 alpha 分不開（中位皆≈−0.2%）→ **只揭露、不設自動 gate**。
+- 位階/趨勢：`回踩(MA20下)` alpha 中位最差（−0.31~−0.62%）、`延伸(>15%)` 最好 → **位階有預測力、值得判讀加權**（與 M-MH「位階當主訊號」獨立同證）。
+- 故本修法＝「揭露事實＋判讀收嚴」，**不加硬性自動踢除**。
+
+### 6a 法人多窗揭露
+- `grouping.py`：institutional 除 20 日和外，加外資近 5/10 日累計（`foreign_net_5d/10d`，窗為模組常數比照 `_MOMENTUM_DAYS`）。
+- `group_report.py _build_enriched_rows`：candidates 加 `foreign_net_5d_lots`/`foreign_net_10d_lots`（擺 `foreign_net_lots` 旁）；併入 `_CANONICAL_REUSE_FIELDS`，holdings/watchlist 一致。
+- `docs/11`：候選欄說明補多窗；規則「外資 20 日與近 5 日符號背離 → 禁寫『雙強買』，須據實寫『20日累計+X、近5日−Y、投信撐』。揭露事實非自動扣分」。
+
+### 6b 趨勢/回撤揭露＋趨勢階段收嚴
+- `grouping.py`：加 `ret_10d`（`compute_n_day_return` n=10＋除息還原，比照 momentum_5d）。
+- `group_report.py`：candidates 加 `ret_10d_pct`（擺 `momentum_5d_pct` 旁）。
+- `docs/11`：趨勢階段規則——`回踩拉回` 必再分 **健康（ret_10d≥−3% 且外資近 5 日未轉賣）** vs **下跌反彈（ret_10d<−5% 或外資近 5 日大賣）→歸轉弱**，後者不得當健康買點/核心。
+
+### 成功標準
+- [ ] candidates_enriched.csv 出現 `foreign_net_5d_lots`/`foreign_net_10d_lots`/`ret_10d_pct` 三欄；20 日欄與既有輸出不變（純加法）。
+- [ ] W25 重跑：緯創/鴻海近 5 日外資負值現形、ret_10d≈−8%，可被 docs/11 規則判為下跌反彈；南亞科/華邦電維持多窗一致買＋強勢領頭。
+- [ ] holdings/watchlist enriched 同步有三欄（`_build_enriched_rows` 共用）。
+- [ ] 窗集合語意（5/10）為模組常數；無硬性新 gate；守人設＝揭露＋判讀收嚴、不下買賣結論。
+- [ ] `make test` 綠。
+
+### 收官（2026-06-19）
+6a+6b 全實作：`grouping.py` 加 `foreign_net_5d/10d`（外資近端窗）＋`ret_10d`（近10日報酬・除息還原）；`group_report.py` 三 CSV（candidates/holdings/watchlist 共用 `_build_enriched_rows`）加 `foreign_net_5d_lots`/`foreign_net_10d_lots`/`ret_10d_pct`＋併入 `_CANONICAL_REUSE_FIELDS`；`docs/11` 補 6a「20日 vs 近5日背離禁寫雙強買、揭露非扣分」＋6b「回踩拉回分健康(ret_10d≥−3%)/下跌反彈(<−5%或外資近端大賣→轉弱)」規則。**真實快取驗證（跑實際 group_stocks）**：緯創外資近5日 **−57,862**、ret_10d **−8.2%**（下跌反彈現形）；晶豪科三窗一致買、ret_10d −3.1%（健康）。`make test` **457 綠**（+2）、ruff/mypy 零淨增。**注意：W25+ 報告須重跑才反映新欄/讀法。**

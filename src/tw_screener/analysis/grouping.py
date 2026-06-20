@@ -27,6 +27,10 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
 }
 
 _MOMENTUM_DAYS = 5
+# 修法6 趨勢窗：近 10 日報酬，供報表區分「健康回踩」vs「下跌反彈」（比照 _MOMENTUM_DAYS）。
+_TREND_DAYS = 10
+# 修法6 法人近端窗：外資近 5/10 日累計，揭露 20 日累計蓋住的近端轉向（純揭露、非 gate）。
+_FOREIGN_NEAR_WINDOWS = (5, 10)
 
 # 策略 G（成長拉回）的「拉回 setup」判定門檻；可由 settings.yaml 的 g_pullback 覆蓋。
 # 三者皆硬門檻：季線上揚 + 乖離帶內 + 量縮。
@@ -292,6 +296,21 @@ def group_stocks(
         ]
     )
 
+    # 修法6（6b）近 10 日報酬：趨勢鏡頭，供報表區分「健康回踩（10 日≥−3%）」vs
+    # 「下跌反彈（10 日<−5%、貼 MA20 的弱彈）」。除息還原比照 momentum_5d，避免除息季假負。
+    # 此處 stock_df 仍與 stock_ids 同序，可用 positional Series 對齊。
+    ret10_map = compute_n_day_return(stock_ids, price_history, n=_TREND_DAYS)
+    ret10_vals = [ret10_map.get(sid, (None, 0))[0] for sid in stock_ids]
+    stock_df = stock_df.with_columns(pl.Series("ret_10d", ret10_vals, dtype=pl.Float64))
+    if dividends is not None and not dividends.is_empty():
+        add10 = compute_dividend_addback(stock_ids, price_history, dividends, n=_TREND_DAYS)
+        add10_vals = [add10.get(sid, (0.0, 0.0))[0] for sid in stock_ids]
+        stock_df = stock_df.with_columns(
+            (pl.col("ret_10d") + pl.Series("_ret10_add", add10_vals, dtype=pl.Float64)).alias(
+                "ret_10d"
+            )
+        )
+
     # 法人淨買超：近 N 日合計 → inst_net（三大法人總和）/ foreign_net（外資）/
     # trust_net（投信）。只算一次，下游共用。自營＝inst_net−foreign_net−trust_net 可推得，不另存。
     _inst_cols = ("inst_net", "foreign_net", "trust_net")
@@ -319,6 +338,30 @@ def group_stocks(
     else:
         stock_df = stock_df.with_columns(
             [pl.lit(0.0).alias(c) for c in _inst_cols] + [pl.lit(True).alias("inst_missing")]
+        )
+
+    # 修法6（6a）外資多窗揭露：除 20 日累計外，另算外資近 5/10 日累計。20 日與近端符號
+    # 背離時（如緯創外資 5日−57,862/20日+43,553），報表須據實寫「20日累計+X、近5日−Y」
+    # 而非「雙強買」。純揭露——事件研究證近端外資反轉不預測弱勢，故不設 gate。
+    if (
+        institutional is not None
+        and not institutional.is_empty()
+        and {"date", "stock_id", "foreign_net"}.issubset(institutional.columns)
+    ):
+        near_dates = institutional.select("date").unique().sort("date", descending=True)
+        for w in _FOREIGN_NEAR_WINDOWS:
+            wdates = near_dates.head(w)["date"].to_list()
+            wagg = (
+                institutional.filter(pl.col("date").is_in(wdates))
+                .group_by("stock_id")
+                .agg(pl.col("foreign_net").sum().alias(f"foreign_net_{w}d"))
+            )
+            stock_df = stock_df.join(wagg, on="stock_id", how="left").with_columns(
+                pl.col(f"foreign_net_{w}d").fill_null(0.0).cast(pl.Float64)
+            )
+    else:
+        stock_df = stock_df.with_columns(
+            [pl.lit(0.0).alias(f"foreign_net_{w}d") for w in _FOREIGN_NEAR_WINDOWS]
         )
 
     # MA20 / MA60 距離 + MA60 斜率（% 偏離最新收盤價 / 季線上揚率）—— 不足則 null

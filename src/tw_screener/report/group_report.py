@@ -726,6 +726,11 @@ def _build_enriched_rows(
         inst_lots = _lots(r.get("inst_net"))
         foreign_lots = _lots(r.get("foreign_net"))
         trust_lots = _lots(r.get("trust_net"))
+        # 修法6（6a）外資近端窗：揭露 20 日累計蓋住的近 5/10 日轉向
+        foreign_5d_lots = _lots(r.get("foreign_net_5d"))
+        foreign_10d_lots = _lots(r.get("foreign_net_10d"))
+        # 修法6（6b）近 10 日報酬：趨勢鏡頭，區分健康回踩 vs 下跌反彈
+        ret_10d = _num(r.get("ret_10d"), 2)
         vlots = _num(vol_map.get(sid), 0)
         # 近 20 日總成交量（張）：20日均量=今日量/vol_ratio，×20。供集中度與土洋對作相對門檻共用
         tot20 = (vlots / vr) * 20.0 if (vlots and vr and vr > 0) else None
@@ -738,6 +743,7 @@ def _build_enriched_rows(
         inst_missing = bool(r.get("inst_missing"))
         if inst_missing:
             inst_lots = inst_pct20d = foreign_lots = trust_lots = None
+            foreign_5d_lots = foreign_10d_lots = None
 
         flags: list[str] = []
         if m60 is not None and m60 > overheated:
@@ -780,6 +786,7 @@ def _build_enriched_rows(
                 "strategy": _strategy_str(r, strategy_ids),
                 "rank_in_group": int(r.get("rank_in_group", 0) or 0),
                 "momentum_5d_pct": mom,  # 已含除息還原（見 div_addback_pct）
+                "ret_10d_pct": ret_10d,  # 近10日報酬(除息還原)：≥−3%＝健康回踩、<−5%＝下跌反彈
                 "ex_div_cash": ex_div_cash,            # 5 日內現金股利合計（元），無＝空
                 "div_addback_pct": div_addback_pct,    # 還原加回 momentum 的百分點
                 "change_pct": _num(r.get("change_pct"), 2),
@@ -803,6 +810,8 @@ def _build_enriched_rows(
                 "inst_net_lots": inst_lots,
                 "inst_pct20d": inst_pct20d,
                 "foreign_net_lots": foreign_lots,
+                "foreign_net_5d_lots": foreign_5d_lots,   # 外資近5日：揭露近端轉向(20日恐為殘留)
+                "foreign_net_10d_lots": foreign_10d_lots,  # 外資近10日
                 "trust_net_lots": trust_lots,
                 "flags": ";".join(flags),
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
@@ -845,6 +854,7 @@ def write_candidates_enriched_csv(
 # 來源/視窗不同造成同一檔量比/集中度/成交額分岔。只重用市場/籌碼/估值/flags，識別欄與策略欄保留。
 _CANONICAL_REUSE_FIELDS = (
     "momentum_5d_pct",
+    "ret_10d_pct",
     "ex_div_cash",
     "div_addback_pct",
     "change_pct",
@@ -867,6 +877,8 @@ _CANONICAL_REUSE_FIELDS = (
     "inst_net_lots",
     "inst_pct20d",
     "foreign_net_lots",
+    "foreign_net_5d_lots",
+    "foreign_net_10d_lots",
     "trust_net_lots",
     "flags",
 )

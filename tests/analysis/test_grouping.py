@@ -352,6 +352,47 @@ def test_group_stocks_splits_foreign_and_trust():
     assert m["2454"]["trust_net"] == pytest.approx(50.0)
 
 
+def test_group_stocks_foreign_multiwindow_and_ret10():
+    """修法6：外資 20 日累計為正、但近 5 日轉賣，foreign_net_5d/10d 各自揭露；
+    ret_10d 為近 10 日報酬（除息還原）→ 報表可區分健康回踩 vs 下跌反彈。"""
+    from datetime import date
+
+    dates = [date(2026, 5, d) for d in range(1, 13)]  # 12 個交易日
+    # 前 7 日 +10000、後 5 日 −4000 → 20日和 +50000、5日和 −20000、10日和 +30000
+    fnet = [10000] * 7 + [-4000] * 5
+    inst = pl.DataFrame(
+        {
+            "date": dates,
+            "stock_id": ["3231"] * 12,
+            "stock_name": ["緯創"] * 12,
+            "foreign_net": fnet,
+            "trust_net": [0] * 12,
+            "dealer_net": [0] * 12,
+            "total_net": fnet,
+        }
+    )
+    # 近 10 日由 176 跌到 162（ret_10d≈−8%）＝下跌反彈型
+    closes = [170.0, 176.0, 173.0, 168.0, 165.0, 160.0, 158.0, 156.0, 159.0, 158.0, 163.0, 162.0]
+    history = pl.DataFrame({"stock_id": ["3231"] * 12, "date": dates, "close": closes})
+    industry = pl.DataFrame(
+        {
+            "stock_id": ["3231", "3037"],
+            "industry_code": ["25", "25"],
+            "industry_name": ["電腦及周邊設備業", "電腦及周邊設備業"],
+        }
+    )
+    results = {"a_breakout": _make_screener_df(["3231", "3037"], [0.0, 0.0], "a_breakout")}
+    _, members = group_stocks(
+        results, history, pl.DataFrame(), industry_df=industry,
+        min_group_size=2, institutional=inst,
+    )
+    row = members.filter(pl.col("stock_id") == "3231").to_dicts()[0]
+    assert row["foreign_net"] == pytest.approx(50000.0)       # 20 日累計（正）
+    assert row["foreign_net_5d"] == pytest.approx(-20000.0)   # 近 5 日（轉賣・近端真相）
+    assert row["foreign_net_10d"] == pytest.approx(30000.0)
+    assert row["ret_10d"] == pytest.approx((162.0 - 176.0) / 176.0 * 100, abs=0.1)
+
+
 # ─── _compute_rs_from_history（back-compat wrapper）─────────────────────────
 
 
