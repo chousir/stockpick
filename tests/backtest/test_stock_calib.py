@@ -12,6 +12,7 @@ import polars as pl
 from tw_screener.backtest.rotation_calib import compute_base_rate
 from tw_screener.backtest.stock_calib import (
     _flow_z_cols,
+    _laggard_lift_significance,
     compute_cross_window_lead,
     detect_ambush_episodes,
     detect_breakout_episodes,
@@ -19,12 +20,17 @@ from tw_screener.backtest.stock_calib import (
     detect_top_episodes,
     dom_monotonicity_spearman,
     dom_monotonicity_table,
+    factor_monotonicity_spearman,
+    factor_monotonicity_table,
     holdout_table,
     interaction_2x2_table,
+    laggard_filter_precision,
     liquidity_table,
     payoff_decay_table,
     render_dom_monotonicity_report,
     render_interaction_report,
+    render_laggard_filter_report,
+    render_laggard_monotonicity_report,
     render_robustness_report,
     scan_stock_signals,
     scan_top_signals,
@@ -680,3 +686,172 @@ def test_render_interaction_g_high_harmful_verdict():
     md = render_interaction_report(tab, "ambush", _INTER_PARAMS, {}, min_triggers=8, z_sig=1.96)
     assert "否證" in md and "落後" in md  # 反向發現＝落後其族群才是補漲訊號
     assert "建議設計" not in md  # 不得誤判為升級
+
+
+# ── M-Part C / C-P1：族群內落後度單調（rs_subind direction=decreasing；docs/16）────────
+
+
+def _laggard_fixture() -> tuple[pl.DataFrame, pl.DataFrame]:
+    """5 檔 rs_subind 由低（落後族群）到高（領先），前瞻報酬隨 rs_subind 遞減（越落後越強）；
+    起漲事件落最落後兩檔 → 低桶 lift 高、ρ<0（direction=decreasing 顯著）。位階交錯使兩層各含範圍。
+    """
+    days = [date(2025, 1, 1) + timedelta(days=i) for i in range(15)]
+    specs = [  # (sid, rs_subind, 成長率 g, above_low)
+        ("L0", -8.0, 0.02, 4.0),   # 最落後・貼低・有起漲
+        ("L1", -4.0, 0.01, 50.0),  # 落後・非貼低・有起漲
+        ("L2", 0.0, 0.00, 4.0),
+        ("L3", 4.0, -0.01, 50.0),
+        ("L4", 8.0, -0.02, 4.0),   # 最領先・前瞻最弱
+    ]
+    rows, ep_rows = [], []
+    for sid, rs, g, low in specs:
+        for i, d in enumerate(days):
+            rows.append({"date": d, "stock_id": sid, "close": 100.0 * (1 + g) ** i,
+                         "rs_subind_20d": rs, "above_low_60d_pct": low})
+        if sid in ("L0", "L1"):
+            ep_rows.append({"stock_id": sid, "start_date": days[7]})
+    panel = pl.DataFrame(rows)
+    episodes = pl.DataFrame(ep_rows, schema={"stock_id": pl.Utf8, "start_date": pl.Date})
+    return panel, episodes
+
+
+_LAG_KW = dict(n_buckets=5, fwd_window=5, lead_window=5, occupy_days=5, z_min_periods=2)
+
+
+def test_factor_monotonicity_decreasing_significant():
+    panel, episodes = _laggard_fixture()
+    tab = factor_monotonicity_table(panel, episodes, "rs_subind_20d", **_LAG_KW)
+    assert not tab.is_empty()
+    assert {"stratum", "bucket", "factor_median", "lift"} <= set(tab.columns)
+    overall = tab.filter(pl.col("stratum") == "全體").sort("bucket")
+    lifts = [v if v is not None else 0.0 for v in overall["lift"].to_list()]
+    assert lifts[0] > lifts[-1]  # 低桶（最落後）lift > 高桶（領先）
+
+    sp = factor_monotonicity_spearman(panel, "rs_subind_20d", fwd_window=5, direction="decreasing")
+    allrow = sp.filter(pl.col("stratum") == "全體").row(0, named=True)
+    assert allrow["spearman_rho"] is not None and allrow["spearman_rho"] < 0  # 落後預測起漲 → ρ<0
+    assert allrow["significant"] is True  # direction=decreasing：ρ<0 且 z<−界
+
+
+def test_factor_monotonicity_direction_flag_matters():
+    # 同資料：預設 increasing 不認 ρ<0 為顯著，decreasing 才認（驗 direction 旗有效）
+    panel, _ = _laggard_fixture()
+    inc = factor_monotonicity_spearman(panel, "rs_subind_20d", fwd_window=5)  # 預設 increasing
+    dec = factor_monotonicity_spearman(panel, "rs_subind_20d", fwd_window=5, direction="decreasing")
+    assert inc.filter(pl.col("stratum") == "全體").row(0, named=True)["significant"] is False
+    assert dec.filter(pl.col("stratum") == "全體").row(0, named=True)["significant"] is True
+
+
+def test_factor_monotonicity_missing_col_returns_empty():
+    panel, episodes = _laggard_fixture()
+    assert factor_monotonicity_table(panel, episodes, None).is_empty()
+    assert factor_monotonicity_table(panel, episodes, "no_such_col").is_empty()
+    assert factor_monotonicity_spearman(panel, None).is_empty()
+
+
+def test_render_laggard_report_sections_and_verdict():
+    panel, episodes = _laggard_fixture()
+    tab = factor_monotonicity_table(panel, episodes, "rs_subind_20d", **_LAG_KW)
+    sp = factor_monotonicity_spearman(panel, "rs_subind_20d", fwd_window=5, direction="decreasing")
+    params = {"rs_window": "20", "n_buckets": 5, "fwd_window": 5, "position_low_pct": 15.0}
+    md = render_laggard_monotonicity_report(tab, sp, "ambush", params, {})
+    assert "落後" in md and "Spearman" in md and "裁決" in md
+    assert "C-P2" in md or "否證" in md  # 必出一種裁決
+    # 空輸入給誠實佔位、不爆
+    empty_md = render_laggard_monotonicity_report(
+        pl.DataFrame(), pl.DataFrame(), "ambush", params, {}
+    )
+    assert "無法分桶" in empty_md or "無法檢定" in empty_md
+
+
+def test_laggard_lift_significance_extreme_buckets():
+    # on-target 量尺：桶1(最落後) hit 高、桶5(最領先) hit 低、lift 單調遞減 → sig+monotone_dec
+    buckets = pl.DataFrame(
+        {
+            "stratum": ["全體"] * 5,
+            "bucket": [1, 2, 3, 4, 5],
+            "hits": [100, 80, 50, 20, 5],
+            "n_eval": [500, 500, 500, 500, 500],
+            "lift": [2.74, 2.46, 1.74, 1.16, 0.24],
+        }
+    )
+    out = _laggard_lift_significance(buckets, 1.96)
+    assert out["全體"]["monotone_dec"] is True
+    assert out["全體"]["sig"] is True  # 100/500 vs 5/500 → 兩比例 z 遠超界
+    assert out["全體"]["z"] is not None and out["全體"]["z"] > 1.96
+    # 反例：lift 非遞減（峰在中桶）→ monotone_dec False
+    flat = buckets.with_columns(pl.Series("lift", [1.0, 1.4, 1.5, 1.2, 1.1]))
+    assert _laggard_lift_significance(flat, 1.96)["全體"]["monotone_dec"] is False
+
+
+# ── M-Part C / C-P2：冠軍 S+ 內落後濾鏡 precision 增量＋賺賠（docs/16 H3）──────────────
+
+
+def _laggard_filter_fixture() -> tuple[pl.DataFrame, pl.DataFrame]:
+    """冠軍 S+（foreign_flow_20d_z idx5 上穿 0.5、貼低）6 檔：3 檔落後(rs<0,有起漲、續漲)、
+    3 檔領先(rs>0,無起漲、價平) → 落後濾鏡顯著提升 precision 且中位報酬不惡化。"""
+    days = [date(2025, 1, 1) + timedelta(days=i) for i in range(15)]
+    rows, ep_rows = [], []
+    for prefix, rs, has_ep in (("LAG", -5.0, True), ("LEAD", 5.0, False)):
+        for k in range(3):
+            sid = f"{prefix}{k}"
+            for i, d in enumerate(days):
+                close = 100.0 * (1 + 0.02 * max(0, i - 5)) if prefix == "LAG" else 100.0
+                rows.append({"date": d, "stock_id": sid, "close": close,
+                             "foreign_flow_20d_z": 2.0 if i >= 5 else 0.0,
+                             "above_low_60d_pct": 4.0, "rs_subind_20d": rs})
+            if has_ep:
+                ep_rows.append({"stock_id": sid, "start_date": days[7]})
+    panel = pl.DataFrame(rows)
+    episodes = pl.DataFrame(ep_rows, schema={"stock_id": pl.Utf8, "start_date": pl.Date})
+    return panel, episodes
+
+
+_C2_KW = dict(s_z_threshold=0.5, s_low_pct=15.0, lag_threshold=0.0,
+              lead_window=5, occupy_days=5, z_min_periods=2)
+
+
+def test_laggard_filter_precision_gain():
+    panel, episodes = _laggard_filter_fixture()
+    tbl, z = laggard_filter_precision(panel, episodes, **_C2_KW)
+    assert not tbl.is_empty()
+    by = {r["group"]: r for r in tbl.iter_rows(named=True)}
+    assert set(by) == {"S+全體", "S+且落後", "S+且領先"}
+    assert by["S+且落後"]["lift"] > (by["S+且領先"]["lift"] or 0.0)  # 落後命中 > 領先
+    assert by["S+且落後"]["lift"] > by["S+全體"]["lift"]  # 濾鏡優於聯集基線
+    assert z is not None and z > 1.96  # 落後 vs 領先 兩比例 z 顯著
+
+    # 缺欄回 (空表, None)
+    empty, ez = laggard_filter_precision(panel.drop("rs_subind_20d"), episodes, **_C2_KW)
+    assert empty.is_empty() and ez is None
+
+
+def test_payoff_decay_extra_conditions_filters_and_suffixes():
+    panel, _ = _laggard_filter_fixture()
+    champ = "foreign_flow_20d_z (z>0.5) +low≤15"
+    base = payoff_decay_table(panel, horizons=(5,), signals={champ}, z_thresholds=(0.5,))
+    filt = payoff_decay_table(panel, horizons=(5,), signals={champ}, z_thresholds=(0.5,),
+                              extra_conditions=[pl.col("rs_subind_20d") < 0.0],
+                              name_suffix="＋落後")
+    assert base.row(0, named=True)["signal"] == champ
+    assert filt.row(0, named=True)["signal"] == champ + "＋落後"
+    # 濾後只剩落後股（續漲）→ 中位報酬 ≥ 全體基線（領先股價平拉低基線）
+    assert filt.row(0, named=True)["median_ret_pct"] >= base.row(0, named=True)["median_ret_pct"]
+    assert filt.row(0, named=True)["n"] == 3  # 3 檔落後
+
+
+def test_render_laggard_filter_report_verdict():
+    panel, episodes = _laggard_filter_fixture()
+    tbl, z = laggard_filter_precision(panel, episodes, **_C2_KW)
+    champ = "foreign_flow_20d_z (z>0.5) +low≤15"
+    base = payoff_decay_table(panel, horizons=(2, 5), signals={champ}, z_thresholds=(0.5,))
+    filt = payoff_decay_table(panel, horizons=(2, 5), signals={champ}, z_thresholds=(0.5,),
+                              extra_conditions=[pl.col("rs_subind_20d") < 0.0],
+                              name_suffix="＋落後")
+    params = {"s_flow_col": "foreign_flow_20d_z", "s_z_threshold": 0.5, "lag_threshold": 0.0,
+              "horizons": [2, 5]}
+    md = render_laggard_filter_report(tbl, z, base, filt, "ambush", params, {}, z_sig=1.96)
+    assert "H3 precision" in md and "賺賠" in md and "裁決" in md
+    assert "升級" in md  # precision 增量＋賺賠不惡化 → 升級
+    empty_md = render_laggard_filter_report(pl.DataFrame(), None, base, filt, "ambush", params, {})
+    assert "無法分組" in empty_md
