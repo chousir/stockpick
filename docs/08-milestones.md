@@ -507,3 +507,32 @@ claude
 
 ### 收官（2026-06-21）
 M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計算欄 low/high_20d/60d（code，commit 3146ffd）＋7b 進場階梯重構（50/30/20 前重後輕·停損收盤確認脫鉤·低價股退化·回檔深度檢核，76b1f3d）＋7c 因子簇上限（利率敏感簇核心≤2檔/合計≤~50%，248ce61）＋7d 籌碼主導標準一致。**規劃書 docs/14、D1–D5 全採推薦版**。`make test` 462 綠（7a +5）、ruff/mypy 零淨增。**注意：W26+ 報告須重跑才反映新階梯/停損/簇上限/分級讀法（報告不回溯）。** Part B 研究三軌（買方主導度單調性／個股×族群交互／payoff·decay）另開規劃書與分支、不重跑已被 M-MH 校準否證的壓縮突破·多窗早訊號。
+
+---
+
+## M-Part B：起漲點研究三軌（研究軌・規劃書見 docs/15）
+
+> 全研究軌、不碰生產（`cp_candidates.py` 不動）。引擎沿用 `backtest/stock_calib.py`＋`analysis/stock_panel.py`。
+> 三軌＝T1 買方主導度單調性／T2 個股×族群交互／T3 payoff·decay 四件套；E1–E7 設計決策全採推薦版。
+
+### B-P1 穩健度四件套（T3・code・純加法）｜✅ 完成
+- `stock_calib.py` 加 `payoff_decay_table`（觸發日前瞻報酬分布：勝率/賠率/中位/超額 vs 全宇宙同窗）、`holdout_table`（時間 70/30 樣本外、lift 前後段對照）、`liquidity_table`（ADV 成交額硬化、lift 硬化前/後）、`render_robustness_report`，以及 helper `_select_jobs`（沿用主掃描條件子集）/`_forward_returns`/`_scalar`。既有函式簽名零變更。
+- `config/settings.yaml` 加 `cp_value.robustness`（anchor_label=ambush・top_k=6・horizons=[5,10,20,40]・holdout_frac=0.7・adv_window=20・adv_min_amount=100 百萬）。
+- `cli.py cp calibrate` 末段：錨定 ambush 主掃描合格前 6 名因子，產 `research/cp_value/calibration_*_robustness.md`＋三 CSV。
+- 實跑（1375 檔×250 日）洞察：**edge 隨持有期累積**（trust_flow_10d 超額中位 5日 +0.2%→40日 +2.1%、賠率 1.46→1.99）、短窗近打平；**holdout 後段 lift ≥ 前段**（撐住樣本外，tiny-N z>2.0 後段 0 觸發＝誠實標不足）；**流動性硬化後 lift 反升**（1.81→1.93…＝edge 非小量股假象、可交易宇宙成立）。
+- 驗收：`make test` 新增 6 測全綠（payoff/decay/holdout/流動性/render/空輸入）、ruff 乾淨、mypy 零淨增（cli.py 11 既有 sector_calibrate 錯不動）。**研究軌、不回溯生產讀法。**
+- 註：`tests/screener/goodinfo/test_fetcher.py` 2 個快取新鮮度測試在 main HEAD 即失敗（日期/mtime 敏感、與本milestone無關）。
+
+### B-P2 買方主導度單調性（T1）｜✅ 完成（裁決＝否證，維持 binary 旗標）
+- `stock_panel.py` 純加 `dom_{long_window}d`＝(外資+投信長窗淨買)/(|外資|+|投信|)∈[−1,1]（D-E1 拍板「淨買集中度」；分母 0→null；連續化修法4 binary 土洋對作旗標）。既有欄零變更。
+- `stock_calib.py` 加 `dom_monotonicity_table`（dom 分 5 分位＝D-E2 拍板，ordinal rank 切以避 ±1/0 重邊；各桶以「桶內全股日當觸發 × 全宇宙基率」算前瞻起漲 lift＋前瞻報酬中位；分全體/貼低/非貼低三層＝控制位階）、`dom_monotonicity_spearman`（dom vs 前瞻報酬 Spearman ρ，z=ρ·√(n−1) 大樣本近似顯著）、`render_dom_monotonicity_report`，helper `_dom_col`/`_spearman`/`_dom_strata`。
+- `config/settings.yaml` 加 `cp_value.monotonicity`（n_buckets=5・fwd_window=20・z_sig=1.96；錨定 label 沿用 robustness.anchor_label=ambush・dom 窗＝面板 long_window）。`cli.py cp calibrate` 末段產 `calibration_*_monotonicity.md`＋2 CSV。
+- **實跑（1375 檔×250 日）裁決＝否證**：①全體 Spearman ρ **+0.006**（z=2.94「顯著」純為 n=24萬 大樣本假象、效應量≈0；桶 lift 1.26→1.40→1.39→1.17→1.29 **峰在桶2、非單調**）；②控制位階後**貼低層 ρ=−0.013（z=−5.66，顯著為負）**、非貼低 ρ=+0.027——**控制位階即崩**（守 §D「位階在做工」反例）。→ **dom 連續分級無加值，維持修法4 binary 土洋對作旗標、記否證**（不升級分級因子）。
+- 驗收：`make test` 新增 6 測全綠（panel dom 值/null＋table 桶遞增/spearman 顯著/空輸入/render）、ruff 乾淨、mypy 零淨增（58→58；既有 sector_calibrate 等錯不動）。**研究軌、不碰生產 `cp_candidates.py`。** goodinfo fetcher 2 測仍為 main HEAD 既有失敗（與本milestone無關）。
+- 啟示：土洋「對作 vs 同向」的**程度**對前瞻起漲無系統性單調力——修法4 當初只做 binary 排雷旗標是對的，不需連續化。每季資料累積後可重校。
+### B-P3 個股×族群 2×2 交互（T2）｜✅ 完成（裁決＝否證＋反向發現）
+- D-E3/D-E4 使用者皆採推薦版（2×2 列聯；G＝面板 `rs_subind_{rs_window}d`）。**D-E4 語意註明**：rs_subind＝個股報酬−次產業籃報酬＝**個股相對其次產業的領先**（去族群 beta），**非族群絕對強度**；故 B-P3 測的是「資金進+貼低(S) × 個股在族群裡領先(G)」的超加性。
+- `stock_calib.py` 加 `interaction_2x2_table`（S 高=冠軍 foreign_flow_20d_z>0.5 且貼低、G 高=rs_subind>0；四格各以「格內全股日當觸發×全宇宙基率」算前瞻起漲 lift）、`render_interaction_report`（含加法基準超加性＋S+ 內 G高 vs G低 兩比例 z 檢定＋裁決）、helper `_rs_subind_col`/`_two_prop_z`。settings `cp_value.interaction`；cli cp calibrate 末段產 `calibration_*_interaction.md`＋CSV。
+- **實跑（1375 檔×250 日）裁決＝否證＋反向發現**：2×2 lift S+G+ **1.46** / S+G− **2.86** / S−G+ 0.58 / S−G− 2.18 → **S+ 內 G高(個股領先族群) 顯著「降低」起漲命中率（10.1% vs 19.7%，z=−16.89）**、S− 內同向。**否證「強族群裡強個股」交互**；**反向發現：個股『落後』其次產業(G低)才是補漲訊號**（重申 CP 補漲＝買未動/落後的）。→ **個股訊號已自足、不加族群領先確認**（加了反扣分）。註：§2「超加 +0.21」是邊際格高 lift 的算術假象（lift 非線性可加），以 §3 z 方向為準——**實作時修正裁決邏輯，把強顯著的負向 z 正確判為否證、非「未達顯著」**。
+- 驗收：`make test` 新增 4 測全綠（table 超加、空輸入/缺欄、render 升級、render 否證反向）、ruff 乾淨、mypy 58→58 零淨增。全套 476 綠。**研究軌、不碰生產 `cp_candidates.py`。** goodinfo fetcher 2 測仍為 main HEAD 既有失敗（無關）。
+- **Part B 三軌全收官**：T1 買方主導度單調性（B-P2）否證、T2 個股×族群交互（B-P3）否證＋反向、T3 穩健度四件套（B-P1）為橫切度量＝唯一存活的可複用工具。**結論：起漲端在台股母體，裸位階/資金進+貼低(冠軍 S) 已自足，連續化主導度與族群領先確認皆未加值**（守 docs/15 §6「沒贏與贏同等是有效產出」）。勝出軌＝無；不另開生產實作 milestone。每季資料累積後可重校。

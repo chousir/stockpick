@@ -95,7 +95,7 @@ def test_one_row_per_stock_day_and_columns():
     assert panel.height == 4 * 6
     assert panel.select(["date", "stock_id"]).n_unique() == panel.height
     for col in (
-        "net_flow_2d", "net_flow_4d", "net_flow_4d_z", "flow_momentum",
+        "net_flow_2d", "net_flow_4d", "net_flow_4d_z", "flow_momentum", "dom_4d",
         "above_low_4d_pct", "above_high_4d_pct", "above_ma2_pct", "above_ma3_pct",
         "ret_2d", "rs_market_2d", "rs_subind_2d", "volume_z_2d",
     ):
@@ -112,6 +112,36 @@ def test_flow_rolling_and_momentum():
     assert row["net_flow_4d"][0] == 150
     # momentum(D5)=rs2[D5]-rs2[D3]=200-(-50)=250
     assert row["flow_momentum"][0] == 250
+
+
+# ---- B-P2：買方主導度 dom（docs/15 T1）----
+
+def test_dom_buyer_dominance():
+    # 1111 外資+投信同向買 → dom_4d=+1；5555 外資買・投信賣（土洋對作）→ dom 介於 ±1
+    prices = _price({"1111": [100, 101, 102, 103, 104, 105], "5555": [50] * 6})
+    rows = []
+    for d in _dates(6):
+        rows.append(
+            {"date": d, "stock_id": "1111", "foreign_net": 100, "trust_net": 50,
+             "dealer_net": 0, "total_net": 150}
+        )
+        rows.append(
+            {"date": d, "stock_id": "5555", "foreign_net": 100, "trust_net": -60,
+             "dealer_net": 0, "total_net": 40}
+        )
+    panel = build_stock_panel(prices, pl.DataFrame(rows), _membership(),
+                              compute_subindustry_baskets(_membership(), prices), **PARAMS)
+    assert abs(_row(panel, "1111", 5).row(0, named=True)["dom_4d"] - 1.0) < 1e-9
+    # 5555：foreign_flow_4d=400、trust_flow_4d=−240 → (400−240)/(400+240)=0.25
+    assert abs(_row(panel, "5555", 5).row(0, named=True)["dom_4d"] - 0.25) < 1e-9
+
+
+def test_dom_null_when_no_institutional():
+    # 無法人 → 雙邊淨額皆 0、分母 0 → dom null（不誤判為勢均 0）
+    prices = _price({"1111": [100, 101, 102, 103, 104, 105]})
+    panel = build_stock_panel(prices, pl.DataFrame(), _membership(),
+                              compute_subindustry_baskets(_membership(), prices), **PARAMS)
+    assert _row(panel, "1111", 5).row(0, named=True)["dom_4d"] is None
 
 
 # ---- M-MH Phase 1：多窗 + 背離因子 ----

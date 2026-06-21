@@ -1553,8 +1553,17 @@ def cp_calibrate_cmd(
         detect_breakout_episodes,
         detect_reversal_episodes,
         detect_top_episodes,
+        dom_monotonicity_spearman,
+        dom_monotonicity_table,
+        holdout_table,
+        interaction_2x2_table,
+        liquidity_table,
+        payoff_decay_table,
         render_cp_calibration_report,
         render_cross_window_lead,
+        render_dom_monotonicity_report,
+        render_interaction_report,
+        render_robustness_report,
         render_top_calibration_report,
         scan_stock_signals,
         scan_top_signals,
@@ -1581,6 +1590,23 @@ def cp_calibrate_cmd(
     early_lookback = int(early_cfg.get("lead_lookback", 30))
     early_min_lead = int(early_cfg.get("min_lead_days", 2))
     labels_cfg = cp.get("labels", {})
+    rb = cp.get("robustness", {})  # B-P1 穩健度四件套（docs/15 T3）
+    rb_anchor = str(rb.get("anchor_label", "ambush"))
+    rb_top_k = int(rb.get("top_k", 6))
+    rb_horizons = tuple(int(x) for x in rb.get("horizons", [5, 10, 20, 40]))
+    rb_holdout_frac = float(rb.get("holdout_frac", 0.7))
+    rb_adv_window = int(rb.get("adv_window", 20))
+    rb_adv_min = float(rb.get("adv_min_amount", 100))
+    long_window = int(cp.get("long_window", 20))  # dom 錨窗（panel dom_{long_window}d）
+    mono = cp.get("monotonicity", {})  # B-P2 買方主導度單調性（docs/15 T1）
+    mono_buckets = int(mono.get("n_buckets", 5))
+    mono_fwd = int(mono.get("fwd_window", 20))
+    mono_zsig = float(mono.get("z_sig", 1.96))
+    inter = cp.get("interaction", {})  # B-P3 個股×族群 2×2 交互（docs/15 T2）
+    inter_s_col = str(inter.get("s_flow_col", "foreign_flow_20d_z"))
+    inter_s_z = float(inter.get("s_z_threshold", 0.5))
+    inter_g_thr = float(inter.get("g_threshold", 0.0))
+    inter_zsig = float(inter.get("z_sig", 1.96))
     cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
 
     console.print(f"[bold]載入上市資料（{history_days} 交易日）...[/bold]")
@@ -1673,6 +1699,9 @@ def cp_calibrate_cmd(
         ),
         "",
     ]
+    anchor_scan: pl.DataFrame = pl.DataFrame()  # B-P1：捕捉錨定 label 的掃描結果供穩健度剖析
+    anchor_eps: pl.DataFrame = pl.DataFrame()
+    anchor_occupy = 15
     for key, (name, desc, detect) in detectors.items():
         lp = labels_cfg.get(key, {})
         episodes = detect(lp)
@@ -1698,6 +1727,10 @@ def cp_calibrate_cmd(
             z_min_periods=z_min_periods,
             early_gate=early_cfg if early_on else None,
         )
+        if key == rb_anchor:  # B-P1：留存錨定 label 的掃描＋事件供穩健度剖析
+            anchor_scan = scan
+            anchor_eps = episodes
+            anchor_occupy = int(lp.get("cooldown_days", 15))
         report = render_cp_calibration_report(
             scan, episodes, name, desc, report_params, coverage, min_triggers, min_lift
         )
@@ -1836,6 +1869,206 @@ def cp_calibrate_cmd(
             console.print(
                 f"  {r['signal']}：命中 {r['hit_rate']:.0%}・recall {r['recall']:.0%}"
                 f"・lift {lift}・領先中位 {r['median_lead_days']} 日（{r['n_triggers']} 觸發）"
+            )
+
+    # ★ B-P1 穩健度四件套（payoff/decay/holdout/流動性硬化；docs/15 T3）——錨定勝出因子、研究軌
+    anchor_signals: list[str] = []
+    if not anchor_scan.is_empty() and not anchor_eps.is_empty():
+        anchor_signals = (
+            anchor_scan.filter(
+                (pl.col("n_triggers") >= min_triggers)
+                & pl.col("lift").is_not_null()
+                & (pl.col("lift") >= min_lift)
+            )
+            .sort("lift", descending=True)
+            .head(rb_top_k)["signal"]
+            .to_list()
+        )
+    if not anchor_signals:
+        summary.append(
+            f"- **穩健度剖析（docs/15 B-P1）**：錨定「{rb_anchor}」無因子過門檻"
+            f"（lift≥{min_lift}・觸發≥{min_triggers}）或無事件，略過。"
+        )
+    else:
+        sig_set = set(anchor_signals)
+        gate = early_cfg if early_on else None
+        payoff = payoff_decay_table(
+            panel,
+            rb_horizons,
+            signals=sig_set,
+            z_thresholds=z_thr,
+            volume_thresholds=vol_thr,
+            position_low_pct=position_low_pct,
+            early_gate=gate,
+        )
+        holdout = holdout_table(
+            panel,
+            anchor_eps,
+            split_frac=rb_holdout_frac,
+            signals=sig_set,
+            z_thresholds=z_thr,
+            volume_thresholds=vol_thr,
+            position_low_pct=position_low_pct,
+            lead_window=lead_window,
+            occupy_days=anchor_occupy,
+            z_min_periods=z_min_periods,
+            early_gate=gate,
+        )
+        liquidity = liquidity_table(
+            panel,
+            anchor_eps,
+            adv_window=rb_adv_window,
+            adv_min_amount=rb_adv_min,
+            signals=sig_set,
+            z_thresholds=z_thr,
+            volume_thresholds=vol_thr,
+            position_low_pct=position_low_pct,
+            lead_window=lead_window,
+            occupy_days=anchor_occupy,
+            z_min_periods=z_min_periods,
+            early_gate=gate,
+        )
+        rb_params = {
+            "top_k": rb_top_k,
+            "horizons": list(rb_horizons),
+            "holdout_frac": rb_holdout_frac,
+            "adv_window": rb_adv_window,
+            "adv_min_amount": rb_adv_min,
+        }
+        rb_report = render_robustness_report(
+            payoff, holdout, liquidity, rb_anchor, anchor_signals, rb_params, coverage
+        )
+        (out_dir / f"calibration_{tag}_robustness.md").write_text(rb_report, encoding="utf-8")
+        if not payoff.is_empty():
+            payoff.write_csv(out_dir / f"calibration_{tag}_robustness_payoff.csv")
+        if not holdout.is_empty():
+            holdout.write_csv(out_dir / f"calibration_{tag}_robustness_holdout.csv")
+        if not liquidity.is_empty():
+            liquidity.write_csv(out_dir / f"calibration_{tag}_robustness_liquidity.csv")
+        console.print(
+            f"\n[bold]穩健度剖析[/bold]（錨定 {rb_anchor}・{len(anchor_signals)} 因子）"
+            f" → calibration_{tag}_robustness.md"
+        )
+        summary.append(
+            f"- **穩健度（docs/15 B-P1）**：錨定「{rb_anchor}」前 {len(anchor_signals)} 名因子"
+            f"・payoff/decay/holdout/流動性見 calibration_{tag}_robustness.md。"
+        )
+
+    # ★ B-P2 買方主導度單調性（docs/15 T1）——dom 分位 × 控制位階，錨定同 robustness label
+    if anchor_eps.is_empty():
+        summary.append(
+            f"- **買方主導度單調性（docs/15 B-P2）**：錨定「{rb_anchor}」無事件，略過。"
+        )
+    else:
+        dom_buckets = dom_monotonicity_table(
+            panel,
+            anchor_eps,
+            n_buckets=mono_buckets,
+            fwd_window=mono_fwd,
+            position_low_pct=position_low_pct,
+            lead_window=lead_window,
+            occupy_days=anchor_occupy,
+            z_min_periods=z_min_periods,
+        )
+        dom_spear = dom_monotonicity_spearman(
+            panel, fwd_window=mono_fwd, position_low_pct=position_low_pct, z_sig=mono_zsig
+        )
+        mono_params = {
+            "n_buckets": mono_buckets,
+            "fwd_window": mono_fwd,
+            "dom_window": long_window,
+            "position_low_pct": position_low_pct,
+            "z_sig": mono_zsig,
+        }
+        mono_report = render_dom_monotonicity_report(
+            dom_buckets, dom_spear, rb_anchor, mono_params, coverage
+        )
+        (out_dir / f"calibration_{tag}_monotonicity.md").write_text(mono_report, encoding="utf-8")
+        if not dom_buckets.is_empty():
+            dom_buckets.write_csv(out_dir / f"calibration_{tag}_monotonicity_buckets.csv")
+        if not dom_spear.is_empty():
+            dom_spear.write_csv(out_dir / f"calibration_{tag}_monotonicity_spearman.csv")
+        sp = {r["stratum"]: r for r in dom_spear.iter_rows(named=True)}
+        all_sig = bool(sp.get("全體", {}).get("significant", False))
+        ctrl = bool(sp.get("貼低", {}).get("significant", False)) and bool(
+            sp.get("非貼低", {}).get("significant", False)
+        )
+        verdict = (
+            "①單調顯著＋②控制位階後仍單調 → 建議升級分級因子"
+            if (all_sig and ctrl)
+            else (
+                "①單調顯著但②控制位階後消失（位階在做工）→ 維持 binary 旗標、記否證"
+                if all_sig
+                else "①單調不顯著 → 維持 binary 旗標、記否證"
+            )
+        )
+        rho_all = sp.get("全體", {}).get("spearman_rho")
+        rho_txt = f"{rho_all:+.3f}" if rho_all is not None else "—"
+        console.print(
+            f"\n[bold]買方主導度單調性[/bold]（錨定 {rb_anchor}・全體 ρ {rho_txt}）"
+            f" → calibration_{tag}_monotonicity.md"
+        )
+        summary.append(
+            f"- **買方主導度單調性（docs/15 B-P2）**：錨定「{rb_anchor}」・全體 ρ {rho_txt}；"
+            f"{verdict}（詳 calibration_{tag}_monotonicity.md）。"
+        )
+
+    # ★ B-P3 個股×族群 2×2 交互（docs/15 T2）——資金進+貼低(S) × 個股在族群裡領先(G)，錨定同 label
+    if anchor_eps.is_empty():
+        summary.append(
+            f"- **個股×族群交互（docs/15 B-P3）**：錨定「{rb_anchor}」無事件，略過。"
+        )
+    else:
+        inter_tab = interaction_2x2_table(
+            panel,
+            anchor_eps,
+            s_flow_col=inter_s_col,
+            s_z_threshold=inter_s_z,
+            s_low_pct=position_low_pct,
+            g_threshold=inter_g_thr,
+            lead_window=lead_window,
+            occupy_days=anchor_occupy,
+            z_min_periods=z_min_periods,
+        )
+        inter_params = {
+            "s_flow_col": inter_s_col,
+            "s_z_threshold": inter_s_z,
+            "s_low_pct": position_low_pct,
+            "g_threshold": inter_g_thr,
+        }
+        inter_report = render_interaction_report(
+            inter_tab, rb_anchor, inter_params, coverage, min_triggers, inter_zsig
+        )
+        (out_dir / f"calibration_{tag}_interaction.md").write_text(inter_report, encoding="utf-8")
+        if not inter_tab.is_empty():
+            inter_tab.write_csv(out_dir / f"calibration_{tag}_interaction.csv")
+        if inter_tab.is_empty():
+            summary.append(
+                "- **個股×族群交互（docs/15 B-P3）**：缺 S 欄/above_low/rs_subind，無法分格。"
+            )
+        else:
+            bc = {r["cell"]: r for r in inter_tab.iter_rows(named=True)}
+            ssg, spg = bc.get("S+G+"), bc.get("S+G−")
+            if ssg and spg:
+                gp, gn = ssg["lift"], spg["lift"]
+                gp_s = f"{gp:.2f}" if gp is not None else "—"
+                gn_s = f"{gn:.2f}" if gn is not None else "—"
+                if gp is not None and gn is not None and gp < gn:
+                    dir_txt = "G高反降→否證交互、個股訊號自足"
+                elif gp is not None and gn is not None and gp > gn:
+                    dir_txt = "G高提升→可能族群確認加分"
+                else:
+                    dir_txt = "方向不明"
+                pp_txt = f"S+ 內 G高 lift {gp_s} vs G低 {gn_s}（{dir_txt}）"
+            else:
+                pp_txt = "某格 lift 不可算"
+            console.print(
+                f"\n[bold]個股×族群 2×2 交互[/bold]（錨定 {rb_anchor}）"
+                f" → calibration_{tag}_interaction.md"
+            )
+            summary.append(
+                f"- **個股×族群交互（docs/15 B-P3）**：錨定「{rb_anchor}」・{pp_txt}；"
+                f"裁決詳 calibration_{tag}_interaction.md。"
             )
 
     # L3 裁決（docs/13 §3：lift≥門檻＋領先 >0＋需確認非單日 spike，否則不上線）
