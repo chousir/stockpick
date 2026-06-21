@@ -809,13 +809,16 @@ def payoff_decay_table(
     volume_thresholds: tuple[float, ...] = (1.0, 1.5, 2.0),
     position_low_pct: float = 15.0,
     early_gate: dict | None = None,
+    extra_conditions: list[pl.Expr] | None = None,
+    name_suffix: str = "",
 ) -> pl.DataFrame:
     """T3 payoff＋decay（docs/15）：對選定訊號的觸發日，算各前瞻窗的報酬分布。
 
     payoff（賠率/期望）＝win_rate、avg_win/avg_loss、payoff_ratio（均盈/均虧）；
     decay＝同訊號跨 horizon 的 median_ret 衰減曲線；excess_median＝訊號中位 − 全宇宙同窗
     中位（扣掉大盤/持有期自然漂移，誠實量訊號超額）。label 無關（純前瞻報酬），不需 episodes。
-    回每 (signal, horizon) 一列。空輸入或缺 close 回空表。
+    extra_conditions（M-Part C C-P2）：額外 AND 到每個 job 的條件（如落後濾鏡 rs_subind<0），
+    name_suffix 標進 signal 名以區分。回每 (signal, horizon) 一列。空輸入或缺 close 回空表。
     """
     if panel.is_empty() or "close" not in panel.columns:
         return pl.DataFrame()
@@ -826,7 +829,7 @@ def payoff_decay_table(
     )
     rows: list[dict] = []
     for name, conditions in jobs:
-        trig = _stock_triggers(panel, conditions)
+        trig = _stock_triggers(panel, conditions + list(extra_conditions or []))
         if trig.is_empty():
             continue
         joined = trig.join(fwd, on=["stock_id", "date"], how="left")
@@ -843,7 +846,7 @@ def payoff_decay_table(
             bm = base_med[h]
             rows.append(
                 {
-                    "signal": name,
+                    "signal": name + name_suffix,
                     "horizon_d": h,
                     "n": n,
                     "median_ret_pct": median_ret,
@@ -1806,6 +1809,163 @@ def render_laggard_monotonicity_report(
         "> 誠實但書：(1) rs_subind 只在有次產業標記股日有值（無標排除）；lift 以全宇宙基率為分母；",
         "> (2) 裁決用起漲 lift（§2）非前瞻報酬 Spearman（§3）——兩者分流，落後↑起漲機率≠↑中位報酬；",
         "> (3) 1 年單一樣本、個股事件稀疏；研究軌裁決非買賣訊；每季資料累積後重校。",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+# ── M-Part C / C-P2：冠軍 S+ 內落後濾鏡 precision 增量 ＋ 賺賠驗證（docs/16 H3）─────────
+# D-F4 拍板＝S+全體 vs S+且落後。precision 用冠軍 S+ 觸發；賺賠用 payoff_decay_table（冠軍 vs
+# 冠軍+落後濾鏡）——因 C-P1 揭領先股中位報酬反高，落後濾鏡須驗賺賠不惡化才升級。全研究軌。
+
+
+def laggard_filter_precision(
+    panel: pl.DataFrame,
+    episodes: pl.DataFrame,
+    *,
+    s_flow_col: str = "foreign_flow_20d_z",
+    s_z_threshold: float = 0.5,
+    s_low_pct: float = 15.0,
+    lag_threshold: float = 0.0,
+    lead_window: int = 15,
+    occupy_days: int = 15,
+    z_min_periods: int = 30,
+) -> tuple[pl.DataFrame, float | None]:
+    """H3（docs/16）：冠軍 S+（資金進+貼低）觸發內，加『落後其族群(rs_subind<lag_threshold)』濾鏡
+    是否提升 precision。回 (precision_table, z)；table 三列 S+全體/S+且落後/S+且領先（n_eval/hits
+    /hit_rate/lift），z＝落後 vs 領先 兩比例（獨立組乾淨檢定；S+全體＝兩者聯集當生產基線參考）。
+    空輸入／缺 S 流向欄／缺 above_low／缺 rs_subind 回 (空表, None)。
+    """
+    if panel.is_empty() or episodes.is_empty():
+        return pl.DataFrame(), None
+    low_col = _position_low_col(panel)
+    g_col = _rs_subind_col(panel)
+    if s_flow_col not in panel.columns or low_col is None or g_col is None:
+        return pl.DataFrame(), None
+    calendar = sorted(panel["date"].unique().to_list())
+    warmup_pos = min(z_min_periods, len(calendar) - 1)
+    base_rate = compute_base_rate(
+        episodes, calendar, panel["stock_id"].unique().to_list(),
+        lead_window, occupy_days, warmup_pos, key_col="stock_id",
+    )
+    s_cond = [pl.col(s_flow_col) > s_z_threshold, pl.col(low_col) <= s_low_pct]
+    s_trig = _stock_triggers(panel, s_cond).join(
+        panel.select(["stock_id", "date", g_col]), on=["stock_id", "date"], how="left"
+    )
+    groups = [
+        ("S+全體", s_trig),
+        ("S+且落後", s_trig.filter(pl.col(g_col) < lag_threshold)),
+        ("S+且領先", s_trig.filter(pl.col(g_col) >= lag_threshold)),
+    ]
+    rows: list[dict] = []
+    for name, t in groups:
+        stats = evaluate_triggers(
+            t.select(["stock_id", "date"]), episodes, calendar,
+            lead_window, occupy_days, warmup_pos, key_col="stock_id", base_rate=base_rate,
+        )
+        rows.append({
+            "group": name, "n_eval": stats["n_triggers"], "hits": stats["hits"],
+            "hit_rate": stats["hit_rate"], "lift": stats["lift"],
+        })
+    by = {r["group"]: r for r in rows}
+    lag, lead = by["S+且落後"], by["S+且領先"]
+    z = _two_prop_z(lag["hits"], lag["n_eval"], lead["hits"], lead["n_eval"])
+    return pl.DataFrame(rows), z
+
+
+def render_laggard_filter_report(
+    precision: pl.DataFrame,
+    z: float | None,
+    payoff_base: pl.DataFrame,
+    payoff_filt: pl.DataFrame,
+    anchor_label: str,
+    params: dict,
+    coverage: dict,
+    z_sig: float = 1.96,
+) -> str:
+    """C-P2 報告 markdown（docs/16 H3）：H3 precision 增量（S+全體/落後/領先＋z）＋ payoff/decay
+    對照（冠軍 vs 冠軍+落後濾鏡），依『precision 顯著增量 且 賺賠不惡化』裁決升級/否證。"""
+    key_h = max(params.get("horizons", [20]))
+    lines = [
+        "# 冠軍 S+ 內落後濾鏡 — precision 增量 × 賺賠驗證（docs/16 C-P2 / H3）",
+        "",
+        f"- 冠軍 S+：{params.get('s_flow_col', '?')} z>{params.get('s_z_threshold', '?')} 且貼低"
+        f"・落後濾鏡：rs_subind < {params.get('lag_threshold', 0)}（落後其族群）",
+        f"- 錨定 label：{anchor_label}・賺賠前瞻窗 {params.get('horizons', [])}（裁決看 {key_h}d）",
+        f"- 宇宙：{coverage.get('n_stocks', 0)} 檔・{coverage.get('n_trading_days', 0)} 交易日",
+        "",
+        "## 1. H3 precision（冠軍 S+ 觸發內，落後 vs 領先；lift＝命中率/全宇宙基率）",
+        "",
+    ]
+    if precision.is_empty():
+        lines.append("（缺 S 流向欄/above_low/rs_subind，無法分組）")
+        return "\n".join(lines)
+    by = {r["group"]: r for r in precision.iter_rows(named=True)}
+    lines += ["| 組 | 觸發 | 命中 | 命中率 | lift |", "|---|---|---|---|---|"]
+    for g in ("S+全體", "S+且落後", "S+且領先"):
+        r = by.get(g)
+        if r is None:
+            continue
+        lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
+        lines.append(f"| {g} | {r['n_eval']} | {r['hits']} | {r['hit_rate']:.1%} | {lift} |")
+    zt = f"{z:+.2f}" if z is not None else "—"
+    lines += ["", f"- 落後 vs 領先 兩比例 z = {zt}（>界＝落後濾鏡顯著提升命中）", ""]
+
+    lines += [
+        "## 2. 賺賠 payoff/decay（冠軍 vs 冠軍+落後濾鏡；excess＝訊號中位 − 全宇宙同窗中位）",
+        "",
+        "| 前瞻(日) | 冠軍中位% | 冠軍超額% | +落後中位% | +落後超額% | +落後勝率 | +落後賠率 |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    pb = {r["horizon_d"]: r for r in payoff_base.iter_rows(named=True)}
+    pf = {r["horizon_d"]: r for r in payoff_filt.iter_rows(named=True)}
+
+    def _f(v: float | None, p: str = "+.1f") -> str:
+        return format(v, p) if v is not None else "—"
+
+    for h in params.get("horizons", []):
+        b, f = pb.get(h), pf.get(h)
+        if b is None and f is None:
+            continue
+        b = b or {}
+        f = f or {}
+        lines.append(
+            f"| {h} | {_f(b.get('median_ret_pct'))} | {_f(b.get('excess_median_pct'))} "
+            f"| {_f(f.get('median_ret_pct'))} | {_f(f.get('excess_median_pct'))} "
+            f"| {_f(f.get('win_rate'), '.0%')} | {_f(f.get('payoff_ratio'), '.2f')} |"
+        )
+
+    lift_all = by.get("S+全體", {}).get("lift")
+    lift_lag = by.get("S+且落後", {}).get("lift")
+    prec_gain = (
+        lift_lag is not None and lift_all is not None and lift_lag > lift_all
+        and z is not None and z > z_sig
+    )
+    b_key, f_key = pb.get(key_h, {}), pf.get(key_h, {})
+    bm, fm = b_key.get("median_ret_pct"), f_key.get("median_ret_pct")
+    payoff_ok = bm is not None and fm is not None and fm >= bm
+    lines += ["", f"## 3. 裁決（precision 顯著增量 且 {key_h}d 中位報酬不惡化）", ""]
+    if prec_gain and payoff_ok:
+        lines.append(
+            "- **precision 顯著增量 ✅ 且賺賠不惡化 ✅** → **落後濾鏡升級為冠軍 S+ 的進場加分**"
+            "（上線前另開生產 milestone：S+ 且 rs_subind<0 提高權重/分批）。"
+        )
+    elif prec_gain and not payoff_ok:
+        lines.append(
+            f"- **precision 顯著增量 ✅ 但 {key_h}d 中位報酬較冠軍低 ❌**（C-P1 警示成真：落後↑起漲"
+            "機率卻↓報酬）→ **當『觀察/分批』濾鏡、不升為主加分**；命中多但賺賠未改善。"
+        )
+    else:
+        lines.append(
+            "- **precision 未顯著增量 ❌** → 落後濾鏡在冠軍 S+ 上不加值。**否證 H3、訊號自足**。"
+        )
+    lines += [
+        "",
+        "---",
+        "",
+        "> 誠實但書：(1) z＝落後 vs 領先 獨立組（S+全體＝聯集生產基線）；前瞻報酬原始收盤不還原；",
+        "> (2) 雙重濾鏡樣本更稀疏，holdout/流動性硬化留待資料累積（冠軍版已在 B-P1 驗）；",
+        "> (3) 研究軌裁決非買賣訊、非目標價；每季資料累積後重校。",
         "",
     ]
     return "\n".join(lines)

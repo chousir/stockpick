@@ -1561,12 +1561,14 @@ def cp_calibrate_cmd(
         factor_monotonicity_table,
         holdout_table,
         interaction_2x2_table,
+        laggard_filter_precision,
         liquidity_table,
         payoff_decay_table,
         render_cp_calibration_report,
         render_cross_window_lead,
         render_dom_monotonicity_report,
         render_interaction_report,
+        render_laggard_filter_report,
         render_laggard_monotonicity_report,
         render_robustness_report,
         render_top_calibration_report,
@@ -2148,6 +2150,83 @@ def cp_calibrate_cmd(
             f"- **族群內落後度（docs/16 C-P1）**：錨定「{rb_anchor}」・{lh_txt}（z {z_txt}）；"
             f"{verdict}（詳 calibration_{tag}_laggard.md）。"
         )
+
+    # ★ M-Part C / C-P2 冠軍 S+ 內落後濾鏡 precision 增量＋賺賠驗證（docs/16 H3）
+    if anchor_eps.is_empty():
+        summary.append(f"- **落後濾鏡（docs/16 C-P2）**：錨定「{rb_anchor}」無事件，略過。")
+    else:
+        rs_col_c2 = _rs_subind_col(panel)
+        prec_tbl, prec_z = laggard_filter_precision(
+            panel,
+            anchor_eps,
+            s_flow_col=inter_s_col,
+            s_z_threshold=inter_s_z,
+            s_low_pct=position_low_pct,
+            lag_threshold=inter_g_thr,
+            lead_window=lead_window,
+            occupy_days=anchor_occupy,
+            z_min_periods=z_min_periods,
+        )
+        champ_name = f"{inter_s_col} (z>{inter_s_z:g}) +low≤{position_low_pct:g}"
+        gate2 = early_cfg if early_on else None
+        payoff_base = payoff_decay_table(
+            panel,
+            rb_horizons,
+            signals={champ_name},
+            z_thresholds=z_thr,
+            volume_thresholds=vol_thr,
+            position_low_pct=position_low_pct,
+            early_gate=gate2,
+        )
+        payoff_filt = (
+            payoff_decay_table(
+                panel,
+                rb_horizons,
+                signals={champ_name},
+                z_thresholds=z_thr,
+                volume_thresholds=vol_thr,
+                position_low_pct=position_low_pct,
+                early_gate=gate2,
+                extra_conditions=[pl.col(rs_col_c2) < inter_g_thr],
+                name_suffix="＋落後",
+            )
+            if rs_col_c2 is not None
+            else pl.DataFrame()
+        )
+        c2_params = {
+            "s_flow_col": inter_s_col,
+            "s_z_threshold": inter_s_z,
+            "lag_threshold": inter_g_thr,
+            "horizons": list(rb_horizons),
+        }
+        c2_report = render_laggard_filter_report(
+            prec_tbl, prec_z, payoff_base, payoff_filt, rb_anchor, c2_params, coverage, mono_zsig
+        )
+        (out_dir / f"calibration_{tag}_laggard_filter.md").write_text(c2_report, encoding="utf-8")
+        if not prec_tbl.is_empty():
+            prec_tbl.write_csv(out_dir / f"calibration_{tag}_laggard_filter_precision.csv")
+        if prec_tbl.is_empty():
+            summary.append(
+                "- **落後濾鏡（docs/16 C-P2）**：缺 S 欄/above_low/rs_subind，略過。"
+            )
+        else:
+            pcg = {r["group"]: r for r in prec_tbl.iter_rows(named=True)}
+            la_l = pcg.get("S+且落後", {}).get("lift")
+            al_l = pcg.get("S+全體", {}).get("lift")
+            zt2 = f"{prec_z:+.1f}" if prec_z is not None else "—"
+            txt = (
+                f"S+且落後 lift {la_l:.2f} vs S+全體 {al_l:.2f}（落後vs領先 z {zt2}）"
+                if la_l is not None and al_l is not None
+                else "lift 不可算"
+            )
+            console.print(
+                f"\n[bold]落後濾鏡 C-P2[/bold]（錨定 {rb_anchor}・{txt}）"
+                f" → calibration_{tag}_laggard_filter.md"
+            )
+            summary.append(
+                f"- **落後濾鏡（docs/16 C-P2）**：錨定「{rb_anchor}」・{txt}；"
+                f"裁決詳 calibration_{tag}_laggard_filter.md。"
+            )
 
     # L3 裁決（docs/13 §3：lift≥門檻＋領先 >0＋需確認非單日 spike，否則不上線）
     summary += [

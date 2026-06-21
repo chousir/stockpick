@@ -24,10 +24,12 @@ from tw_screener.backtest.stock_calib import (
     factor_monotonicity_table,
     holdout_table,
     interaction_2x2_table,
+    laggard_filter_precision,
     liquidity_table,
     payoff_decay_table,
     render_dom_monotonicity_report,
     render_interaction_report,
+    render_laggard_filter_report,
     render_laggard_monotonicity_report,
     render_robustness_report,
     scan_stock_signals,
@@ -780,3 +782,76 @@ def test_laggard_lift_significance_extreme_buckets():
     # 反例：lift 非遞減（峰在中桶）→ monotone_dec False
     flat = buckets.with_columns(pl.Series("lift", [1.0, 1.4, 1.5, 1.2, 1.1]))
     assert _laggard_lift_significance(flat, 1.96)["全體"]["monotone_dec"] is False
+
+
+# ── M-Part C / C-P2：冠軍 S+ 內落後濾鏡 precision 增量＋賺賠（docs/16 H3）──────────────
+
+
+def _laggard_filter_fixture() -> tuple[pl.DataFrame, pl.DataFrame]:
+    """冠軍 S+（foreign_flow_20d_z idx5 上穿 0.5、貼低）6 檔：3 檔落後(rs<0,有起漲、續漲)、
+    3 檔領先(rs>0,無起漲、價平) → 落後濾鏡顯著提升 precision 且中位報酬不惡化。"""
+    days = [date(2025, 1, 1) + timedelta(days=i) for i in range(15)]
+    rows, ep_rows = [], []
+    for prefix, rs, has_ep in (("LAG", -5.0, True), ("LEAD", 5.0, False)):
+        for k in range(3):
+            sid = f"{prefix}{k}"
+            for i, d in enumerate(days):
+                close = 100.0 * (1 + 0.02 * max(0, i - 5)) if prefix == "LAG" else 100.0
+                rows.append({"date": d, "stock_id": sid, "close": close,
+                             "foreign_flow_20d_z": 2.0 if i >= 5 else 0.0,
+                             "above_low_60d_pct": 4.0, "rs_subind_20d": rs})
+            if has_ep:
+                ep_rows.append({"stock_id": sid, "start_date": days[7]})
+    panel = pl.DataFrame(rows)
+    episodes = pl.DataFrame(ep_rows, schema={"stock_id": pl.Utf8, "start_date": pl.Date})
+    return panel, episodes
+
+
+_C2_KW = dict(s_z_threshold=0.5, s_low_pct=15.0, lag_threshold=0.0,
+              lead_window=5, occupy_days=5, z_min_periods=2)
+
+
+def test_laggard_filter_precision_gain():
+    panel, episodes = _laggard_filter_fixture()
+    tbl, z = laggard_filter_precision(panel, episodes, **_C2_KW)
+    assert not tbl.is_empty()
+    by = {r["group"]: r for r in tbl.iter_rows(named=True)}
+    assert set(by) == {"S+全體", "S+且落後", "S+且領先"}
+    assert by["S+且落後"]["lift"] > (by["S+且領先"]["lift"] or 0.0)  # 落後命中 > 領先
+    assert by["S+且落後"]["lift"] > by["S+全體"]["lift"]  # 濾鏡優於聯集基線
+    assert z is not None and z > 1.96  # 落後 vs 領先 兩比例 z 顯著
+
+    # 缺欄回 (空表, None)
+    empty, ez = laggard_filter_precision(panel.drop("rs_subind_20d"), episodes, **_C2_KW)
+    assert empty.is_empty() and ez is None
+
+
+def test_payoff_decay_extra_conditions_filters_and_suffixes():
+    panel, _ = _laggard_filter_fixture()
+    champ = "foreign_flow_20d_z (z>0.5) +low≤15"
+    base = payoff_decay_table(panel, horizons=(5,), signals={champ}, z_thresholds=(0.5,))
+    filt = payoff_decay_table(panel, horizons=(5,), signals={champ}, z_thresholds=(0.5,),
+                              extra_conditions=[pl.col("rs_subind_20d") < 0.0],
+                              name_suffix="＋落後")
+    assert base.row(0, named=True)["signal"] == champ
+    assert filt.row(0, named=True)["signal"] == champ + "＋落後"
+    # 濾後只剩落後股（續漲）→ 中位報酬 ≥ 全體基線（領先股價平拉低基線）
+    assert filt.row(0, named=True)["median_ret_pct"] >= base.row(0, named=True)["median_ret_pct"]
+    assert filt.row(0, named=True)["n"] == 3  # 3 檔落後
+
+
+def test_render_laggard_filter_report_verdict():
+    panel, episodes = _laggard_filter_fixture()
+    tbl, z = laggard_filter_precision(panel, episodes, **_C2_KW)
+    champ = "foreign_flow_20d_z (z>0.5) +low≤15"
+    base = payoff_decay_table(panel, horizons=(2, 5), signals={champ}, z_thresholds=(0.5,))
+    filt = payoff_decay_table(panel, horizons=(2, 5), signals={champ}, z_thresholds=(0.5,),
+                              extra_conditions=[pl.col("rs_subind_20d") < 0.0],
+                              name_suffix="＋落後")
+    params = {"s_flow_col": "foreign_flow_20d_z", "s_z_threshold": 0.5, "lag_threshold": 0.0,
+              "horizons": [2, 5]}
+    md = render_laggard_filter_report(tbl, z, base, filt, "ambush", params, {}, z_sig=1.96)
+    assert "H3 precision" in md and "賺賠" in md and "裁決" in md
+    assert "升級" in md  # precision 增量＋賺賠不惡化 → 升級
+    empty_md = render_laggard_filter_report(pl.DataFrame(), None, base, filt, "ambush", params, {})
+    assert "無法分組" in empty_md

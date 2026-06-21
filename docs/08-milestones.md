@@ -548,3 +548,11 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **★實跑暴露量尺陷阱（重要學習）**：先用 B-P2 的「factor vs 前瞻**報酬** Spearman」當裁決 → 全體 ρ=+0.007「否證」；但**桶 lift（起漲機率）強烈單調遞減**（全體 2.74→0.24、貼低 3.64→1.51、非貼低 0.99→0.01）。**根因：落後↑起漲機率，但領先股↑中位報酬，兩者分流**——Spearman 測到「報酬」非「起漲」，誤判否證。**修正＝裁決改用 on-target 的起漲 lift**（最落後桶 vs 最領先桶 hit-rate 兩比例 z），Spearman 退為診斷揭分流。
 - **修正後裁決＝進 C-P2**：①全體落後桶起漲 lift 顯著高（z=+54.4）且單調遞減 ✅；②貼低（z=+27.2）/非貼低（z=+23.3）兩層皆然 ✅ → **落後度非僅位階代理、控制位階後仍在＝獨立起漲-機率加分**。**但帶警示**：領先股中位報酬反而高（+2.4% vs 落後桶 +1.5%），故 C-P2 須用 payoff/decay 四件套驗賺賠，不能只看 lift。
 - 驗收：`make test` 新增 5 測（factor 一般化 decreasing/direction 旗/缺欄＋render laggard＋_laggard_lift_significance 極端桶；B-P2 dom 薄包測零改）、全套 481 綠、ruff 乾淨、mypy 58→58 零淨增。**研究軌、不碰生產。** goodinfo fetcher 2 測仍 main HEAD 既有失敗（無關）。
+
+### C-P2 冠軍 S+ 內落後濾鏡 precision 增量＋賺賠驗證（H3）｜✅ 完成（裁決＝**升級・首個全勝軌**）
+- D-F4 採推薦版（S+全體 vs S+且落後）。`stock_calib.py` 加 `laggard_filter_precision`（冠軍 S+ 觸發切 S+全體/S+且落後/S+且領先，evaluate_triggers 各算 lift＋落後vs領先兩比例 z）、`render_laggard_filter_report`；`payoff_decay_table` 加 `extra_conditions`/`name_suffix`（落後濾鏡疊上冠軍 job 算賺賠）。cli cp calibrate 末段產 `calibration_*_laggard_filter.md`＋CSV。settings 沿用 interaction/robustness（無新設定）。
+- **實跑裁決＝升級**：①H3 precision——冠軍 S+ 內 **S+且落後 lift 2.77（19.1% 命中）vs S+且領先 1.70（11.8%），z=+4.54** 顯著（落後濾鏡近乎倍增命中率）；②賺賠（解 C-P1 警示）——**冠軍 S+ 全體中位報酬其實為負**（−0.2→−0.7% / 5-40d），但**+落後中位報酬轉正且隨持有期升**（+0.0→+2.3%、賠率 1.61→2.44、勝率 48→57%）。→ **落後濾鏡 precision↑ 且賺賠不惡化（反改善）→ 升級為冠軍 S+ 進場加分**（S+ 且 rs_subind<0 提高權重/分批）。
+- **解 C-P1 警示**：C-P1「領先股報酬高」是**全宇宙**（所有股日）的相對；**條件在冠軍 S+（資金進+貼低）子集內，落後股反而 lift＋報酬雙贏**——C-P1 標警示→C-P2 驗證的設計奏效。
+- 驗收：`make test` 新增 3 測（precision 增量/payoff extra_conditions 濾鏡+suffix/render 升級裁決）、全套 484 綠、ruff 乾淨、mypy 58→58 零淨增。雙重濾鏡樣本稀疏，holdout/流動性留待資料累積（冠軍版已 B-P1 驗）。
+
+> **M-Part C 全收官（C-P1+C-P2）**：落後度（rs_subind<0）是**首個全勝研究軌**——在冠軍 CP 補漲訊號（資金進+貼低）上，加「個股落後其次產業」濾鏡顯著提升起漲命中且賺賠改善。**可選後續＝另開生產 milestone**把落後濾鏡接進 `cp_candidates.py`（S+ 且 rs_subind<0 加分/分批），不在 docs/16 研究軌範圍、待使用者拍板。每季資料累積後重校。
