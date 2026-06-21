@@ -536,3 +536,15 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **實跑（1375 檔×250 日）裁決＝否證＋反向發現**：2×2 lift S+G+ **1.46** / S+G− **2.86** / S−G+ 0.58 / S−G− 2.18 → **S+ 內 G高(個股領先族群) 顯著「降低」起漲命中率（10.1% vs 19.7%，z=−16.89）**、S− 內同向。**否證「強族群裡強個股」交互**；**反向發現：個股『落後』其次產業(G低)才是補漲訊號**（重申 CP 補漲＝買未動/落後的）。→ **個股訊號已自足、不加族群領先確認**（加了反扣分）。註：§2「超加 +0.21」是邊際格高 lift 的算術假象（lift 非線性可加），以 §3 z 方向為準——**實作時修正裁決邏輯，把強顯著的負向 z 正確判為否證、非「未達顯著」**。
 - 驗收：`make test` 新增 4 測全綠（table 超加、空輸入/缺欄、render 升級、render 否證反向）、ruff 乾淨、mypy 58→58 零淨增。全套 476 綠。**研究軌、不碰生產 `cp_candidates.py`。** goodinfo fetcher 2 測仍為 main HEAD 既有失敗（無關）。
 - **Part B 三軌全收官**：T1 買方主導度單調性（B-P2）否證、T2 個股×族群交互（B-P3）否證＋反向、T3 穩健度四件套（B-P1）為橫切度量＝唯一存活的可複用工具。**結論：起漲端在台股母體，裸位階/資金進+貼低(冠軍 S) 已自足，連續化主導度與族群領先確認皆未加值**（守 docs/15 §6「沒贏與贏同等是有效產出」）。勝出軌＝無；不另開生產實作 milestone。每季資料累積後可重校。
+
+## M-Part C：個股族群內落後度補漲因子（研究軌・規劃書見 docs/16，承 B-P3 反向發現）
+
+> 全研究軌、不碰生產。承 B-P3「個股落後其次產業 rs_subind<0 起漲 lift 高於領先」正式立題：落後度是獨立補漲因子、還是只是位階（貼低）的化身？三層假說 H1 落後度單調／H2 控制位階仍有增量（關鍵閘）／H3 冠軍 S+ 內濾鏡 precision 增量。複用 B-P2 單調機制（`factor_monotonicity_*` 因子參數化）。
+
+### C-P1 落後度單調 × 位階控制（H1+H2）｜✅ 完成（裁決＝進 C-P2）
+- D-F1/D-F2/D-F3 使用者皆採推薦版（rs_subind 直接用、5 分位、貼低/非貼低二分）。
+- **重構複用（不重造）**：把 B-P2 的 `_dom_strata`/`dom_monotonicity_table`/`dom_monotonicity_spearman` 一般化為 `_factor_strata`/`factor_monotonicity_table`（因子欄參數化、輸出 factor_min/median/max＋hits）/`factor_monotonicity_spearman`（加 `direction` 旗：increasing 或 decreasing），`dom_*` 退為薄包（B-P2 行為/測試零改）。
+- **C-P1 專屬**：`render_laggard_monotonicity_report`＋helper `_laggard_lift_significance`；settings 沿用 `cp_value.monotonicity`（n_buckets/fwd_window/z_sig）＋自動偵測 rs_subind 欄；cli cp calibrate 末段產 `calibration_*_laggard.md`＋2 CSV。
+- **★實跑暴露量尺陷阱（重要學習）**：先用 B-P2 的「factor vs 前瞻**報酬** Spearman」當裁決 → 全體 ρ=+0.007「否證」；但**桶 lift（起漲機率）強烈單調遞減**（全體 2.74→0.24、貼低 3.64→1.51、非貼低 0.99→0.01）。**根因：落後↑起漲機率，但領先股↑中位報酬，兩者分流**——Spearman 測到「報酬」非「起漲」，誤判否證。**修正＝裁決改用 on-target 的起漲 lift**（最落後桶 vs 最領先桶 hit-rate 兩比例 z），Spearman 退為診斷揭分流。
+- **修正後裁決＝進 C-P2**：①全體落後桶起漲 lift 顯著高（z=+54.4）且單調遞減 ✅；②貼低（z=+27.2）/非貼低（z=+23.3）兩層皆然 ✅ → **落後度非僅位階代理、控制位階後仍在＝獨立起漲-機率加分**。**但帶警示**：領先股中位報酬反而高（+2.4% vs 落後桶 +1.5%），故 C-P2 須用 payoff/decay 四件套驗賺賠，不能只看 lift。
+- 驗收：`make test` 新增 5 測（factor 一般化 decreasing/direction 旗/缺欄＋render laggard＋_laggard_lift_significance 極端桶；B-P2 dom 薄包測零改）、全套 481 綠、ruff 乾淨、mypy 58→58 零淨增。**研究軌、不碰生產。** goodinfo fetcher 2 測仍 main HEAD 既有失敗（無關）。

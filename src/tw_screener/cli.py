@@ -1548,6 +1548,8 @@ def cp_calibrate_cmd(
     from tw_screener.analysis.sector_universe import list_subindustries
     from tw_screener.analysis.stock_panel import build_stock_panel, compute_coverage_meta
     from tw_screener.backtest.stock_calib import (
+        _laggard_lift_significance,
+        _rs_subind_col,
         compute_cross_window_lead,
         detect_ambush_episodes,
         detect_breakout_episodes,
@@ -1555,6 +1557,8 @@ def cp_calibrate_cmd(
         detect_top_episodes,
         dom_monotonicity_spearman,
         dom_monotonicity_table,
+        factor_monotonicity_spearman,
+        factor_monotonicity_table,
         holdout_table,
         interaction_2x2_table,
         liquidity_table,
@@ -1563,6 +1567,7 @@ def cp_calibrate_cmd(
         render_cross_window_lead,
         render_dom_monotonicity_report,
         render_interaction_report,
+        render_laggard_monotonicity_report,
         render_robustness_report,
         render_top_calibration_report,
         scan_stock_signals,
@@ -2070,6 +2075,79 @@ def cp_calibrate_cmd(
                 f"- **個股×族群交互（docs/15 B-P3）**：錨定「{rb_anchor}」・{pp_txt}；"
                 f"裁決詳 calibration_{tag}_interaction.md。"
             )
+
+    # ★ M-Part C / C-P1 個股族群內落後度單調×位階控制（docs/16 H1+H2）——rs_subind 低桶=落後、ρ<0
+    if anchor_eps.is_empty():
+        summary.append(f"- **族群內落後度（docs/16 C-P1）**：錨定「{rb_anchor}」無事件，略過。")
+    else:
+        rs_col = _rs_subind_col(panel)
+        lag_buckets = factor_monotonicity_table(
+            panel,
+            anchor_eps,
+            rs_col,
+            n_buckets=mono_buckets,
+            fwd_window=mono_fwd,
+            position_low_pct=position_low_pct,
+            lead_window=lead_window,
+            occupy_days=anchor_occupy,
+            z_min_periods=z_min_periods,
+        )
+        lag_spear = factor_monotonicity_spearman(
+            panel,
+            rs_col,
+            fwd_window=mono_fwd,
+            position_low_pct=position_low_pct,
+            z_sig=mono_zsig,
+            direction="decreasing",
+        )
+        lag_params = {
+            "rs_window": rs_col.split("_")[-1].rstrip("d") if rs_col else "?",
+            "n_buckets": mono_buckets,
+            "fwd_window": mono_fwd,
+            "position_low_pct": position_low_pct,
+        }
+        lag_report = render_laggard_monotonicity_report(
+            lag_buckets, lag_spear, rb_anchor, lag_params, coverage, z_sig=mono_zsig
+        )
+        (out_dir / f"calibration_{tag}_laggard.md").write_text(lag_report, encoding="utf-8")
+        if not lag_buckets.is_empty():
+            lag_buckets.write_csv(out_dir / f"calibration_{tag}_laggard_buckets.csv")
+        if not lag_spear.is_empty():
+            lag_spear.write_csv(out_dir / f"calibration_{tag}_laggard_spearman.csv")
+        # 裁決以起漲 lift 為 on-target 量尺（非前瞻報酬 Spearman——兩者分流）
+        lift_sig = _laggard_lift_significance(lag_buckets, mono_zsig)
+        a = lift_sig.get("全體", {})
+        h1 = bool(a.get("sig") and a.get("monotone_dec"))
+        h2 = bool(
+            lift_sig.get("貼低", {}).get("sig")
+            and lift_sig.get("貼低", {}).get("monotone_dec")
+            and lift_sig.get("非貼低", {}).get("sig")
+            and lift_sig.get("非貼低", {}).get("monotone_dec")
+        )
+        lo_l, hi_l, z_l = a.get("lift_lo"), a.get("lift_hi"), a.get("z")
+        lh_txt = (
+            f"最落後桶 lift {lo_l:.2f} vs 最領先 {hi_l:.2f}"
+            if lo_l is not None and hi_l is not None
+            else "—"
+        )
+        z_txt = f"{z_l:+.1f}" if z_l is not None else "—"
+        verdict = (
+            "①落後起漲 lift 顯著＋②控制位階後仍在 → 進 C-P2"
+            if (h1 and h2)
+            else (
+                "①顯著但②控制位階某層崩 → 否證(位階代理)"
+                if h1
+                else "①落後 lift 不顯著 → 否證"
+            )
+        )
+        console.print(
+            f"\n[bold]族群內落後度單調[/bold]（錨定 {rb_anchor}・{lh_txt}・z {z_txt}）"
+            f" → calibration_{tag}_laggard.md"
+        )
+        summary.append(
+            f"- **族群內落後度（docs/16 C-P1）**：錨定「{rb_anchor}」・{lh_txt}（z {z_txt}）；"
+            f"{verdict}（詳 calibration_{tag}_laggard.md）。"
+        )
 
     # L3 裁決（docs/13 §3：lift≥門檻＋領先 >0＋需確認非單日 spike，否則不上線）
     summary += [

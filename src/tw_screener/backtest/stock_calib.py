@@ -1141,34 +1141,35 @@ def _spearman(df: pl.DataFrame, x_col: str, y_col: str) -> tuple[float | None, i
     return rho, n, rho * ((n - 1) ** 0.5)
 
 
-def _dom_strata(
-    panel: pl.DataFrame, fwd_window: int, position_low_pct: float
-) -> tuple[str | None, str | None, list[tuple[str, pl.DataFrame]]]:
-    """組單調性分析的股日子集：全體＋（有位階欄時）貼低/非貼低（控制位階）。
+def _factor_strata(
+    panel: pl.DataFrame, factor_col: str | None, fwd_window: int, position_low_pct: float
+) -> tuple[str | None, list[tuple[str, pl.DataFrame]]]:
+    """組單調性分析的股日子集（任一 factor_col）：全體＋（有位階欄時）貼低/非貼低（控制位階）。
 
-    回 (dom 欄, 前瞻報酬欄, [(層名, 含 dom/位階/前瞻報酬的 df)…])。缺 dom 欄或 close → 空清單。
+    回 (前瞻報酬欄, [(層名, 含 factor/位階/前瞻報酬的 df)…])。缺 factor_col 或 close → 空清單。
+    供 B-P2 dom（docs/15 T1）與 M-Part C rs_subind 落後度（docs/16）共用，不重造分位/控制邏輯。
     """
-    dom_col = _dom_col(panel)
-    if dom_col is None or "close" not in panel.columns:
-        return None, None, []
+    if not factor_col or factor_col not in panel.columns or "close" not in panel.columns:
+        return None, []
     low_col = _position_low_col(panel)
     fwd_col = f"fwd_ret_{fwd_window}d"
-    cols = ["stock_id", "date", dom_col] + ([low_col] if low_col else [])
+    cols = ["stock_id", "date", factor_col] + ([low_col] if low_col else [])
     base = (
         panel.select(cols)
         .join(_forward_returns(panel, (fwd_window,)), on=["stock_id", "date"], how="left")
-        .filter(pl.col(dom_col).is_not_null())
+        .filter(pl.col(factor_col).is_not_null())
     )
     strata: list[tuple[str, pl.DataFrame]] = [("全體", base)]
     if low_col is not None:
         strata.append(("貼低", base.filter(pl.col(low_col) <= position_low_pct)))
         strata.append(("非貼低", base.filter(pl.col(low_col) > position_low_pct)))
-    return dom_col, fwd_col, strata
+    return fwd_col, strata
 
 
-def dom_monotonicity_table(
+def factor_monotonicity_table(
     panel: pl.DataFrame,
     episodes: pl.DataFrame,
+    factor_col: str | None,
     *,
     n_buckets: int = 5,
     fwd_window: int = 20,
@@ -1177,18 +1178,18 @@ def dom_monotonicity_table(
     occupy_days: int = 15,
     z_min_periods: int = 30,
 ) -> pl.DataFrame:
-    """T1 買方主導度單調性（docs/15）：dom 分 n_buckets 分位，各桶算前瞻起漲 lift 與前瞻報酬
-    中位，分「全體／貼低／非貼低」三層（控制位階）看是否單調遞增。
+    """因子分位單調性表（docs/15 B-P2 機制；M-Part C docs/16 共用）：factor_col 分 n_buckets 分位，
+    各桶算前瞻起漲 lift 與前瞻報酬中位，分「全體／貼低／非貼低」三層（控制位階）。
 
-    桶以 ordinal rank 切（dom 在 ±1／0 多重結，qcut 因重邊失敗；rank 保證桶均衡）。lift 以
-    全宇宙基率為分母（與 scan_stock_signals 一致）：把每桶所有股日當「觸發」丟 evaluate_triggers
-    ——答「處在此 dom 桶的隨機一天，前瞻 lead_window 內起漲機率是基率的幾倍」。每層各自重分位
-    （控制位階＝在同位階內比 dom）。回每 (stratum, bucket) 一列。空輸入／缺 dom／缺 close 回空表。
+    桶以 ordinal rank 切（避 ±1/0 等重邊；rank 保證桶均衡）。lift 以全宇宙基率為分母（與
+    scan_stock_signals 一致）：把每桶所有股日當「觸發」丟 evaluate_triggers——答「處在此桶的隨機
+    一天，前瞻 lead_window 內起漲機率是基率的幾倍」。每層各自重分位（控制位階＝同位階內比因子）。
+    回每 (stratum, bucket) 一列（含 factor_min/median/max）。空輸入／缺 factor_col/close 回空表。
     """
     if panel.is_empty() or episodes.is_empty():
         return pl.DataFrame()
-    dom_col, fwd_col, strata = _dom_strata(panel, fwd_window, position_low_pct)
-    if not strata or dom_col is None or fwd_col is None:
+    fwd_col, strata = _factor_strata(panel, factor_col, fwd_window, position_low_pct)
+    if not strata or fwd_col is None or factor_col is None:
         return pl.DataFrame()
     calendar = sorted(panel["date"].unique().to_list())
     warmup_pos = min(z_min_periods, len(calendar) - 1)
@@ -1206,11 +1207,8 @@ def dom_monotonicity_table(
         n = df.height
         if n < n_buckets:
             continue
-        bucketed = df.with_columns(
-            (
-                ((pl.col(dom_col).rank(method="ordinal").cast(pl.Int64) - 1) * n_buckets) // n + 1
-            ).alias("_b")
-        )
+        rank = pl.col(factor_col).rank(method="ordinal").cast(pl.Int64)
+        bucketed = df.with_columns((((rank - 1) * n_buckets) // n + 1).alias("_b"))
         for b in range(1, n_buckets + 1):
             cell = bucketed.filter(pl.col("_b") == b)
             if cell.is_empty():
@@ -1230,10 +1228,11 @@ def dom_monotonicity_table(
                     "stratum": stratum,
                     "bucket": b,
                     "n_stock_days": cell.height,
-                    "dom_min": _scalar(cell[dom_col].min()),
-                    "dom_median": _scalar(cell[dom_col].median()),
-                    "dom_max": _scalar(cell[dom_col].max()),
+                    "factor_min": _scalar(cell[factor_col].min()),
+                    "factor_median": _scalar(cell[factor_col].median()),
+                    "factor_max": _scalar(cell[factor_col].max()),
                     "n_eval": stats["n_triggers"],
+                    "hits": stats["hits"],
                     "hit_rate": stats["hit_rate"],
                     "lift": stats["lift"],
                     "median_fwd_ret_pct": _scalar(cell[fwd_col].median()),
@@ -1244,6 +1243,61 @@ def dom_monotonicity_table(
     return pl.DataFrame(rows)
 
 
+def dom_monotonicity_table(
+    panel: pl.DataFrame,
+    episodes: pl.DataFrame,
+    *,
+    n_buckets: int = 5,
+    fwd_window: int = 20,
+    position_low_pct: float = 15.0,
+    lead_window: int = 15,
+    occupy_days: int = 15,
+    z_min_periods: int = 30,
+) -> pl.DataFrame:
+    """T1 買方主導度單調性（docs/15）＝factor_monotonicity_table 套 dom 欄（薄包、向後相容）。"""
+    return factor_monotonicity_table(
+        panel,
+        episodes,
+        _dom_col(panel),
+        n_buckets=n_buckets,
+        fwd_window=fwd_window,
+        position_low_pct=position_low_pct,
+        lead_window=lead_window,
+        occupy_days=occupy_days,
+        z_min_periods=z_min_periods,
+    )
+
+
+def factor_monotonicity_spearman(
+    panel: pl.DataFrame,
+    factor_col: str | None,
+    *,
+    fwd_window: int = 20,
+    position_low_pct: float = 15.0,
+    z_sig: float = 1.96,
+    direction: str = "increasing",
+) -> pl.DataFrame:
+    """因子 vs 前瞻報酬的 Spearman ρ，分三層（docs/15 B-P2 機制；M-Part C docs/16 共用）。
+
+    桶表給可讀視覺；本表給大樣本顯著（z=ρ·√(n−1) 近似）。direction="increasing"＝因子越高前瞻越強
+    （significant＝ρ>0 且 z>z_sig）；"decreasing"＝越低越強（significant＝ρ<0 且 z<−z_sig，供
+    rs_subind 落後度：rs_subind 越低=越落後其族群=起漲越強）。回每層 stratum/n/spearman_rho/z
+    /significant。缺 factor_col／close 回空表。
+    """
+    fwd_col, strata = _factor_strata(panel, factor_col, fwd_window, position_low_pct)
+    if not strata or fwd_col is None or factor_col is None:
+        return pl.DataFrame()
+    rows: list[dict] = []
+    for name, df in strata:
+        rho, n, z = _spearman(df, factor_col, fwd_col)
+        if direction == "decreasing":
+            sig = rho is not None and z is not None and rho < 0 and z < -z_sig
+        else:
+            sig = rho is not None and z is not None and rho > 0 and z > z_sig
+        rows.append({"stratum": name, "n": n, "spearman_rho": rho, "z": z, "significant": sig})
+    return pl.DataFrame(rows)
+
+
 def dom_monotonicity_spearman(
     panel: pl.DataFrame,
     *,
@@ -1251,30 +1305,15 @@ def dom_monotonicity_spearman(
     position_low_pct: float = 15.0,
     z_sig: float = 1.96,
 ) -> pl.DataFrame:
-    """T1 連續單調性顯著檢定（docs/15 裁決門檻①②）：dom vs 前瞻報酬的 Spearman ρ，分三層。
-
-    桶表（dom_monotonicity_table）給可讀的遞增視覺；本表給大樣本顯著（n=分位桶數時 ρ 無檢定力，
-    故顯著建立在連續秩相關）。significant＝ρ>0 且 z>z_sig（主導度越高、前瞻越強＝方向對且顯著）。
-    回每層一列：stratum/n/spearman_rho/z/significant。缺 dom 欄／close 回空表。
-    """
-    _dom, fwd_col, strata = _dom_strata(panel, fwd_window, position_low_pct)
-    if not strata or fwd_col is None:
-        return pl.DataFrame()
-    dom_col = _dom_col(panel)
-    assert dom_col is not None  # strata 非空保證 dom 欄存在
-    rows: list[dict] = []
-    for name, df in strata:
-        rho, n, z = _spearman(df, dom_col, fwd_col)
-        rows.append(
-            {
-                "stratum": name,
-                "n": n,
-                "spearman_rho": rho,
-                "z": z,
-                "significant": rho is not None and z is not None and rho > 0 and z > z_sig,
-            }
-        )
-    return pl.DataFrame(rows)
+    """T1 連續單調性顯著檢定（docs/15）＝factor_monotonicity_spearman 套 dom、遞增方向（薄包）。"""
+    return factor_monotonicity_spearman(
+        panel,
+        _dom_col(panel),
+        fwd_window=fwd_window,
+        position_low_pct=position_low_pct,
+        z_sig=z_sig,
+        direction="increasing",
+    )
 
 
 def render_dom_monotonicity_report(
@@ -1317,7 +1356,7 @@ def render_dom_monotonicity_report(
             ]
             for r in sub.iter_rows(named=True):
                 lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
-                dm = f"{r['dom_median']:+.2f}" if r["dom_median"] is not None else "—"
+                dm = f"{r['factor_median']:+.2f}" if r["factor_median"] is not None else "—"
                 fr = (
                     f"{r['median_fwd_ret_pct']:+.1f}"
                     if r["median_fwd_ret_pct"] is not None
@@ -1589,6 +1628,184 @@ def render_interaction_report(
         "> 誠實但書：(1) G＝rs_subind 是個股相對其次產業、非族群絕對強度；只含有次產業標記的股日；",
         "> (2) lift 以全宇宙基率為分母、前瞻起漲純價格定義（資金/族群因子全在訊號端，避免循環）；",
         "> (3) 1 年單一樣本、交互格稀疏，tiny-N lift 差可能是雜訊；研究軌裁決非賣訊；每季重校。",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+# ── M-Part C / C-P1：個股族群內落後度補漲因子（rs_subind 落後度單調 × 位階控制；docs/16）──
+# 承 B-P3 反向發現，複用 factor_monotonicity_table 把因子換成 rs_subind（低桶＝落後）。
+# **裁決以「起漲 lift」為 on-target 量尺**（最落後桶 vs 最領先桶 hit-rate 兩比例 z）——
+# 實跑發現 factor vs 前瞻「報酬」的 Spearman 測到不同結果（落後↑起漲機率但領先↑中位報酬、兩者分流，
+# ρ≈0 誤判否證），故 Spearman 退為診斷、不當裁決閘。關鍵關＝控制位階後 lift 是否仍遞減（守 §D）。
+
+
+def _laggard_lift_significance(buckets: pl.DataFrame, z_sig: float) -> dict[str, dict]:
+    """C-P1 的 on-target 顯著性：每層最落後桶(桶1) vs 最領先桶(最大桶) 起漲 hit-rate 兩比例 z，
+    並檢桶 lift 是否單調遞減。回 {stratum: {z, monotone_dec, sig, lift_lo, lift_hi}}。
+
+    取代 factor_monotonicity_spearman 的「factor vs 前瞻報酬」當裁決——後者測不同結果（落後↑起漲
+    機率但領先↑中位報酬，兩者分流）。sig＝桶1 hit-rate 顯著 > 桶N（z>z_sig＝落後起漲較多）。
+    """
+    out: dict[str, dict] = {}
+    for stratum in ("全體", "貼低", "非貼低"):
+        sub = buckets.filter(pl.col("stratum") == stratum).sort("bucket")
+        if sub.height < 2:
+            continue
+        recs = sub.to_dicts()
+        lo, hi = recs[0], recs[-1]  # 桶1＝最落後、最大桶＝最領先
+        z = _two_prop_z(lo["hits"], lo["n_eval"], hi["hits"], hi["n_eval"])
+        lifts = [r["lift"] for r in recs if r["lift"] is not None]
+        monotone_dec = (
+            len(lifts) >= 2
+            and all(lifts[i] >= lifts[i + 1] for i in range(len(lifts) - 1))
+            and lifts[0] > lifts[-1]
+        )
+        out[stratum] = {
+            "z": z,
+            "monotone_dec": monotone_dec,
+            "sig": z is not None and z > z_sig,
+            "lift_lo": lo["lift"],
+            "lift_hi": hi["lift"],
+        }
+    return out
+
+
+def render_laggard_monotonicity_report(
+    buckets: pl.DataFrame,
+    spearman: pl.DataFrame,
+    anchor_label: str,
+    params: dict,
+    coverage: dict,
+    z_sig: float = 1.96,
+) -> str:
+    """族群內落後度單調性報告 markdown（docs/16 C-P1 / H1+H2）。factor＝rs_subind（低桶＝落後）。
+
+    裁決以**起漲 lift** 為 on-target 量尺：H1＝全體最落後桶 hit-rate 顯著 > 最領先桶且桶 lift 單調
+    遞減；H2＝貼低/非貼低兩層皆然（控制位階後仍在）。Spearman（vs 前瞻報酬）退為診斷——落後↑起漲
+    機率但領先↑中位報酬、兩者分流，不當裁決閘。空輸入回誠實佔位。"""
+    lines = [
+        "# 族群內落後度單調性 — rs_subind 分位 × 控制位階（docs/16 C-P1 / H1+H2）",
+        "",
+        f"- 因子：rs_subind_{params.get('rs_window', '?')}d＝個股報酬 − 次產業籃報酬"
+        "（**低桶＝越落後其族群**；去族群 beta、非族群絕對強度）",
+        f"- 假說：rs_subind 越低（越落後）前瞻起漲越強（ρ<0）；錨定 label：{anchor_label}",
+        f"- 分位桶數 {params.get('n_buckets', '?')}（ordinal rank 切）・前瞻報酬窗 "
+        f"{params.get('fwd_window', '?')} 交易日・位階分層界 above_low ≤ "
+        f"{params.get('position_low_pct', '?')}%（貼低）",
+        f"- 宇宙：{coverage.get('n_stocks', 0)} 檔・{coverage.get('n_trading_days', 0)} 交易日"
+        f"（{coverage.get('date_min', '?')} ~ {coverage.get('date_max', '?')}）",
+        "",
+        "## 1. 分位桶（桶 1＝最落後其族群；lift＝桶內前瞻起漲機率 / 全宇宙基率）",
+        "",
+    ]
+    if buckets.is_empty():
+        lines.append("（缺 rs_subind 欄、缺 close 或樣本不足分位，無法分桶）")
+    else:
+        for stratum in ("全體", "貼低", "非貼低"):
+            sub = buckets.filter(pl.col("stratum") == stratum).sort("bucket")
+            if sub.is_empty():
+                continue
+            lines += [
+                f"### {stratum}",
+                "",
+                "| 桶 | rs_subind 中位 | 股日數 | 評估數 | 命中率 | lift | 前瞻報酬中位% |",
+                "|---|---|---|---|---|---|---|",
+            ]
+            for r in sub.iter_rows(named=True):
+                lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
+                fm = f"{r['factor_median']:+.2f}" if r["factor_median"] is not None else "—"
+                fr = (
+                    f"{r['median_fwd_ret_pct']:+.1f}"
+                    if r["median_fwd_ret_pct"] is not None
+                    else "—"
+                )
+                lines.append(
+                    f"| {r['bucket']} | {fm} | {r['n_stock_days']} | {r['n_eval']} "
+                    f"| {r['hit_rate']:.1%} | {lift} | {fr} |"
+                )
+            lines.append("")
+
+    lift_sig = _laggard_lift_significance(buckets, z_sig) if not buckets.is_empty() else {}
+    lines += [
+        "## 2. 起漲 lift 顯著性（on-target：最落後桶 vs 最領先桶 hit-rate 兩比例 z）",
+        "",
+    ]
+    if not lift_sig:
+        lines.append("（無分位桶，無法檢定）")
+    else:
+        lines += ["| 層 | 桶 lift 單調遞減 | 最落後桶 lift | 最領先桶 lift | z | 落後顯著(z>界) |",
+                  "|---|---|---|---|---|---|"]
+        for stratum in ("全體", "貼低", "非貼低"):
+            lr = lift_sig.get(stratum)
+            if lr is None:
+                continue
+            zt = f"{lr['z']:+.2f}" if lr["z"] is not None else "—"
+            ll = f"{lr['lift_lo']:.2f}" if lr["lift_lo"] is not None else "—"
+            lh = f"{lr['lift_hi']:.2f}" if lr["lift_hi"] is not None else "—"
+            lines.append(
+                f"| {stratum} | {'✅' if lr['monotone_dec'] else '❌'} | {ll} | {lh} | {zt} "
+                f"| {'✅' if lr['sig'] else '❌'} |"
+            )
+        lines.append("")
+
+    lines += [
+        "## 3. 連續報酬診斷（Spearman ρ：rs_subind vs 前瞻報酬；非裁決閘、僅揭分流）",
+        "",
+    ]
+    if spearman.is_empty():
+        lines.append("（缺 rs_subind 欄或樣本不足）")
+    else:
+        sp_map = {r["stratum"]: r for r in spearman.iter_rows(named=True)}
+        lines += ["| 層 | Spearman ρ | z |", "|---|---|---|"]
+        for stratum in ("全體", "貼低", "非貼低"):
+            sr = sp_map.get(stratum)
+            if sr is None:
+                continue
+            rho = f"{sr['spearman_rho']:+.3f}" if sr["spearman_rho"] is not None else "—"
+            z = f"{sr['z']:+.2f}" if sr["z"] is not None else "—"
+            lines.append(f"| {stratum} | {rho} | {z} |")
+        lines += [
+            "",
+            "> ρ≈0／正：落後**不**預測較高中位報酬（領先股反而高）——與 §2『落後↑起漲機率』分流。"
+            "故 C-P2 須用 payoff/decay 四件套驗賺賠，不能只看 lift。",
+        ]
+
+    a = lift_sig.get("全體", {})
+    low = lift_sig.get("貼低", {})
+    high = lift_sig.get("非貼低", {})
+    h1 = bool(a.get("sig") and a.get("monotone_dec"))
+    h2 = bool(
+        low.get("sig")
+        and low.get("monotone_dec")
+        and high.get("sig")
+        and high.get("monotone_dec")
+    )
+    lines += ["", "## 4. 裁決（docs/16 H1 落後度起漲 lift 單調顯著・H2 控制位階後仍在）", ""]
+    if not lift_sig:
+        lines.append("- 無法檢定——標『資料累積後重校』。")
+    elif h1 and h2:
+        lines.append(
+            "- **①全體落後桶起漲 lift 顯著高且單調遞減 ✅ 且 ②貼低/非貼低兩層皆然 ✅** → "
+            "落後度**非僅位階代理**、控制位階後仍在＝獨立起漲-機率加分。**進 C-P2 測 S+ 內落後濾鏡"
+            " precision 增量＋穩健度（須驗賺賠，因領先股中位報酬反而高）**。"
+        )
+    elif h1 and not h2:
+        lines.append(
+            "- **①全體落後顯著 ✅ 但 ②控制位階後某層崩 ❌** → 落後多由位階驅動（§D『位階做工』）。"
+            "**否證 H2＝落後只是貼低代理**，個股訊號自足、不另立落後因子。"
+        )
+    else:
+        lines.append(
+            "- **①落後度起漲 lift 未單調顯著 ❌** → 落後與前瞻起漲無系統。**否證**（守 §D/B-P2）。"
+        )
+    lines += [
+        "",
+        "---",
+        "",
+        "> 誠實但書：(1) rs_subind 只在有次產業標記股日有值（無標排除）；lift 以全宇宙基率為分母；",
+        "> (2) 裁決用起漲 lift（§2）非前瞻報酬 Spearman（§3）——兩者分流，落後↑起漲機率≠↑中位報酬；",
+        "> (3) 1 年單一樣本、個股事件稀疏；研究軌裁決非買賣訊；每季資料累積後重校。",
         "",
     ]
     return "\n".join(lines)
