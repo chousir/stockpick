@@ -183,6 +183,12 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
     n_buckets: 5             # dom 分位桶數（D-E2 拍板：個股事件稀疏、避 tiny-N；ordinal rank 切）
     fwd_window: 20           # 連續單調性檢定的前瞻報酬窗（沿用冠軍 20d；亦＝dom 窗）
     z_sig: 1.96              # 顯著界：大樣本 z=ρ·√(n−1)，|z|>此≈雙尾 5%（ρ>0 且 z>此＝單調顯著）
+  interaction:               # ★ B-P3 個股×族群 2×2 交互（docs/15 T2；研究軌、不改生產判讀）
+    # 錨定 label 沿用 robustness.anchor_label（ambush）；G＝面板 rs_subind（個股相對次產業、非族群絕對）
+    s_flow_col: foreign_flow_20d_z  # 個股訊號 S 的資金 z 欄（冠軍；D-E3 固定冠軍 S）
+    s_z_threshold: 0.5       # S 高：資金 z > 此（＋下方 above_low 貼低條件＝冠軍 +low 變體）
+    g_threshold: 0.0         # G 高：rs_subind > 此（個股相對次產業領先；>0＝贏過自己族群）
+    z_sig: 1.96              # 族群確認加分顯著界（S+ 內 G高 vs G低 兩比例 z 檢定）
   labels:                    # episode 純價格定義（資金因子留訊號端，避免循環，使用者拍板）
     ambush:                  # L1 埋伏：貼低基期 + 前瞻續漲（抓起漲前）
       m_days: 60             # 低基期回看（交易日）

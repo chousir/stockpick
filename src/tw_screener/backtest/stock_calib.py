@@ -1382,3 +1382,213 @@ def render_dom_monotonicity_report(
         "",
     ]
     return "\n".join(lines)
+
+
+# ── B-P3：個股×族群 2×2 交互（T2；docs/15）────────────────────────────────────────
+# 測「資金進+貼低(S) × 個股在族群裡領先(G)」是否超加（S高G高 lift > 邊際相加），G＝面板
+# rs_subind（個股相對其次產業，非族群絕對強度，D-E4 拍板）。全研究軌、不改生產。
+_RS_SUBIND_RE = re.compile(r"^rs_subind_(\d+)d$")
+
+
+def _rs_subind_col(panel: pl.DataFrame) -> str | None:
+    """panel 的個股相對次產業強度欄名（B1 隨 rs_window 命名，如 rs_subind_20d）。"""
+    cols = [c for c in panel.columns if _RS_SUBIND_RE.match(c)]
+    return cols[0] if cols else None
+
+
+def _two_prop_z(h1: int, n1: int, h2: int, n2: int) -> float | None:
+    """兩比例差 z 檢定（pooled）：(p1−p2)/SE。任一 n=0 或零變異 → None。
+
+    用於「S+ 內 G高 vs G低 的起漲命中率差」是否顯著（族群確認加分的可測判準）。
+    """
+    if n1 == 0 or n2 == 0:
+        return None
+    p1, p2 = h1 / n1, h2 / n2
+    pool = (h1 + h2) / (n1 + n2)
+    se = (pool * (1 - pool) * (1 / n1 + 1 / n2)) ** 0.5
+    return (p1 - p2) / se if se > 0 else None
+
+
+def interaction_2x2_table(
+    panel: pl.DataFrame,
+    episodes: pl.DataFrame,
+    *,
+    s_flow_col: str = "foreign_flow_20d_z",
+    s_z_threshold: float = 0.5,
+    s_low_pct: float = 15.0,
+    g_threshold: float = 0.0,
+    lead_window: int = 15,
+    occupy_days: int = 15,
+    z_min_periods: int = 30,
+) -> pl.DataFrame:
+    """T2 個股×族群 2×2 交互（docs/15，D-E3 拍板＝2×2 列聯）：把股日依 S 高/低 × G 高/低
+    分四格，各算前瞻起漲 lift（同 dom 桶法：格內全股日當觸發 × 全宇宙基率），看是否超加。
+
+    S 高＝冠軍個股訊號（`s_flow_col` z > s_z_threshold 且 above_low ≤ s_low_pct＝資金進+貼低）；
+    G 高＝rs_subind > g_threshold（個股相對其次產業領先，D-E4；非族群絕對強度）。只取 S/G 輸入
+    皆非 null 的股日（缺次產業標記者排除，誠實）。回每格一列：cell/s_high/g_high/n_eval/hits
+    /hit_rate/lift。空輸入／缺 S 流向欄／缺 above_low／缺 rs_subind 回空表。
+    """
+    if panel.is_empty() or episodes.is_empty():
+        return pl.DataFrame()
+    low_col = _position_low_col(panel)
+    g_col = _rs_subind_col(panel)
+    if s_flow_col not in panel.columns or low_col is None or g_col is None:
+        return pl.DataFrame()
+    calendar = sorted(panel["date"].unique().to_list())
+    warmup_pos = min(z_min_periods, len(calendar) - 1)
+    base_rate = compute_base_rate(
+        episodes,
+        calendar,
+        panel["stock_id"].unique().to_list(),
+        lead_window,
+        occupy_days,
+        warmup_pos,
+        key_col="stock_id",
+    )
+    base = (
+        panel.select(["stock_id", "date", s_flow_col, low_col, g_col])
+        .drop_nulls()
+        .with_columns(
+            ((pl.col(s_flow_col) > s_z_threshold) & (pl.col(low_col) <= s_low_pct)).alias("_s"),
+            (pl.col(g_col) > g_threshold).alias("_g"),
+        )
+    )
+    rows: list[dict] = []
+    for s_high, g_high in ((True, True), (True, False), (False, True), (False, False)):
+        cell = base.filter((pl.col("_s") == s_high) & (pl.col("_g") == g_high))
+        stats = evaluate_triggers(
+            cell.select(["stock_id", "date"]),
+            episodes,
+            calendar,
+            lead_window,
+            occupy_days,
+            warmup_pos,
+            key_col="stock_id",
+            base_rate=base_rate,
+        )
+        rows.append(
+            {
+                "cell": f"S{'+' if s_high else '−'}G{'+' if g_high else '−'}",
+                "s_high": s_high,
+                "g_high": g_high,
+                "n_eval": stats["n_triggers"],
+                "hits": stats["hits"],
+                "hit_rate": stats["hit_rate"],
+                "lift": stats["lift"],
+            }
+        )
+    return pl.DataFrame(rows)
+
+
+def render_interaction_report(
+    table: pl.DataFrame,
+    anchor_label: str,
+    params: dict,
+    coverage: dict,
+    min_triggers: int = 8,
+    z_sig: float = 1.96,
+) -> str:
+    """個股×族群 2×2 交互報告 markdown（docs/15 B-P3 / T2）。並陳四格 lift、加法基準與超加性
+    差、S+ 內 G高 vs G低 兩比例 z 檢定，依裁決門檻給「族群確認進場加分 / 個股訊號已自足」。"""
+    lines = [
+        "# 個股×族群 2×2 交互 — 資金進+貼低(S) × 個股在族群裡領先(G)（docs/15 B-P3 / T2）",
+        "",
+        f"- 個股訊號 S 高：{params.get('s_flow_col', '?')} z > {params.get('s_z_threshold', '?')} "
+        f"且 above_low ≤ {params.get('s_low_pct', '?')}%（冠軍資金進+貼低）",
+        f"- 族群因子 G 高：rs_subind > {params.get('g_threshold', '?')}"
+        "（個股相對其次產業領先＝D-E4；**非族群絕對強度**）",
+        f"- 錨定起漲 label：{anchor_label}（lift 以全宇宙基率為分母；只取有次產業標記的股日）",
+        f"- 宇宙：{coverage.get('n_stocks', 0)} 檔・{coverage.get('n_trading_days', 0)} 交易日"
+        f"（{coverage.get('date_min', '?')} ~ {coverage.get('date_max', '?')}）",
+        "",
+        "## 1. 2×2 格（lift＝格內前瞻起漲機率 / 全宇宙基率）",
+        "",
+    ]
+    if table.is_empty():
+        lines += ["（缺 S 流向欄、above_low 或 rs_subind，無法分格）", ""]
+        return "\n".join(lines)
+
+    by_cell = {r["cell"]: r for r in table.iter_rows(named=True)}
+    lines += ["| 格 | 評估數 | 命中 | 命中率 | lift |", "|---|---|---|---|---|"]
+    for cell in ("S+G+", "S+G−", "S−G+", "S−G−"):
+        r = by_cell.get(cell)
+        if r is None:
+            continue
+        lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
+        lines.append(
+            f"| {cell} | {r['n_eval']} | {r['hits']} | {r['hit_rate']:.1%} | {lift} |"
+        )
+
+    def _lift(cell: str) -> float | None:
+        r = by_cell.get(cell)
+        return r["lift"] if r else None
+
+    pp, pn, np_, nn = _lift("S+G+"), _lift("S+G−"), _lift("S−G+"), _lift("S−G−")
+    lines += ["", "## 2. 超加性（S+G+ lift vs 邊際相加基準）", ""]
+    if None in (pp, pn, np_, nn):
+        lines.append("- 某格 lift 不可算（基率 0 或無觸發），無法評超加性。")
+        additive = interaction = None
+    else:
+        additive = pn + np_ - nn  # type: ignore[operator]
+        interaction = pp - additive  # type: ignore[operator]
+        lines += [
+            f"- 加法基準（S+G− + S−G+ − S−G−）＝{pn:.2f} + {np_:.2f} − {nn:.2f} = {additive:.2f}",
+            f"- 觀測 S+G+ lift＝{pp:.2f} → **交互差 {interaction:+.2f}**"
+            f"（>0＝超加；但 lift 非線性可加、邊際格高 lift 會汙染此基準，**以 §3 方向為準**）",
+        ]
+
+    # 族群確認加分的可測判準：S+ 內 G高 vs G低 的起漲命中率差是否顯著
+    sp, snp = by_cell.get("S+G+"), by_cell.get("S+G−")
+    lines += ["", "## 3. 族群確認加分（S+ 內 G高 vs G低 兩比例 z 檢定）", ""]
+    z = None
+    enough = bool(sp and snp and sp["n_eval"] >= min_triggers and snp["n_eval"] >= min_triggers)
+    if sp and snp:
+        z = _two_prop_z(sp["hits"], sp["n_eval"], snp["hits"], snp["n_eval"])
+        zt = f"{z:+.2f}" if z is not None else "—"
+        lines.append(
+            f"- S+G+ 命中率 {sp['hit_rate']:.1%}（{sp['hits']}/{sp['n_eval']}）"
+            f" vs S+G− 命中率 {snp['hit_rate']:.1%}（{snp['hits']}/{snp['n_eval']}）；z = {zt}"
+            f"・樣本{'足' if enough else '不足（tiny-N，守 §6）'}"
+        )
+
+    superadd = interaction is not None and interaction > 0
+    z_pos = z is not None and z > z_sig and enough  # G高顯著提升命中
+    z_neg = z is not None and z < -z_sig and enough  # G高顯著降低命中
+    lines += [
+        "",
+        "## 4. 裁決（§3 方向為主——§2 加法基準易受邊際格高 lift 算術汙染、非真綜效）",
+        "",
+    ]
+    if z_pos and superadd:
+        lines.append(
+            "- **超加性 ✅ 且 S+ 內族群領先顯著提升命中率 ✅（樣本足）** → "
+            "**建議設計「族群確認」進場加分**（資金進+貼低且個股在族群裡領先＝更高起漲機率；"
+            "上線前另開生產 milestone）。"
+        )
+    elif z_neg:
+        lines.append(
+            "- **S+ 內族群領先(G高)顯著「降低」起漲命中率（z<−界、樣本足）** → 否證強族群強個股；"
+            "**反向發現：個股『落後』其次產業(G低)才是補漲訊號**（重申 CP 補漲＝買未動的）。"
+            "→ 個股訊號已自足，**不加族群領先確認**（§2 超加是邊際格高 lift 的算術假象）。"
+        )
+    elif superadd:
+        lines.append(
+            "- **超加性 ✅ 但 S+ 內族群確認未達顯著（tiny-N 或方向不明）** → 交互方向對但力不足，"
+            "**記『暫不升級、資料累積後重校』**，不據單次差距加規則（守 §6）。"
+        )
+    else:
+        lines.append(
+            "- **無超加性且族群確認未顯著提升** → 族群領先未在資金訊號上額外加分，"
+            "**記個股訊號已自足、否證交互**（誠實的『沒贏』＝守 §D）。"
+        )
+    lines += [
+        "",
+        "---",
+        "",
+        "> 誠實但書：(1) G＝rs_subind 是個股相對其次產業、非族群絕對強度；只含有次產業標記的股日；",
+        "> (2) lift 以全宇宙基率為分母、前瞻起漲純價格定義（資金/族群因子全在訊號端，避免循環）；",
+        "> (3) 1 年單一樣本、交互格稀疏，tiny-N lift 差可能是雜訊；研究軌裁決非賣訊；每季重校。",
+        "",
+    ]
+    return "\n".join(lines)

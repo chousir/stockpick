@@ -1556,11 +1556,13 @@ def cp_calibrate_cmd(
         dom_monotonicity_spearman,
         dom_monotonicity_table,
         holdout_table,
+        interaction_2x2_table,
         liquidity_table,
         payoff_decay_table,
         render_cp_calibration_report,
         render_cross_window_lead,
         render_dom_monotonicity_report,
+        render_interaction_report,
         render_robustness_report,
         render_top_calibration_report,
         scan_stock_signals,
@@ -1600,6 +1602,11 @@ def cp_calibrate_cmd(
     mono_buckets = int(mono.get("n_buckets", 5))
     mono_fwd = int(mono.get("fwd_window", 20))
     mono_zsig = float(mono.get("z_sig", 1.96))
+    inter = cp.get("interaction", {})  # B-P3 個股×族群 2×2 交互（docs/15 T2）
+    inter_s_col = str(inter.get("s_flow_col", "foreign_flow_20d_z"))
+    inter_s_z = float(inter.get("s_z_threshold", 0.5))
+    inter_g_thr = float(inter.get("g_threshold", 0.0))
+    inter_zsig = float(inter.get("z_sig", 1.96))
     cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
 
     console.print(f"[bold]載入上市資料（{history_days} 交易日）...[/bold]")
@@ -2005,6 +2012,64 @@ def cp_calibrate_cmd(
             f"- **買方主導度單調性（docs/15 B-P2）**：錨定「{rb_anchor}」・全體 ρ {rho_txt}；"
             f"{verdict}（詳 calibration_{tag}_monotonicity.md）。"
         )
+
+    # ★ B-P3 個股×族群 2×2 交互（docs/15 T2）——資金進+貼低(S) × 個股在族群裡領先(G)，錨定同 label
+    if anchor_eps.is_empty():
+        summary.append(
+            f"- **個股×族群交互（docs/15 B-P3）**：錨定「{rb_anchor}」無事件，略過。"
+        )
+    else:
+        inter_tab = interaction_2x2_table(
+            panel,
+            anchor_eps,
+            s_flow_col=inter_s_col,
+            s_z_threshold=inter_s_z,
+            s_low_pct=position_low_pct,
+            g_threshold=inter_g_thr,
+            lead_window=lead_window,
+            occupy_days=anchor_occupy,
+            z_min_periods=z_min_periods,
+        )
+        inter_params = {
+            "s_flow_col": inter_s_col,
+            "s_z_threshold": inter_s_z,
+            "s_low_pct": position_low_pct,
+            "g_threshold": inter_g_thr,
+        }
+        inter_report = render_interaction_report(
+            inter_tab, rb_anchor, inter_params, coverage, min_triggers, inter_zsig
+        )
+        (out_dir / f"calibration_{tag}_interaction.md").write_text(inter_report, encoding="utf-8")
+        if not inter_tab.is_empty():
+            inter_tab.write_csv(out_dir / f"calibration_{tag}_interaction.csv")
+        if inter_tab.is_empty():
+            summary.append(
+                "- **個股×族群交互（docs/15 B-P3）**：缺 S 欄/above_low/rs_subind，無法分格。"
+            )
+        else:
+            bc = {r["cell"]: r for r in inter_tab.iter_rows(named=True)}
+            ssg, spg = bc.get("S+G+"), bc.get("S+G−")
+            if ssg and spg:
+                gp, gn = ssg["lift"], spg["lift"]
+                gp_s = f"{gp:.2f}" if gp is not None else "—"
+                gn_s = f"{gn:.2f}" if gn is not None else "—"
+                if gp is not None and gn is not None and gp < gn:
+                    dir_txt = "G高反降→否證交互、個股訊號自足"
+                elif gp is not None and gn is not None and gp > gn:
+                    dir_txt = "G高提升→可能族群確認加分"
+                else:
+                    dir_txt = "方向不明"
+                pp_txt = f"S+ 內 G高 lift {gp_s} vs G低 {gn_s}（{dir_txt}）"
+            else:
+                pp_txt = "某格 lift 不可算"
+            console.print(
+                f"\n[bold]個股×族群 2×2 交互[/bold]（錨定 {rb_anchor}）"
+                f" → calibration_{tag}_interaction.md"
+            )
+            summary.append(
+                f"- **個股×族群交互（docs/15 B-P3）**：錨定「{rb_anchor}」・{pp_txt}；"
+                f"裁決詳 calibration_{tag}_interaction.md。"
+            )
 
     # L3 裁決（docs/13 §3：lift≥門檻＋領先 >0＋需確認非單日 spike，否則不上線）
     summary += [

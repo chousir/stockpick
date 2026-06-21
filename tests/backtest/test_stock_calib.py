@@ -20,9 +20,11 @@ from tw_screener.backtest.stock_calib import (
     dom_monotonicity_spearman,
     dom_monotonicity_table,
     holdout_table,
+    interaction_2x2_table,
     liquidity_table,
     payoff_decay_table,
     render_dom_monotonicity_report,
+    render_interaction_report,
     render_robustness_report,
     scan_stock_signals,
     scan_top_signals,
@@ -592,3 +594,89 @@ def test_render_dom_monotonicity_report_has_sections_and_verdict():
     # 空輸入給誠實佔位、不爆
     empty_md = render_dom_monotonicity_report(pl.DataFrame(), pl.DataFrame(), "ambush", params, {})
     assert "無法分桶" in empty_md or "無法檢定" in empty_md
+
+
+# ── B-P3：個股×族群 2×2 交互（S 資金進+貼低 × G 個股相對次產業領先；docs/15 T2）──────
+
+
+def _interaction_fixture() -> tuple[pl.DataFrame, pl.DataFrame]:
+    """4 格各 3 檔：S 高＝flow_z>0.5 且 above_low≤15、G 高＝rs_subind>0。起漲事件只落 S+G+
+    （資金進+貼低且族群領先）→ S+G+ lift 遠高、超加性成立、S+ 內 G高 vs G低 命中率顯著。"""
+    days = [date(2025, 1, 1) + timedelta(days=i) for i in range(15)]
+    cells = [  # (前綴, flow_z, above_low, rs_subind, 有起漲)
+        ("PP", 2.0, 4.0, 5.0, True),    # S+G+
+        ("PN", 2.0, 4.0, -5.0, False),  # S+G−
+        ("NP", 0.0, 50.0, 5.0, False),  # S−G+
+        ("NN", 0.0, 50.0, -5.0, False),  # S−G−
+    ]
+    rows, ep_rows = [], []
+    for prefix, fz, low, rs, has_ep in cells:
+        for k in range(3):
+            sid = f"{prefix}{k}"
+            for d in days:
+                rows.append({"date": d, "stock_id": sid, "foreign_flow_20d_z": fz,
+                             "above_low_60d_pct": low, "rs_subind_20d": rs})
+            if has_ep:
+                ep_rows.append({"stock_id": sid, "start_date": days[7]})
+    panel = pl.DataFrame(rows)
+    episodes = pl.DataFrame(ep_rows, schema={"stock_id": pl.Utf8, "start_date": pl.Date})
+    return panel, episodes
+
+
+_INTER_KW = dict(lead_window=5, occupy_days=5, z_min_periods=2)
+
+
+def test_interaction_2x2_superadditive():
+    panel, episodes = _interaction_fixture()
+    tab = interaction_2x2_table(panel, episodes, **_INTER_KW)
+    assert not tab.is_empty()
+    assert set(tab["cell"].to_list()) == {"S+G+", "S+G−", "S−G+", "S−G−"}
+    by = {r["cell"]: r for r in tab.iter_rows(named=True)}
+    # 起漲集中 S+G+：其 lift 為四格最高、且明顯 > S+G−（族群領先在資金訊號上加分）
+    assert by["S+G+"]["lift"] is not None and by["S+G+"]["lift"] > 1.0
+    assert by["S+G+"]["lift"] > (by["S+G−"]["lift"] or 0.0)
+    assert by["S+G+"]["hit_rate"] > by["S+G−"]["hit_rate"]
+
+
+def test_interaction_empty_or_missing_cols_return_empty():
+    panel, episodes = _interaction_fixture()
+    assert interaction_2x2_table(pl.DataFrame(), episodes).is_empty()
+    assert interaction_2x2_table(panel, pl.DataFrame()).is_empty()
+    assert interaction_2x2_table(panel.drop("rs_subind_20d"), episodes).is_empty()
+    assert interaction_2x2_table(panel.drop("above_low_60d_pct"), episodes).is_empty()
+    assert interaction_2x2_table(panel.drop("foreign_flow_20d_z"), episodes).is_empty()
+
+
+_INTER_PARAMS = {"s_flow_col": "foreign_flow_20d_z", "s_z_threshold": 0.5, "s_low_pct": 15.0,
+                 "g_threshold": 0.0}
+
+
+def test_render_interaction_report_verdict_upgrade():
+    panel, episodes = _interaction_fixture()
+    tab = interaction_2x2_table(panel, episodes, **_INTER_KW)
+    md = render_interaction_report(tab, "ambush", _INTER_PARAMS, {}, min_triggers=8, z_sig=1.96)
+    assert "2×2" in md and "超加性" in md and "裁決" in md
+    assert "族群確認" in md  # 超加+G高顯著提升 → 建議設計族群確認加分
+    # 空輸入給誠實佔位、不爆
+    empty_md = render_interaction_report(pl.DataFrame(), "ambush", _INTER_PARAMS, {})
+    assert "無法分格" in empty_md
+
+
+def _interaction_g_harmful_fixture() -> tuple[pl.DataFrame, pl.DataFrame]:
+    """同 _interaction_fixture 但起漲事件落 S+G−（G低）→ S+ 內 G高顯著「降低」命中（z<−界）。"""
+    panel, _ = _interaction_fixture()
+    ep_rows = [{"stock_id": f"PN{k}", "start_date": date(2025, 1, 1) + timedelta(days=7)}
+               for k in range(3)]
+    episodes = pl.DataFrame(ep_rows, schema={"stock_id": pl.Utf8, "start_date": pl.Date})
+    return panel, episodes
+
+
+def test_render_interaction_g_high_harmful_verdict():
+    # 起漲集中 S+G−（個股落後族群）→ 裁決應否證交互、給反向發現「G低才是補漲訊號」
+    panel, episodes = _interaction_g_harmful_fixture()
+    tab = interaction_2x2_table(panel, episodes, **_INTER_KW)
+    by = {r["cell"]: r for r in tab.iter_rows(named=True)}
+    assert by["S+G−"]["hit_rate"] > by["S+G+"]["hit_rate"]  # G低命中 > G高
+    md = render_interaction_report(tab, "ambush", _INTER_PARAMS, {}, min_triggers=8, z_sig=1.96)
+    assert "否證" in md and "落後" in md  # 反向發現＝落後其族群才是補漲訊號
+    assert "建議設計" not in md  # 不得誤判為升級
