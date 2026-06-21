@@ -1110,3 +1110,275 @@ def render_robustness_report(
         "",
     ]
     return "\n".join(lines)
+
+
+# ── B-P2：買方主導度單調性（T1；docs/15）──────────────────────────────────────────
+# 把修法4 的 binary 土洋對作旗標連續化（dom∈[−1,1]），測「主導度是否與起漲單調」，
+# 並控制位階（above_low 分層）檢核是否「位階在做工」（守 §D 教訓）。全研究軌、不改生產。
+_DOM_RE = re.compile(r"^dom_(\d+)d$")
+
+
+def _dom_col(panel: pl.DataFrame) -> str | None:
+    """panel 的買方主導度欄名（B1 隨 long_window 命名，如 dom_20d）。"""
+    cols = [c for c in panel.columns if _DOM_RE.match(c)]
+    return cols[0] if cols else None
+
+
+def _spearman(df: pl.DataFrame, x_col: str, y_col: str) -> tuple[float | None, int, float | None]:
+    """Spearman 秩相關 ρ（＝秩的 Pearson）與有效樣本 n、大樣本常態近似 z＝ρ·√(n−1)。
+
+    兩欄皆非 null 才納；n<3 或某欄零變異（rank 相關未定義）→ (None, n, None)。
+    z 供顯著判讀（|z|>1.96 ≈ 雙尾 5%；ρ>0 且 z>界＝主導度越高、前瞻越強）。
+    """
+    sub = df.select([x_col, y_col]).drop_nulls()
+    n = sub.height
+    if n < 3:
+        return None, n, None
+    ranked = sub.select(pl.col(x_col).rank().alias("_rx"), pl.col(y_col).rank().alias("_ry"))
+    rho = _scalar(ranked.select(pl.corr("_rx", "_ry")).to_series()[0])
+    if rho is None:
+        return None, n, None
+    return rho, n, rho * ((n - 1) ** 0.5)
+
+
+def _dom_strata(
+    panel: pl.DataFrame, fwd_window: int, position_low_pct: float
+) -> tuple[str | None, str | None, list[tuple[str, pl.DataFrame]]]:
+    """組單調性分析的股日子集：全體＋（有位階欄時）貼低/非貼低（控制位階）。
+
+    回 (dom 欄, 前瞻報酬欄, [(層名, 含 dom/位階/前瞻報酬的 df)…])。缺 dom 欄或 close → 空清單。
+    """
+    dom_col = _dom_col(panel)
+    if dom_col is None or "close" not in panel.columns:
+        return None, None, []
+    low_col = _position_low_col(panel)
+    fwd_col = f"fwd_ret_{fwd_window}d"
+    cols = ["stock_id", "date", dom_col] + ([low_col] if low_col else [])
+    base = (
+        panel.select(cols)
+        .join(_forward_returns(panel, (fwd_window,)), on=["stock_id", "date"], how="left")
+        .filter(pl.col(dom_col).is_not_null())
+    )
+    strata: list[tuple[str, pl.DataFrame]] = [("全體", base)]
+    if low_col is not None:
+        strata.append(("貼低", base.filter(pl.col(low_col) <= position_low_pct)))
+        strata.append(("非貼低", base.filter(pl.col(low_col) > position_low_pct)))
+    return dom_col, fwd_col, strata
+
+
+def dom_monotonicity_table(
+    panel: pl.DataFrame,
+    episodes: pl.DataFrame,
+    *,
+    n_buckets: int = 5,
+    fwd_window: int = 20,
+    position_low_pct: float = 15.0,
+    lead_window: int = 15,
+    occupy_days: int = 15,
+    z_min_periods: int = 30,
+) -> pl.DataFrame:
+    """T1 買方主導度單調性（docs/15）：dom 分 n_buckets 分位，各桶算前瞻起漲 lift 與前瞻報酬
+    中位，分「全體／貼低／非貼低」三層（控制位階）看是否單調遞增。
+
+    桶以 ordinal rank 切（dom 在 ±1／0 多重結，qcut 因重邊失敗；rank 保證桶均衡）。lift 以
+    全宇宙基率為分母（與 scan_stock_signals 一致）：把每桶所有股日當「觸發」丟 evaluate_triggers
+    ——答「處在此 dom 桶的隨機一天，前瞻 lead_window 內起漲機率是基率的幾倍」。每層各自重分位
+    （控制位階＝在同位階內比 dom）。回每 (stratum, bucket) 一列。空輸入／缺 dom／缺 close 回空表。
+    """
+    if panel.is_empty() or episodes.is_empty():
+        return pl.DataFrame()
+    dom_col, fwd_col, strata = _dom_strata(panel, fwd_window, position_low_pct)
+    if not strata or dom_col is None or fwd_col is None:
+        return pl.DataFrame()
+    calendar = sorted(panel["date"].unique().to_list())
+    warmup_pos = min(z_min_periods, len(calendar) - 1)
+    base_rate = compute_base_rate(
+        episodes,
+        calendar,
+        panel["stock_id"].unique().to_list(),
+        lead_window,
+        occupy_days,
+        warmup_pos,
+        key_col="stock_id",
+    )
+    rows: list[dict] = []
+    for stratum, df in strata:
+        n = df.height
+        if n < n_buckets:
+            continue
+        bucketed = df.with_columns(
+            (
+                ((pl.col(dom_col).rank(method="ordinal").cast(pl.Int64) - 1) * n_buckets) // n + 1
+            ).alias("_b")
+        )
+        for b in range(1, n_buckets + 1):
+            cell = bucketed.filter(pl.col("_b") == b)
+            if cell.is_empty():
+                continue
+            stats = evaluate_triggers(
+                cell.select(["stock_id", "date"]),
+                episodes,
+                calendar,
+                lead_window,
+                occupy_days,
+                warmup_pos,
+                key_col="stock_id",
+                base_rate=base_rate,
+            )
+            rows.append(
+                {
+                    "stratum": stratum,
+                    "bucket": b,
+                    "n_stock_days": cell.height,
+                    "dom_min": _scalar(cell[dom_col].min()),
+                    "dom_median": _scalar(cell[dom_col].median()),
+                    "dom_max": _scalar(cell[dom_col].max()),
+                    "n_eval": stats["n_triggers"],
+                    "hit_rate": stats["hit_rate"],
+                    "lift": stats["lift"],
+                    "median_fwd_ret_pct": _scalar(cell[fwd_col].median()),
+                }
+            )
+    if not rows:
+        return pl.DataFrame()
+    return pl.DataFrame(rows)
+
+
+def dom_monotonicity_spearman(
+    panel: pl.DataFrame,
+    *,
+    fwd_window: int = 20,
+    position_low_pct: float = 15.0,
+    z_sig: float = 1.96,
+) -> pl.DataFrame:
+    """T1 連續單調性顯著檢定（docs/15 裁決門檻①②）：dom vs 前瞻報酬的 Spearman ρ，分三層。
+
+    桶表（dom_monotonicity_table）給可讀的遞增視覺；本表給大樣本顯著（n=分位桶數時 ρ 無檢定力，
+    故顯著建立在連續秩相關）。significant＝ρ>0 且 z>z_sig（主導度越高、前瞻越強＝方向對且顯著）。
+    回每層一列：stratum/n/spearman_rho/z/significant。缺 dom 欄／close 回空表。
+    """
+    _dom, fwd_col, strata = _dom_strata(panel, fwd_window, position_low_pct)
+    if not strata or fwd_col is None:
+        return pl.DataFrame()
+    dom_col = _dom_col(panel)
+    assert dom_col is not None  # strata 非空保證 dom 欄存在
+    rows: list[dict] = []
+    for name, df in strata:
+        rho, n, z = _spearman(df, dom_col, fwd_col)
+        rows.append(
+            {
+                "stratum": name,
+                "n": n,
+                "spearman_rho": rho,
+                "z": z,
+                "significant": rho is not None and z is not None and rho > 0 and z > z_sig,
+            }
+        )
+    return pl.DataFrame(rows)
+
+
+def render_dom_monotonicity_report(
+    buckets: pl.DataFrame,
+    spearman: pl.DataFrame,
+    anchor_label: str,
+    params: dict,
+    coverage: dict,
+) -> str:
+    """買方主導度單調性報告 markdown（docs/15 B-P2）。並陳分位桶 lift／報酬與三層 Spearman，
+    依裁決門檻①（全體單調顯著）②（控制位階後兩層仍單調顯著）給「升級分級因子 / 維持 binary 旗標、
+    記否證」的誠實裁決。空輸入回誠實佔位。"""
+    lines = [
+        "# 買方主導度單調性 — dom 分位 × 控制位階（docs/15 B-P2 / T1）",
+        "",
+        f"- 因子：dom_{params.get('dom_window', '?')}d＝(外資+投信長窗淨買)/(|外資|+|投信|)∈[−1,1]"
+        "（+1 雙邊同向買到底、−1 完全土洋對作、0 勢均）",
+        f"- 錨定起漲 label：{anchor_label}（CP 補漲主假說；lift 以全宇宙基率為分母）",
+        f"- 分位桶數 {params.get('n_buckets', '?')}（ordinal rank 切）・前瞻報酬窗 "
+        f"{params.get('fwd_window', '?')} 交易日・位階分層界 above_low ≤ "
+        f"{params.get('position_low_pct', '?')}%（貼低）",
+        f"- 宇宙：{coverage.get('n_stocks', 0)} 檔・{coverage.get('n_trading_days', 0)} 交易日"
+        f"（{coverage.get('date_min', '?')} ~ {coverage.get('date_max', '?')}）",
+        "",
+        "## 1. 分位桶（各桶＝同層內 dom 由低到高；lift＝桶內前瞻起漲機率 / 全宇宙基率）",
+        "",
+    ]
+    if buckets.is_empty():
+        lines.append("（缺 dom 欄、缺 close 或樣本不足分位，無法分桶）")
+    else:
+        for stratum in ("全體", "貼低", "非貼低"):
+            sub = buckets.filter(pl.col("stratum") == stratum).sort("bucket")
+            if sub.is_empty():
+                continue
+            lines += [
+                f"### {stratum}",
+                "",
+                "| 桶 | dom 中位 | 股日數 | 評估數 | 命中率 | lift | 前瞻報酬中位% |",
+                "|---|---|---|---|---|---|---|",
+            ]
+            for r in sub.iter_rows(named=True):
+                lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
+                dm = f"{r['dom_median']:+.2f}" if r["dom_median"] is not None else "—"
+                fr = (
+                    f"{r['median_fwd_ret_pct']:+.1f}"
+                    if r["median_fwd_ret_pct"] is not None
+                    else "—"
+                )
+                lines.append(
+                    f"| {r['bucket']} | {dm} | {r['n_stock_days']} | {r['n_eval']} "
+                    f"| {r['hit_rate']:.1%} | {lift} | {fr} |"
+                )
+            lines.append("")
+
+    lines += [
+        "## 2. 連續單調性（Spearman ρ：dom vs 前瞻報酬；z＝ρ·√(n−1) 大樣本近似）",
+        "",
+    ]
+    sig: dict[str, dict] = {}
+    if spearman.is_empty():
+        lines.append("（缺 dom 欄或樣本不足，無法檢定）")
+    else:
+        sig = {r["stratum"]: r for r in spearman.iter_rows(named=True)}
+        lines += ["| 層 | n | Spearman ρ | z | 顯著(ρ>0 且 z>界) |", "|---|---|---|---|---|"]
+        for stratum in ("全體", "貼低", "非貼低"):
+            sr = sig.get(stratum)
+            if sr is None:
+                continue
+            rho = f"{sr['spearman_rho']:+.3f}" if sr["spearman_rho"] is not None else "—"
+            z = f"{sr['z']:+.2f}" if sr["z"] is not None else "—"
+            lines.append(
+                f"| {stratum} | {sr['n']} | {rho} | {z} | {'✅' if sr['significant'] else '❌'} |"
+            )
+        lines.append("")
+
+    all_sig = bool(sig.get("全體", {}).get("significant", False))
+    low_sig = bool(sig.get("貼低", {}).get("significant", False))
+    high_sig = bool(sig.get("非貼低", {}).get("significant", False))
+    controlled = low_sig and high_sig
+    lines += ["## 3. 裁決（docs/15 T1 門檻①單調顯著 ②控制位階後仍單調）", ""]
+    if not sig:
+        lines.append("- 無法檢定——標『資料累積後重校』。")
+    elif all_sig and controlled:
+        lines.append(
+            "- **①全體單調顯著 ✅ 且 ②貼低/非貼低兩層皆仍單調顯著 ✅** → 主導度非僅『位階在做工』，"
+            "**建議升級為連續分級因子**（B3 進場可按 dom 分位加分；上線前另開生產 milestone）。"
+        )
+    elif all_sig and not controlled:
+        lines.append(
+            "- **①全體單調顯著 ✅ 但 ②控制位階後消失 ❌**（貼低或非貼低層不顯著）→ 全體單調多由"
+            "位階驅動（守 §D 反例）。**維持修法4 binary 土洋對作旗標、記否證**，不升級分級。"
+        )
+    else:
+        lines.append(
+            "- **①全體單調不顯著 ❌** → 主導度與前瞻起漲無系統性單調關係。"
+            "**維持修法4 binary 土洋對作旗標、記否證**（誠實的『沒贏』＝省下未來做白工，守 §D）。"
+        )
+    lines += [
+        "",
+        "---",
+        "",
+        "> 誠實但書：(1) lift 以全宇宙基率為分母、前瞻報酬用原始收盤不還原（與 episode 同口徑）；",
+        "> (2) 1 年單一樣本、個股事件稀疏，桶內 lift 差距可能是雜訊——顯著建立在連續秩相關非桶數；",
+        "> (3) 研究軌裁決，非買賣訊、非目標價；每季資料累積後重跑校準。",
+        "",
+    ]
+    return "\n".join(lines)

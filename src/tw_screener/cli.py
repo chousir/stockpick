@@ -1553,11 +1553,14 @@ def cp_calibrate_cmd(
         detect_breakout_episodes,
         detect_reversal_episodes,
         detect_top_episodes,
+        dom_monotonicity_spearman,
+        dom_monotonicity_table,
         holdout_table,
         liquidity_table,
         payoff_decay_table,
         render_cp_calibration_report,
         render_cross_window_lead,
+        render_dom_monotonicity_report,
         render_robustness_report,
         render_top_calibration_report,
         scan_stock_signals,
@@ -1592,6 +1595,11 @@ def cp_calibrate_cmd(
     rb_holdout_frac = float(rb.get("holdout_frac", 0.7))
     rb_adv_window = int(rb.get("adv_window", 20))
     rb_adv_min = float(rb.get("adv_min_amount", 100))
+    long_window = int(cp.get("long_window", 20))  # dom 錨窗（panel dom_{long_window}d）
+    mono = cp.get("monotonicity", {})  # B-P2 買方主導度單調性（docs/15 T1）
+    mono_buckets = int(mono.get("n_buckets", 5))
+    mono_fwd = int(mono.get("fwd_window", 20))
+    mono_zsig = float(mono.get("z_sig", 1.96))
     cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
 
     console.print(f"[bold]載入上市資料（{history_days} 交易日）...[/bold]")
@@ -1937,6 +1945,65 @@ def cp_calibrate_cmd(
         summary.append(
             f"- **穩健度（docs/15 B-P1）**：錨定「{rb_anchor}」前 {len(anchor_signals)} 名因子"
             f"・payoff/decay/holdout/流動性見 calibration_{tag}_robustness.md。"
+        )
+
+    # ★ B-P2 買方主導度單調性（docs/15 T1）——dom 分位 × 控制位階，錨定同 robustness label
+    if anchor_eps.is_empty():
+        summary.append(
+            f"- **買方主導度單調性（docs/15 B-P2）**：錨定「{rb_anchor}」無事件，略過。"
+        )
+    else:
+        dom_buckets = dom_monotonicity_table(
+            panel,
+            anchor_eps,
+            n_buckets=mono_buckets,
+            fwd_window=mono_fwd,
+            position_low_pct=position_low_pct,
+            lead_window=lead_window,
+            occupy_days=anchor_occupy,
+            z_min_periods=z_min_periods,
+        )
+        dom_spear = dom_monotonicity_spearman(
+            panel, fwd_window=mono_fwd, position_low_pct=position_low_pct, z_sig=mono_zsig
+        )
+        mono_params = {
+            "n_buckets": mono_buckets,
+            "fwd_window": mono_fwd,
+            "dom_window": long_window,
+            "position_low_pct": position_low_pct,
+            "z_sig": mono_zsig,
+        }
+        mono_report = render_dom_monotonicity_report(
+            dom_buckets, dom_spear, rb_anchor, mono_params, coverage
+        )
+        (out_dir / f"calibration_{tag}_monotonicity.md").write_text(mono_report, encoding="utf-8")
+        if not dom_buckets.is_empty():
+            dom_buckets.write_csv(out_dir / f"calibration_{tag}_monotonicity_buckets.csv")
+        if not dom_spear.is_empty():
+            dom_spear.write_csv(out_dir / f"calibration_{tag}_monotonicity_spearman.csv")
+        sp = {r["stratum"]: r for r in dom_spear.iter_rows(named=True)}
+        all_sig = bool(sp.get("全體", {}).get("significant", False))
+        ctrl = bool(sp.get("貼低", {}).get("significant", False)) and bool(
+            sp.get("非貼低", {}).get("significant", False)
+        )
+        verdict = (
+            "①單調顯著＋②控制位階後仍單調 → 建議升級分級因子"
+            if (all_sig and ctrl)
+            else (
+                "①單調顯著但②控制位階後消失（位階在做工）→ 維持 binary 旗標、記否證"
+                if all_sig
+                else "①單調不顯著 → 維持 binary 旗標、記否證"
+            )
+        )
+        rho_all = sp.get("全體", {}).get("spearman_rho")
+        rho_txt = f"{rho_all:+.3f}" if rho_all is not None else "—"
+        console.print(
+            f"\n[bold]買方主導度單調性[/bold]（錨定 {rb_anchor}・全體 ρ {rho_txt}）"
+            f" → calibration_{tag}_monotonicity.md"
+        )
+        summary.append(
+            f"- **買方主導度單調性（docs/15 B-P2）**：錨定「{rb_anchor}」・全體 ρ {rho_txt}；"
+            f"{verdict}（詳 calibration_{tag}_monotonicity.md）。"
         )
 
     # L3 裁決（docs/13 §3：lift≥門檻＋領先 >0＋需確認非單日 spike，否則不上線）

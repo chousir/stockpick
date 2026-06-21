@@ -114,6 +114,7 @@ def build_stock_panel(
     Returns:
         每 (date, stock_id) 一列，欄位：
         - 資金：{net,foreign,trust}_flow_{w}d（各窗滾動加總，股）＋同名 _z（個股自身 z）
+        - 買方主導度：dom_{long_window}d＝(外資+投信長窗淨買)/(|外資|+|投信|)∈[−1,1]（B-P2/T1）
         - 加速度：{flow,foreign,trust}_momentum_{w}d（各窗：本窗 − 前一同窗）＋
           unsuffixed {flow,foreign,trust}_momentum（＝短窗值，向後相容 cp_candidates）
         - 背離：flow_decel（短窗總淨流動能的環比變化，二階；<0＝買盤減速）、
@@ -178,6 +179,15 @@ def build_stock_panel(
     z_targets = [f"{_FLOW_PREFIX[c]}_{w}d" for c in _NET_COLS for w in wins]
     panel = panel.with_columns(
         [_rolling_z(t, z_window, z_min_periods).alias(f"{t}_z") for t in z_targets]
+    )
+
+    # 買方主導度 dom（B-P2／docs/15 T1，D-E1 拍板）：長窗外資＋投信淨買集中度，∈[−1,1]。
+    # +1＝雙邊同向買到底、−1＝完全土洋對作、0＝勢均；分母 0（雙邊皆無淨額）→ null（連續化
+    # 修法4 的 binary 土洋對作旗標，供 stock_calib 測「主導度是否與起漲單調」）。錨長窗（冠軍窗）。
+    _f, _t = pl.col(f"foreign_flow_{lw}d"), pl.col(f"trust_flow_{lw}d")
+    _denom = _f.abs() + _t.abs()
+    panel = panel.with_columns(
+        pl.when(_denom > 0).then((_f + _t) / _denom).otherwise(None).alias(f"dom_{lw}d")
     )
 
     # 背離因子①：flow_decel＝短窗總淨流動能的環比變化（二階差分）。
@@ -260,6 +270,7 @@ def build_stock_panel(
     # 收尾：丟暫存欄、固定欄序、依 (stock_id, date) 排序
     flow_cols = [f"{_FLOW_PREFIX[c]}_{w}d" for c in _NET_COLS for w in wins]
     z_cols = [f"{t}_z" for t in z_targets]
+    dom_cols = [f"dom_{lw}d"]
     mom_cols = [f"{_MOM_PREFIX[c]}_momentum_{w}d" for c in _NET_COLS for w in wins] + [
         f"{_MOM_PREFIX[c]}_momentum" for c in _NET_COLS
     ]
@@ -274,6 +285,7 @@ def build_stock_panel(
         ["date", "stock_id", "close", "volume"]
         + flow_cols
         + z_cols
+        + dom_cols
         + mom_cols
         + div_cols
         + pos_cols

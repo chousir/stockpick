@@ -17,9 +17,12 @@ from tw_screener.backtest.stock_calib import (
     detect_breakout_episodes,
     detect_reversal_episodes,
     detect_top_episodes,
+    dom_monotonicity_spearman,
+    dom_monotonicity_table,
     holdout_table,
     liquidity_table,
     payoff_decay_table,
+    render_dom_monotonicity_report,
     render_robustness_report,
     scan_stock_signals,
     scan_top_signals,
@@ -503,3 +506,89 @@ def test_render_robustness_report_has_sections_and_placeholder():
     assert "trust_flow_20d_z (z>1.0)" in md
     # 空表段落給誠實佔位、不爆
     assert "無法做樣本外切分" in md
+
+
+# ── B-P2：買方主導度單調性（dom 分位 × 控制位階；docs/15 T1）─────────────────────
+
+
+def _mono_fixture() -> tuple[pl.DataFrame, pl.DataFrame]:
+    """5 檔 dom 由低到高（每檔 dom 定值＝一個分位桶），前瞻報酬隨 dom 單調遞增；
+    起漲事件落在高 dom 兩檔（S3/S4）→ 高桶 lift 高、低桶 0。位階交錯使兩層各含 dom 範圍。"""
+    days = [date(2025, 1, 1) + timedelta(days=i) for i in range(15)]
+    specs = [  # (sid, dom, 每日成長率 g, above_low)
+        ("S0", -0.8, -0.02, 4.0),
+        ("S1", -0.4, -0.01, 50.0),
+        ("S2", 0.0, 0.00, 4.0),
+        ("S3", 0.4, 0.01, 50.0),
+        ("S4", 0.8, 0.02, 4.0),
+    ]
+    rows = []
+    for sid, dom, g, low in specs:
+        for i, d in enumerate(days):
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "close": 100.0 * (1 + g) ** i,
+                    "dom_20d": dom,
+                    "above_low_60d_pct": low,
+                }
+            )
+    panel = pl.DataFrame(rows)
+    episodes = pl.DataFrame(
+        {"stock_id": ["S3", "S4"], "start_date": [days[7], days[7]]},
+        schema={"stock_id": pl.Utf8, "start_date": pl.Date},
+    )
+    return panel, episodes
+
+
+_MONO_KW = dict(n_buckets=5, fwd_window=5, lead_window=5, occupy_days=5, z_min_periods=2)
+
+
+def test_dom_monotonicity_table_lift_rises_with_bucket():
+    panel, episodes = _mono_fixture()
+    tab = dom_monotonicity_table(panel, episodes, **_MONO_KW)
+    assert not tab.is_empty()
+    assert {"stratum", "bucket", "lift", "median_fwd_ret_pct", "n_stock_days"} <= set(tab.columns)
+    # 三層皆有（全體＋控制位階兩層）
+    assert {"全體", "貼低", "非貼低"} == set(tab["stratum"].unique().to_list())
+    overall = tab.filter(pl.col("stratum") == "全體").sort("bucket")
+    assert overall.height == 5
+    lifts = [r if r is not None else 0.0 for r in overall["lift"].to_list()]
+    assert lifts[-1] > lifts[0]  # 高 dom 桶 lift > 低 dom 桶（起漲集中高 dom）
+    # 前瞻報酬中位亦隨桶遞增（dom 越高、續漲越強）
+    frs = overall["median_fwd_ret_pct"].to_list()
+    assert frs[-1] > frs[0]
+
+
+def test_dom_spearman_positive_and_significant():
+    panel, _ = _mono_fixture()
+    sp = dom_monotonicity_spearman(panel, fwd_window=5, z_sig=1.96)
+    assert not sp.is_empty()
+    assert {"stratum", "spearman_rho", "z", "significant"} <= set(sp.columns)
+    allrow = sp.filter(pl.col("stratum") == "全體").row(0, named=True)
+    assert allrow["spearman_rho"] is not None and allrow["spearman_rho"] > 0
+    assert allrow["significant"] is True  # dom 越高、前瞻報酬越強，方向對且大樣本顯著
+
+
+def test_dom_monotonicity_empty_or_missing_cols_return_empty():
+    panel, episodes = _mono_fixture()
+    assert dom_monotonicity_table(pl.DataFrame(), episodes).is_empty()
+    assert dom_monotonicity_table(panel, pl.DataFrame()).is_empty()
+    assert dom_monotonicity_table(panel.drop("dom_20d"), episodes).is_empty()
+    assert dom_monotonicity_table(panel.drop("close"), episodes).is_empty()
+    assert dom_monotonicity_spearman(panel.drop("dom_20d")).is_empty()
+
+
+def test_render_dom_monotonicity_report_has_sections_and_verdict():
+    panel, episodes = _mono_fixture()
+    tab = dom_monotonicity_table(panel, episodes, **_MONO_KW)
+    sp = dom_monotonicity_spearman(panel, fwd_window=5)
+    params = {"n_buckets": 5, "fwd_window": 5, "dom_window": 20, "position_low_pct": 15.0,
+              "z_sig": 1.96}
+    md = render_dom_monotonicity_report(tab, sp, "ambush", params, {})
+    assert "分位桶" in md and "Spearman" in md and "裁決" in md
+    assert "建議升級" in md or "維持" in md  # 必出一種裁決
+    # 空輸入給誠實佔位、不爆
+    empty_md = render_dom_monotonicity_report(pl.DataFrame(), pl.DataFrame(), "ambush", params, {})
+    assert "無法分桶" in empty_md or "無法檢定" in empty_md

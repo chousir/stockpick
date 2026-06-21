@@ -523,5 +523,11 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - 驗收：`make test` 新增 6 測全綠（payoff/decay/holdout/流動性/render/空輸入）、ruff 乾淨、mypy 零淨增（cli.py 11 既有 sector_calibrate 錯不動）。**研究軌、不回溯生產讀法。**
 - 註：`tests/screener/goodinfo/test_fetcher.py` 2 個快取新鮮度測試在 main HEAD 即失敗（日期/mtime 敏感、與本milestone無關）。
 
-### B-P2 買方主導度單調性（T1）｜待辦
+### B-P2 買方主導度單調性（T1）｜✅ 完成（裁決＝否證，維持 binary 旗標）
+- `stock_panel.py` 純加 `dom_{long_window}d`＝(外資+投信長窗淨買)/(|外資|+|投信|)∈[−1,1]（D-E1 拍板「淨買集中度」；分母 0→null；連續化修法4 binary 土洋對作旗標）。既有欄零變更。
+- `stock_calib.py` 加 `dom_monotonicity_table`（dom 分 5 分位＝D-E2 拍板，ordinal rank 切以避 ±1/0 重邊；各桶以「桶內全股日當觸發 × 全宇宙基率」算前瞻起漲 lift＋前瞻報酬中位；分全體/貼低/非貼低三層＝控制位階）、`dom_monotonicity_spearman`（dom vs 前瞻報酬 Spearman ρ，z=ρ·√(n−1) 大樣本近似顯著）、`render_dom_monotonicity_report`，helper `_dom_col`/`_spearman`/`_dom_strata`。
+- `config/settings.yaml` 加 `cp_value.monotonicity`（n_buckets=5・fwd_window=20・z_sig=1.96；錨定 label 沿用 robustness.anchor_label=ambush・dom 窗＝面板 long_window）。`cli.py cp calibrate` 末段產 `calibration_*_monotonicity.md`＋2 CSV。
+- **實跑（1375 檔×250 日）裁決＝否證**：①全體 Spearman ρ **+0.006**（z=2.94「顯著」純為 n=24萬 大樣本假象、效應量≈0；桶 lift 1.26→1.40→1.39→1.17→1.29 **峰在桶2、非單調**）；②控制位階後**貼低層 ρ=−0.013（z=−5.66，顯著為負）**、非貼低 ρ=+0.027——**控制位階即崩**（守 §D「位階在做工」反例）。→ **dom 連續分級無加值，維持修法4 binary 土洋對作旗標、記否證**（不升級分級因子）。
+- 驗收：`make test` 新增 6 測全綠（panel dom 值/null＋table 桶遞增/spearman 顯著/空輸入/render）、ruff 乾淨、mypy 零淨增（58→58；既有 sector_calibrate 等錯不動）。**研究軌、不碰生產 `cp_candidates.py`。** goodinfo fetcher 2 測仍為 main HEAD 既有失敗（與本milestone無關）。
+- 啟示：土洋「對作 vs 同向」的**程度**對前瞻起漲無系統性單調力——修法4 當初只做 binary 排雷旗標是對的，不需連續化。每季資料累積後可重校。
 ### B-P3 個股×族群 2×2 交互（T2）｜待辦

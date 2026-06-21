@@ -178,6 +178,11 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
     holdout_frac: 0.7        # 時間樣本外切分：前段占比（前段選因子、後段驗 lift 撐不撐）
     adv_window: 20           # 流動性硬化：ADV（成交額）回看窗（交易日）
     adv_min_amount: 100      # 流動性門檻（百萬元）；觸發日 ADV < 此值＝剔除（大資金進不去）
+  monotonicity:              # ★ B-P2 買方主導度單調性（docs/15 T1；研究軌、不改生產判讀）
+    # 錨定起漲 label 沿用 robustness.anchor_label（同 ambush，不另立）；dom 窗＝面板 long_window
+    n_buckets: 5             # dom 分位桶數（D-E2 拍板：個股事件稀疏、避 tiny-N；ordinal rank 切）
+    fwd_window: 20           # 連續單調性檢定的前瞻報酬窗（沿用冠軍 20d；亦＝dom 窗）
+    z_sig: 1.96              # 顯著界：大樣本 z=ρ·√(n−1)，|z|>此≈雙尾 5%（ρ>0 且 z>此＝單調顯著）
   labels:                    # episode 純價格定義（資金因子留訊號端，避免循環，使用者拍板）
     ambush:                  # L1 埋伏：貼低基期 + 前瞻續漲（抓起漲前）
       m_days: 60             # 低基期回看（交易日）
