@@ -476,3 +476,27 @@ claude
 
 ### 收官（2026-06-19）
 6a+6b 全實作：`grouping.py` 加 `foreign_net_5d/10d`（外資近端窗）＋`ret_10d`（近10日報酬・除息還原）；`group_report.py` 三 CSV（candidates/holdings/watchlist 共用 `_build_enriched_rows`）加 `foreign_net_5d_lots`/`foreign_net_10d_lots`/`ret_10d_pct`＋併入 `_CANONICAL_REUSE_FIELDS`；`docs/11` 補 6a「20日 vs 近5日背離禁寫雙強買、揭露非扣分」＋6b「回踩拉回分健康(ret_10d≥−3%)/下跌反彈(<−5%或外資近端大賣→轉弱)」規則。**真實快取驗證（跑實際 group_stocks）**：緯創外資近5日 **−57,862**、ret_10d **−8.2%**（下跌反彈現形）；晶豪科三窗一致買、ret_10d −3.1%（健康）。`make test` **457 綠**（+2）、ruff/mypy 零淨增。**注意：W25+ 報告須重跑才反映新欄/讀法。**
+
+---
+
+## M-修法7：進場階梯 × 組合層修法（報告層・規劃書見 docs/14）
+
+> 承外部 Part A 批評（2026-06-21 對帳 reports/2026-W25/pick.md＋docs/11）：進場階梯**最大注 40% 壓在最深的 T2≈MA60、停損價＝T2 進場價、低價股三階假精度、T3 懸空待手動確認**，組合層**只有單檔⅓上限、無因子簇上限**（3 銀行＋建材＋產險全押 PCE 利率事件），核心 vs 機會**籌碼主導標準不一**。全在 `docs/11` prompt（非程式寫死）＋少數計算欄。藍圖＝[docs/14](14-entry-ladder-portfolio-fix.md)；D1–D5 設計決策待使用者拍板。
+
+### 7a 計算欄位先行（code・純加法，比照修法6）
+- `momentum.py`：加 `compute_rolling_extrema`（每檔各視窗「最近 N 日收盤」min/max；原始收盤、不除息還原、與 close/MA 絕對價同口徑）。
+- `grouping.py`：`_RANGE_WINDOWS=(20,60)` 模組常數；ret_10d 區塊後加 `low_20d`/`high_20d`/`low_60d`/`high_60d`（positional Series 對齊 stock_ids）。
+- `group_report.py _build_enriched_rows`：四欄擺 `ma60_price` 旁、併入 `_CANONICAL_REUSE_FIELDS`（candidates/holdings/watchlist 一致）。
+- [x] candidates_enriched.csv 出現四欄；既有欄逐值不變（純加法）；holdings/watchlist 同步。
+- [x] 單元驗證：極值落在前 5 筆（60 日窗內、20 日窗外）→ low_60d=50/high_60d=200 vs low_20d=100/high_20d=180（窗區隔正確、low_60d≤low_20d≤high_20d≤high_60d）。
+- [x] `make test` 綠（**462**，+5）、ruff/mypy 零淨增（餘 2 既有 grouping CJK E501、2 既有 float→int）。
+- [ ] W26+ 重跑實測：抽查數檔 low/high 對得起日線（報告不回溯，須重跑才生效）。
+
+### 7b 進場階梯重構（docs/11 prompt・吃 D1/D2/D3＋7a 欄位）｜待做
+- 配比前重後輕（D1）／停損與最深批脫鉤·T3 用 low_60d（D2）／MA20≈MA60 退化兩階（D3）／「等回 MA20」過深改買強勢階梯（D3/D5）。
+
+### 7c 組合層因子簇上限（docs/11 prompt・吃 D4）｜待做
+- 任務 2 事件閘門段加「因子簇/族群上限」（利率敏感簇合計部位上限），門檻進 settings。
+
+### 7d 分級一致性（docs/11 prompt・吃 D5）｜待做
+- 核心 vs 機會籌碼主導標準寫一致（投信主導進核心須明標但書）。

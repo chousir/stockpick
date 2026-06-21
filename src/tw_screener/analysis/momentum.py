@@ -52,6 +52,46 @@ def compute_n_day_return(
     return result
 
 
+def compute_rolling_extrema(
+    stock_ids: list[str],
+    price_history: pl.DataFrame,
+    windows: tuple[int, ...] = (20, 60),
+) -> dict[str, dict[int, tuple[float, float]]]:
+    """回傳每檔股票各視窗「最近 window 個交易日」收盤的 (最低, 最高)。
+
+    供進場階梯的 T3 結構價（前波低）與回檔深度檢核（距區間低/高）使用。
+    用原始收盤、不做除息還原——進場/停損是實際成交價，與 close/MA20/MA60 絕對價同口徑
+    （近端除息另由 ex_div_cash 旗標揭露）。
+
+    Args:
+        stock_ids: 要計算的股票代號清單。
+        price_history: 必須含 stock_id / date / close 欄。
+        windows: 視窗交易日數集合（預設近 20 與 60 日）。
+
+    Returns:
+        {stock_id: {window: (low, high)}}；無可用收盤的股不出現。
+        各視窗取最近 window 個交易日的收盤 min/max（不足則用可得全部）。
+    """
+    if price_history.is_empty():
+        return {}
+    required = {"stock_id", "date", "close"}
+    if not required.issubset(set(price_history.columns)):
+        return {}
+
+    result: dict[str, dict[int, tuple[float, float]]] = {}
+    ph_sorted = price_history.sort("date")
+    for stock_id in stock_ids:
+        closes = (
+            ph_sorted.filter(pl.col("stock_id") == stock_id)["close"].drop_nulls().to_list()
+        )
+        if not closes:
+            continue
+        result[stock_id] = {
+            w: (float(min(closes[-w:])), float(max(closes[-w:]))) for w in windows
+        }
+    return result
+
+
 def compute_dividend_addback(
     stock_ids: list[str],
     price_history: pl.DataFrame,

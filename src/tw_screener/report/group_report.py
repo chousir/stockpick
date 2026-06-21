@@ -704,6 +704,11 @@ def _build_enriched_rows(
         close = _num(close_map.get(sid), 2)
         ma20_price = _lvl(close, m20)
         ma60_price = _lvl(close, m60)
+        # M-修法7（7a）進場區間絕對價：T3 結構價（前波低 low_60d）＋回檔深度檢核（距區間低/高）
+        low_20d = _num(r.get("low_20d"), 2)
+        high_20d = _num(r.get("high_20d"), 2)
+        low_60d = _num(r.get("low_60d"), 2)
+        high_60d = _num(r.get("high_60d"), 2)
         ryoy = _num(rev_yoy_map.get(sid), 1) if rev_yoy_map else None
         fund = fundamentals_map.get(sid) if fundamentals_map else None
         gross_margin = _num(fund.get("gross_margin_pct"), 1) if fund else None
@@ -796,6 +801,10 @@ def _build_enriched_rows(
                 "ma60_dist_pct": m60,
                 "ma20_price": ma20_price,
                 "ma60_price": ma60_price,
+                "low_20d": low_20d,    # 近20日收盤低（區間下緣）：回檔深度檢核
+                "high_20d": high_20d,  # 近20日收盤高（區間上緣）
+                "low_60d": low_60d,    # 近60日收盤低：進場階梯 T3 結構價（前波低）
+                "high_60d": high_60d,  # 近60日收盤高
                 "amount_million": amt,
                 "pe_ratio": pe,
                 "pb_ratio": pb,
@@ -863,6 +872,10 @@ _CANONICAL_REUSE_FIELDS = (
     "ma60_dist_pct",
     "ma20_price",
     "ma60_price",
+    "low_20d",
+    "high_20d",
+    "low_60d",
+    "high_60d",
     "amount_million",
     "pe_ratio",
     "pb_ratio",

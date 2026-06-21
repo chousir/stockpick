@@ -9,6 +9,7 @@ from tw_screener.analysis.momentum import (
     aggregate_group_momentum,
     compute_dividend_addback,
     compute_n_day_return,
+    compute_rolling_extrema,
 )
 
 
@@ -101,6 +102,30 @@ def test_zero_back_close_skipped():
     """過去某天收盤為 0 → 不能算（分母 0）。"""
     history = _make_history("2330", [0.0, 0.0, 0.0, 0.0, 0.0, 110.0])
     assert "2330" not in compute_n_day_return(["2330"], history, n=5)
+
+
+# ─── compute_rolling_extrema（M-修法7 7a）─────────────────────────────────────
+
+
+def test_rolling_extrema_windows():
+    """各視窗取最近 N 個交易日收盤的 (min, max)。"""
+    history = _make_history("2330", [100.0, 90.0, 120.0, 95.0, 105.0, 98.0, 130.0, 110.0])
+    result = compute_rolling_extrema(["2330"], history, windows=(3, 5))
+    assert result["2330"][3] == (98.0, 130.0)  # 最近 3 日 [98, 130, 110]
+    assert result["2330"][5] == (95.0, 130.0)  # 最近 5 日 [95, 105, 98, 130, 110]
+
+
+def test_rolling_extrema_short_history_uses_available():
+    """可用天數 < 視窗 → 用可得全部，不報錯。"""
+    history = _make_history("2330", [100.0, 120.0])
+    result = compute_rolling_extrema(["2330"], history, windows=(60,))
+    assert result["2330"][60] == (100.0, 120.0)
+
+
+def test_rolling_extrema_empty_and_missing_cols():
+    assert compute_rolling_extrema(["2330"], pl.DataFrame()) == {}
+    df = pl.DataFrame({"stock_id": ["2330"], "close": [100.0]})  # 缺 date
+    assert compute_rolling_extrema(["2330"], df) == {}
 
 
 # ─── compute_dividend_addback ─────────────────────────────────────────────────
