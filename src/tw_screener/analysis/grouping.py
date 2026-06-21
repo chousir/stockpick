@@ -17,7 +17,11 @@ import math
 import polars as pl
 from loguru import logger
 
-from tw_screener.analysis.momentum import compute_dividend_addback, compute_n_day_return
+from tw_screener.analysis.momentum import (
+    compute_dividend_addback,
+    compute_n_day_return,
+    compute_rolling_extrema,
+)
 
 _DEFAULT_WEIGHTS: dict[str, float] = {
     "momentum": 0.50,
@@ -31,6 +35,9 @@ _MOMENTUM_DAYS = 5
 _TREND_DAYS = 10
 # 修法6 法人近端窗：外資近 5/10 日累計，揭露 20 日累計蓋住的近端轉向（純揭露、非 gate）。
 _FOREIGN_NEAR_WINDOWS = (5, 10)
+# M-修法7（7a）進場區間視窗：近 20/60 日收盤 min/max（絕對價），供進場階梯 T3 結構價（前波低）
+# 與回檔深度檢核（距區間低/高）；比照 _MOMENTUM_DAYS/_TREND_DAYS 為模組常數。
+_RANGE_WINDOWS = (20, 60)
 
 # 策略 G（成長拉回）的「拉回 setup」判定門檻；可由 settings.yaml 的 g_pullback 覆蓋。
 # 三者皆硬門檻：季線上揚 + 乖離帶內 + 量縮。
@@ -310,6 +317,17 @@ def group_stocks(
                 "ret_10d"
             )
         )
+
+    # M-修法7（7a）進場區間：近 20/60 日收盤 min/max（絕對價）。
+    # 供 T3 結構價（前波低 low_60d）與回檔深度檢核；不除息還原、與 close/MA 同口徑。
+    # stock_df 與 stock_ids 同序，可用 positional Series 對齊。
+    extrema = compute_rolling_extrema(stock_ids, price_history, windows=_RANGE_WINDOWS)
+    extrema_series: list[pl.Series] = []
+    for w in _RANGE_WINDOWS:
+        pairs = [extrema.get(sid, {}).get(w) or (None, None) for sid in stock_ids]
+        extrema_series.append(pl.Series(f"low_{w}d", [p[0] for p in pairs], dtype=pl.Float64))
+        extrema_series.append(pl.Series(f"high_{w}d", [p[1] for p in pairs], dtype=pl.Float64))
+    stock_df = stock_df.with_columns(extrema_series)
 
     # 法人淨買超：近 N 日合計 → inst_net（三大法人總和）/ foreign_net（外資）/
     # trust_net（投信）。只算一次，下游共用。自營＝inst_net−foreign_net−trust_net 可推得，不另存。

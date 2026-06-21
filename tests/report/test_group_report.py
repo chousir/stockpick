@@ -106,6 +106,32 @@ def test_candidates_csv_foreign_multiwindow_columns(tmp_path):
     assert row["ret_10d_pct"] < 0                # 近 10 日下跌
 
 
+def test_candidates_csv_range_extrema_columns(tmp_path):
+    """M-修法7（7a）：candidates CSV 應有 low/high_20d/60d 四欄（近 20/60 日收盤 min/max）。"""
+    n = 25
+    dates = [date(2026, 5, 1 + i) for i in range(n)]
+    head = [50.0, 200.0, 60.0, 190.0, 70.0]  # 全域低 50 / 高 200（僅落在 60 日窗）
+    tail = [120.0, 130.0, 110.0, 140.0, 150.0, 100.0, 160.0, 170.0, 115.0, 125.0,
+            135.0, 145.0, 155.0, 165.0, 175.0, 180.0, 118.0, 128.0, 138.0, 148.0]
+    closes = head + tail
+    history = pl.DataFrame({"stock_id": ["2330"] * n, "date": dates, "close": closes})
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    _, members = group_stocks(
+        results, history, pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), results, out)
+    df = pl.read_csv(out)
+    for col in ("low_20d", "high_20d", "low_60d", "high_60d"):
+        assert col in df.columns
+    row = {str(r["stock_id"]): r for r in df.iter_rows(named=True)}["2330"]
+    assert row["low_20d"] == 100.0
+    assert row["high_20d"] == 180.0
+    assert row["low_60d"] == 50.0
+    assert row["high_60d"] == 200.0
+
+
 def test_strong_leader_vs_overheated_flag(tmp_path):
     """距季線 >40%：外資投信同向買 + 營收 YoY 達標 → 『強勢領頭』（非過熱）；
     否則（缺 YoY / 法人非同向）→ 『過熱』。修法1：過熱由硬否決改為需確認的脈絡。"""

@@ -393,6 +393,36 @@ def test_group_stocks_foreign_multiwindow_and_ret10():
     assert row["ret_10d"] == pytest.approx((162.0 - 176.0) / 176.0 * 100, abs=0.1)
 
 
+def test_group_stocks_range_extrema_windows():
+    """M-修法7（7a）：low/high_20d/60d 為近 20/60 日收盤 min/max（絕對價）。
+    極值落在最前 5 筆（在 60 日窗內、20 日窗外）→ 兩窗應給不同的低/高。"""
+    from datetime import date
+
+    n = 25
+    dates = [date(2026, 5, 1 + i) for i in range(n)]
+    head = [50.0, 200.0, 60.0, 190.0, 70.0]  # 全域低 50 / 高 200（僅落在 60 日窗）
+    tail = [120.0, 130.0, 110.0, 140.0, 150.0, 100.0, 160.0, 170.0, 115.0, 125.0,
+            135.0, 145.0, 155.0, 165.0, 175.0, 180.0, 118.0, 128.0, 138.0, 148.0]
+    closes = head + tail  # len 25；近 20 日 = tail（低 100 / 高 180）
+    history = pl.DataFrame({"stock_id": ["2330"] * n, "date": dates, "close": closes})
+    industry = pl.DataFrame(
+        {
+            "stock_id": ["2330", "2454"],
+            "industry_code": ["24", "24"],
+            "industry_name": ["半導體業", "半導體業"],
+        }
+    )
+    results = {"a_breakout": _make_screener_df(["2330", "2454"], [0.0, 0.0], "a_breakout")}
+    _, members = group_stocks(
+        results, history, pl.DataFrame(), industry_df=industry, min_group_size=2,
+    )
+    row = members.filter(pl.col("stock_id") == "2330").to_dicts()[0]
+    assert row["low_20d"] == pytest.approx(100.0)
+    assert row["high_20d"] == pytest.approx(180.0)
+    assert row["low_60d"] == pytest.approx(50.0)
+    assert row["high_60d"] == pytest.approx(200.0)
+
+
 # ─── _compute_rs_from_history（back-compat wrapper）─────────────────────────
 
 
