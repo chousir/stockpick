@@ -753,3 +753,360 @@ def render_top_calibration_report(
         "",
     ]
     return "\n".join(lines)
+
+
+# ── B-P1：穩健度四件套（payoff／decay／holdout／流動性硬化；docs/15 T3）──────────
+# 全研究軌、純加法：度量「既有勝出因子」的賺賠/衰減/樣本外/可交易性，不改任何生產判讀。
+
+
+def _scalar(x: object) -> float | None:
+    """Polars Series 聚合純量 → float|None（polars stub 回寬 union，集中轉型供 Python 端運算）。"""
+    return None if x is None else float(x)  # type: ignore[arg-type]
+
+
+def _select_jobs(
+    panel: pl.DataFrame,
+    signals: set[str] | None,
+    z_thresholds: tuple[float, ...],
+    volume_thresholds: tuple[float, ...],
+    position_low_pct: float,
+    early_gate: dict | None,
+) -> list[tuple[str, list[pl.Expr]]]:
+    """_build_signal_jobs 的結果，可選依 signal 名子集過濾（保序）；signals=None 取全部。
+
+    讓四件套沿用主掃描的條件定義（同一 +low/+mom/+early 串），不重寫條件、保證一致。
+    """
+    jobs = _build_signal_jobs(panel, z_thresholds, volume_thresholds, position_low_pct, early_gate)
+    if signals is None:
+        return jobs
+    return [(name, cond) for name, cond in jobs if name in signals]
+
+
+def _forward_returns(panel: pl.DataFrame, horizons: tuple[int, ...]) -> pl.DataFrame:
+    """每 (stock_id, date) 各 horizon 前瞻報酬%＝close[t+H]/close[t]−1（原始價、不除息還原，
+    與 episode 偵測同口徑）。panel 須含 close。尾端不足 H 日的列該窗為 null。"""
+    return (
+        panel.select(["stock_id", "date", "close"])
+        .sort(["stock_id", "date"])
+        .with_columns(
+            [
+                (
+                    (pl.col("close").shift(-h).over("stock_id") / pl.col("close") - 1.0) * 100
+                ).alias(f"fwd_ret_{h}d")
+                for h in horizons
+            ]
+        )
+        .drop("close")
+    )
+
+
+def payoff_decay_table(
+    panel: pl.DataFrame,
+    horizons: tuple[int, ...] = (5, 10, 20, 40),
+    *,
+    signals: set[str] | None = None,
+    z_thresholds: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0),
+    volume_thresholds: tuple[float, ...] = (1.0, 1.5, 2.0),
+    position_low_pct: float = 15.0,
+    early_gate: dict | None = None,
+) -> pl.DataFrame:
+    """T3 payoff＋decay（docs/15）：對選定訊號的觸發日，算各前瞻窗的報酬分布。
+
+    payoff（賠率/期望）＝win_rate、avg_win/avg_loss、payoff_ratio（均盈/均虧）；
+    decay＝同訊號跨 horizon 的 median_ret 衰減曲線；excess_median＝訊號中位 − 全宇宙同窗
+    中位（扣掉大盤/持有期自然漂移，誠實量訊號超額）。label 無關（純前瞻報酬），不需 episodes。
+    回每 (signal, horizon) 一列。空輸入或缺 close 回空表。
+    """
+    if panel.is_empty() or "close" not in panel.columns:
+        return pl.DataFrame()
+    fwd = _forward_returns(panel, horizons)
+    base_med = {h: _scalar(fwd[f"fwd_ret_{h}d"].median()) for h in horizons}
+    jobs = _select_jobs(
+        panel, signals, z_thresholds, volume_thresholds, position_low_pct, early_gate
+    )
+    rows: list[dict] = []
+    for name, conditions in jobs:
+        trig = _stock_triggers(panel, conditions)
+        if trig.is_empty():
+            continue
+        joined = trig.join(fwd, on=["stock_id", "date"], how="left")
+        for h in horizons:
+            vals = joined[f"fwd_ret_{h}d"].drop_nulls()
+            n = vals.len()
+            if n == 0:
+                continue
+            wins = vals.filter(vals > 0)
+            losses = vals.filter(vals < 0)
+            avg_win = _scalar(wins.mean())
+            avg_loss = _scalar(losses.mean())
+            median_ret = _scalar(vals.median())
+            bm = base_med[h]
+            rows.append(
+                {
+                    "signal": name,
+                    "horizon_d": h,
+                    "n": n,
+                    "median_ret_pct": median_ret,
+                    "mean_ret_pct": _scalar(vals.mean()),
+                    "win_rate": wins.len() / n,
+                    "avg_win_pct": avg_win,
+                    "avg_loss_pct": avg_loss,
+                    "payoff_ratio": (avg_win / abs(avg_loss))
+                    if avg_win is not None and avg_loss is not None and avg_loss != 0.0
+                    else None,
+                    "base_median_pct": bm,
+                    "excess_median_pct": (median_ret - bm)
+                    if median_ret is not None and bm is not None
+                    else None,
+                }
+            )
+    if not rows:
+        return pl.DataFrame()
+    return pl.DataFrame(rows).sort(["signal", "horizon_d"])
+
+
+def holdout_table(
+    panel: pl.DataFrame,
+    episodes: pl.DataFrame,
+    *,
+    split_frac: float = 0.7,
+    signals: set[str] | None = None,
+    z_thresholds: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0),
+    volume_thresholds: tuple[float, ...] = (1.0, 1.5, 2.0),
+    position_low_pct: float = 15.0,
+    lead_window: int = 15,
+    occupy_days: int = 15,
+    z_min_periods: int = 30,
+    early_gate: dict | None = None,
+) -> pl.DataFrame:
+    """T3 holdout（docs/15）：日曆按 split_frac 切「前段(train)/後段(test)」各自重掃，比對 lift
+    是否撐住樣本外（呼應 §D「1 年單一樣本」過擬合疑慮）。
+
+    回 signal/lift_train/n_triggers_train/lift_test/n_triggers_test，依 lift_test 遞減。
+    空輸入或日曆過短（<4 日）回空表；某側無事件 → 該側 lift 為 null。
+    """
+    if panel.is_empty() or episodes.is_empty():
+        return pl.DataFrame()
+    calendar = sorted(panel["date"].unique().to_list())
+    if len(calendar) < 4:
+        return pl.DataFrame()
+    cut = calendar[max(1, min(len(calendar) - 1, int(len(calendar) * split_frac)))]
+    train = scan_stock_signals(
+        panel.filter(pl.col("date") < cut),
+        episodes.filter(pl.col("start_date") < cut),
+        z_thresholds=z_thresholds,
+        volume_thresholds=volume_thresholds,
+        position_low_pct=position_low_pct,
+        lead_window=lead_window,
+        occupy_days=occupy_days,
+        z_min_periods=z_min_periods,
+        early_gate=early_gate,
+    )
+    test = scan_stock_signals(
+        panel.filter(pl.col("date") >= cut),
+        episodes.filter(pl.col("start_date") >= cut),
+        z_thresholds=z_thresholds,
+        volume_thresholds=volume_thresholds,
+        position_low_pct=position_low_pct,
+        lead_window=lead_window,
+        occupy_days=occupy_days,
+        z_min_periods=z_min_periods,
+        early_gate=early_gate,
+    )
+    if train.is_empty() and test.is_empty():
+        return pl.DataFrame()
+    train_map = {r["signal"]: r for r in train.iter_rows(named=True)}
+    test_map = {r["signal"]: r for r in test.iter_rows(named=True)}
+    rows: list[dict] = []
+    for s in dict.fromkeys([*train_map, *test_map]):
+        if signals is not None and s not in signals:
+            continue
+        tr = train_map.get(s)
+        te = test_map.get(s)
+        rows.append(
+            {
+                "signal": s,
+                "lift_train": tr["lift"] if tr else None,
+                "n_triggers_train": tr["n_triggers"] if tr else 0,
+                "lift_test": te["lift"] if te else None,
+                "n_triggers_test": te["n_triggers"] if te else 0,
+            }
+        )
+    if not rows:
+        return pl.DataFrame()
+    return pl.DataFrame(rows).sort("lift_test", descending=True, nulls_last=True)
+
+
+def liquidity_table(
+    panel: pl.DataFrame,
+    episodes: pl.DataFrame,
+    *,
+    adv_window: int = 20,
+    adv_min_amount: float = 100.0,
+    signals: set[str] | None = None,
+    z_thresholds: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0),
+    volume_thresholds: tuple[float, ...] = (1.0, 1.5, 2.0),
+    position_low_pct: float = 15.0,
+    lead_window: int = 15,
+    occupy_days: int = 15,
+    z_min_periods: int = 30,
+    early_gate: dict | None = None,
+) -> pl.DataFrame:
+    """T3 流動性硬化（docs/15）：只保留觸發日 ADV（近 adv_window 日均成交額）≥ adv_min_amount
+    百萬元 的觸發，比對 lift 硬化前/後（剔除大資金進不去的小量股、看訊號在可交易宇宙是否成立）。
+
+    ADV＝close×volume（元；真周轉率不可得＝缺流通股數，誠實標）。回 signal/n_raw/lift_raw/
+    n_hardened/lift_hardened，依 lift_hardened 遞減。空輸入或缺 volume 回空表。
+    """
+    if panel.is_empty() or episodes.is_empty() or "volume" not in panel.columns:
+        return pl.DataFrame()
+    thr = adv_min_amount * 1_000_000
+    adv = (
+        panel.select(["stock_id", "date", "close", "volume"])
+        .sort(["stock_id", "date"])
+        .with_columns(
+            (pl.col("close") * pl.col("volume"))
+            .rolling_mean(adv_window, min_samples=1)
+            .over("stock_id")
+            .alias("_adv")
+        )
+        .select(["stock_id", "date", "_adv"])
+    )
+    calendar = sorted(panel["date"].unique().to_list())
+    warmup_pos = min(z_min_periods, len(calendar) - 1)
+    base_rate = compute_base_rate(
+        episodes,
+        calendar,
+        panel["stock_id"].unique().to_list(),
+        lead_window,
+        occupy_days,
+        warmup_pos,
+        key_col="stock_id",
+    )
+    jobs = _select_jobs(
+        panel, signals, z_thresholds, volume_thresholds, position_low_pct, early_gate
+    )
+    rows: list[dict] = []
+    for name, conditions in jobs:
+        trig = _stock_triggers(panel, conditions)
+        trig_hard = (
+            trig.join(adv, on=["stock_id", "date"], how="left")
+            .filter(pl.col("_adv") >= thr)
+            .select(["stock_id", "date"])
+        )
+        raw = evaluate_triggers(
+            trig, episodes, calendar, lead_window, occupy_days, warmup_pos,
+            key_col="stock_id", base_rate=base_rate,
+        )
+        hard = evaluate_triggers(
+            trig_hard, episodes, calendar, lead_window, occupy_days, warmup_pos,
+            key_col="stock_id", base_rate=base_rate,
+        )
+        rows.append(
+            {
+                "signal": name,
+                "n_raw": raw["n_triggers"],
+                "lift_raw": raw["lift"],
+                "n_hardened": hard["n_triggers"],
+                "lift_hardened": hard["lift"],
+            }
+        )
+    if not rows:
+        return pl.DataFrame()
+    return pl.DataFrame(rows).sort("lift_hardened", descending=True, nulls_last=True)
+
+
+def render_robustness_report(
+    payoff: pl.DataFrame,
+    holdout: pl.DataFrame,
+    liquidity: pl.DataFrame,
+    anchor_label: str,
+    anchor_signals: list[str],
+    params: dict,
+    coverage: dict,
+) -> str:
+    """穩健度四件套 markdown（docs/15 B-P1）。錨定 anchor_label 的勝出因子，並陳 payoff/decay
+    /holdout/流動性硬化，誠實標所有限制。空輸入回誠實佔位。"""
+    lines = [
+        "# 個股起漲因子穩健度剖析 — payoff／decay／holdout／流動性（docs/15 B-P1）",
+        "",
+        f"- 錨定 label：{anchor_label}（CP 補漲主假說、現任冠軍之家）",
+        f"- 剖析因子（錨定主掃描合格前 {params.get('top_k', '?')} 名）："
+        + ("、".join(anchor_signals) if anchor_signals else "（無合格因子）"),
+        f"- 宇宙：{coverage.get('n_stocks', 0)} 檔・{coverage.get('n_trading_days', 0)} 交易日"
+        f"（{coverage.get('date_min', '?')} ~ {coverage.get('date_max', '?')}）",
+        f"- decay 前瞻窗 {params.get('horizons', [])} 交易日・holdout 前段占比 "
+        f"{params.get('holdout_frac', '?')}・流動性門檻 ADV ≥ {params.get('adv_min_amount', '?')} "
+        f"百萬元（近 {params.get('adv_window', '?')} 日均成交額）",
+        "",
+        "## 1. payoff × decay（觸發日前瞻報酬分布；excess＝訊號中位 − 全宇宙同窗中位）",
+        "",
+    ]
+    if payoff.is_empty():
+        lines.append("（無合格因子或觸發不足，無法剖析賺賠/衰減）")
+    else:
+        lines += [
+            "| 訊號 | 前瞻(日) | n | 中位% | 超額中位% | 勝率 | 均盈% | 均虧% | 賠率 |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+        for r in payoff.iter_rows(named=True):
+            pr = f"{r['payoff_ratio']:.2f}" if r["payoff_ratio"] is not None else "—"
+            aw = f"{r['avg_win_pct']:.1f}" if r["avg_win_pct"] is not None else "—"
+            al = f"{r['avg_loss_pct']:.1f}" if r["avg_loss_pct"] is not None else "—"
+            ex = f"{r['excess_median_pct']:+.1f}" if r["excess_median_pct"] is not None else "—"
+            md = f"{r['median_ret_pct']:.1f}" if r["median_ret_pct"] is not None else "—"
+            lines.append(
+                f"| {r['signal']} | {r['horizon_d']} | {r['n']} | {md} | {ex} "
+                f"| {r['win_rate']:.0%} | {aw} | {al} | {pr} |"
+            )
+
+    lines += [
+        "",
+        "## 2. holdout（時間樣本外：前段選因子、後段驗 lift 是否撐住）",
+        "",
+    ]
+    if holdout.is_empty():
+        lines.append("（日曆過短或某側無事件，無法做樣本外切分）")
+    else:
+        lines += [
+            "| 訊號 | lift(前段) | 觸發(前段) | lift(後段) | 觸發(後段) |",
+            "|---|---|---|---|---|",
+        ]
+        for r in holdout.iter_rows(named=True):
+            lt = f"{r['lift_train']:.2f}" if r["lift_train"] is not None else "—"
+            le = f"{r['lift_test']:.2f}" if r["lift_test"] is not None else "—"
+            lines.append(
+                f"| {r['signal']} | {lt} | {r['n_triggers_train']} | {le} "
+                f"| {r['n_triggers_test']} |"
+            )
+
+    lines += [
+        "",
+        "## 3. 流動性硬化（只算可交易量級觸發；lift 硬化前/後）",
+        "",
+    ]
+    if liquidity.is_empty():
+        lines.append("（無合格因子或缺成交量，無法硬化）")
+    else:
+        lines += [
+            "| 訊號 | 觸發(原始) | lift(原始) | 觸發(硬化) | lift(硬化) |",
+            "|---|---|---|---|---|",
+        ]
+        for r in liquidity.iter_rows(named=True):
+            lr = f"{r['lift_raw']:.2f}" if r["lift_raw"] is not None else "—"
+            lh = f"{r['lift_hardened']:.2f}" if r["lift_hardened"] is not None else "—"
+            lines.append(
+                f"| {r['signal']} | {r['n_raw']} | {lr} | {r['n_hardened']} | {lh} |"
+            )
+
+    lines += [
+        "",
+        "---",
+        "",
+        "> 誠實但書：(1) 前瞻報酬用原始收盤、不除息還原（與 episode 同口徑）；",
+        "> (2) ADV＝成交額代理，**真周轉率不可得（缺流通在外股數）**；",
+        "> (3) 1 年單一樣本，holdout 後段樣本更稀疏、lift 差距可能是雜訊；",
+        "> (4) 研究軌產出，非買賣訊、非目標價；每季資料累積後重跑校準。",
+        "",
+    ]
+    return "\n".join(lines)

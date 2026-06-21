@@ -171,6 +171,13 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
     div_ceiling: 0.0         # +nodiv：price_flow_div_{w}d ≤ 此值＝價未先噴（資金領先價）
     lead_lookback: 30        # 跨窗配對領先：事件前回看 N 交易日找各窗首次 z≥門檻
     min_lead_days: 2         # 過閘：短窗中位領先 20d ≥ 此日數（GATE 核心判準）
+  robustness:                # ★ B-P1 穩健度四件套（docs/15 T3；研究軌、不改生產判讀）
+    anchor_label: ambush     # 錨定 label（L1 CP 補漲、現任冠軍之家）；取其主掃描勝出因子剖析
+    top_k: 6                 # 取錨定主掃描合格前 K 名因子（觸發≥min_triggers・lift≥min_lift）
+    horizons: [5, 10, 20, 40]  # decay 前瞻窗（交易日）：edge 隨持有期衰減曲線
+    holdout_frac: 0.7        # 時間樣本外切分：前段占比（前段選因子、後段驗 lift 撐不撐）
+    adv_window: 20           # 流動性硬化：ADV（成交額）回看窗（交易日）
+    adv_min_amount: 100      # 流動性門檻（百萬元）；觸發日 ADV < 此值＝剔除（大資金進不去）
   labels:                    # episode 純價格定義（資金因子留訊號端，避免循環，使用者拍板）
     ambush:                  # L1 埋伏：貼低基期 + 前瞻續漲（抓起漲前）
       m_days: 60             # 低基期回看（交易日）

@@ -17,6 +17,10 @@ from tw_screener.backtest.stock_calib import (
     detect_breakout_episodes,
     detect_reversal_episodes,
     detect_top_episodes,
+    holdout_table,
+    liquidity_table,
+    payoff_decay_table,
+    render_robustness_report,
     scan_stock_signals,
     scan_top_signals,
 )
@@ -361,3 +365,141 @@ def test_scan_top_empty_inputs_return_empty():
     panel, episodes = _top_fixture()
     assert scan_top_signals(pl.DataFrame(), episodes).is_empty()
     assert scan_top_signals(panel, pl.DataFrame()).is_empty()
+
+
+# ── B-P1：穩健度四件套（payoff／decay／holdout／流動性硬化；docs/15 T3）────────────
+
+
+def _robust_fixture() -> tuple[pl.DataFrame, pl.DataFrame]:
+    """A：trust z idx5/6 上穿 1.0（觸發 idx5、close=100）、之後續漲（前瞻報酬為正）、量大；
+    B：z 恆 0、價平、量極小（稀釋基率＋流動性硬化會被剔）。"""
+    days = [date(2025, 1, 1) + timedelta(days=i) for i in range(20)]
+    rows = []
+    for sid in ("A", "B"):
+        for i, d in enumerate(days):
+            if sid == "A":
+                close = 100.0 if i <= 5 else 100.0 * (1 + 0.03 * (i - 5))
+                z = 2.0 if i in (5, 6) else 0.0
+                vol, low = 100_000, 4.0
+            else:
+                close, z, vol, low = 100.0, 0.0, 10, 50.0
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "close": close,
+                    "volume": vol,
+                    "trust_flow_20d_z": z,
+                    "trust_momentum": 100.0 if z > 0 else 0.0,
+                    "above_low_60d_pct": low,
+                    "volume_z_5d": z,
+                }
+            )
+    panel = pl.DataFrame(rows)
+    episodes = pl.DataFrame(
+        {"stock_id": ["A"], "start_date": [days[7]]},
+        schema={"stock_id": pl.Utf8, "start_date": pl.Date},
+    )
+    return panel, episodes
+
+
+def test_payoff_decay_table_measures_forward_returns():
+    panel, _ = _robust_fixture()
+    pd_tab = payoff_decay_table(
+        panel,
+        horizons=(3, 5),
+        signals={"trust_flow_20d_z (z>1.0)"},
+        z_thresholds=(1.0,),
+        volume_thresholds=(1.0,),
+    )
+    assert not pd_tab.is_empty()
+    assert {"signal", "horizon_d", "win_rate", "payoff_ratio", "excess_median_pct"} <= set(
+        pd_tab.columns
+    )
+    r3 = pd_tab.filter(
+        (pl.col("signal") == "trust_flow_20d_z (z>1.0)") & (pl.col("horizon_d") == 3)
+    ).row(0, named=True)
+    assert r3["n"] == 1  # A 在 idx5 觸發
+    assert abs(r3["median_ret_pct"] - 9.0) < 1e-6  # close[idx8]/100−1 = +9%
+    assert r3["win_rate"] == 1.0
+    assert r3["payoff_ratio"] is None  # 無虧損樣本 → 賠率不可算
+
+
+def test_payoff_decay_empty_or_no_close_returns_empty():
+    panel, _ = _robust_fixture()
+    assert payoff_decay_table(pl.DataFrame()).is_empty()
+    assert payoff_decay_table(panel.drop("close")).is_empty()
+
+
+def test_holdout_table_splits_train_test():
+    panel, episodes = _robust_fixture()
+    ho = holdout_table(
+        panel,
+        episodes,
+        split_frac=0.5,  # cut＝idx10：事件 idx7、觸發 idx5 落前段（lead=2 留前瞻空間）
+        signals={"trust_flow_20d_z (z>1.0)"},
+        z_thresholds=(1.0,),
+        volume_thresholds=(1.0,),
+        lead_window=2,
+        occupy_days=2,
+        z_min_periods=2,
+    )
+    assert not ho.is_empty()
+    assert {
+        "signal",
+        "lift_train",
+        "n_triggers_train",
+        "lift_test",
+        "n_triggers_test",
+    } <= set(ho.columns)
+    r = ho.filter(pl.col("signal") == "trust_flow_20d_z (z>1.0)").row(0, named=True)
+    assert r["lift_train"] is not None and r["lift_train"] > 1.0  # 前段命中
+    assert r["lift_test"] is None  # 後段無事件
+
+
+def test_liquidity_hardening_filters_low_turnover():
+    panel, episodes = _robust_fixture()
+    kw = {
+        "signals": {"trust_flow_20d_z (z>1.0)"},
+        "z_thresholds": (1.0,),
+        "volume_thresholds": (1.0,),
+        "lead_window": 5,
+        "occupy_days": 5,
+        "z_min_periods": 2,
+    }
+    # A 的 ADV ≈ 100×100,000 = 10 百萬：門檻 1 百萬 → 留存；門檻 1000 百萬 → 剔除
+    keep = liquidity_table(panel, episodes, adv_window=5, adv_min_amount=1.0, **kw)
+    drop = liquidity_table(panel, episodes, adv_window=5, adv_min_amount=1000.0, **kw)
+    rk = keep.filter(pl.col("signal") == "trust_flow_20d_z (z>1.0)").row(0, named=True)
+    rd = drop.filter(pl.col("signal") == "trust_flow_20d_z (z>1.0)").row(0, named=True)
+    assert rk["n_raw"] == rk["n_hardened"]  # 低門檻：A 全留
+    assert rd["n_hardened"] == 0  # 高門檻：A 被剔（lift_hardened=0）
+
+
+def test_holdout_liquidity_empty_inputs_return_empty():
+    panel, episodes = _robust_fixture()
+    assert holdout_table(panel, pl.DataFrame()).is_empty()
+    assert liquidity_table(panel, pl.DataFrame()).is_empty()
+    assert liquidity_table(panel.drop("volume"), episodes).is_empty()
+
+
+def test_render_robustness_report_has_sections_and_placeholder():
+    panel, episodes = _robust_fixture()
+    sig = {"trust_flow_20d_z (z>1.0)"}
+    payoff = payoff_decay_table(
+        panel, horizons=(3, 5), signals=sig, z_thresholds=(1.0,), volume_thresholds=(1.0,)
+    )
+    params = {
+        "top_k": 6,
+        "horizons": [3, 5],
+        "holdout_frac": 0.5,
+        "adv_window": 5,
+        "adv_min_amount": 1.0,
+    }
+    md = render_robustness_report(
+        payoff, pl.DataFrame(), pl.DataFrame(), "ambush", list(sig), params, {}
+    )
+    assert "payoff" in md and "holdout" in md and "流動性" in md
+    assert "trust_flow_20d_z (z>1.0)" in md
+    # 空表段落給誠實佔位、不爆
+    assert "無法做樣本外切分" in md

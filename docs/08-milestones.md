@@ -507,3 +507,21 @@ claude
 
 ### 收官（2026-06-21）
 M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計算欄 low/high_20d/60d（code，commit 3146ffd）＋7b 進場階梯重構（50/30/20 前重後輕·停損收盤確認脫鉤·低價股退化·回檔深度檢核，76b1f3d）＋7c 因子簇上限（利率敏感簇核心≤2檔/合計≤~50%，248ce61）＋7d 籌碼主導標準一致。**規劃書 docs/14、D1–D5 全採推薦版**。`make test` 462 綠（7a +5）、ruff/mypy 零淨增。**注意：W26+ 報告須重跑才反映新階梯/停損/簇上限/分級讀法（報告不回溯）。** Part B 研究三軌（買方主導度單調性／個股×族群交互／payoff·decay）另開規劃書與分支、不重跑已被 M-MH 校準否證的壓縮突破·多窗早訊號。
+
+---
+
+## M-Part B：起漲點研究三軌（研究軌・規劃書見 docs/15）
+
+> 全研究軌、不碰生產（`cp_candidates.py` 不動）。引擎沿用 `backtest/stock_calib.py`＋`analysis/stock_panel.py`。
+> 三軌＝T1 買方主導度單調性／T2 個股×族群交互／T3 payoff·decay 四件套；E1–E7 設計決策全採推薦版。
+
+### B-P1 穩健度四件套（T3・code・純加法）｜✅ 完成
+- `stock_calib.py` 加 `payoff_decay_table`（觸發日前瞻報酬分布：勝率/賠率/中位/超額 vs 全宇宙同窗）、`holdout_table`（時間 70/30 樣本外、lift 前後段對照）、`liquidity_table`（ADV 成交額硬化、lift 硬化前/後）、`render_robustness_report`，以及 helper `_select_jobs`（沿用主掃描條件子集）/`_forward_returns`/`_scalar`。既有函式簽名零變更。
+- `config/settings.yaml` 加 `cp_value.robustness`（anchor_label=ambush・top_k=6・horizons=[5,10,20,40]・holdout_frac=0.7・adv_window=20・adv_min_amount=100 百萬）。
+- `cli.py cp calibrate` 末段：錨定 ambush 主掃描合格前 6 名因子，產 `research/cp_value/calibration_*_robustness.md`＋三 CSV。
+- 實跑（1375 檔×250 日）洞察：**edge 隨持有期累積**（trust_flow_10d 超額中位 5日 +0.2%→40日 +2.1%、賠率 1.46→1.99）、短窗近打平；**holdout 後段 lift ≥ 前段**（撐住樣本外，tiny-N z>2.0 後段 0 觸發＝誠實標不足）；**流動性硬化後 lift 反升**（1.81→1.93…＝edge 非小量股假象、可交易宇宙成立）。
+- 驗收：`make test` 新增 6 測全綠（payoff/decay/holdout/流動性/render/空輸入）、ruff 乾淨、mypy 零淨增（cli.py 11 既有 sector_calibrate 錯不動）。**研究軌、不回溯生產讀法。**
+- 註：`tests/screener/goodinfo/test_fetcher.py` 2 個快取新鮮度測試在 main HEAD 即失敗（日期/mtime 敏感、與本milestone無關）。
+
+### B-P2 買方主導度單調性（T1）｜待辦
+### B-P3 個股×族群 2×2 交互（T2）｜待辦
