@@ -49,6 +49,18 @@ def version() -> None:
     console.print(f"tw-stock-screener {__version__}")
 
 
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", help="綁定位址（預設本機，勿綁 0.0.0.0）"),
+    port: int = typer.Option(8000, help="埠"),
+    reload: bool = typer.Option(False, "--reload", help="dev 自動重載"),
+) -> None:
+    """啟動投資戰情室 Dashboard（FastAPI 服務 frontend/dist ＋ /api；docs/17）。"""
+    from tw_screener.webapp.server import run
+
+    run(host=host, port=port, reload=reload)
+
+
 # ─── data 子指令 ──────────────────────────────────────────────────────────────
 
 

@@ -9,6 +9,11 @@ dist/
 build/
 .eggs/
 
+# Frontend（dashboard；docs/17）
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
 # uv / venv
 .venv/
 .env
