@@ -272,6 +272,21 @@ a.member-chip:hover {
 .member-chip b {
   color: var(--hi);
 }
+.member-note {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  margin: 2px 0 6px;
+}
+.member-note b {
+  color: var(--hi);
+}
+.exp-caret {
+  color: var(--accent);
+}
+tr.row-expandable {
+  cursor: pointer;
+}
 
 /* ─── Empty / loading state ─────────────────────────────── */
 .empty-state {

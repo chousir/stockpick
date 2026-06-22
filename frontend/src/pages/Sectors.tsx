@@ -48,16 +48,69 @@ function quadClass(q: unknown): string {
   return "muted";
 }
 
-// rank_delta 箭頭：上升（正）紅、下降（負）綠（§5.3）
+// rank_delta 箭頭：上升（正）紅、下降（負）綠、不變顯「持平」（§5.3）
 function RankDelta({ v }: { v: unknown }) {
   if (isBlank(v)) return <span className="num-flat">—</span>;
   const n = Number(v);
-  if (Number.isNaN(n) || n === 0) return <span className="num-flat">—</span>;
+  if (Number.isNaN(n)) return <span className="num-flat">—</span>;
+  if (n === 0) return <span className="muted">持平</span>;
   return (
     <span className={n > 0 ? "num-up" : "num-down"}>
       {n > 0 ? "▲" : "▼"}
       {Math.abs(n)}
     </span>
+  );
+}
+
+// 成員展開內容：本週入選候選股 chip（連 Goodinfo）。universe＝族群成員總數（reports/ 無逐檔清單）。
+function MemberChips({ members, universe }: { members: Row[]; universe?: unknown }) {
+  const total = isBlank(universe) ? null : Number(universe);
+  return (
+    <>
+      <div className="member-note">
+        本週入選候選股 <b>{members.length}</b> 檔
+        {total !== null && total > members.length && (
+          <>
+            （族群成員共 {total} 檔，其餘未入選任何策略篩選、reports 無其價量資料）
+          </>
+        )}
+      </div>
+      {members.length === 0 ? (
+        <span className="muted">本週候選股無此族群成員。</span>
+      ) : (
+        <div className="member-chips">
+          {members.map((m) => {
+            const url = m.goodinfo_url ? String(m.goodinfo_url) : null;
+            const label = (
+              <span>
+                <b>{String(m.stock_id ?? "")}</b> {String(m.name ?? "")}
+                <span className={signClass(m.momentum_5d_pct)}>
+                  {" "}
+                  {fmtNum(m.momentum_5d_pct, 1)}%
+                </span>
+              </span>
+            );
+            return url ? (
+              <a
+                key={String(m.stock_id)}
+                className="member-chip"
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                title="Goodinfo"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {label}
+              </a>
+            ) : (
+              <span key={String(m.stock_id)} className="member-chip">
+                {label}
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -202,6 +255,11 @@ export function Sectors({ week }: Props) {
         {sectors.status === 200 && orderedSectors.length > 0 && (
           <div className="chart-card chart-card--wide">
             <h3>族群資金輪動（點次產業展開本週候選成員）</h3>
+            <div className="chart-cap">
+              依資金雷達<b>排名</b>列出；<b>資金轉向</b>＝近 5 日由賣轉買/買轉賣的前哨（多數族群無、顯
+              「—」屬正常）；<b>排名Δ</b>＝對上週名次變化（持平＝沒變）；
+              <b>成員（候選/總）</b>＝本週入選候選股數／族群成員總數（reports 只有總數、無逐檔清單）。
+            </div>
             <div className="table-wrap">
               <table className="hud">
                 <thead>
@@ -217,7 +275,7 @@ export function Sectors({ week }: Props) {
                     <th>籃報酬5d%</th>
                     <th>CP</th>
                     <th>排名Δ</th>
-                    <th>成員</th>
+                    <th>成員(候選/總)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -244,10 +302,25 @@ export function Sectors({ week }: Props) {
 
         <div className="chart-card chart-card--wide">
           <h3>主題 / 次產業強度排行</h3>
+          <div className="chart-cap">
+            預設依 <b>排名（radar_rank）</b>排序，排名＝<b>領先分 lead_score 由高到低</b>
+            （綜合動能、外資分、爆量分的族群領先強度）；點任一表頭可改排序。
+            點列展開本週入選之候選成員。
+          </div>
           {themes.loading ? (
             <div className="placeholder">載入中…</div>
           ) : themes.status === 200 && (themes.data?.length ?? 0) > 0 ? (
-            <DataTable columns={themeCols} data={themes.data ?? []} />
+            <DataTable
+              columns={themeCols}
+              data={themes.data ?? []}
+              initialSorting={[{ id: "radar_rank", desc: false }]}
+              renderExpanded={(r) => (
+                <MemberChips
+                  members={memberMap.get(String(r.theme ?? "")) ?? []}
+                  universe={r.members_count}
+                />
+              )}
+            />
           ) : (
             <div className="empty-state">本週無主題強度資料（theme_strength）</div>
           )}
@@ -321,45 +394,17 @@ function SectorRows({
         <td>
           <RankDelta v={row.rank_delta} />
         </td>
-        <td>{fmtNum(row.members, 0)}</td>
+        <td>
+          <span className={members.length > 0 ? "cell-id" : "num-flat"}>
+            {members.length}
+          </span>
+          <span className="muted"> / {fmtNum(row.members, 0)}</span>
+        </td>
       </tr>
       {open && (
         <tr className="sector-members-row">
           <td className="text" colSpan={colSpan}>
-            {members.length === 0 ? (
-              <span className="muted">本週候選股無此族群成員。</span>
-            ) : (
-              <div className="member-chips">
-                {members.map((m) => {
-                  const url = m.goodinfo_url ? String(m.goodinfo_url) : null;
-                  const label = (
-                    <span>
-                      <b>{String(m.stock_id ?? "")}</b> {String(m.name ?? "")}
-                      <span className={signClass(m.momentum_5d_pct)}>
-                        {" "}
-                        {fmtNum(m.momentum_5d_pct, 1)}%
-                      </span>
-                    </span>
-                  );
-                  return url ? (
-                    <a
-                      key={String(m.stock_id)}
-                      className="member-chip"
-                      href={url}
-                      target="_blank"
-                      rel="noreferrer"
-                      title="Goodinfo"
-                    >
-                      {label}
-                    </a>
-                  ) : (
-                    <span key={String(m.stock_id)} className="member-chip">
-                      {label}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
+            <MemberChips members={members} universe={row.members} />
           </td>
         </tr>
       )}

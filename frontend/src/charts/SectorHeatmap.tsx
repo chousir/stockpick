@@ -9,15 +9,19 @@ import type { Row } from "../lib/api";
 import { axisCommon, C, MONO, toNum, tooltipStyle } from "./echartsBase";
 import { EChart } from "./EChart";
 
-// 熱力圖欄位（皆為 z-score，同一色階口徑）。flow_breadth 為 0..1 不同尺度，留在輪動表。
-const COLS: { key: string; label: string }[] = [
-  { key: "net_flow_5d_z", label: "總量5d" },
-  { key: "net_flow_20d_z", label: "總量20d" },
-  { key: "foreign_flow_5d_z", label: "外資5d" },
-  { key: "foreign_flow_20d_z", label: "外資20d" },
-  { key: "trust_flow_5d_z", label: "投信5d" },
-  { key: "trust_flow_20d_z", label: "投信20d" },
+// 熱力圖欄位（皆為 z-score，同一色階口徑）。依 總量｜外資｜投信 分區、各區內 5d/20d。
+// 註：目前 reports 僅 5d/20d；10d 待分析層補窗後加入（flow_breadth 0..1 另留在輪動表）。
+const COLS: { key: string; group: string; win: string }[] = [
+  { key: "net_flow_5d_z", group: "總量", win: "5d" },
+  { key: "net_flow_20d_z", group: "總量", win: "20d" },
+  { key: "foreign_flow_5d_z", group: "外資", win: "5d" },
+  { key: "foreign_flow_20d_z", group: "外資", win: "20d" },
+  { key: "trust_flow_5d_z", group: "投信", win: "5d" },
+  { key: "trust_flow_20d_z", group: "投信", win: "20d" },
 ];
+
+// 群組分隔線位置（總量｜外資 之間、外資｜投信 之間）
+const GROUP_SEPARATORS = [1.5, 3.5];
 
 // quadrant → 色點 rich 樣式索引（主升續勢 teal／下一棒 amber／冷卻觀望 muted／出貨警訊 紅）
 const QUADRANTS = ["主升續勢", "下一棒", "冷卻觀望", "出貨警訊"];
@@ -73,13 +77,14 @@ export function SectorHeatmap({ rows }: { rows: Row[] }) {
 
   const option = useMemo<EChartsOption>(
     () => ({
-      grid: { left: 150, right: 16, top: 28, bottom: 16 },
+      grid: { left: 150, right: 150, top: 46, bottom: 16 },
       tooltip: {
         ...tooltipStyle,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         formatter: (p: any) => {
           const [ci, ri, z] = p.data.value as [number, number, number];
-          return `${ordered[ri].sub_industry}<br/>${COLS[ci].label} z＝${z.toFixed(2)}（${
+          const c = COLS[ci];
+          return `${ordered[ri].sub_industry}<br/>${c.group}近${c.win} z＝${z.toFixed(2)}（${
             z > 0 ? "資金流入" : z < 0 ? "資金流出" : "中性"
           }）`;
         },
@@ -87,9 +92,21 @@ export function SectorHeatmap({ rows }: { rows: Row[] }) {
       xAxis: {
         type: "category",
         position: "top",
-        data: COLS.map((c) => c.label),
+        data: COLS.map((c) => `${c.group}|${c.win}`),
         ...axisCommon,
-        axisLabel: { ...axisCommon.axisLabel, fontSize: 10 },
+        axisTick: { show: false },
+        axisLabel: {
+          ...axisCommon.axisLabel,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          formatter: (value: string) => {
+            const [g, w] = value.split("|");
+            return `{g|${g}}\n{w|${w}}`;
+          },
+          rich: {
+            g: { color: C.hi, fontFamily: MONO, fontSize: 11, fontWeight: "bold", lineHeight: 14 },
+            w: { color: C.muted, fontFamily: MONO, fontSize: 10, lineHeight: 13 },
+          },
+        },
         splitLine: { show: false },
       },
       yAxis: {
@@ -119,15 +136,17 @@ export function SectorHeatmap({ rows }: { rows: Row[] }) {
       visualMap: {
         min: -3,
         max: 3,
+        precision: 1,
         calculable: true,
-        orient: "horizontal",
-        right: 16,
-        top: 0,
-        itemHeight: 80,
-        itemWidth: 12,
-        text: ["流入", "流出"],
-        textStyle: { color: C.muted, fontFamily: MONO, fontSize: 10 },
-        inRange: { color: [C.accent, "rgba(17,24,38,0.35)", C.warn] },
+        orient: "vertical",
+        right: 8,
+        top: "middle",
+        itemHeight: 150,
+        itemWidth: 16,
+        text: ["流入 +3", "-3 流出"],
+        textStyle: { color: C.text, fontFamily: MONO, fontSize: 11 },
+        // 中段用實色（非透明）讓每格都有底，避免近零格「看不見」
+        inRange: { color: [C.accent, "#243049", C.warn] },
         dimension: 2,
         seriesIndex: 0,
       },
@@ -138,12 +157,20 @@ export function SectorHeatmap({ rows }: { rows: Row[] }) {
           label: {
             show: true,
             fontFamily: MONO,
-            fontSize: 9,
+            fontSize: 11,
+            fontWeight: "bold",
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             formatter: (p: any) => (p.data.value[2] as number).toFixed(1),
           },
-          itemStyle: { borderColor: C.bg, borderWidth: 1 },
+          itemStyle: { borderColor: C.bg, borderWidth: 2 },
           emphasis: { itemStyle: { borderColor: C.hi, borderWidth: 1 } },
+          markLine: {
+            silent: true,
+            symbol: "none",
+            label: { show: false },
+            lineStyle: { color: C.muted, width: 2, type: "solid", opacity: 0.6 },
+            data: GROUP_SEPARATORS.map((x) => ({ xAxis: x })),
+          },
         },
       ],
     }),
@@ -156,7 +183,8 @@ export function SectorHeatmap({ rows }: { rows: Row[] }) {
   return (
     <div>
       <div className="chart-cap">
-        列＝<b>次產業</b>（依資金雷達排名）、欄＝各窗<b>資金淨流入 z 分數</b>；
+        列＝<b>次產業</b>（依資金雷達排名）、欄分 <b>總量｜外資｜投信</b> 三區（分隔線區隔）、
+        各區內 <b>近5d／近20d</b>，格值＝<b>資金淨流入 z 分數</b>（目前僅 5d/20d，10d 待分析層補窗）；
         色階 <span style={{ color: C.warn }}>琥珀＝流入</span>／
         <span style={{ color: C.accent }}>teal＝流出</span>（與漲跌紅綠分離）。
         左側色點＝象限（<span style={{ color: QUAD_COLOR[0] }}>●主升續勢</span>
