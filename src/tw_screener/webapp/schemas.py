@@ -14,6 +14,53 @@ class WeeksResponse(BaseModel):
     latest: str | None
 
 
+class SectorRow(BaseModel):
+    """sector_rotation.csv 列（族群資金雷達，docs/17 §2.1）。全 Optional、extra 容忍。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    radar_rank: int | None = None
+    sub_industry: str | None = None
+    date: str | None = None
+    members: int | None = None
+    members_priced: int | None = None
+    quadrant: str | None = None
+    freshness: str | None = None
+    flow_turn: str | None = None
+    entry_triggered: bool | None = None
+    confirm_triggered: bool | None = None
+    rank_delta: int | None = None
+    cp_score: float | None = None
+    basket_ret_5d_pct: float | None = None
+    above_low_pct: float | None = None
+    # 資金 z（熱力圖欄；其餘 *_z 由 extra 帶過）
+    net_flow_5d_z: float | None = None
+    net_flow_20d_z: float | None = None
+    foreign_flow_5d_z: float | None = None
+    foreign_flow_20d_z: float | None = None
+    trust_flow_5d_z: float | None = None
+    trust_flow_20d_z: float | None = None
+    flow_breadth_5d: float | None = None
+    flow_breadth_20d: float | None = None
+
+
+class ThemeRow(BaseModel):
+    """theme_strength.csv 列（主題/次產業強度，docs/17 §2.1）。全 Optional。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    theme: str | None = None
+    kind: str | None = None
+    radar_rank: int | None = None
+    lead_score: float | None = None
+    score: float | None = None
+    momentum_5d: float | None = None
+    members_count: int | None = None
+    foreign_score: float | None = None
+    vol_surge_score: float | None = None
+    rank_delta: int | None = None
+
+
 class EnrichedRow(BaseModel):
     """candidates / holdings / watchlist 共用列（W25 超集，全 Optional）。"""
 

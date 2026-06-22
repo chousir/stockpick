@@ -233,6 +233,45 @@ table.hud tbody tr:hover td {
 .cell-link:hover {
   text-decoration: underline;
 }
+.muted {
+  color: var(--muted);
+}
+
+/* ─── 族群輪動表：成員展開（§5.3）─────────────────────────── */
+.sector-toggle {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+.sector-members-row td {
+  background: rgba(11, 15, 23, 0.55);
+  white-space: normal;
+}
+.member-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 2px;
+}
+.member-chip {
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 2px 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  text-decoration: none;
+}
+a.member-chip:hover {
+  border-color: var(--accent);
+  background: rgba(24, 224, 200, 0.06);
+}
+.member-chip b {
+  color: var(--hi);
+}
 
 /* ─── Empty / loading state ─────────────────────────────── */
 .empty-state {

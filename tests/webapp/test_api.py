@@ -48,8 +48,48 @@ def test_candidates_happy_path() -> None:
     assert "flags" in rows[0]
 
 
+def _week_with(endpoint: str) -> str | None:
+    for w in _weeks():
+        if client.get(f"/api/weeks/{w}/{endpoint}").status_code == 200:
+            return w
+    return None
+
+
+def test_sectors_happy_path() -> None:
+    week = _week_with("sectors")
+    if week is None:
+        pytest.skip("本機 reports/ 無含 sector_rotation 的週次")
+    rows = client.get(f"/api/weeks/{week}/sectors").json()
+    assert isinstance(rows, list) and len(rows) > 0
+    # 熱力圖/輪動表關鍵欄位存在（值可能為 null）
+    assert "sub_industry" in rows[0]
+    assert "radar_rank" in rows[0]
+    assert "net_flow_20d_z" in rows[0]
+    assert "quadrant" in rows[0]
+
+
+def test_themes_happy_path() -> None:
+    week = _week_with("themes")
+    if week is None:
+        pytest.skip("本機 reports/ 無含 theme_strength 的週次")
+    rows = client.get(f"/api/weeks/{week}/themes").json()
+    assert isinstance(rows, list) and len(rows) > 0
+    assert "theme" in rows[0]
+    assert "lead_score" in rows[0]
+    assert "rank_delta" in rows[0]
+
+
+def test_sectors_themes_missing_404_not_500() -> None:
+    """缺 sector_rotation/theme_strength 的週回 404、非 500（docs/17 §2.4）。"""
+    for w in _weeks():
+        assert client.get(f"/api/weeks/{w}/sectors").status_code in (200, 404)
+        assert client.get(f"/api/weeks/{w}/themes").status_code in (200, 404)
+
+
 def test_missing_week_404() -> None:
     assert client.get("/api/weeks/9999-W99/candidates").status_code == 404
+    assert client.get("/api/weeks/9999-W99/sectors").status_code == 404
+    assert client.get("/api/weeks/9999-W99/themes").status_code == 404
     assert client.get("/api/weeks/9999-W99/meta").status_code == 404
 
 

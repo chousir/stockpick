@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { AppShell, type TabKey } from "./components/AppShell";
 import { Candidates } from "./pages/Candidates";
+import { Sectors } from "./pages/Sectors";
 import { getWeeks } from "./lib/api";
 
 // 後續 milestone 才實作的頁面（docs/17 §9）
-const PENDING: Record<Exclude<TabKey, "candidates">, string> = {
-  sectors: "族群輪動（M-Dash 2）",
+const PENDING: Record<"stock" | "holdings", string> = {
   stock: "個股鑽取（M-Dash 3）",
   holdings: "持股損益（M-Dash 4）",
 };
@@ -45,6 +45,8 @@ export default function App() {
     >
       {tab === "candidates" ? (
         <Candidates week={week} />
+      ) : tab === "sectors" ? (
+        <Sectors week={week} />
       ) : (
         <div className="placeholder">「{PENDING[tab]}」尚未實作。</div>
       )}

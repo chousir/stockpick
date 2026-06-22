@@ -40,5 +40,9 @@ export interface NarrativeResponse {
 export const getWeeks = () => getJSON<WeeksResponse>("/api/weeks");
 export const getCandidates = (week: string) =>
   getJSON<Row[]>(`/api/weeks/${week}/candidates`);
+export const getSectors = (week: string) =>
+  getJSON<Row[]>(`/api/weeks/${week}/sectors`);
+export const getThemes = (week: string) =>
+  getJSON<Row[]>(`/api/weeks/${week}/themes`);
 export const getNarrative = (week: string, name: string) =>
   getJSON<NarrativeResponse>(`/api/weeks/${week}/narrative/${name}`);
