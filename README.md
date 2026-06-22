@@ -115,6 +115,7 @@ make week GROUP=defg                              # ①~⑥ 一鍵跑完
 #   cp_candidates.md  holdings/watchlist_enriched.csv  screen_result_*.csv
 # → 套 docs/11 範本 prompt → 得 picks.md
 make report STOCK_ID=2330                         # 對 picks 選出的每檔產個股深度報告（5-10 秒）
+make dash-dev                                     # （選配）把本週報告開成可視化儀表板瀏覽（首次先 make dash-install）→ §13
 ```
 
 > **個股報告兩模式**：設了 `ANTHROPIC_API_KEY` → `make report` 直接產完整分析；沒設 → 產資料草稿，貼 Claude 對話依範本補寫。
@@ -141,6 +142,9 @@ make report STOCK_ID=2330                         # 對 picks 選出的每檔產
 | `make build-themes` | 爬 Yahoo 概念股更新 concepts.yaml | 每月或新題材出現時（`DRY=1` 預演） |
 | `make audit-concepts` | 清查 concepts.yaml 無價成員（不改檔） | 久久檢查興櫃/下市/誤標 |
 | `bash scripts/fetch_cron.sh` | 盤後抓全市場資料（cron 用，見 §12） | 每交易日（排程或手動） |
+| `make dash-install` | 裝 dashboard 前後端依賴（uv＋npm，首次一次） | 第一次用儀表板 |
+| `make dash-dev` | 起 dashboard 開發伺服器（FastAPI:8000＋Vite:5173） | 視覺化瀏覽本週報告（§13） |
+| `make dash-build && make dash` | build 前端＋單一 FastAPI 服務（:8000） | 自用正式跑、不需 Vite |
 | `make test` / `make lint` / `make typecheck` | 測試 / ruff / mypy | 開發時 |
 | `uv run tw-screener sector universe --list` | 列出次產業宇宙與成員 | 檢查 concepts.yaml 覆蓋 |
 | `uv run tw-screener sector universe --audit` | 列出近日無價的次產業成員 | 清 concepts.yaml 前先看 |
@@ -283,6 +287,44 @@ crontab -e
 漏抓自我檢查：`make rotation` / `sector flows` 會印「上櫃法人快取落後上市 N 個交易日」警告；
 看到就手動 `make fetch-twse`（但只能補到最新日，更早的缺口補不回）。
 
+### 13. 投資戰情室 Dashboard（`make dash-dev`）
+
+把 `make week` 產出的 `reports/YYYY-Www/` 開成本機可視化 HUD——**只讀報告、不抓資料也不寫檔**，
+和「貼給 Claude」是兩條並行的消化路徑（規格 [docs/17](./docs/17-dashboard-spec.md)）。FastAPI 後端
+（`src/tw_screener/webapp/`）讀 `reports/` 吐 JSON、React/Vite 前端（`frontend/`）渲染。
+
+**首次安裝（一次性）**：
+
+```bash
+make dash-install        # uv sync ＋ (cd frontend && npm install)
+```
+
+**執行流程 ＝ 先有報告、再開儀表板**（重點：dashboard 只是 `reports/` 的瀏覽器，沒報告就沒東西看）：
+
+```bash
+make week GROUP=defg     # ① 先跑主流程產 reports/YYYY-Www/（缺資料的週 → 儀表板顯空狀態）
+make dash-dev            # ② 同時起 FastAPI(:8000) ＋ Vite(:5173)，Ctrl-C 一起關
+#   → 瀏覽器開 http://localhost:5173 （Vite 把 /api proxy 到 :8000）
+```
+
+頁面（對應已完成的 M-Dash 0–4）：
+
+- **候選股**：可排序/篩選表＋動能×估值散佈／法人買賣超 bar／估值分布，側欄渲染 `pick.md` 敘事
+- **族群輪動**：資金熱力圖＋主題強度排行＋成員展開，`sector_rotation.md`／`group_analysis.md` 分頁
+- **個股 detail**：點任一候選股/族群成員鑽取，六卡（基本面/籌碼/技術區間/族群定位/策略徽章＋Goodinfo 連結），缺資料顯「未取得」不報錯
+- **持股損益**：`holdings_enriched.csv` 報酬/市值＋MA60 停損距離燈號＋除權息提醒；**Privacy 遮罩**一鍵把持股數字打碼（分享截圖友善，純前端、不影響資料）
+- 週次切換器：缺資料週顯空狀態（只讀現有 `reports/`、不自動回補）
+
+**自用正式跑法**（單一進程、不需 Vite dev server）：
+
+```bash
+make dash-build          # 前端 build → frontend/dist
+make dash                # uv run tw-screener serve：單一 FastAPI 同時服務 build 後前端＋API（:8000）
+```
+
+> 全程**只讀 `reports/`**：不改報告、不觸發抓取，跑壞重開即可；`holdings` 為本機明文不入 git，
+> Privacy 遮罩僅前端打碼供分享。後端 happy-path 測試 `make dash-test`。
+
 ---
 
 ## 報表產物導覽（`reports/YYYY-Www/`）
@@ -373,6 +415,7 @@ make typecheck   # mypy
 | [`docs/11-propicks-analysis.md`](./docs/11-propicks-analysis.md) | **ProPicks 全清單分析**（Step 3 完整 prompt + 流程） |
 | [`docs/12-sector-rotation.md`](./docs/12-sector-rotation.md) | **次產業資金輪動**規劃書＋方法論（R0-R6、起漲點校準、四象限） |
 | [`docs/13-cp-value-research.md`](./docs/13-cp-value-research.md) | **個股 CP 補漲研究**＋方法論（三重濾網、官方 PE 估值層、M-MH 多窗起漲/退潮校準裁決） |
+| [`docs/17-dashboard-spec.md`](./docs/17-dashboard-spec.md) | **投資戰情室 Dashboard** 規劃書（讀 reports/ 的本機 HUD、M-Dash 拆解、API/頁面/Privacy 遮罩） |
 | [`docs/99-troubleshooting.md`](./docs/99-troubleshooting.md) | 常見問題與解法 |
 
 ## 給 Claude Code 的使用指示
