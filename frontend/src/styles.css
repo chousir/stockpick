@@ -290,9 +290,42 @@ table.hud tbody tr:hover td {
 }
 .chart-toggle {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   align-items: center;
   margin-bottom: 6px;
+}
+.chart-cap {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.chart-cap b {
+  color: var(--text);
+  font-weight: 600;
+}
+.strat-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.strat-legend span {
+  display: inline-flex;
+  align-items: center;
+}
+.strat-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
 }
 @media (max-width: 1100px) {
   .chart-grid {

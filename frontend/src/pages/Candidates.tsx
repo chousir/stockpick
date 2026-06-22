@@ -253,7 +253,7 @@ export function Candidates({ week }: Props) {
           </div>
         </div>
         <div className="chart-card chart-card--wide">
-          <h3>法人買賣超（|淨額| 前 15）</h3>
+          <h3>法人買賣超</h3>
           <InstFlowBar rows={filtered} />
         </div>
 
