@@ -18,6 +18,8 @@ interface Props {
   onWeekChange: (week: string) => void;
   tab: TabKey;
   onTabChange: (tab: TabKey) => void;
+  privacy: boolean;
+  onPrivacyChange: (privacy: boolean) => void;
   children: ReactNode;
 }
 
@@ -27,6 +29,8 @@ export function AppShell({
   onWeekChange,
   tab,
   onTabChange,
+  privacy,
+  onPrivacyChange,
   children,
 }: Props) {
   return (
@@ -47,6 +51,13 @@ export function AppShell({
           ))}
         </nav>
         <span className="shell-spacer" />
+        <button
+          className={`chip ${privacy ? "on" : ""}`}
+          onClick={() => onPrivacyChange(!privacy)}
+          title="遮蔽持股買價/市值/損益（純前端打碼，防截圖）"
+        >
+          {privacy ? "🔒 隱私" : "🔓 隱私"}
+        </button>
         {weeks.length > 0 && (
           <WeekSwitcher weeks={weeks} value={week} onChange={onWeekChange} />
         )}

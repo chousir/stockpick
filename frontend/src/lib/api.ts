@@ -51,6 +51,8 @@ export interface StockDetailResponse {
 export const getWeeks = () => getJSON<WeeksResponse>("/api/weeks");
 export const getCandidates = (week: string) =>
   getJSON<Row[]>(`/api/weeks/${week}/candidates`);
+export const getHoldings = (week: string) =>
+  getJSON<Row[]>(`/api/weeks/${week}/holdings`);
 export const getSectors = (week: string) =>
   getJSON<Row[]>(`/api/weeks/${week}/sectors`);
 export const getThemes = (week: string) =>

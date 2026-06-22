@@ -43,6 +43,12 @@ def get_candidates(week: str) -> list[EnrichedRow]:
     return _validate(_rows_or_404(week, "candidates_enriched.csv", "候選股"), EnrichedRow)
 
 
+@router.get("/{week}/holdings", response_model=list[EnrichedRow])
+def get_holdings(week: str) -> list[EnrichedRow]:
+    """持股損益表（holdings_enriched.csv）。API 回明文，遮罩在前端（docs/17 §5.1）。"""
+    return _validate(_rows_or_404(week, "holdings_enriched.csv", "持股"), EnrichedRow)
+
+
 @router.get("/{week}/sectors", response_model=list[SectorRow])
 def get_sectors(week: str) -> list[SectorRow]:
     """族群資金雷達（sector_rotation.csv）。"""

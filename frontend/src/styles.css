@@ -610,6 +610,31 @@ button.member-chip:hover {
   }
 }
 
+/* ─── 持股損益頁（§5.5）─────────────────────────────────── */
+.holdings-summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 2px 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.holdings-summary .count {
+  color: var(--hi);
+}
+.holdings-summary b {
+  color: var(--hi);
+}
+.masked {
+  font-family: var(--mono);
+  color: var(--muted);
+  letter-spacing: 1px;
+}
+.masked-note {
+  color: var(--warn);
+  font-size: 11px;
+}
+
 /* ─── 敘事側欄（markdown）───────────────────────────────── */
 .narrative-panel {
   flex: 0 0 440px;

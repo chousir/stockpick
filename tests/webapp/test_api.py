@@ -55,6 +55,28 @@ def _week_with(endpoint: str) -> str | None:
     return None
 
 
+def test_holdings_happy_path() -> None:
+    """持股損益表可讀，含買價/報酬/市值欄（docs/17 M-Dash 4 驗收）。"""
+    week = _week_with("holdings")
+    if week is None:
+        pytest.skip("本機 reports/ 無含 holdings 的週次")
+    rows = client.get(f"/api/weeks/{week}/holdings").json()
+    assert isinstance(rows, list) and len(rows) > 0
+    # stock_id 一律字串（避免 ETF 前導零遺失）
+    assert all(isinstance(row["stock_id"], str) for row in rows)
+    # 持股專屬欄存在（值可能為 null）
+    assert "buy_price" in rows[0]
+    assert "return_pct" in rows[0]
+    assert "market_value_k" in rows[0]
+
+
+def test_holdings_missing_404_not_500() -> None:
+    """缺 holdings 的週回 404、非 500（docs/17 §2.4）。"""
+    for w in _weeks():
+        assert client.get(f"/api/weeks/{w}/holdings").status_code in (200, 404)
+    assert client.get("/api/weeks/9999-W99/holdings").status_code == 404
+
+
 def test_sectors_happy_path() -> None:
     week = _week_with("sectors")
     if week is None:
