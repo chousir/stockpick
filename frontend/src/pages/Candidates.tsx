@@ -2,8 +2,12 @@
 // 缺資料週（如 W21 無 candidates）→ 空狀態，不報錯（§2.4）。
 
 import { type ColumnDef, type SortingFn } from "@tanstack/react-table";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { InstFlowBar } from "../charts/InstFlowBar";
+import { MomentumValueScatter } from "../charts/MomentumValueScatter";
+import { ValuationDist } from "../charts/ValuationDist";
 import { DataTable } from "../components/DataTable";
+import { NarrativePanel } from "../components/NarrativePanel";
 import { ApiError, getCandidates, type Row } from "../lib/api";
 import { flagClass, fmtNum, isBlank, signClass } from "../lib/format";
 
@@ -125,6 +129,17 @@ export function Candidates({ week }: Props) {
   const [search, setSearch] = useState("");
   const [activeStrats, setActiveStrats] = useState<Set<string>>(new Set());
   const [cheapOnly, setCheapOnly] = useState(false);
+  const [showNarrative, setShowNarrative] = useState(false);
+
+  // 點散佈點/股號 → 開 Goodinfo（完整跳個股 detail 頁待 M-Dash 3）
+  const onPick = useCallback(
+    (stockId: string) => {
+      const row = rows?.find((r) => String(r.stock_id) === stockId);
+      const url = row?.goodinfo_url;
+      if (url) window.open(String(url), "_blank", "noreferrer");
+    },
+    [rows],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -192,34 +207,67 @@ export function Candidates({ week }: Props) {
   }
 
   return (
-    <div>
-      <div className="toolbar">
-        <input
-          type="text"
-          placeholder="搜尋 股號/名稱…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        {STRATEGIES.map((s) => (
+    <div className="cand-layout">
+      <div className="cand-main">
+        <div className="toolbar">
+          <input
+            type="text"
+            placeholder="搜尋 股號/名稱…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {STRATEGIES.map((s) => (
+            <button
+              key={s}
+              className={`chip ${activeStrats.has(s) ? "on" : ""}`}
+              onClick={() => toggleStrat(s)}
+            >
+              {s}
+            </button>
+          ))}
           <button
-            key={s}
-            className={`chip ${activeStrats.has(s) ? "on" : ""}`}
-            onClick={() => toggleStrat(s)}
+            className={`chip ${cheapOnly ? "on" : ""}`}
+            onClick={() => setCheapOnly((v) => !v)}
           >
-            {s}
+            相對便宜
           </button>
-        ))}
-        <button
-          className={`chip ${cheapOnly ? "on" : ""}`}
-          onClick={() => setCheapOnly((v) => !v)}
-        >
-          相對便宜
-        </button>
-        <span className="count">
-          {filtered.length} / {rows?.length ?? 0} 檔
-        </span>
+          <button
+            className={`chip ${showNarrative ? "on" : ""}`}
+            onClick={() => setShowNarrative((v) => !v)}
+          >
+            敘事 pick.md
+          </button>
+          <span className="count">
+            {filtered.length} / {rows?.length ?? 0} 檔
+          </span>
+        </div>
+
+        <div className="chart-grid">
+          <div className="chart-card">
+            <h3>動能 × 估值散佈</h3>
+            <MomentumValueScatter rows={filtered} onPick={onPick} />
+          </div>
+          <div className="chart-card">
+            <h3>估值 / 殖利分布</h3>
+            <ValuationDist rows={filtered} />
+          </div>
+        </div>
+        <div className="chart-card chart-card--wide">
+          <h3>法人買賣超（|淨額| 前 15）</h3>
+          <InstFlowBar rows={filtered} />
+        </div>
+
+        <DataTable columns={columns} data={filtered} />
       </div>
-      <DataTable columns={columns} data={filtered} />
+
+      {showNarrative && (
+        <NarrativePanel
+          week={week}
+          name="pick"
+          title="本週進場敘事 pick.md"
+          onClose={() => setShowNarrative(false)}
+        />
+      )}
     </div>
   );
 }

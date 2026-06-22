@@ -68,3 +68,25 @@ def test_meta_shape() -> None:
     assert meta["week"] == week
     assert isinstance(meta["files"], dict)
     assert "candidates" in meta["files"]
+
+
+def test_narrative_pick_or_404() -> None:
+    """有 pick.md 的週回 markdown；沒有的回 404（不丟 500）。"""
+    weeks = _weeks()
+    if not weeks:
+        pytest.skip("本機 reports/ 無資料")
+    seen_ok = False
+    for w in weeks:
+        r = client.get(f"/api/weeks/{w}/narrative/pick")
+        assert r.status_code in (200, 404)
+        if r.status_code == 200:
+            assert isinstance(r.json()["markdown"], str)
+            seen_ok = True
+    assert seen_ok, "預期至少一週有 pick.md"
+
+
+def test_narrative_unknown_name_404() -> None:
+    weeks = _weeks()
+    if not weeks:
+        pytest.skip("本機 reports/ 無資料")
+    assert client.get(f"/api/weeks/{weeks[-1]}/narrative/bogus").status_code == 404

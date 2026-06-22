@@ -32,6 +32,13 @@ async function getJSON<T>(url: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export interface NarrativeResponse {
+  name: string;
+  markdown: string;
+}
+
 export const getWeeks = () => getJSON<WeeksResponse>("/api/weeks");
 export const getCandidates = (week: string) =>
   getJSON<Row[]>(`/api/weeks/${week}/candidates`);
+export const getNarrative = (week: string, name: string) =>
+  getJSON<NarrativeResponse>(`/api/weeks/${week}/narrative/${name}`);
