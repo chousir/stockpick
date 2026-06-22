@@ -1,0 +1,21 @@
+/* War-Room HUD design tokens（docs/17 §6.1）。漲跌為台股慣例：紅漲綠跌。 */
+:root {
+  --bg: #0b0f17;
+  --panel: #111826;
+  --border: #1c2738;
+
+  --accent: #18e0c8; /* teal 主色 */
+  --warn: #ffae00; /* amber 預警 */
+
+  --text: #9fb3c8;
+  --muted: #5d6b7e;
+  --hi: #e6f0f7;
+
+  --up: #ff4d5e; /* 漲（紅） */
+  --down: #2bd576; /* 跌（綠） */
+  --flat: #9fb3c8; /* 平 */
+
+  --mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  --sans: system-ui, -apple-system, "Noto Sans TC", "PingFang TC", sans-serif;
+}

@@ -1,7 +1,8 @@
 .PHONY: init sync test test-unit test-integration lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry \
         group leaders report week weekend backtest-strategies rotation-calib rotation backfill-otc-history \
-        audit-concepts cp-value-calib cp-value-candidates cp-value-valuation
+        audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
+        dash-install dash-dev dash-build dash dash-test
 
 # ─── 環境 ────────────────────────────────────────────────────────────────────
 
@@ -142,3 +143,24 @@ cp-value-candidates:  ## B3 個股 CP 候選清單（生產軌，產 reports/週
 
 cp-value-valuation:  ## C1 個股相對 PE 估值表（生產軌，產 reports/週次/cp_valuation.md+csv；docs/13 §C1）
 	uv run tw-screener cp valuation
+
+# ─── Dashboard（投資戰情室；docs/17）─────────────────────────────────────────
+
+dash-install:  ## 安裝前後端依賴（uv sync ＋ npm install）
+	uv sync
+	cd frontend && npm install
+
+dash-dev:  ## 併發起 FastAPI(:8000) ＋ Vite(:5173, proxy /api)；Ctrl-C 同時關閉
+	@trap 'kill 0' EXIT INT TERM; \
+	  uv run tw-screener serve --reload & \
+	  ( cd frontend && npm run dev ) & \
+	  wait
+
+dash-build:  ## 前端 build → frontend/dist
+	cd frontend && npm run build
+
+dash:  ## FastAPI 服務 frontend/dist ＋ /api（:8000）
+	uv run tw-screener serve
+
+dash-test:  ## 後端 webapp 路由 pytest（happy path）
+	uv run pytest tests/webapp -v --tb=short

@@ -1,0 +1,37 @@
+// fetch wrapper ＋ 型別。dev 走 Vite proxy /api → :8000；prod 同源。
+
+export interface WeeksResponse {
+  weeks: string[];
+  latest: string | null;
+}
+
+// enriched 列：欄位跨週演進，值可能為 null（缺欄）。
+export type Row = Record<string, string | number | null>;
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+async function getJSON<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // 非 JSON 回應，沿用 statusText
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return res.json() as Promise<T>;
+}
+
+export const getWeeks = () => getJSON<WeeksResponse>("/api/weeks");
+export const getCandidates = (week: string) =>
+  getJSON<Row[]>(`/api/weeks/${week}/candidates`);
