@@ -192,6 +192,76 @@ def test_build_empty_inputs():
     assert build_cp_candidates(_snap([{"stock_id": "A"}]), _confirm({"A": True}), []).is_empty()
 
 
+# ── 族群內落後濾鏡（docs/17 C-P2 生產化）─────────────────────────────────────
+
+_LAG = dict(laggard_labels=("ambush",), laggard_boost=0.3, laggard_threshold=0.0)
+
+
+def test_laggard_boosts_ambush_and_discloses():
+    # 同 z/位階的埋伏：落後其族群者 cp_score 輕加權＋揭露；領先者僅揭露不加權
+    snap = _snap(
+        [
+            {"stock_id": "LAG", "foreign_flow_20d_z": 1.0, "above_low_60d_pct": 4.0,
+             "rs_subind_20d": -3.0},
+            {"stock_id": "LEAD", "foreign_flow_20d_z": 1.0, "above_low_60d_pct": 4.0,
+             "rs_subind_20d": 2.0},
+        ]
+    )
+    out = build_cp_candidates(snap, _confirm({"LAG": True, "LEAD": True}), RULES, **_LAG)
+    rows = {r["stock_id"]: r for r in out.iter_rows(named=True)}
+    base = round(1.0 * (1 - 4 / 60), 3)
+    assert rows["LAG"]["cp_boosted"] is True
+    assert rows["LAG"]["cp_score"] == round(base * 1.3, 3)
+    assert rows["LAG"]["rs_subind"] == -3.0
+    assert rows["LEAD"]["cp_boosted"] is False
+    assert rows["LEAD"]["cp_score"] == base
+    assert rows["LEAD"]["rs_subind"] == 2.0
+
+
+def test_laggard_boost_reorders_within_type():
+    # 落後股 z 略低於領先股，加權後仍浮上型態前；未加權則領先 z 高在前
+    snap = _snap(
+        [
+            {"stock_id": "LAG", "foreign_flow_20d_z": 1.4, "above_low_60d_pct": 4.0,
+             "rs_subind_20d": -2.0},
+            {"stock_id": "LEAD", "foreign_flow_20d_z": 1.5, "above_low_60d_pct": 4.0,
+             "rs_subind_20d": 1.0},
+        ]
+    )
+    ids = _confirm({"LAG": True, "LEAD": True})
+    assert build_cp_candidates(snap, ids, RULES, **_LAG)["stock_id"].to_list() == ["LAG", "LEAD"]
+    assert build_cp_candidates(snap, ids, RULES)["stock_id"].to_list() == ["LEAD", "LAG"]
+
+
+def test_laggard_only_applies_to_apply_to_labels():
+    # breakout 落後股：揭露 rs_subind 但不加權（D2：加權只作用 ambush）
+    snap = _snap(
+        [{"stock_id": "BRK", "trust_flow_20d_z": 1.2, "above_low_60d_pct": 5.0,
+          "rs_subind_20d": -3.0}]
+    )
+    row = build_cp_candidates(snap, _confirm({"BRK": True}), RULES, **_LAG).row(0, named=True)
+    assert row["primary_label"] == "breakout"
+    assert row["cp_boosted"] is False
+    assert row["rs_subind"] == -3.0  # 仍揭露
+    assert row["cp_score"] == round(1.2 * (1 - 5 / 60), 3)  # 原分不變
+
+
+def test_laggard_missing_rs_column_graceful():
+    # 面板無 rs_subind 欄 → 不報錯、不加權、不出揭露欄
+    snap = _snap([{"stock_id": "A", "foreign_flow_20d_z": 1.0, "above_low_60d_pct": 4.0}])
+    out = build_cp_candidates(snap, _confirm({"A": True}), RULES, **_LAG)
+    assert "rs_subind" not in out.columns and "cp_boosted" not in out.columns
+    assert out.row(0, named=True)["cp_score"] == round(1 - 4 / 60, 3)
+
+
+def test_laggard_disabled_keeps_legacy_columns():
+    # 預設停用（boost=0/labels 空）→ 完全回退、無新欄（向後相容）
+    snap = _snap([{"stock_id": "A", "foreign_flow_20d_z": 1.0, "above_low_60d_pct": 4.0,
+                   "rs_subind_20d": -3.0}])
+    out = build_cp_candidates(snap, _confirm({"A": True}), RULES)
+    assert "rs_subind" not in out.columns and "cp_boosted" not in out.columns
+
+
 # ── 疊圖：象限 / 持有狀態 ─────────────────────────────────────────────────────
 
 
@@ -320,6 +390,43 @@ def test_render_without_valuation_unchanged(tmp_path):
     )
     text = md.read_text(encoding="utf-8")
     assert "三重" not in text and "三重濾網全過" not in text
+
+
+def test_render_shows_laggard_column_and_mark(tmp_path):
+    # 族群內欄＋🔻（被加權的落後埋伏）；CSV 帶 rs_subind/cp_boosted
+    snap = _snap([{"stock_id": "A", "foreign_flow_20d_z": 1.0, "above_low_60d_pct": 4.0,
+                   "flow_momentum": 100.0, "rs_subind_20d": -3.0}])
+    cands = build_cp_candidates(snap, _confirm({"A": True}), RULES,
+                                laggard_labels=("ambush",), laggard_boost=0.3)
+    cands = attach_subind_quadrant(cands, pl.DataFrame({"sub_industry": ["半導體"],
+                                                        "stock_id": ["A"]}),
+                                   tmp_path / "missing.csv")
+    cands = tag_holding_status(cands, holdings=[], watch=[], hits=[])
+    md = render_cp_candidates_report(
+        cands, "2026-W24", tmp_path,
+        params={"drawdown_pct": 20.0, "confirm_days": 2}, coverage=_coverage(),
+        rules=RULES, names={"A": "台積電"}, data_date="2026-06-12",
+    )
+    text = md.read_text(encoding="utf-8")
+    assert "族群內" in text and "-3.0🔻" in text
+    csv = pl.read_csv(tmp_path / "cp_candidates.csv")
+    assert {"rs_subind", "cp_boosted"} <= set(csv.columns)
+
+
+def test_render_without_laggard_unchanged(tmp_path):
+    # 未啟用落後濾鏡 → 不出族群內欄（向後相容）
+    snap = _snap([{"stock_id": "A", "foreign_flow_20d_z": 1.0, "above_low_60d_pct": 4.0}])
+    cands = build_cp_candidates(snap, _confirm({"A": True}), RULES)
+    cands = attach_subind_quadrant(cands, pl.DataFrame(schema={"sub_industry": pl.Utf8,
+                                                               "stock_id": pl.Utf8}),
+                                   tmp_path / "missing.csv")
+    cands = tag_holding_status(cands, holdings=[], watch=[], hits=[])
+    md = render_cp_candidates_report(
+        cands, "2026-W24", tmp_path,
+        params={"drawdown_pct": 20.0, "confirm_days": 2}, coverage=_coverage(),
+        rules=RULES, names={}, data_date="2026-06-12",
+    )
+    assert "族群內" not in md.read_text(encoding="utf-8")
 
 
 def test_render_empty_candidates(tmp_path):

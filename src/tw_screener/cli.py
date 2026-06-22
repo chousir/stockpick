@@ -2317,6 +2317,8 @@ def cp_candidates_cmd(
     snapshot = latest_snapshot(panel)
     confirm_days = int(cand.get("confirm_days", 2))
     confirm = recent_buy_confirm(panel, institutional, confirm_days=confirm_days)
+    lag = cand.get("laggard", {})
+    lag_on = bool(lag.get("enabled", False))
     candidates = build_cp_candidates(
         snapshot,
         confirm,
@@ -2325,6 +2327,9 @@ def cp_candidates_cmd(
         drawdown_pct=float(cand.get("drawdown_pct", 20.0)),
         cp_ceiling=cp_ceiling,
         max_candidates=int(cand.get("max_candidates", 40)),
+        laggard_labels=tuple(lag.get("apply_to", [])) if lag_on else (),
+        laggard_boost=float(lag.get("boost", 0.0)) if lag_on else 0.0,
+        laggard_threshold=float(lag.get("threshold", 0.0)),
     )
 
     week_tag = derive_week_tag(settings)
