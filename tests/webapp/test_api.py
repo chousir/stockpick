@@ -130,3 +130,33 @@ def test_narrative_unknown_name_404() -> None:
     if not weeks:
         pytest.skip("本機 reports/ 無資料")
     assert client.get(f"/api/weeks/{weeks[-1]}/narrative/bogus").status_code == 404
+
+
+def test_stock_happy_path() -> None:
+    """任一候選股可鑽取（docs/17 M-Dash 3 驗收）。"""
+    week = _week_with_candidates()
+    if week is None:
+        pytest.skip("本機 reports/ 無含 candidates 的週次")
+    cand = client.get(f"/api/weeks/{week}/candidates").json()[0]
+    sid = cand["stock_id"]
+    r = client.get(f"/api/weeks/{week}/stock/{sid}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["stock_id"] == sid
+    assert body["week"] == week
+    assert body["sources"]  # 至少命中一表
+    assert isinstance(body["screens"], list)  # d/e/f/g 子集（可空）
+    assert all(s in {"d", "e", "f", "g"} for s in body["screens"])
+    # sectors：None（本週無 sector_rotation）或 list（docs/17 §4）
+    assert body["sectors"] is None or isinstance(body["sectors"], list)
+    assert body["row"]["stock_id"] == sid
+    assert body["goodinfo_url"]
+
+
+def test_stock_missing_404() -> None:
+    """三表皆查無此股回 404、非 500（docs/17 §4）。"""
+    week = _week_with_candidates()
+    if week is None:
+        pytest.skip("本機 reports/ 無含 candidates 的週次")
+    assert client.get(f"/api/weeks/{week}/stock/9999999").status_code == 404
+    assert client.get("/api/weeks/9999-W99/stock/2330").status_code == 404

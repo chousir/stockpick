@@ -12,6 +12,7 @@ import { fmtNum, isBlank, signClass } from "../lib/format";
 
 interface Props {
   week: string;
+  onStock: (stockId: string) => void;
 }
 
 type Load<T> = { data: T | null; status: number | null; loading: boolean };
@@ -62,8 +63,16 @@ function RankDelta({ v }: { v: unknown }) {
   );
 }
 
-// 成員展開內容：本週入選候選股 chip（連 Goodinfo）。universe＝族群成員總數（reports/ 無逐檔清單）。
-function MemberChips({ members, universe }: { members: Row[]; universe?: unknown }) {
+// 成員展開內容：本週入選候選股 chip（點擊鑽取個股頁）。universe＝族群成員總數（reports/ 無逐檔清單）。
+function MemberChips({
+  members,
+  universe,
+  onStock,
+}: {
+  members: Row[];
+  universe?: unknown;
+  onStock: (stockId: string) => void;
+}) {
   const total = isBlank(universe) ? null : Number(universe);
   return (
     <>
@@ -80,32 +89,20 @@ function MemberChips({ members, universe }: { members: Row[]; universe?: unknown
       ) : (
         <div className="member-chips">
           {members.map((m) => {
-            const url = m.goodinfo_url ? String(m.goodinfo_url) : null;
-            const label = (
-              <span>
-                <b>{String(m.stock_id ?? "")}</b> {String(m.name ?? "")}
-                <span className={signClass(m.momentum_5d_pct)}>
-                  {" "}
-                  {fmtNum(m.momentum_5d_pct, 1)}%
-                </span>
-              </span>
-            );
-            return url ? (
-              <a
-                key={String(m.stock_id)}
+            const id = String(m.stock_id ?? "");
+            return (
+              <button
+                key={id}
                 className="member-chip"
-                href={url}
-                target="_blank"
-                rel="noreferrer"
-                title="Goodinfo"
-                onClick={(e) => e.stopPropagation()}
+                title="個股鑽取"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (id) onStock(id);
+                }}
               >
-                {label}
-              </a>
-            ) : (
-              <span key={String(m.stock_id)} className="member-chip">
-                {label}
-              </span>
+                <b>{id}</b> {String(m.name ?? "")}
+                <span className={signClass(m.momentum_5d_pct)}> {fmtNum(m.momentum_5d_pct, 1)}%</span>
+              </button>
             );
           })}
         </div>
@@ -188,7 +185,7 @@ const SECTOR_Z_COLS: { key: string; label: string }[] = [
   { key: "trust_flow_20d_z", label: "投信20dz" },
 ];
 
-export function Sectors({ week }: Props) {
+export function Sectors({ week, onStock }: Props) {
   const sectors = useTable(week, getSectors);
   const themes = useTable(week, getThemes);
   const candidates = useTable(week, getCandidates);
@@ -291,6 +288,7 @@ export function Sectors({ week }: Props) {
                         members={members}
                         open={open}
                         onToggle={() => toggle(sub)}
+                        onStock={onStock}
                       />
                     );
                   })}
@@ -318,6 +316,7 @@ export function Sectors({ week }: Props) {
                 <MemberChips
                   members={memberMap.get(String(r.theme ?? "")) ?? []}
                   universe={r.members_count}
+                  onStock={onStock}
                 />
               )}
             />
@@ -346,12 +345,14 @@ function SectorRows({
   members,
   open,
   onToggle,
+  onStock,
 }: {
   row: Row;
   sub: string;
   members: Row[];
   open: boolean;
   onToggle: () => void;
+  onStock: (stockId: string) => void;
 }) {
   const entry = row.entry_triggered ? <span className="flag amber">⚑進場</span> : null;
   const confirm = row.confirm_triggered ? <span className="flag teal">✓確認</span> : null;
@@ -404,7 +405,7 @@ function SectorRows({
       {open && (
         <tr className="sector-members-row">
           <td className="text" colSpan={colSpan}>
-            <MemberChips members={members} universe={row.members} />
+            <MemberChips members={members} universe={row.members} onStock={onStock} />
           </td>
         </tr>
       )}

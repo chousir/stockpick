@@ -117,3 +117,19 @@ class EnrichedRow(BaseModel):
     buy_price: float | None = None
     return_pct: float | None = None
     market_value_k: float | None = None
+
+
+class StockDetail(BaseModel):
+    """個股彙整（docs/17 §4/§5.4）：跨表合併列 ＋ 命中策略 ＋ 所屬族群位置。"""
+
+    stock_id: str
+    week: str
+    # 命中來源表（holdings/candidates/watchlist 子集，優先序 holdings>candidates>watchlist）
+    sources: list[str]
+    # 命中的篩選策略代號（d/e/f/g 子集）
+    screens: list[str]
+    # 合併後的 enriched 列（W25 超集、全 Optional）
+    row: EnrichedRow
+    # 所屬次產業在 sector_rotation 的位置：None＝本週無 sector_rotation 檔；[]＝有檔但無對應次產業
+    sectors: list[SectorRow] | None
+    goodinfo_url: str | None = None

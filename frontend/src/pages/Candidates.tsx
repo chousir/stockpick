@@ -2,7 +2,7 @@
 // 缺資料週（如 W21 無 candidates）→ 空狀態，不報錯（§2.4）。
 
 import { type ColumnDef, type SortingFn } from "@tanstack/react-table";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { InstFlowBar } from "../charts/InstFlowBar";
 import { MomentumValueScatter } from "../charts/MomentumValueScatter";
 import { ValuationDist } from "../charts/ValuationDist";
@@ -71,7 +71,7 @@ function renderFlags(raw: unknown) {
   );
 }
 
-function buildColumns(): ColumnDef<Row, unknown>[] {
+function buildColumns(onPick: (stockId: string) => void): ColumnDef<Row, unknown>[] {
   return COLUMNS.map((col) => {
     const text = col.kind === "text" || col.kind === "id" || col.kind === "flags";
     const base: ColumnDef<Row, unknown> = {
@@ -87,20 +87,12 @@ function buildColumns(): ColumnDef<Row, unknown>[] {
       const v = info.getValue();
       switch (col.kind) {
         case "id": {
-          const url = info.row.original.goodinfo_url;
-          const label = <span className="cell-id">{isBlank(v) ? "—" : String(v)}</span>;
-          return url ? (
-            <a
-              className="cell-link"
-              href={String(url)}
-              target="_blank"
-              rel="noreferrer"
-              title="Goodinfo"
-            >
-              {label}
-            </a>
-          ) : (
-            label
+          if (isBlank(v)) return <span className="cell-id">—</span>;
+          const id = String(v);
+          return (
+            <button className="cell-link cell-id-btn" onClick={() => onPick(id)} title="個股鑽取">
+              {id}
+            </button>
           );
         }
         case "text":
@@ -119,9 +111,10 @@ function buildColumns(): ColumnDef<Row, unknown>[] {
 
 interface Props {
   week: string;
+  onStock: (stockId: string) => void;
 }
 
-export function Candidates({ week }: Props) {
+export function Candidates({ week, onStock }: Props) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<{ status: number; msg: string } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -131,15 +124,8 @@ export function Candidates({ week }: Props) {
   const [cheapOnly, setCheapOnly] = useState(false);
   const [showNarrative, setShowNarrative] = useState(false);
 
-  // 點散佈點/股號 → 開 Goodinfo（完整跳個股 detail 頁待 M-Dash 3）
-  const onPick = useCallback(
-    (stockId: string) => {
-      const row = rows?.find((r) => String(r.stock_id) === stockId);
-      const url = row?.goodinfo_url;
-      if (url) window.open(String(url), "_blank", "noreferrer");
-    },
-    [rows],
-  );
+  // 點散佈點/股號 → 鑽取個股 detail 頁（M-Dash 3）
+  const onPick = onStock;
 
   useEffect(() => {
     let cancelled = false;
@@ -163,7 +149,7 @@ export function Candidates({ week }: Props) {
     };
   }, [week]);
 
-  const columns = useMemo(() => buildColumns(), []);
+  const columns = useMemo(() => buildColumns(onPick), [onPick]);
 
   const filtered = useMemo(() => {
     if (!rows) return [];

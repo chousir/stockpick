@@ -104,6 +104,58 @@ def read_table(week: str, filename: str) -> list[dict[str, Any]] | None:
     return rows
 
 
+# 個股彙整來源（優先序 holdings > candidates > watchlist，docs/17 §4）
+_STOCK_SOURCES = (
+    ("holdings", "holdings_enriched.csv"),
+    ("candidates", "candidates_enriched.csv"),
+    ("watchlist", "watchlist_enriched.csv"),
+)
+# 四策略原始篩選命中檔（screen_result_{id}_*.csv，後綴可變故用 glob）
+_SCREEN_IDS = ("d", "e", "f", "g")
+
+
+def find_stock(week: str, stock_id: str) -> tuple[dict[str, Any] | None, list[str]]:
+    """跨 candidates/holdings/watchlist 找單一股並合併（docs/17 §4）。
+
+    回 (merged_row, sources)；三表皆查無回 (None, [])。
+    合併優先序 holdings > candidates > watchlist：低→高依序覆寫，**只用非 None 值覆寫**
+    （高優先表的缺欄不會抹掉低優先表已有的值），欄位取聯集。
+    """
+    found: dict[str, dict[str, Any]] = {}
+    for name, fname in _STOCK_SOURCES:
+        rows = read_table(week, fname)
+        if rows is None:
+            continue
+        match = next((r for r in rows if str(r.get("stock_id")) == stock_id), None)
+        if match is not None:
+            found[name] = match
+    if not found:
+        return None, []
+
+    merged: dict[str, Any] = {}
+    for name in ("watchlist", "candidates", "holdings"):  # 低→高優先
+        row = found.get(name)
+        if row:
+            merged.update({k: v for k, v in row.items() if v is not None})
+    sources = [name for name, _ in _STOCK_SOURCES if name in found]  # holdings→candidates→watchlist
+    return merged, sources
+
+
+def screens_hit(week: str, stock_id: str) -> list[str]:
+    """掃 screen_result_{d,e,f,g}_*.csv，回此股命中的策略代號（去重、固定 d/e/f/g 序）。"""
+    if not week_exists(week):
+        return []
+    base = file_path(week, "")
+    hit: list[str] = []
+    for sid in _SCREEN_IDS:
+        for path in sorted(base.glob(f"screen_result_{sid}_*.csv")):
+            rows = read_table(week, path.name)
+            if rows and any(str(r.get("stock_id")) == stock_id for r in rows):
+                hit.append(sid)
+                break
+    return hit
+
+
 def read_text(week: str, filename: str) -> str | None:
     """讀單一 markdown/文字檔。檔案不存在回 None。"""
     if not week_exists(week):

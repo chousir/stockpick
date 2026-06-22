@@ -37,6 +37,17 @@ export interface NarrativeResponse {
   markdown: string;
 }
 
+// 個股彙整（docs/17 §4/§5.4）。sectors：null＝本週無 sector_rotation；[]＝有檔但無對應次產業。
+export interface StockDetailResponse {
+  stock_id: string;
+  week: string;
+  sources: string[];
+  screens: string[];
+  row: Row;
+  sectors: Row[] | null;
+  goodinfo_url: string | null;
+}
+
 export const getWeeks = () => getJSON<WeeksResponse>("/api/weeks");
 export const getCandidates = (week: string) =>
   getJSON<Row[]>(`/api/weeks/${week}/candidates`);
@@ -46,3 +57,5 @@ export const getThemes = (week: string) =>
   getJSON<Row[]>(`/api/weeks/${week}/themes`);
 export const getNarrative = (week: string, name: string) =>
   getJSON<NarrativeResponse>(`/api/weeks/${week}/narrative/${name}`);
+export const getStock = (week: string, stockId: string) =>
+  getJSON<StockDetailResponse>(`/api/weeks/${week}/stock/${stockId}`);

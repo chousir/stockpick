@@ -1,20 +1,22 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AppShell, type TabKey } from "./components/AppShell";
 import { Candidates } from "./pages/Candidates";
 import { Sectors } from "./pages/Sectors";
+import { StockDetail } from "./pages/StockDetail";
 import { getWeeks } from "./lib/api";
-
-// 後續 milestone 才實作的頁面（docs/17 §9）
-const PENDING: Record<"stock" | "holdings", string> = {
-  stock: "個股鑽取（M-Dash 3）",
-  holdings: "持股損益（M-Dash 4）",
-};
 
 export default function App() {
   const [weeks, setWeeks] = useState<string[]>([]);
   const [week, setWeek] = useState<string>("");
   const [tab, setTab] = useState<TabKey>("candidates");
+  const [stock, setStock] = useState<string | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
+
+  // 點候選股/族群成員 → 鑽取個股頁（docs/17 §5.2/§5.3）
+  const goStock = useCallback((stockId: string) => {
+    setStock(stockId);
+    setTab("stock");
+  }, []);
 
   useEffect(() => {
     getWeeks()
@@ -44,11 +46,13 @@ export default function App() {
       onTabChange={setTab}
     >
       {tab === "candidates" ? (
-        <Candidates week={week} />
+        <Candidates week={week} onStock={goStock} />
       ) : tab === "sectors" ? (
-        <Sectors week={week} />
+        <Sectors week={week} onStock={goStock} />
+      ) : tab === "stock" ? (
+        <StockDetail week={week} stockId={stock} onBack={() => setTab("candidates")} />
       ) : (
-        <div className="placeholder">「{PENDING[tab]}」尚未實作。</div>
+        <div className="placeholder">「持股損益（M-Dash 4）」尚未實作。</div>
       )}
     </AppShell>
   );

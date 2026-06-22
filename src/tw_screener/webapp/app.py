@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from tw_screener.webapp.routers import narrative, tables, weeks
+from tw_screener.webapp.routers import narrative, stock, tables, weeks
 
 # repo 根的 frontend/dist（prod build 產物）；存在才掛載
 _DIST_DIR = Path("frontend/dist")
@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
     # API 路由（必須在靜態掛載之前註冊，/api/* 才會優先匹配）
     app.include_router(weeks.router)
     app.include_router(tables.router)
+    app.include_router(stock.router)
     app.include_router(narrative.router)
 
     @app.get("/api/health")
