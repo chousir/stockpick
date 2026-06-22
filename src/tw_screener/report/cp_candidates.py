@@ -26,6 +26,8 @@ from loguru import logger
 
 # 多窗資金 z 欄名（M-MH：foreign_flow_5d_z / net_flow_20d_z…）
 _FLOW_Z_RE = re.compile(r"^(net_flow|foreign_flow|trust_flow)_(\d+)d_z$")
+# 族群內落後度欄（B1 隨 rs_window 命名，如 rs_subind_20d；docs/17 落後濾鏡生產化）
+_RS_SUBIND_RE = re.compile(r"^rs_subind_(\d+)d$")
 
 # label key → 報表顯示型態名
 _LABEL_NAMES: dict[str, str] = {"ambush": "埋伏", "breakout": "追突破", "reversal": "反轉"}
@@ -51,6 +53,14 @@ def _mom_col(z_col: str) -> str:
         if z_col.startswith(pfx):
             return mom
     return "flow_momentum"
+
+
+def _rs_subind_col(df: pl.DataFrame) -> str | None:
+    """面板的個股相對次產業強度欄名（rs_subind_{rs_window}d；docs/17）。取首見。"""
+    for c in df.columns:
+        if _RS_SUBIND_RE.match(c):
+            return c
+    return None
 
 
 def latest_snapshot(panel: pl.DataFrame) -> pl.DataFrame:
@@ -99,6 +109,9 @@ def build_cp_candidates(
     drawdown_pct: float = 20.0,
     cp_ceiling: float = 60.0,
     max_candidates: int = 40,
+    laggard_labels: tuple[str, ...] = (),
+    laggard_boost: float = 0.0,
+    laggard_threshold: float = 0.0,
 ) -> pl.DataFrame:
     """套 B2 勝出規則於最新快照，產標註後的 CP 候選表（docs/13 B3）。
 
@@ -113,15 +126,23 @@ def build_cp_candidates(
         cp_ceiling: cp_score 的位階剩餘空間 room 天花板（同 A1）
         max_candidates: **每個主型態**各取前 N（≤0 不截）——三型態各自獵場，避免
             貼低高分的埋伏把離低的反轉全擠掉
+        laggard_labels: 族群內落後濾鏡加權作用的型態（docs/17 C-P2；空＝停用）
+        laggard_boost: 落後股 cp_score ×(1+此值)＝輕加權（≤0＝停用）
+        laggard_threshold: rs_subind < 此＝落後其次產業（C-P2 驗證切點）
 
     Returns:
         每檔一列：stock_id/date/primary_label/labels/rules/cp_score/flow_z_col/flow_z/
         freshness/above_low_pct/above_high_pct/confirm_buy，依 cp_score 遞減。空輸入 → 空表。
+        落後濾鏡啟用時另含 rs_subind（揭露值）/cp_boosted（該列是否被輕加權）。
     """
     if snapshot.is_empty() or not rules:
         return pl.DataFrame()
     low_col = _prefix_col(snapshot, "above_low_")
     high_col = _prefix_col(snapshot, "above_high_")
+    rs_col = _rs_subind_col(snapshot)
+    # 落後濾鏡生效＝有加權幅度＋有作用型態＋面板有 rs_subind 欄；否則完全不動（向後相容）
+    laggard_on = laggard_boost > 0.0 and bool(laggard_labels) and rs_col is not None
+    laggard_set = set(laggard_labels)
     snap = snapshot.join(confirm, on="stock_id", how="left").with_columns(
         pl.col("confirm_buy").fill_null(False)
     )
@@ -180,26 +201,40 @@ def build_cp_candidates(
         zc = str(best["flow_z_col"])
         mom = rec.get("flow_momentum")
         zval = rec.get(zc)
-        rows.append(
-            {
-                "stock_id": rec["stock_id"],
-                "date": rec["date"],
-                "primary_label": str(best["label"]),  # 最高分規則的型態（分組／排序用）
-                "labels": "/".join(dict.fromkeys(labels)),
-                "rules": "/".join(dict.fromkeys(hit_rules)),
-                "cp_score": best_score,
-                "flow_z_col": zc,
-                "flow_z": round(zval, 2) if zval is not None else None,
-                "freshness": "加速" if (mom or 0) > 0 else ("放緩" if (mom or 0) < 0 else None),
-                "above_low_pct": (
-                    round(rec[low_col], 1) if low_col and rec.get(low_col) is not None else None
-                ),
-                "above_high_pct": (
-                    round(rec[high_col], 1) if high_col and rec.get(high_col) is not None else None
-                ),
-                "confirm_buy": bool(rec["confirm_buy"]),
-            }
-        )
+        # 族群內落後濾鏡（docs/17 C-P2）：落後且型態在作用範圍 → cp_score 輕加權浮上
+        rs_val = rec.get(rs_col) if rs_col else None
+        boosted = False
+        if (
+            laggard_on
+            and best_score is not None
+            and rs_val is not None
+            and rs_val < laggard_threshold
+            and str(best["label"]) in laggard_set
+        ):
+            best_score = round(best_score * (1.0 + laggard_boost), 3)
+            boosted = True
+        row = {
+            "stock_id": rec["stock_id"],
+            "date": rec["date"],
+            "primary_label": str(best["label"]),  # 最高分規則的型態（分組／排序用）
+            "labels": "/".join(dict.fromkeys(labels)),
+            "rules": "/".join(dict.fromkeys(hit_rules)),
+            "cp_score": best_score,
+            "flow_z_col": zc,
+            "flow_z": round(zval, 2) if zval is not None else None,
+            "freshness": "加速" if (mom or 0) > 0 else ("放緩" if (mom or 0) < 0 else None),
+            "above_low_pct": (
+                round(rec[low_col], 1) if low_col and rec.get(low_col) is not None else None
+            ),
+            "above_high_pct": (
+                round(rec[high_col], 1) if high_col and rec.get(high_col) is not None else None
+            ),
+            "confirm_buy": bool(rec["confirm_buy"]),
+        }
+        if laggard_on:  # 揭露欄只在濾鏡啟用時加，停用＝既有欄位不變（向後相容）
+            row["rs_subind"] = round(rs_val, 2) if rs_val is not None else None
+            row["cp_boosted"] = boosted
+        rows.append(row)
     # 以 flow_z 為次序鍵：反轉股多離低 → room=0 → cp_score 全 0，靠資金 z 才排得開。
     sort_keys, sort_desc = ["cp_score", "flow_z"], [True, True]
     out = pl.DataFrame(rows).sort(sort_keys, descending=sort_desc, nulls_last=True)
@@ -557,6 +592,7 @@ def render_cp_candidates_report(
         candidates.filter(pl.col("watch_status").str.contains("本週命中")).height if n_total else 0
     )
     has_val = "triple_filter" in candidates.columns
+    has_rs = "rs_subind" in candidates.columns  # 族群內落後濾鏡欄（docs/17）
     n_triple = (
         candidates.filter(pl.col("triple_filter") == "✓三重").height if (n_total and has_val) else 0
     )
@@ -601,6 +637,15 @@ def render_cp_candidates_report(
         "> 欄位：CP＝cp_score（資金 z × 位階空間）・z＝資金 z・距低/距高＝距 60 日低/高 %",
         *(
             [
+                "> 族群內＝個股相對其次產業強度（pp，負＝落後其族群）；🔻＝落後且該型態加權"
+                "（docs/17 C-P2：冠軍 S+ 內落後者起漲 precision 高、賺賠轉正，"
+                "可作進場加碼/前重分批依據）。"
+            ]
+            if has_rs
+            else []
+        ),
+        *(
+            [
                 "> 三重＝C2 三重濾網（錢進＋沒漲＋相對便宜）：✓三重＝次產業百分位 ≤ 便宜門檻；"
                 "估值缺＝同儕不足；估值＝官方 trailing PE 主／PB 補虧損股(標 PE/PB)；"
                 "次位＝同儕升冪百分位（0=最便宜；同儕＝手標次產業優先、未標以 TWSE 產業別兜底）。"
@@ -613,11 +658,14 @@ def render_cp_candidates_report(
     if n_total == 0:
         lines.append("（本週無個股同時滿足任一規則——錢進且價貼低/深跌反轉的標的暫缺。）")
     else:
-        head = "| 股號 | 名稱 | 規則 | CP | z | 新鮮 | 距低% | 距高% | 確認 | 象限 | 持有 |"
-        sep = "|---|---|---|---|---|---|---|---|---|---|---|"
+        cols = ["股號", "名稱", "規則", "CP", "z", "新鮮", "距低%", "距高%"]
+        if has_rs:
+            cols.append("族群內")
+        cols += ["確認", "象限", "持有"]
         if has_val:
-            head += " 估值 | 次位 | 三重 |"
-            sep += "---|---|---|"
+            cols += ["估值", "次位", "三重"]
+        head = "| " + " | ".join(cols) + " |"
+        sep = "|" + "---|" * len(cols)
         for key in ("ambush", "breakout", "reversal"):
             grp = candidates.filter(pl.col("primary_label") == key)
             lines += [f"### {_LABEL_NAMES[key]}（{grp.height} 檔）", ""]
@@ -631,10 +679,18 @@ def render_cp_candidates_report(
                 al = f"{r['above_low_pct']:.1f}" if r["above_low_pct"] is not None else "—"
                 ah = f"{r['above_high_pct']:.1f}" if r["above_high_pct"] is not None else "—"
                 confirm = "✓" if r["confirm_buy"] else "—"
+                rs_cell = ""
+                if has_rs:
+                    rv = r.get("rs_subind")
+                    if rv is None:
+                        rs_cell = "| — "
+                    else:
+                        mark = "🔻" if r.get("cp_boosted") else ""
+                        rs_cell = f"| {rv:+.1f}{mark} "
                 row = (
                     f"| {r['stock_id']} | {names.get(r['stock_id'], '')} | {r['rules']} "
                     f"| {cp} | {fz} | {r['freshness'] or '—'} | {al} | {ah} "
-                    f"| {confirm} | {r['subind_quadrant']} | {r['watch_status'] or '—'} |"
+                    f"{rs_cell}| {confirm} | {r['subind_quadrant']} | {r['watch_status'] or '—'} |"
                 )
                 if has_val:
                     metric = r.get("val_metric") or ""

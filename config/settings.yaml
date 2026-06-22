@@ -249,6 +249,11 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
         z_threshold: 1.5
         modifier: mom
         require_confirm: true
+    laggard:                 # ★ M-Part C 生產化：冠軍 S+ 內族群內落後濾鏡（docs/17；C-P2 升級）
+      enabled: true          # 開：對 apply_to 型態的落後股 cp_score 輕加權＋揭露 rs_subind 欄
+      apply_to: [ambush]     # 加權只作用型態（D2：嚴格對齊 C-P2 證據＝冠軍 S+＝L1 埋伏；L2/L3 只揭露）
+      threshold: 0.0         # rs_subind < 此＝落後其次產業（C-P2 驗證切點；個股報酬−次產業籃報酬 pp）
+      boost: 0.3             # 命中型態的落後股 cp_score ×(1+boost)＝輕加權浮上（每季隨資料重校）
   valuation:                 # C1 個股相對估值（官方 trailing PE/PB；make cp-value-valuation・docs/13 §C1）
     min_peers: 5             # 次產業同儕有效數下限，低於不計相對位階（樣本太小無代表性）
     cheap_pctile: 30.0       # 次產業升冪百分位 ≤ 此值標「相對便宜」（0=次產業內最便宜；PE 主、PB 補虧損股）
