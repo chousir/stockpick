@@ -1,5 +1,5 @@
 // 區間條（docs/17 §5.4 卡4 / §8）：close 落在 [low, high] 的相對位置，附均線標記。
-// 沒有逐日 K 線——reports 只有 N 日高低與均線；缺 low/high（目前所有週皆缺，待 W26+）
+// 沒有逐日 K 線——reports 只有 N 日高低與均線；舊週缺 low/high（W26+ 重跑起才有，僅在有值時顯示）
 // 則降級為僅顯均線距離（由 StockDetail 卡片決定，不在此元件）。
 
 import { fmtNum, isBlank } from "../lib/format";

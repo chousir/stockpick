@@ -1,5 +1,5 @@
 // 動能 × 估值散佈（docs/17 §7-2）。x=val_pctile（左=便宜），y=momentum_5d_pct，
-// 點大小=amount_million，點色=策略；四象限參考線；點擊回呼。僅 W25 有 val_pctile。
+// 點大小=amount_million，點色=策略；四象限參考線；點擊回呼。僅近期週有 val_pctile。
 
 import type { EChartsOption } from "echarts";
 import { useMemo } from "react";

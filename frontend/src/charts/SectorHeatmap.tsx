@@ -1,7 +1,7 @@
 // 族群資金熱力圖（docs/17 §7-1）。列＝次產業（依 radar_rank），欄＝資金 z 因子，
 // 色＝z-score（teal=流出↔amber=流入，與紅漲綠跌分離，§6.2）。
 // y 軸標籤帶 quadrant 色點 ＋ entry/confirm 圖示（⚑進場觸發、✓確認）。
-// 僅有 sector_rotation.csv 的週（目前 W24/W25）可繪，其餘週由頁面顯空狀態。
+// 僅近期週（有 sector_rotation.csv）可繪，其餘週由頁面顯空狀態。
 
 import type { EChartsOption } from "echarts";
 import { useMemo } from "react";
@@ -20,8 +20,13 @@ const COLS: { key: string; group: string; win: string }[] = [
   { key: "trust_flow_20d_z", group: "投信", win: "20d" },
 ];
 
-// 群組分隔線位置（總量｜外資 之間、外資｜投信 之間）
-const GROUP_SEPARATORS = [1.5, 3.5];
+// 群組分隔線：群組變換的「欄邊界」索引（總量→外資＝2、外資→投信＝4）。
+// 畫在疊加的隱形 value 軸（0..COLS.length）上——category 軸的 markLine 數值會被 ECharts
+// 四捨五入到最近欄位中心（量過 1.5→欄2 中心），落不到欄間；value 軸線性對映、不會被進位。
+const GROUP_BOUNDARIES = COLS.reduce<number[]>((acc, c, i) => {
+  if (i > 0 && c.group !== COLS[i - 1].group) acc.push(i);
+  return acc;
+}, []);
 
 // quadrant → 色點 rich 樣式索引（主升續勢 teal／下一棒 amber／冷卻觀望 muted／出貨警訊 紅）
 const QUADRANTS = ["主升續勢", "下一棒", "冷卻觀望", "出貨警訊"];
@@ -89,26 +94,30 @@ export function SectorHeatmap({ rows }: { rows: Row[] }) {
           }）`;
         },
       },
-      xAxis: {
-        type: "category",
-        position: "top",
-        data: COLS.map((c) => `${c.group}|${c.win}`),
-        ...axisCommon,
-        axisTick: { show: false },
-        axisLabel: {
-          ...axisCommon.axisLabel,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          formatter: (value: string) => {
-            const [g, w] = value.split("|");
-            return `{g|${g}}\n{w|${w}}`;
+      xAxis: [
+        {
+          type: "category",
+          position: "top",
+          data: COLS.map((c) => `${c.group}|${c.win}`),
+          ...axisCommon,
+          axisTick: { show: false },
+          axisLabel: {
+            ...axisCommon.axisLabel,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            formatter: (value: string) => {
+              const [g, w] = value.split("|");
+              return `{g|${g}}\n{w|${w}}`;
+            },
+            rich: {
+              g: { color: C.hi, fontFamily: MONO, fontSize: 11, fontWeight: "bold", lineHeight: 14 },
+              w: { color: C.muted, fontFamily: MONO, fontSize: 10, lineHeight: 13 },
+            },
           },
-          rich: {
-            g: { color: C.hi, fontFamily: MONO, fontSize: 11, fontWeight: "bold", lineHeight: 14 },
-            w: { color: C.muted, fontFamily: MONO, fontSize: 10, lineHeight: 13 },
-          },
+          splitLine: { show: false },
         },
-        splitLine: { show: false },
-      },
+        // 疊加隱形 value 軸（0..欄數）：僅供群組分隔線定位，線性對映欄邊界、不被進位
+        { type: "value", min: 0, max: COLS.length, position: "top", show: false },
+      ],
       yAxis: {
         type: "category",
         inverse: true,
@@ -153,6 +162,8 @@ export function SectorHeatmap({ rows }: { rows: Row[] }) {
       series: [
         {
           type: "heatmap",
+          xAxisIndex: 0,
+          yAxisIndex: 0,
           data: cells,
           label: {
             show: true,
@@ -164,12 +175,20 @@ export function SectorHeatmap({ rows }: { rows: Row[] }) {
           },
           itemStyle: { borderColor: C.bg, borderWidth: 2 },
           emphasis: { itemStyle: { borderColor: C.hi, borderWidth: 1 } },
+        },
+        {
+          // 群組分隔線載體：綁隱形 value 軸（xAxisIndex 1），markLine 落在欄邊界、不被進位
+          type: "line",
+          xAxisIndex: 1,
+          yAxisIndex: 0,
+          data: [],
+          silent: true,
           markLine: {
             silent: true,
             symbol: "none",
             label: { show: false },
-            lineStyle: { color: C.muted, width: 2, type: "solid", opacity: 0.6 },
-            data: GROUP_SEPARATORS.map((x) => ({ xAxis: x })),
+            lineStyle: { color: C.text, width: 2, type: "solid", opacity: 0.9 },
+            data: GROUP_BOUNDARIES.map((x) => ({ xAxis: x })),
           },
         },
       ],

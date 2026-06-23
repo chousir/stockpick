@@ -1,5 +1,5 @@
 // 估值/殖利分布（docs/17 §7-4）。val_pctile 或 dividend_yield_pct 直方圖。
-// hover 每根長條列出該區間的個股清單，標 cheap_flag 群落數。僅 W25 有相關欄。
+// hover 每根長條列出該區間的個股清單，標 cheap_flag 群落數。僅近期週有相關欄。
 
 import type { EChartsOption } from "echarts";
 import { useMemo, useState } from "react";

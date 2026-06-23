@@ -216,7 +216,7 @@ export function StockDetail({ week, stockId, onBack }: Props) {
             </div>
           ) : (
             <div className="chart-cap" style={{ marginTop: 8 }}>
-              本週無 20/60 日高低區間資料（reports 未含 <code>low/high_20d/60d</code>，待 W26+ 重跑）；
+              本週無 20/60 日高低區間資料（此週 reports 未含 <code>low/high_20d/60d</code>）；
               技術面以上方<b>均線距離</b>呈現。reports 為每週快照，無逐日 K 線（§8）。
             </div>
           )}
@@ -226,7 +226,7 @@ export function StockDetail({ week, stockId, onBack }: Props) {
         <div className="hud-card">
           <h3>族群相對位置</h3>
           {data.sectors === null ? (
-            <div className="num-flat">本週無族群輪動資料（sector_rotation 僅 W25 有）。</div>
+            <div className="num-flat">本週無族群輪動資料（此週無 sector_rotation）。</div>
           ) : data.sectors.length === 0 ? (
             <div className="num-flat">此股所屬次產業未入本週族群資金雷達。</div>
           ) : (

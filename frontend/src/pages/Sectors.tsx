@@ -1,6 +1,6 @@
 // 族群輪動頁（docs/17 §5.3）：族群資金熱力圖 ＋ 輪動表（成員展開）＋ 主題強度排行
 // ＋ 敘事分頁（sector_rotation.md / group_analysis.md）。
-// sector_rotation 僅近期週有（W24/W25）；缺資料週顯空狀態，不報錯（§2.4）。
+// sector_rotation 僅近期週有；缺資料週顯空狀態，不報錯（§2.4）。
 
 import { type ColumnDef } from "@tanstack/react-table";
 import { useEffect, useMemo, useState } from "react";

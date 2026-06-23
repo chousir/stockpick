@@ -124,6 +124,23 @@ make dash-dev                                     # （選配）把本週報告�
 
 ---
 
+## Dashboard（投資戰情室・選配）
+
+把 `make week` 產出的 `reports/YYYY-Www/` 開成本機可視化 HUD——**只讀報告、不抓資料也不寫檔**，
+與「貼給 Claude」並行的另一條消化路徑。頁面細節（候選股／族群輪動／個股鑽取／持股損益）見下方
+**§13 功能詳解**、完整規格 [docs/17-dashboard-spec.md](./docs/17-dashboard-spec.md)。
+
+```bash
+make dash-install        # 首次一次：基礎 make sync 之外多裝前端依賴（＝ uv sync ＋ cd frontend && npm install）
+make week GROUP=defg      # 先有本週報告（dashboard 只是 reports/ 的瀏覽器，沒報告就沒東西看）
+make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http://localhost:5173；Ctrl-C 一起關
+```
+
+> 自用正式跑（單一進程、免 Vite dev server）：`make dash-build && make dash`（:8000）。
+> 註：首次設定的 `make sync && make init` 只裝 Python 依賴（含後端 FastAPI），**前端 npm 需另跑 `make dash-install`**。
+
+---
+
 ## 指令總覽
 
 | 指令 | 做什麼 | 何時用 |
@@ -409,12 +426,16 @@ make typecheck   # mypy
 | [`docs/05-group-analysis.md`](./docs/05-group-analysis.md) | 族群分析、族群內排名 |
 | [`docs/06-report-spec.md`](./docs/06-report-spec.md) | 個股深度報告框架與輸出規範 |
 | [`docs/07-cli-spec.md`](./docs/07-cli-spec.md) | Makefile 指令、CLI 介面 |
-| [`docs/08-milestones.md`](./docs/08-milestones.md) | 建置期 M0-M7＋上線後 M-MH 多窗起漲偵測 milestones（已完成） |
+| [`docs/08-milestones.md`](./docs/08-milestones.md) | 建置期 M0-M7＋上線後研究軌（M-MH 多窗起漲／Part B·C／修法7 進場階梯／落後濾鏡）＋ M-Dash 0–4 dashboard milestones |
 | [`docs/09-coding-conventions.md`](./docs/09-coding-conventions.md) | 程式碼風格、命名、測試規範 |
 | [`docs/10-sop.md`](./docs/10-sop.md) | **每週使用 SOP**（手動 Claude 對話模式、含範本 prompt） |
 | [`docs/11-propicks-analysis.md`](./docs/11-propicks-analysis.md) | **ProPicks 全清單分析**（Step 3 完整 prompt + 流程） |
 | [`docs/12-sector-rotation.md`](./docs/12-sector-rotation.md) | **次產業資金輪動**規劃書＋方法論（R0-R6、起漲點校準、四象限） |
 | [`docs/13-cp-value-research.md`](./docs/13-cp-value-research.md) | **個股 CP 補漲研究**＋方法論（三重濾網、官方 PE 估值層、M-MH 多窗起漲/退潮校準裁決） |
+| [`docs/14-entry-ladder-portfolio-fix.md`](./docs/14-entry-ladder-portfolio-fix.md) | 進場階梯 × 組合層修法（M-修法7：前重後輕分批、停損脫鉤、因子簇上限） |
+| [`docs/15-launch-point-research-partB.md`](./docs/15-launch-point-research-partB.md) | 起漲點研究 Part B（買方主導度／個股×族群交互／payoff·decay 穩健度） |
+| [`docs/16-intra-sector-laggard-research.md`](./docs/16-intra-sector-laggard-research.md) | 族群內落後度補漲因子研究（rs_subind 落後度 × 位階 × S+ 濾鏡） |
+| [`docs/17-intra-sector-laggard-production.md`](./docs/17-intra-sector-laggard-production.md) | 族群內落後濾鏡生產化（冠軍 S+ 內 rs_subind<0 進場加分上線） |
 | [`docs/17-dashboard-spec.md`](./docs/17-dashboard-spec.md) | **投資戰情室 Dashboard** 規劃書（讀 reports/ 的本機 HUD、M-Dash 拆解、API/頁面/Privacy 遮罩） |
 | [`docs/99-troubleshooting.md`](./docs/99-troubleshooting.md) | 常見問題與解法 |
 
