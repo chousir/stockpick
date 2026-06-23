@@ -393,6 +393,52 @@ def test_group_stocks_foreign_multiwindow_and_ret10():
     assert row["ret_10d"] == pytest.approx((162.0 - 176.0) / 176.0 * 100, abs=0.1)
 
 
+def test_group_stocks_inst_trust_multiwindow():
+    """分析層補窗：三大法人(total_net)/投信(trust_net) 也各自輸出近 5/10 日累計，與外資
+    5/10 日同口徑（揭露 20 日累計蓋住的近端轉向）。三法人各窗值彼此獨立。"""
+    from datetime import date
+
+    dates = [date(2026, 5, d) for d in range(1, 13)]  # 12 個交易日
+    fnet = [10000] * 7 + [-4000] * 5      # 外資 20日+50000 / 5日−20000 / 10日+30000
+    tnet = [1000] * 12                     # 投信 20日+12000 / 5日+5000 / 10日+10000
+    total = [f + t for f, t in zip(fnet, tnet)]  # 三大法人(自營=0) 5日−15000 / 10日+40000
+    inst = pl.DataFrame(
+        {
+            "date": dates,
+            "stock_id": ["3231"] * 12,
+            "stock_name": ["緯創"] * 12,
+            "foreign_net": fnet,
+            "trust_net": tnet,
+            "dealer_net": [0] * 12,
+            "total_net": total,
+        }
+    )
+    industry = pl.DataFrame(
+        {
+            "stock_id": ["3231", "3037"],
+            "industry_code": ["25", "25"],
+            "industry_name": ["電腦及周邊設備業", "電腦及周邊設備業"],
+        }
+    )
+    results = {"a_breakout": _make_screener_df(["3231", "3037"], [0.0, 0.0], "a_breakout")}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=industry,
+        min_group_size=2, institutional=inst,
+    )
+    row = members.filter(pl.col("stock_id") == "3231").to_dicts()[0]
+    # 投信近端窗
+    assert row["trust_net_5d"] == pytest.approx(5000.0)
+    assert row["trust_net_10d"] == pytest.approx(10000.0)
+    assert row["trust_net"] == pytest.approx(12000.0)      # 20 日累計
+    # 三大法人近端窗（total_net 對外稱 inst）
+    assert row["inst_net_5d"] == pytest.approx(-15000.0)   # 近 5 日轉賣（近端真相）
+    assert row["inst_net_10d"] == pytest.approx(40000.0)
+    assert row["inst_net"] == pytest.approx(62000.0)       # 20 日累計
+    # 外資仍各自獨立、與投信/三大法人不互相污染
+    assert row["foreign_net_5d"] == pytest.approx(-20000.0)
+    assert row["foreign_net_10d"] == pytest.approx(30000.0)
+
+
 def test_group_stocks_range_extrema_windows():
     """M-修法7（7a）：low/high_20d/60d 為近 20/60 日收盤 min/max（絕對價）。
     極值落在最前 5 筆（在 60 日窗內、20 日窗外）→ 兩窗應給不同的低/高。"""
