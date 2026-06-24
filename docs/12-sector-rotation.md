@@ -144,8 +144,11 @@
 
 `reports/YYYY-Www/sector_rotation.csv`：機器可讀，供下週算 ΔRank、未來 UI 吃。
 
-**Phase 2 UI（R6・選配）**：吃 `sector_rotation.csv` 的本地靜態 HTML / 簡單 dashboard
-（先文字清單，UI 後做——使用者已定調）。
+**Phase 2 UI（R6・選配）— 已由投資戰情室 dashboard 吸收（2026-06-24 結案）**：
+原規劃「吃 `sector_rotation.csv` 的本地靜態 HTML」已被 docs/17 投資戰情室 dashboard
+（FastAPI + React/Vite，族群輪動頁讀 `sector_rotation.csv`/`theme_strength.csv`）取代，
+**不再另做靜態 HTML**。R6 剩下的選配項僅「把輪動結論餵進 doc 11 挑股流程（picks 自動化）」與
+概念主題第二層輪動，兩者仍待估、非必做。
 
 ---
 
@@ -236,8 +239,10 @@
 - **是否完全替換 lead_score**：保留並列，由使用者長期對照後拍板（暫不替換）。
 
 ### R6（選配）：UI / picks 自動化（預估待估）
-- **目標**：`sector_rotation.csv` → 本地靜態 HTML / dashboard；或把輪動結論餵進 doc 11 的挑股流程。
-- **狀態**：**首期不做**，待 R0–R5 穩定後再開。概念主題（5G/AI/衛星）第二層輪動也歸在此。
+- **目標**：~~`sector_rotation.csv` → 本地靜態 HTML / dashboard~~；或把輪動結論餵進 doc 11 的挑股流程。
+- **狀態（2026-06-24 更新）**：**UI 半已結案**——投資戰情室 dashboard（docs/17）已吸收
+  「輪動視覺化」需求，不再做靜態 HTML。**剩餘選配**＝(a) picks 自動化（輪動結論餵 doc 11）、
+  (b) 概念主題（5G/AI/衛星）第二層輪動；兩者仍待估、非必做。
 
 ---
 
