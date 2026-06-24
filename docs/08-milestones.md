@@ -556,3 +556,15 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - 驗收：`make test` 新增 3 測（precision 增量/payoff extra_conditions 濾鏡+suffix/render 升級裁決）、全套 484 綠、ruff 乾淨、mypy 58→58 零淨增。雙重濾鏡樣本稀疏，holdout/流動性留待資料累積（冠軍版已 B-P1 驗）。
 
 > **M-Part C 全收官（C-P1+C-P2）**：落後度（rs_subind<0）是**首個全勝研究軌**——在冠軍 CP 補漲訊號（資金進+貼低）上，加「個股落後其次產業」濾鏡顯著提升起漲命中且賺賠改善。**可選後續＝另開生產 milestone**把落後濾鏡接進 `cp_candidates.py`（S+ 且 rs_subind<0 加分/分批），不在 docs/16 研究軌範圍、待使用者拍板。每季資料累積後重校。
+
+---
+
+## M-補窗：分析層法人/族群近端窗補齊（生產・分支 `feat/inst-sector-window-backfill`，merge `e5900a7`，2026-06-24）
+
+> 動機：個股法人近端窗原只算外資（修法6 的盲點殘留），族群輪動只有 5/20 日窗、缺 10 日中段。皆**純揭露補窗、非新增 gate**（比照 [[M-修法6]] 6a「揭露非扣分」原則）。報告不回溯，須 W26+ `make week` 重跑才寫進 reports。
+
+- **① 個股法人近端窗：外資專屬 → 三法人**。`grouping.py` 把 `_FOREIGN_NEAR_WINDOWS` 一般化為 `_INST_NEAR_WINDOWS`＋`_NEAR_SRC_TO_PREFIX`，一次聚合 foreign_net / trust_net / total_net 各 5/10d；`group_report._build_enriched_rows` 三 CSV（candidates/holdings/watchlist）出 `inst_net_5d/10d_lots`＋`trust_net_5d/10d_lots`、併入 `_CANONICAL_REUSE_FIELDS`。
+- **② 族群 10 日窗**。根因＝M-MH Phase1 把 `windows` 加進 `compute_fund_flows` 但 **cli `sector_rotation_cmd` 從沒接線**（一直跑預設 5,20）。修法＝cli 接 `settings.rotation.windows`，並把 `[5, 20]`→`[5, 10, 20]`；`sector_rotation.csv` 多出 `{net,foreign,trust}_flow_10d`＋`_z`（z 由 `standardize_signals` 自動產）。
+- **③ 前端兩 chart 同步**（hardcoded、非自動浮現）：`SectorHeatmap` COLS 加 3 個 10d_z、`InstFlowBar` PERIODS inst/trust 各加 10 日/5 日。
+- **④ webapp schema 文件化**：`EnrichedRow`/`SectorRow` 宣告新欄（資料本由 `extra="allow"` 透傳，宣告只為超集文件化）。docs 11/17 同步。
+- 驗收：`make test` **509 綠**（+2）、ruff 11/mypy 58＝baseline 零淨增、frontend tsc+build 過、真資料 smoke test 確認 `*_flow_10d_z` 皆產得出。**已 --no-ff 併 main+push（merge `e5900a7`）。**
