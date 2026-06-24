@@ -14,15 +14,23 @@ const PARTIES = [
   { key: "trust", label: "投信" },
 ];
 
-// 各法人別可用期間 → CSV 欄位（base 欄皆為近 20 日累計）
+// 各法人別可用期間 → CSV 欄位（base 欄為近 20 日累計；5/10 日近端窗 W26+ 起齊備、舊週為 0/空）
 const PERIODS: Record<string, { days: string; col: string }[]> = {
-  inst: [{ days: "20日", col: "inst_net_lots" }],
+  inst: [
+    { days: "20日", col: "inst_net_lots" },
+    { days: "10日", col: "inst_net_10d_lots" },
+    { days: "5日", col: "inst_net_5d_lots" },
+  ],
   foreign: [
     { days: "20日", col: "foreign_net_lots" },
     { days: "10日", col: "foreign_net_10d_lots" },
     { days: "5日", col: "foreign_net_5d_lots" },
   ],
-  trust: [{ days: "20日", col: "trust_net_lots" }],
+  trust: [
+    { days: "20日", col: "trust_net_lots" },
+    { days: "10日", col: "trust_net_10d_lots" },
+    { days: "5日", col: "trust_net_5d_lots" },
+  ],
 };
 
 export function InstFlowBar({ rows }: { rows: Row[] }) {

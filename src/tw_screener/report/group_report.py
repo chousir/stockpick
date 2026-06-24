@@ -731,9 +731,13 @@ def _build_enriched_rows(
         inst_lots = _lots(r.get("inst_net"))
         foreign_lots = _lots(r.get("foreign_net"))
         trust_lots = _lots(r.get("trust_net"))
-        # 修法6（6a）外資近端窗：揭露 20 日累計蓋住的近 5/10 日轉向
+        # 修法6（6a）+ 分析層補窗：三大法人/外資/投信近端窗，揭露 20 日累計蓋住的近 5/10 日轉向
         foreign_5d_lots = _lots(r.get("foreign_net_5d"))
         foreign_10d_lots = _lots(r.get("foreign_net_10d"))
+        trust_5d_lots = _lots(r.get("trust_net_5d"))
+        trust_10d_lots = _lots(r.get("trust_net_10d"))
+        inst_5d_lots = _lots(r.get("inst_net_5d"))
+        inst_10d_lots = _lots(r.get("inst_net_10d"))
         # 修法6（6b）近 10 日報酬：趨勢鏡頭，區分健康回踩 vs 下跌反彈
         ret_10d = _num(r.get("ret_10d"), 2)
         vlots = _num(vol_map.get(sid), 0)
@@ -749,6 +753,7 @@ def _build_enriched_rows(
         if inst_missing:
             inst_lots = inst_pct20d = foreign_lots = trust_lots = None
             foreign_5d_lots = foreign_10d_lots = None
+            trust_5d_lots = trust_10d_lots = inst_5d_lots = inst_10d_lots = None
 
         flags: list[str] = []
         if m60 is not None and m60 > overheated:
@@ -817,11 +822,15 @@ def _build_enriched_rows(
                 "eps_q": eps_q,                    # 最新單季 EPS（元）
                 "volume_lots_today": vlots,
                 "inst_net_lots": inst_lots,
+                "inst_net_5d_lots": inst_5d_lots,    # 三大法人近5日：揭露近端轉向(20日恐為殘留)
+                "inst_net_10d_lots": inst_10d_lots,  # 三大法人近10日
                 "inst_pct20d": inst_pct20d,
                 "foreign_net_lots": foreign_lots,
                 "foreign_net_5d_lots": foreign_5d_lots,   # 外資近5日：揭露近端轉向(20日恐為殘留)
                 "foreign_net_10d_lots": foreign_10d_lots,  # 外資近10日
                 "trust_net_lots": trust_lots,
+                "trust_net_5d_lots": trust_5d_lots,    # 投信近5日
+                "trust_net_10d_lots": trust_10d_lots,  # 投信近10日
                 "flags": ";".join(flags),
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
             }
@@ -888,11 +897,15 @@ _CANONICAL_REUSE_FIELDS = (
     "eps_q",
     "volume_lots_today",
     "inst_net_lots",
+    "inst_net_5d_lots",
+    "inst_net_10d_lots",
     "inst_pct20d",
     "foreign_net_lots",
     "foreign_net_5d_lots",
     "foreign_net_10d_lots",
     "trust_net_lots",
+    "trust_net_5d_lots",
+    "trust_net_10d_lots",
     "flags",
 )
 

@@ -65,6 +65,10 @@ def test_candidates_csv_blanks_and_flags_inst_missing(tmp_path):
     assert miss["foreign_net_5d_lots"] is None  # 修法6：缺漏時近端窗也空白
     assert miss["foreign_net_10d_lots"] is None
     assert miss["trust_net_lots"] is None
+    assert miss["inst_net_5d_lots"] is None     # 分析層補窗：缺漏時三大法人/投信近端窗也空白
+    assert miss["inst_net_10d_lots"] is None
+    assert miss["trust_net_5d_lots"] is None
+    assert miss["trust_net_10d_lots"] is None
     assert miss["inst_pct20d"] is None
     assert "法人缺漏" in (miss["flags"] or "")
 
@@ -104,6 +108,40 @@ def test_candidates_csv_foreign_multiwindow_columns(tmp_path):
     assert row["foreign_net_lots"] == 50000      # 20 日累計（正）
     assert row["foreign_net_5d_lots"] == -20000  # 近 5 日轉賣（近端真相）
     assert row["ret_10d_pct"] < 0                # 近 10 日下跌
+
+
+def test_candidates_csv_inst_trust_multiwindow_columns(tmp_path):
+    """分析層補窗：candidates CSV 應有 inst/trust 的 5d/10d_lots 欄（張），與外資同口徑。"""
+    dates = [date(2026, 5, d) for d in range(1, 13)]
+    fnet = [10_000_000] * 7 + [-4_000_000] * 5   # 外資 20日+50000 / 5日−20000 張
+    tnet = [1_000_000] * 12                        # 投信 5日+5000 / 10日+10000 張
+    total = [f + t for f, t in zip(fnet, tnet)]   # 三大法人(自營=0) 5日−15000 / 10日+40000 張
+    inst = pl.DataFrame(
+        {
+            "date": dates,
+            "stock_id": ["2330"] * 12,
+            "stock_name": ["台積電"] * 12,
+            "foreign_net": fnet,
+            "trust_net": tnet,
+            "dealer_net": [0] * 12,
+            "total_net": total,
+        }
+    )
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2, institutional=inst,
+    )
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), results, out)
+    df = pl.read_csv(out)
+    for col in ("inst_net_5d_lots", "inst_net_10d_lots", "trust_net_5d_lots", "trust_net_10d_lots"):
+        assert col in df.columns
+    row = {str(r["stock_id"]): r for r in df.iter_rows(named=True)}["2330"]
+    assert row["trust_net_5d_lots"] == 5000      # 投信近 5 日（張）
+    assert row["trust_net_10d_lots"] == 10000
+    assert row["inst_net_5d_lots"] == -15000     # 三大法人近 5 日轉賣（張）
+    assert row["inst_net_10d_lots"] == 40000
 
 
 def test_candidates_csv_range_extrema_columns(tmp_path):

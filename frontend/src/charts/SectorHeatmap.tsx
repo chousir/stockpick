@@ -9,14 +9,17 @@ import type { Row } from "../lib/api";
 import { axisCommon, C, MONO, toNum, tooltipStyle } from "./echartsBase";
 import { EChart } from "./EChart";
 
-// 熱力圖欄位（皆為 z-score，同一色階口徑）。依 總量｜外資｜投信 分區、各區內 5d/20d。
-// 註：目前 reports 僅 5d/20d；10d 待分析層補窗後加入（flow_breadth 0..1 另留在輪動表）。
+// 熱力圖欄位（皆為 z-score，同一色階口徑）。依 總量｜外資｜投信 分區、各區內 5d/10d/20d。
+// 10d 為分析層補窗加的中端鏡頭（W26+ 起齊備）；舊週缺 10d_z → null → 該格留白（flow_breadth 0..1 另留在輪動表）。
 const COLS: { key: string; group: string; win: string }[] = [
   { key: "net_flow_5d_z", group: "總量", win: "5d" },
+  { key: "net_flow_10d_z", group: "總量", win: "10d" },
   { key: "net_flow_20d_z", group: "總量", win: "20d" },
   { key: "foreign_flow_5d_z", group: "外資", win: "5d" },
+  { key: "foreign_flow_10d_z", group: "外資", win: "10d" },
   { key: "foreign_flow_20d_z", group: "外資", win: "20d" },
   { key: "trust_flow_5d_z", group: "投信", win: "5d" },
+  { key: "trust_flow_10d_z", group: "投信", win: "10d" },
   { key: "trust_flow_20d_z", group: "投信", win: "20d" },
 ];
 
@@ -203,7 +206,7 @@ export function SectorHeatmap({ rows }: { rows: Row[] }) {
     <div>
       <div className="chart-cap">
         列＝<b>次產業</b>（依資金雷達排名）、欄分 <b>總量｜外資｜投信</b> 三區（分隔線區隔）、
-        各區內 <b>近5d／近20d</b>，格值＝<b>資金淨流入 z 分數</b>（目前僅 5d/20d，10d 待分析層補窗）；
+        各區內 <b>近5d／近10d／近20d</b>，格值＝<b>資金淨流入 z 分數</b>（10d 為 W26+ 起的中端鏡頭，舊週留白）；
         色階 <span style={{ color: C.warn }}>琥珀＝流入</span>／
         <span style={{ color: C.accent }}>teal＝流出</span>（與漲跌紅綠分離）。
         左側色點＝象限（<span style={{ color: QUAD_COLOR[0] }}>●主升續勢</span>

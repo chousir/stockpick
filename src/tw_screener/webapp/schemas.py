@@ -33,12 +33,15 @@ class SectorRow(BaseModel):
     cp_score: float | None = None
     basket_ret_5d_pct: float | None = None
     above_low_pct: float | None = None
-    # 資金 z（熱力圖欄；其餘 *_z 由 extra 帶過）
+    # 資金 z（熱力圖欄；10d 為分析層補窗加的中端鏡頭；其餘 *_z 由 extra 帶過）
     net_flow_5d_z: float | None = None
+    net_flow_10d_z: float | None = None
     net_flow_20d_z: float | None = None
     foreign_flow_5d_z: float | None = None
+    foreign_flow_10d_z: float | None = None
     foreign_flow_20d_z: float | None = None
     trust_flow_5d_z: float | None = None
+    trust_flow_10d_z: float | None = None
     trust_flow_20d_z: float | None = None
     flow_breadth_5d: float | None = None
     flow_breadth_20d: float | None = None
@@ -105,11 +108,15 @@ class EnrichedRow(BaseModel):
     volume_lots_today: float | None = None
     amount_million: float | None = None
     inst_net_lots: float | None = None
+    inst_net_5d_lots: float | None = None
+    inst_net_10d_lots: float | None = None
     inst_pct20d: float | None = None
     foreign_net_lots: float | None = None
     foreign_net_5d_lots: float | None = None
     foreign_net_10d_lots: float | None = None
     trust_net_lots: float | None = None
+    trust_net_5d_lots: float | None = None
+    trust_net_10d_lots: float | None = None
     # 除權息
     ex_div_cash: float | None = None
     div_addback_pct: float | None = None

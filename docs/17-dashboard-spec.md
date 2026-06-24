@@ -51,7 +51,7 @@ API 一律容忍缺檔（缺檔回 404、缺欄回 null，**絕不丟 500**）�
 | `candidates_enriched.csv` | ~140 | 候選股主表 | 見 §2.3 共用 schema |
 | `holdings_enriched.csv` | 庫存數 | 持股損益（**個人敏感**） | 共用 schema ＋ `buy_price, return_pct, market_value_k` |
 | `watchlist_enriched.csv` | ~40 | 觀察清單 | 共用 schema |
-| `sector_rotation.csv` | ~35 | 族群資金雷達 | `radar_rank, sub_industry, net_flow_5d/20d, foreign/trust_flow, *_z, quadrant, cp_score, freshness, basket_ret_5d_pct, entry/confirm_triggered` |
+| `sector_rotation.csv` | ~35 | 族群資金雷達 | `radar_rank, sub_industry, net_flow_5d/10d/20d, foreign/trust_flow_5d/10d/20d, *_z（含 10d）, quadrant, cp_score, freshness, basket_ret_5d_pct, entry/confirm_triggered`（10d 為分析層補窗的中端鏡頭，W26+ 起齊備）|
 | `theme_strength.csv` | ~35 | 主題/次產業強度 | `theme, kind, radar_rank, lead_score, score, momentum_5d, members_count, foreign_score, vol_surge_score, rank_delta` |
 | `screen_result_d/e/f/g_*.csv` | 各 30–120 | 四策略原始篩選命中 | `stock_id, name, market, close, change_pct, volume_lots, amount_million, pe_ratio, pb_ratio, strategy_id, screened_at, goodinfo_url` |
 
@@ -78,7 +78,7 @@ foreign_net_5d_lots, foreign_net_10d_lots`；W21 無 enriched 檔。後端 Pydan
 - **技術**：`close, vol_ratio, ma20_dist_pct, ma60_dist_pct, ma20_price, ma60_price, low_20d, high_20d, low_60d, high_60d`
 - **估值**：`pe_ratio, pb_ratio, dividend_yield_pct, val_metric, val_pctile, cheap_flag`
 - **基本面**：`rev_yoy_pct, gross_margin_pct, eps_q`
-- **籌碼**：`volume_lots_today, amount_million, inst_net_lots, inst_pct20d, foreign_net_lots, foreign_net_5d_lots, foreign_net_10d_lots, trust_net_lots`
+- **籌碼**：`volume_lots_today, amount_million, inst_net_lots, inst_net_5d_lots, inst_net_10d_lots, inst_pct20d, foreign_net_lots, foreign_net_5d_lots, foreign_net_10d_lots, trust_net_lots, trust_net_5d_lots, trust_net_10d_lots`（三大法人/外資/投信皆有 5/10d 近端窗，揭露 20 日累計蓋住的近端轉向；W26+ 起齊備）
 - **除權息**：`ex_div_cash, div_addback_pct`
 - **holdings 專屬**：`buy_price, return_pct, market_value_k`
 

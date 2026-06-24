@@ -1316,6 +1316,8 @@ def sector_rotation_cmd(
     cp_ceiling = float(rot.get("cp_score", {}).get("position_ceiling", 60.0))
     short_w = int(rot.get("short_window", 5))
     long_w = int(rot.get("long_window", 20))
+    # 多窗鏡頭（含 10d 中端）；short/long 由 compute_fund_flows 自動納入
+    windows = tuple(int(x) for x in rot.get("windows", []))
     history_days = int(rot.get("history_days", 250))
     min_members = int(rot.get("min_members", 5))
     top_n = top if top is not None else int(rot.get("top_n", 10))
@@ -1340,6 +1342,7 @@ def sector_rotation_cmd(
         volume_history=market.select(["date", "stock_id", "volume"]),
         short_window=short_w,
         long_window=long_w,
+        windows=windows,
     )
 
     week_tag = derive_week_tag(settings)
