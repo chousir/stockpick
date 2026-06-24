@@ -177,7 +177,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 （[docs/12-sector-rotation.md](./docs/12-sector-rotation.md)）。與選股無關地掃**全市場**：
 每個次產業（`concepts.yaml` 手標、46 個）的全部成員，加總上市+上櫃三大法人淨額，算出：
 
-- **資金訊號**：5/20 日淨流（張）、flow_momentum（資金加速度）、breadth（淨買超成員比）、
+- **資金訊號**：5/10/20 日淨流（張）、flow_momentum（資金加速度）、breadth（淨買超成員比）、
   力度（法人淨買股數/成交股數＝集中度）、週對週 ΔRank
 - **四象限**（資金軸＝20 日淨流正負 × 價格軸＝籃子距 60 日低點位階）：
   - 🟢 **下一棒**（流入×未漲）＝重點觀察
@@ -280,15 +280,16 @@ FOMC/CPI/台股結算/法說等市場級事件 → `group_analysis.md` Section 0
 候選新訊號源（主動式 ETF 每日持股異動）。資料公開但後端 geo-fence 台灣，完整抓取需在
 台灣本機跑，目前擱置、與主流程隔離（見 `poc/active_etf/README.md`）。
 
-### 12. 每日資料排程（cron · 上櫃法人不可回補）
+### 12. 每日資料排程（cron · 選配）
 
-上櫃法人（TPEX）只供最新交易日、**缺日不可回補**（TPEX 端無歷史日期參數）。沒在當天抓那天的
-上櫃資金流就永久缺、rotation 上櫃籃子被低估。`make week` 只在你想分析時跑、無法保證每交易日
-都抓到，故用 cron 每交易日盤後固定跑 `fetch-twse`：
+> **過去的「上櫃法人缺日不可回補」前提已推翻（commit 57ab1f7）**：上櫃法人改用
+> TPEX 舊版 `3itrade_hedge` 端點（吃民國日期、逐股回傳）**可逐日回補**。`make week` 已內含
+> `fetch-institutional-history`（回補近 20 日**上市＋上櫃**法人），**隔幾天沒開機/沒跑也會自動補齊**
+> → **cron 不再必要，降為選配**（只有想保證每交易日、或超出 20 日窗的更早缺口才需要）。
 
-`scripts/fetch_cron.sh` 已備好（解析專案路徑、補 cron 精簡 PATH、`flock` 防重入、寫
-`logs/cron_fetch.log`）。T86 法人收盤後約 90 分鐘、**15:00 起穩定**（docs/02），故排 18:00 穩妥；
-crontab 加一行（交易日 18:00，盤後法人/月營收都已公布；依系統時區）：
+若仍想每交易日盤後自動抓全市場資料，`scripts/fetch_cron.sh` 已備好（解析專案路徑、補 cron 精簡
+PATH、`flock` 防重入、寫 `logs/cron_fetch.log`）。T86 法人收盤後約 90 分鐘、**15:00 起穩定**（docs/02），
+故排 18:00 穩妥；crontab 加一行（交易日 18:00，盤後法人/月營收都已公布；依系統時區）：
 
 ```bash
 crontab -e
@@ -302,7 +303,7 @@ crontab -e
 ③ 用 Windows 工作排程器呼叫 `wsl.exe -d <distro> -- /bin/bash /path/to/stockpick/scripts/fetch_cron.sh`（WSL 沒開機也會被喚起，最穩）。
 
 漏抓自我檢查：`make rotation` / `sector flows` 會印「上櫃法人快取落後上市 N 個交易日」警告；
-看到就手動 `make fetch-twse`（但只能補到最新日，更早的缺口補不回）。
+看到就手動 `make fetch-institutional-history DAYS=20`（含上櫃逐日回補，補回近 20 日缺口）。
 
 ### 13. 投資戰情室 Dashboard（`make dash-dev`）
 
@@ -397,7 +398,7 @@ D/E/F 對標 Investing.com ProPicks，共用「市值≥100 億」；**G 是 E �
 ## 開發與測試
 
 ```bash
-make test        # 全部測試（~350 個，全離線：fixtures/合成資料，不打網）
+make test        # 全部測試（~500 個，全離線：fixtures/合成資料，不打網）
 make test-unit   # 排除 integration 標記
 make lint        # ruff
 make typecheck   # mypy
