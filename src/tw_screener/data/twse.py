@@ -11,7 +11,7 @@ import polars as pl
 import yaml
 from loguru import logger
 
-from .cache import is_fresh, load_parquet, save_parquet
+from .cache import is_fresh, load_parquet, save_parquet, select_recent_cache_files
 
 # ─── 字串轉換工具 ─────────────────────────────────────────────────────────────
 
@@ -1152,6 +1152,8 @@ class TWSEClient:
         files = sorted(self.cache_dir.glob("institutional_*.parquet"))
         if not files:
             return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
+        # 先按檔名日期縮到近 n_days 窗（安全超集），避免全讀數百個快取檔（規劃書 01 P1）
+        files = select_recent_cache_files(files, n_days)
         merged = (
             pl.concat([pl.read_parquet(f) for f in files])
             .unique(subset=["date", "stock_id"])

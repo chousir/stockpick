@@ -21,6 +21,7 @@ import polars as pl
 from loguru import logger
 
 from tw_screener.analysis.grouping import attach_rank_delta
+from tw_screener.data.cache import select_recent_cache_files
 
 _NET_COLS = ("total_net", "foreign_net", "trust_net")
 
@@ -72,15 +73,19 @@ def load_market_history(
             ]
         )
 
+    # 先蒐集各 pattern 的檔（維持 pattern 優先序：daily → otc_daily → stock_day，
+    # 供 unique(keep="first") 取上市全市場優先），再按檔名日期縮到近 n_days 窗（規劃書 01 P1）。
+    candidates: list[Path] = []
     for pattern in patterns:
-        for f in sorted(cache_dir.glob(pattern)):
-            try:
-                df = pl.read_parquet(f)
-                if not {"date", "stock_id", "close"}.issubset(df.columns):
-                    continue
-                frames.append(_normalize(df))
-            except Exception as e:
-                logger.warning("讀取 {} 失敗：{}", f, e)
+        candidates.extend(sorted(cache_dir.glob(pattern)))
+    for f in select_recent_cache_files(candidates, n_days):
+        try:
+            df = pl.read_parquet(f)
+            if not {"date", "stock_id", "close"}.issubset(df.columns):
+                continue
+            frames.append(_normalize(df))
+        except Exception as e:
+            logger.warning("讀取 {} 失敗：{}", f, e)
     if not frames:
         return pl.DataFrame(schema=_MARKET_SCHEMA)
     merged = pl.concat(frames).unique(subset=["date", "stock_id"], keep="first").sort("date")
