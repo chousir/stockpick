@@ -135,27 +135,47 @@ CLAUDE.md 人設籌碼段明文要求「融資增減」，目前產不出來。
 
 ---
 
-## D5 — 財報細項擴充（體質維度）
+## D5 — 財報細項擴充（體質維度）✅ 完成（2026-06-27）
+
+> 收官：盤點 TWSE/TPEX OpenAPI 後確認**無現金流量表端點、簡式資產負債表無存貨/應收明細**
+> → 營業現金流/週轉率**不可得**（使用者拍板「改抓確定可得者」，成功標準 #2 據此修正）。
+> 落地物：`_FUNDAMENTALS_SCHEMA` 加 6 欄（`pretax_margin_pct`/`net_margin_pct` 來自已抓的營益分析、
+> `debt_ratio_pct`/`current_ratio`/`bvps`/`roe_q_pct` 來自新增的簡式資產負債表一般業端點）；
+> `_parse_quarterly_fundamentals` 擴成 6 端點輸入（加 `t187ap07_L_ci` 上市＋`mopsfin_t187ap07_O_ci`
+> 上櫃；⚠ 上市欄名「總額」上櫃「總計」、上櫃 key 用「年度/季別」）；ROE＝EPS/每股淨值（單季、歸屬母公司、未年化）；
+> 接進 candidates/holdings/watchlist enriched.csv（`net_margin_pct`/`debt_ratio_pct`/`roe_q_pct` 3 欄＋
+> 併入 `_CANONICAL_REUSE_FIELDS`）與個股報告基本面段（`_format_fundamentals_summary` 進 bundle、j2＋inline draft）。
+> 金融業與缺表者體質欄誠實 null。docs/02 補端點表＋盤點結論、docs/11 補讀法。詳見 docs/08「M-R-Data5」。
 
 ### 問題
 基本面只有 營收 YoY／毛利率／營益率／單季 EPS（`_parse_quarterly_fundamentals`）。
-缺 **營業現金流、負債比、ROE 趨勢、存貨/應收週轉**——D（品質龍頭）/F（價值）的體質判斷踩空。
+缺 **負債比、ROE、純益率**——D（品質龍頭）/F（價值）的體質判斷踩空。
+（原列的「營業現金流、存貨/應收週轉」經盤點確認 OpenAPI 不可得，見下方修正。）
 
-### 方案
-1. 盤點 TWSE/TPEX OpenAPI 可免費取得的財報項目（綜合損益、資產負債、現金流量摘要）。
-2. 擴 `fundamentals_*.parquet` schema，加 `op_cashflow / debt_ratio / roe / inventory_turnover`
-   等**確定可取得**的欄；取不到的明標未取得、不硬湊。
-3. 接進個股報告基本面段與 D/F 的分析層健檢（不改 Goodinfo 篩選條件本身）。
+### 方案（依盤點結果，使用者拍板「只做確定可得者」）
+1. ~~盤點 TWSE/TPEX OpenAPI 財報項目~~ ✅ 完成：**現金流量表無端點、簡式資產負債表無存貨/應收**
+   → 營業現金流/週轉率不可得，誠實標未取得、不硬湊（不爬 MOPS、守 API-first）。
+2. 擴 `fundamentals_*.parquet` schema，加**確定可取得**的欄：
+   - 來自已抓的營益分析（0 新端點）：`pretax_margin_pct`（稅前純益率）、`net_margin_pct`（稅後純益率）。
+   - 來自新增簡式資產負債表（一般業 `_ci`，上市+上櫃 2 端點）：`debt_ratio_pct`（負債/資產）、
+     `current_ratio`（流動資產/流動負債）、`bvps`（每股淨值）、`roe_q_pct`（＝EPS/每股淨值，單季）。
+3. 接進個股報告基本面段與候選表（D/F 體質欄）；不改 Goodinfo 篩選條件本身。
 
 ### 成功標準
-- [ ] `fundamentals` schema 擴充、parser 離線測試過、缺值誠實 null。
-- [ ] 個股報告基本面段能引用至少「營業現金流＋負債比」。
+- [x] `fundamentals` schema 擴充、parser 離線測試過、缺值誠實 null。
+      （6 欄；`tests/data/test_twse.py` 2 新測含金融業/淨值非正的 null 路徑）
+- [x] ~~個股報告基本面段能引用至少「營業現金流＋負債比」~~ **修正**（營業現金流 OpenAPI 不可得）→
+      **個股報告基本面段能引用「負債比＋單季ROE＋稅後純益率」**，且營業現金流/週轉率誠實標未取得。
+      （`_format_fundamentals_summary` 進 bundle，j2＋inline draft 皆改；`tests/report/test_data_fetcher.py` 3 新測）
 
 ### 可動檔案範圍
 `src/tw_screener/data/twse.py`、`report/data_fetcher.py`、`tests/`、`docs/02`（補端點表）。
+（實作另觸及 `report/group_report.py`／`report/builder.py`／`prompts/stock_report.md.j2`／`docs/11`——
+成功標準「候選表/個股報告出現體質欄」必經，範圍清單原漏列，同 D4 慣例。）
 
 ### 風險
-財報端點欄名/格式較雜（上市上櫃不一致，已有前例 §twse._FUND_*）→ 沿用既有「位置/欄名雙保險」與離線 fixture。
+財報端點欄名/格式較雜（上市上櫃不一致：總額/總計、Year/年度）→ 沿用既有「欄名雙保險」與離線 fixture。
+資產負債表/綜合損益表各分 6 種公司型態端點，D5 只取一般業 `_ci`（金融業負債比語意不同、留 null）。
 
 ---
 
