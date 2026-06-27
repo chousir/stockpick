@@ -58,6 +58,55 @@ def select_recent_cache_files(files: list[Path], n_days: int) -> list[Path]:
     return [f for f in files if _file_rep_date(f) is None or id(f) in keep]
 
 
+# 快取保留窗的「家族 → 檔名前綴」對照（規劃書 01 P2）。前綴含尾底線、以 str.startswith 比對。
+# 巢狀關係刻意同窗故不細分：daily_ 也涵蓋 daily_all_、institutional_ 涵蓋 institutional_otc_、
+# margin_ 涵蓋 margin_otc_；otc_daily_ 不被 daily_ 前綴涵蓋故另列。未列入者（dividend_calendar_/
+# revenue_/industry_/fundamentals_…）一律不刪（保守，且非「隨週數無限增長」的痛點）。
+_RETENTION_FAMILIES: dict[str, tuple[str, ...]] = {
+    "daily_days": ("daily_", "otc_daily_"),
+    "institutional_days": ("institutional_",),
+    "margin_days": ("margin_",),
+    "valuation_days": ("valuation_ratios_",),
+}
+
+
+def _prune_family(files: list[Path], days: object) -> list[Path]:
+    """單一家族內：以該家族檔名最新日為錨，回傳早於「錨 − days 日曆日」的檔。
+
+    錨取自檔名（非 wall-clock）→ 可重現、且家族停更時不會誤刪最新檔。
+    days 非正整數 → 視為未設定、回空（不刪）。無可解析日期 token 的檔不納入（保守保留）。
+    """
+    if not isinstance(days, int) or isinstance(days, bool) or days <= 0:
+        return []
+    dated = [(d, f) for f in files if (d := _file_rep_date(f)) is not None]
+    if not dated:
+        return []
+    cutoff = max(d for d, _ in dated) - timedelta(days=days)
+    return [f for d, f in dated if d < cutoff]
+
+
+def select_prune_candidates(cache_dir: Path, retention: dict[str, object] | None) -> list[Path]:
+    """依保留窗挑出「可刪的超窗快取檔」（規劃書 01 P2），**不實際刪除**。
+
+    逐家族（daily/institutional/margin/valuation）依 `_prune_family` 取超窗檔。
+    個股月檔 `stock_day_<sid>_*` 依 `stock_day_keep_all`（預設 True）全留；明確設 False
+    時改用 `daily_days` 窗清理（個股月檔本質即日線價格）。回傳依檔名排序的建議刪除清單；
+    呼叫端決定真刪或 `--dry` 只印。cache_dir 不存在或無設定 → 回空。
+    """
+    retention = retention or {}
+    if not cache_dir.exists():
+        return []
+    files = [f for f in cache_dir.glob("*.parquet") if f.is_file()]
+    prune: list[Path] = []
+    for key, prefixes in _RETENTION_FAMILIES.items():
+        fam = [f for f in files if f.name.startswith(prefixes)]
+        prune.extend(_prune_family(fam, retention.get(key)))
+    if retention.get("stock_day_keep_all", True) is False:
+        stock_day = [f for f in files if f.name.startswith("stock_day_")]
+        prune.extend(_prune_family(stock_day, retention.get("daily_days")))
+    return sorted(prune)
+
+
 def is_fresh(path: Path, ttl_hours: float) -> bool:
     """回傳 True 若 path 存在且修改時間在 ttl_hours 內。"""
     if not path.exists():

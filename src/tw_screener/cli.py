@@ -423,6 +423,46 @@ def data_build_themes(
     )
 
 
+@data_app.command("prune-cache")
+def data_prune_cache(
+    dry: bool = typer.Option(False, "--dry", help="只列出超窗檔、不實際刪除"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """依 settings.cache.retention 保留窗刪除超窗的本地快取檔（規劃書 01 P2）。
+
+    預設「真刪」；加 --dry 只列出不刪。**不自動跑**——由使用者手動或排程呼叫。
+    個股月檔 stock_day_<sid>_* 預設全留（settings.cache.retention.stock_day_keep_all）。
+    """
+    import yaml as _yaml
+
+    from tw_screener.data.cache import select_prune_candidates
+
+    with open(settings, encoding="utf-8") as fh:
+        cfg = _yaml.safe_load(fh)
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+    retention = cfg.get("cache", {}).get("retention", {})
+
+    candidates = select_prune_candidates(cache_dir, retention)
+    if not candidates:
+        console.print("[green]無超窗快取檔，無需清理。[/green]")
+        return
+
+    total_mb = sum(f.stat().st_size for f in candidates) / 1024 / 1024
+    tag = "[dim]\\[would delete][/dim]" if dry else "[red]\\[deleted][/red]"
+    console.print(
+        f"[bold]{'(--dry) ' if dry else ''}超窗快取檔：{len(candidates)} 個"
+        f"（約 {total_mb:.1f} MB）[/bold]"
+    )
+    for f in candidates:
+        console.print(f"  {tag} {f.name}")
+    if dry:
+        console.print("[yellow]--dry：未刪除任何檔。[/yellow]")
+        return
+    for f in candidates:
+        f.unlink()
+    console.print(f"[green]已刪除 {len(candidates)} 個超窗快取檔。[/green]")
+
+
 # ─── screen 子指令 ────────────────────────────────────────────────────────────
 
 

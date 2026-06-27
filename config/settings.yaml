@@ -7,6 +7,17 @@ paths:
   watchlist_dir: watchlist
   strategies_dir: config/strategies
 
+# 快取保留窗（規劃書 01 P2）。`tw-screener data prune-cache` 依此刪除超窗的本地快取檔。
+# 各窗 = 對應分析最大讀取窗（rotation history_days=250 / calibration ~250d）+ buffer；
+# 預設 400 日（≈1.6 年），保守不誤砍 calibration 用的歷史。**不自動跑**——由使用者手動或排程呼叫。
+cache:
+  retention:
+    daily_days: 400          # 全市場日線：daily_/daily_all_/otc_daily_
+    institutional_days: 400  # 三大法人：institutional_/institutional_otc_
+    margin_days: 400         # 融資融券：margin_/margin_otc_
+    valuation_days: 400      # 估值比：valuation_ratios_
+    stock_day_keep_all: true # 個股月檔（stock_day_<sid>_）小、與候選回補相關，預設全留
+
 goodinfo:
   base_url: "https://goodinfo.tw/tw"
   user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"

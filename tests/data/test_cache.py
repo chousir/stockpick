@@ -14,7 +14,7 @@ from pathlib import Path
 
 import polars as pl
 
-from tw_screener.data.cache import select_recent_cache_files
+from tw_screener.data.cache import select_prune_candidates, select_recent_cache_files
 from tw_screener.data.twse import _INSTITUTIONAL_SCHEMA, TWSEClient
 
 
@@ -157,3 +157,90 @@ def test_load_institutional_history_empty_when_no_cache(tmp_path: Path) -> None:
     client = _make_client(tmp_path)
     out = client.load_institutional_history(n_days=20)
     assert out.is_empty()
+
+
+# ── select_prune_candidates（規劃書 01 P2：保留窗清理）────────────────────────
+
+_RETENTION = {
+    "daily_days": 400,
+    "institutional_days": 400,
+    "margin_days": 400,
+    "valuation_days": 400,
+    "stock_day_keep_all": True,
+}
+
+
+def _touch(cache_dir: Path, name: str) -> Path:
+    p = cache_dir / name
+    p.write_bytes(b"")
+    return p
+
+
+def test_prune_no_config_keeps_everything(tmp_path: Path) -> None:
+    _touch(tmp_path, "institutional_20200101.parquet")
+    assert select_prune_candidates(tmp_path, None) == []
+    assert select_prune_candidates(tmp_path, {}) == []
+
+
+def test_prune_missing_dir_returns_empty(tmp_path: Path) -> None:
+    assert select_prune_candidates(tmp_path / "nope", _RETENTION) == []
+
+
+def test_prune_drops_only_over_window_per_family(tmp_path: Path) -> None:
+    # 錨 = 各家族最新檔 20260625；400 日 cutoff ≈ 2025-05-21
+    over = _touch(tmp_path, "institutional_20250101.parquet")        # 早於 cutoff → 刪
+    keep_edge = _touch(tmp_path, "institutional_20250601.parquet")   # 窗內 → 留
+    keep_new = _touch(tmp_path, "institutional_20260625.parquet")    # 錨 → 留
+    pruned = select_prune_candidates(tmp_path, _RETENTION)
+    assert over in pruned
+    assert keep_edge not in pruned
+    assert keep_new not in pruned
+
+
+def test_prune_family_anchors_are_independent(tmp_path: Path) -> None:
+    # daily 家族最新只到 2025-06（停更）；institutional 到 2026-06。
+    # 各家族以自身最新日為錨 → daily 的舊檔不因 institutional 較新而被多刪。
+    d_new = _touch(tmp_path, "daily_20250601.parquet")
+    d_old = _touch(tmp_path, "daily_20240101.parquet")   # 早於 daily 自身錨 −400 → 刪
+    i_new = _touch(tmp_path, "institutional_20260625.parquet")
+    pruned = set(select_prune_candidates(tmp_path, _RETENTION))
+    assert d_old in pruned
+    assert d_new not in pruned   # daily 自身錨 2025-06 → 在窗內
+    assert i_new not in pruned
+
+
+def test_prune_covers_otc_and_all_variants(tmp_path: Path) -> None:
+    # daily_/daily_all_/otc_daily_ 同屬 daily 家族；margin_/margin_otc_ 同屬 margin 家族。
+    # 每家族需自身的近端錨，舊檔才會超窗（per-family 錨，見上一測試）。
+    anchors = [
+        _touch(tmp_path, "daily_20260625.parquet"),
+        _touch(tmp_path, "margin_20260625.parquet"),
+    ]
+    over = [
+        _touch(tmp_path, "daily_all_20240101.parquet"),
+        _touch(tmp_path, "otc_daily_20240101.parquet"),
+        _touch(tmp_path, "margin_otc_20240101.parquet"),
+    ]
+    pruned = set(select_prune_candidates(tmp_path, _RETENTION))
+    assert all(f in pruned for f in over)
+    assert all(a not in pruned for a in anchors)
+
+
+def test_prune_keeps_stock_day_and_unclassified_by_default(tmp_path: Path) -> None:
+    _touch(tmp_path, "institutional_20260625.parquet")  # 提供錨、本身在窗內
+    stock_day = _touch(tmp_path, "stock_day_2330_202001.parquet")    # 預設全留
+    unclassified = _touch(tmp_path, "dividend_calendar_20200101.parquet")  # 不在任何家族
+    fundamentals = _touch(tmp_path, "fundamentals_2020Q1.parquet")   # 無法解析日期
+    pruned = set(select_prune_candidates(tmp_path, _RETENTION))
+    assert stock_day not in pruned
+    assert unclassified not in pruned
+    assert fundamentals not in pruned
+
+
+def test_prune_stock_day_when_keep_all_false(tmp_path: Path) -> None:
+    # stock_day_keep_all=False → 個股月檔改用 daily_days 窗清理
+    retention = {**_RETENTION, "stock_day_keep_all": False}
+    _touch(tmp_path, "stock_day_2330_202606.parquet")               # 錨（月底 06-30）
+    old = _touch(tmp_path, "stock_day_2330_202001.parquet")         # 早於 cutoff → 刪
+    pruned = select_prune_candidates(tmp_path, retention)
+    assert old in pruned
