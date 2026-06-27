@@ -583,3 +583,34 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **接線**：Makefile 新增 `doctor` target；`make week` 在 `screen-all` 前先跑 `doctor`（被擋/改版就早停，不讓 screen-all 白跑）。settings `goodinfo.doctor.{probe_strategy,replay_fixture,save_fixture_path}` 皆可換不寫死。
 - **合規**：探針沿用既有 fetcher（3s±1 間隔、24h/交易日快取、concurrency=1、指數退避），doctor 預設不 force、與 screen-all 同快取行為；docs/02 已確認合規規則未變。
 - 驗收：`make test` **553 綠**（+23：doctor 17＋runner 韌性 4＋log_writer 2）、ruff 11/mypy 58＝baseline 零淨增；`screen doctor --replay` exit 0、`--replay --fixture blocked.html` exit 1。**注意：W26+ `make week` 重跑才會在 `screen_log.md` 出現未取得段（報告不回溯）。**
+
+---
+
+## M-R-Data3：集保大戶／股權分散（規劃書 02 D3）
+
+> 對應規劃書 [docs/proposals/02-data-resilience-and-expansion.md](proposals/02-data-resilience-and-expansion.md) D3。
+> 動機：籌碼面只有三大法人，缺最直接的「籌碼集中」訊號（集保大戶）——個股報告原叫 Claude 去 Goodinfo 手讀千張大戶比。
+> 補上 TDCC 每週集保戶股權分散表，把「籌碼集中」從「人工讀」升級為「可篩可排序」。
+
+- **新資料源 `data/tdcc.py`**：TDCC OpenData「集保戶股權分散表」（`getOD.ashx?id=1-5`，免費、無反爬、CSV）。
+  `parse_distribution`（純解析；吃 UTF-8 BOM 與固定寬度 stock_id 尾端空白；以位置覆寫中文表頭）→ long df
+  （data_date/stock_id/level/holders/shares/pct，保留全 17 級距）。`derive_big_holders` 由**原始股數**精算
+  大戶占比（＝該級距股數 ÷ 級距17合計 ×100；比 TDCC 逐級截斷顯示的占比加總更精確、差 ≤~0.03pp）。
+  `latest_big_holders_with_wow` 取最新週並與前一週相減算 WoW（僅一週/新股→null）。`TDCCClient`（限速/退避/
+  逐週累積 `tdcc_distribution_{YYYYMMDD}.parquet`）＋`create_tdcc_client`。
+- **門檻＝兩個都出（使用者拍板）**：`big_holder_pct`＝≥400 張（級距12-15）、`big_holder_1000_pct`＝≥1000 張
+  （千張大戶，級距15），各帶 `_wow`。**占比口徑為占集保庫存（≈流通量）非占股本**，報告/docs 據實標明。級距→張數
+  與門檻全進 `config/settings.yaml` `tdcc.*`（不寫死）。
+- **接進選股**：`group_report._build_enriched_rows` 加 4 欄（`big_holder_map` keyed by stock_id，缺值 null 不補零），
+  併入 `_CANONICAL_REUSE_FIELDS` → candidates/holdings/watchlist 三 CSV 一致；cli `analysis group` 純讀 TDCC 快取
+  建 map（TDCC 異常回空表→欄退化 null、不擋報告）。
+- **接進個股報告**：`data_fetcher._format_big_holder_summary` 進 bundle；j2 prompt 模板＋inline draft 加「集保大戶
+  持股比（TDCC）」區塊，並把「打開 Goodinfo 手讀千張大戶比」改為「直接引用上方 TDCC 資料」（董監持股/大股東名單
+  TDCC 沒有，仍手讀）。docs/11 候選欄說明補 4 欄＋籌碼讀法（WoW 方向＝吃貨/出貨、週頻有遞延、ETF 看 WoW 非絕對值）。
+- **接線**：CLI `data fetch-tdcc`＋Makefile `fetch-tdcc` target；`make week` 在 `fetch-institutional-history` 後
+  以 `-$(MAKE) fetch-tdcc` 非阻斷接入（TDCC 異常大戶欄退化 null、不擋主流程）。
+- **合規**：TDCC OpenData 為免費公開、無反爬；fetcher 仍加 UA＋限速＋指數退避，逐週快取（同日重跑讀快取）。
+  fixture 取自真實檔裁成 5 檔（2330/2317/0050/6182/1216）× 17 級距，離線測試不打網。
+- 驗收：`make test` **564 綠**（+11 TDCC：parse/derive/WoW/邊界）、ruff/mypy baseline 零淨增；
+  `derive_big_holders` 對 2330 算出 ≥400張 87.85%、≥1000張 85.12%（對得起原始股數）。
+  **注意：W26+ `make week` 重跑才會把大戶欄寫進 reports（報告不回溯）；首週 WoW 為 null（需累積第二週才有週變化）。**

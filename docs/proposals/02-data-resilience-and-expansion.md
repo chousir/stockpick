@@ -64,7 +64,16 @@
 
 ---
 
-## D3 — 集保大戶／股權分散（最痛的籌碼缺口）
+## D3 — 集保大戶／股權分散（最痛的籌碼缺口）✅ 完成（2026-06-27）
+
+> 收官：新 `data/tdcc.py`（TDCC OpenData 集保戶股權分散表 id=1-5，免費、無反爬）——
+> `parse_distribution`（純解析，吃 BOM／固定寬度尾端空白）＋`derive_big_holders`（由原始股數精算
+> 大戶占比，比 TDCC 逐級截斷顯示更準）＋`latest_big_holders_with_wow`（相鄰兩週相減）＋`TDCCClient`
+> （限速/退避/逐週累積 `tdcc_distribution_{YYYYMMDD}.parquet`）。**門檻採「兩個都出」（使用者拍板）**：
+> `big_holder_pct`＝≥400 張（級距12-15）、`big_holder_1000_pct`＝≥1000 張（千張大戶，級距15），各帶 WoW。
+> **占比口徑＝占集保庫存（≈流通量）非占股本**，報告/docs 已據實標明。接進 candidates/holdings/watchlist
+> enriched.csv（`big_holder_map`，缺值誠實 null）＋個股報告籌碼段（不再要 Claude 手讀千張大戶比）。
+> CLI `data fetch-tdcc`＋Makefile `fetch-tdcc`，`make week` 非阻斷接入（TDCC 異常大戶欄退化為 null、不擋主流程）。詳見 docs/08「M-R-Data3」。
 
 ### 問題
 「籌碼集中」是核心訴求（情境 B），但目前只有三大法人。千張大戶比、股權分散趨勢、
@@ -80,9 +89,9 @@
    bundle；情境 B 的「籌碼集中」從「人工讀」升級為「可篩可排序」。
 
 ### 成功標準
-- [ ] `data/tdcc.py` parser 以離線 fixture 測試通過。
-- [ ] `candidates_enriched.csv` 出現大戶持股欄、缺值誠實標 null（不補零）。
-- [ ] 個股報告籌碼段能引用大戶週變化（不再要求 Claude 手讀）。
+- [x] `data/tdcc.py` parser 以離線 fixture 測試通過。（`tests/data/test_tdcc.py` 11 測，fixture 取真實 2330/2317/0050/6182/1216 × 17 級距）
+- [x] `candidates_enriched.csv` 出現大戶持股欄、缺值誠實標 null（不補零）。（4 欄 `big_holder_pct`/`big_holder_1000_pct`＋WoW，holdings/watchlist 經 `_CANONICAL_REUSE_FIELDS` 同步）
+- [x] 個股報告籌碼段能引用大戶週變化（不再要求 Claude 手讀）。（`data_fetcher._format_big_holder_summary` 進 bundle，j2 模板＋inline draft 皆改）
 
 ### 可動檔案範圍
 `src/tw_screener/data/tdcc.py`（新）、`report/data_fetcher.py`、`cli.py`、
