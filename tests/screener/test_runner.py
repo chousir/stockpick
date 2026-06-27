@@ -263,3 +263,48 @@ def test_run_all_strategy_ids_match_yamls(tmp_path: Path):
     results = runner.run_all(week_tag="2026-W20")
     yaml_ids = {p.stem for p in Path("config/strategies").glob("*.yaml")}
     assert set(results.keys()) == yaml_ids
+
+
+# ─── run_all 韌性（規劃書 02 D1）：parse 改版降級為單策略略過、整批不炸 ──────────────
+
+
+class _ParseFailFetcher:
+    """回傳找不到 tblStockList 的 HTML → parse_screener_result raise GoodinfoParseError。"""
+
+    def get(self, url: str, *, force: bool = False) -> str:
+        return "<html><body><table id='other'></table></body></html>"
+
+
+def test_run_all_parse_failure_does_not_abort(tmp_path: Path):
+    runner = make_runner(tmp_path)
+    runner._fetcher = _ParseFailFetcher()
+    # 不應 raise（與 blocked 不同）
+    results = runner.run_all(week_tag="2026-W20")
+    assert results == {}
+
+
+def test_run_all_records_failures(tmp_path: Path):
+    runner = make_runner(tmp_path)
+    runner._fetcher = _ParseFailFetcher()
+    runner.run_all(week_tag="2026-W20")
+    assert runner.failures  # 每個策略都記了一筆未取得
+    assert all("GoodinfoParseError" in r for r in runner.failures.values())
+
+
+def test_run_all_failure_marked_in_screen_log(tmp_path: Path):
+    runner = make_runner(tmp_path)
+    runner._fetcher = _ParseFailFetcher()
+    runner.run_all(week_tag="2026-W20")
+    log = (tmp_path / "reports" / "2026-W20" / "screen_log.md").read_text(encoding="utf-8")
+    assert "本週未取得策略" in log
+
+
+def test_run_all_resets_failures_between_runs(tmp_path: Path):
+    runner = make_runner(tmp_path)
+    runner._fetcher = _ParseFailFetcher()
+    runner.run_all(week_tag="2026-W20")
+    assert runner.failures
+    # 換成正常 fetcher 重跑 → failures 應清空
+    runner._fetcher = _MockFetcher(_screener_html())
+    runner.run_all(week_tag="2026-W21")
+    assert runner.failures == {}

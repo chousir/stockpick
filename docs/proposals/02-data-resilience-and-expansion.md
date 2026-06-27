@@ -18,7 +18,15 @@
 
 ---
 
-## D1 — Goodinfo 韌性：fail-loud、可重放、來源可抽換
+## D1 — Goodinfo 韌性：fail-loud、可重放、來源可抽換 ✅ 完成（2026-06-27，A/B/C）
+
+> 收官：Part A（`screen doctor` 健康檢查）／Part B（`run_all` 單策略失敗不炸整批）／
+> Part C（`--replay` 離線回歸）皆完成；**Part 4（ScreenerSource protocol 抽換接縫）使用者拍板延後**
+> ——目前 Goodinfo 為唯一實作，單一 implementer 的 protocol 屬「為未來抽象」（Karpathy 原則 2），
+> 待真要接第二來源（FinMind/自建）再抽，登記為下方 backlog。
+> 落地物：`screener/goodinfo/doctor.py`（`diagnose_html` 純分類＋live/replay）、`config/doctor_probe.yaml`、
+> settings `goodinfo.doctor.*`、`screen doctor` CLI、`runner.run_all` 韌性＋`screen_log` 未取得段、
+> Makefile `doctor` target 並接進 `make week`（擋在 screen-all 前）。詳見 docs/08「M-R-Data1」。
 
 ### 問題（現況）
 - CLIENT_KEY 由逆向 JS 常數還原，含寫死 fallback
@@ -41,9 +49,11 @@
    篩選的接縫，避免未來大改。
 
 ### 成功標準
-- [ ] `uv run tw-screener screen doctor` 能區分「正常／被擋／改版」並給可讀訊息。
-- [ ] 模擬某策略 parse 失敗時，`make week` 其餘策略仍產出、log 誠實標記。
-- [ ] `screen doctor --replay` 以離線 fixture 通過（不打網）。
+- [x] `uv run tw-screener screen doctor` 能區分「正常／被擋／改版」並給可讀訊息。
+      （診斷碼：OK／BLOCKED／JS_UNRESOLVED／STRUCTURE_CHANGED／COLUMNS_RENAMED／EMPTY_RESULT／TOO_MANY／NETWORK_ERROR）
+- [x] 模擬某策略 parse 失敗時，`make week` 其餘策略仍產出、log 誠實標記。
+      （`run_all` catch `GoodinfoParseError`/`GoodinfoTooManyResultsError` 降級；`GoodinfoBlockedError` 仍中斷整批）
+- [x] `screen doctor --replay` 以離線 fixture 通過（不打網）。
 
 ### 可動檔案範圍
 `src/tw_screener/screener/goodinfo/*`、`src/tw_screener/screener/runner.py`、
@@ -172,6 +182,7 @@ README 把 cron 降「選配」對法人正確（可回補），但對**全市�
 | 外資持股比率 | TWSE 外資持股 | 中 | 與 D3 集保互補 |
 | 分點/主力券商買賣 | 券商分點（爬蟲・灰區） | 高但風險高 | 合規與穩定度需評估，預設不做 |
 | 法說會/財測行事曆 | 公開資訊觀測站 | 中 | 補 macro_calendar 的個股事件層 |
+| `ScreenerSource` protocol（D1 Part 4） | — | 低（目前單一來源） | 2026-06-27 拍板延後；要接第二篩選來源（FinMind/自建）時再抽 build_url/fetch/parse 三方法，避免空殼指向 |
 
 ### 成功標準
 - [ ] D6 以表格登記進本規劃書 backlog；每項待單獨提案才動工。

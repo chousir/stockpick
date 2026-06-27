@@ -1,5 +1,5 @@
 .PHONY: init sync test test-unit test-integration lint typecheck fmt clean clean-cache deep-clean \
-        fetch-twse fetch-stock fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry \
+        fetch-twse fetch-stock fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry doctor \
         group leaders report week weekend backtest-strategies rotation-calib rotation backfill-otc-history \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test
@@ -79,6 +79,9 @@ endif
 screen-dry:  ## 預演（不打網，只組 URL）（STRATEGY=a_breakout）
 	uv run tw-screener screen run $(STRATEGY) --dry-run
 
+doctor:  ## Goodinfo 健康檢查（被擋/改版→exit 1）；make week 在 screen-all 前先擋
+	uv run tw-screener screen doctor
+
 # ─── 分析 ────────────────────────────────────────────────────────────────────
 
 group:  ## 跑族群分析，產出 group_analysis.md
@@ -97,13 +100,14 @@ report:  ## 產單檔個股報告（STOCK_ID=2330，首次跑該檔會花 5-10 �
 
 # ─── 完整流程 ─────────────────────────────────────────────────────────────────
 
-week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → screen-all → fetch-candidates-history → rotation → cp-value-candidates → group
+week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → doctor → screen-all → fetch-candidates-history → rotation → cp-value-candidates → group
 ifndef GROUP
 	@echo "❌ 請指定 GROUP=defg（主流程）、def 或 abc（legacy）"
 	@exit 1
 endif
 	$(MAKE) fetch-twse
 	$(MAKE) fetch-institutional-history   # 回補近 20 日上市+上櫃法人；隔幾天沒跑也自動補齊
+	$(MAKE) doctor   # Goodinfo 健康檢查（規劃書 02 D1）：被擋/改版就早停，不讓 screen-all 白跑
 	$(MAKE) screen-all GROUP=$(GROUP)
 	$(MAKE) fetch-candidates-history
 	-$(MAKE) rotation   # 先跑輪動（group 的 2.8 雷達要讀 sector_rotation.csv 並列；失敗不擋主流程）

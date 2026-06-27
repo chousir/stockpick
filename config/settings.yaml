@@ -28,6 +28,11 @@ goodinfo:
   backoff_base: 5
   referer: "https://goodinfo.tw/tw/index.asp"
   concurrency: 1
+  # screen doctor 健康檢查（規劃書 02 D1）：探針策略 + replay/存樣本路徑，皆可換不寫死
+  doctor:
+    probe_strategy: "config/doctor_probe.yaml"
+    replay_fixture: "tests/fixtures/goodinfo/screener_result.html"   # --replay 離線解析此檔驗 parser 沒退化
+    save_fixture_path: "tests/fixtures/goodinfo/doctor_probe.html"   # --save-fixture 把 live 探針 HTML 落地供手動刷新
 
 # Yahoo 股市「概念股」主題成分（多標籤主題用）；只抓概念股，電子次產業沿用手標 concepts.yaml
 yahoo:

@@ -40,6 +40,24 @@ def test_write_screen_log_contains_counts(tmp_path: Path):
     assert "| c_dividend_steady | 穩健存股 | 0 |" in content
 
 
+def test_write_screen_log_failures_section(tmp_path: Path):
+    results = {"a_breakout": _df([("2330", "台積電")])}
+    names = {"a_breakout": "波段啟動", "d_quality_leader": "品質龍頭"}
+    failures = {"d_quality_leader": "GoodinfoParseError: 找不到 tblStockList"}
+    out = write_screen_log(results, names, "2026-W20", tmp_path / "reports", failures=failures)
+    content = out.read_text(encoding="utf-8")
+    assert "本週未取得策略" in content
+    assert "d_quality_leader 品質龍頭" in content
+    assert "GoodinfoParseError" in content
+
+
+def test_write_screen_log_no_failures_section_when_empty(tmp_path: Path):
+    results = {"a_breakout": _df([("2330", "台積電")])}
+    names = {"a_breakout": "波段啟動"}
+    out = write_screen_log(results, names, "2026-W20", tmp_path / "reports")
+    assert "本週未取得策略" not in out.read_text(encoding="utf-8")
+
+
 def test_write_screen_log_pairwise_intersection(tmp_path: Path):
     results = {
         "a_breakout": _df([("2330", "台積電"), ("2454", "聯發科")]),

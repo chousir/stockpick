@@ -568,3 +568,18 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **③ 前端兩 chart 同步**（hardcoded、非自動浮現）：`SectorHeatmap` COLS 加 3 個 10d_z、`InstFlowBar` PERIODS inst/trust 各加 10 日/5 日。
 - **④ webapp schema 文件化**：`EnrichedRow`/`SectorRow` 宣告新欄（資料本由 `extra="allow"` 透傳，宣告只為超集文件化）。docs 11/17 同步。
 - 驗收：`make test` **509 綠**（+2）、ruff 11/mypy 58＝baseline 零淨增、frontend tsc+build 過、真資料 smoke test 確認 `*_flow_10d_z` 皆產得出。**已 --no-ff 併 main+push（merge `e5900a7`）。**
+
+---
+
+## M-R-Data1：Goodinfo 韌性（規劃書 02 D1・A/B/C；Part 4 protocol 延後）
+
+> 對應規劃書 [docs/proposals/02-data-resilience-and-expansion.md](proposals/02-data-resilience-and-expansion.md) D1。
+> 動機：選股層單點押在 Goodinfo（反爬＋改版風險）。三件事：**健康檢查早停（fail-loud）／單策略失敗不炸整批／離線可重放回歸**。
+> Part 4（`ScreenerSource` protocol 抽換接縫）使用者拍板延後＝目前 Goodinfo 唯一實作、單 implementer 的 protocol 屬「為未來抽象」，登記 D6 backlog。
+
+- **Part A 健康檢查 `screen doctor`**：新 `screener/goodinfo/doctor.py`——`diagnose_html` 純函式把一段 HTML 分類成 8 診斷碼（OK／BLOCKED／JS_UNRESOLVED／STRUCTURE_CHANGED／COLUMNS_RENAMED／EMPTY_RESULT／TOO_MANY／NETWORK_ERROR），live（`run_doctor`）打探針 URL 並把封鎖/連線失敗攔下分類不外拋。探針＝`config/doctor_probe.yaml`（純流動性 成交筆數≥50000，恆 >0 且遠低於匿名 300 上限，不放技術 rule 避免回檔誤判改版）。欄位改名靠顯式檢查關鍵中文表頭（parser 改名只會默默回 null、不 raise）。
+- **Part B `run_all` 韌性**：單策略 `GoodinfoParseError`/`GoodinfoTooManyResultsError` 降級為「本週未取得」記入 `runner.failures`＋`screen_log.md` 新增段，其餘策略照跑、整批不中斷；**`GoodinfoBlockedError` 保留中斷整批語意**（IP 層封鎖，再打也被擋）。CLI `screen run-all` 末尾列未取得策略。
+- **Part C 離線可重放 `screen doctor --replay`**：讀 settings 指定的 committed fixture 跑 `diagnose_html`，驗 parser 沒退化、不打網（CI 友善）。`--save-fixture` 在 live OK 時把探針 HTML 落地供手動刷新黃金樣本（**不在每次抓取自動寫 fixtures**，避免 repo churn／符合 CLAUDE.md 2.6）。
+- **接線**：Makefile 新增 `doctor` target；`make week` 在 `screen-all` 前先跑 `doctor`（被擋/改版就早停，不讓 screen-all 白跑）。settings `goodinfo.doctor.{probe_strategy,replay_fixture,save_fixture_path}` 皆可換不寫死。
+- **合規**：探針沿用既有 fetcher（3s±1 間隔、24h/交易日快取、concurrency=1、指數退避），doctor 預設不 force、與 screen-all 同快取行為；docs/02 已確認合規規則未變。
+- 驗收：`make test` **553 綠**（+23：doctor 17＋runner 韌性 4＋log_writer 2）、ruff 11/mypy 58＝baseline 零淨增；`screen doctor --replay` exit 0、`--replay --fixture blocked.html` exit 1。**注意：W26+ `make week` 重跑才會在 `screen_log.md` 出現未取得段（報告不回溯）。**
