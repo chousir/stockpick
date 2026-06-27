@@ -614,3 +614,19 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - 驗收：`make test` **564 綠**（+11 TDCC：parse/derive/WoW/邊界）、ruff/mypy baseline 零淨增；
   `derive_big_holders` 對 2330 算出 ≥400張 87.85%、≥1000張 85.12%（對得起原始股數）。
   **注意：W26+ `make week` 重跑才會把大戶欄寫進 reports（報告不回溯）；首週 WoW 為 null（需累積第二週才有週變化）。**
+
+---
+
+## M-R-Data4：融資融券 MI_MARGN（規劃書 02 D4）
+
+> 對應規劃書 [docs/proposals/02-data-resilience-and-expansion.md](proposals/02-data-resilience-and-expansion.md) D4。
+> 動機：`MI_MARGN` 端點已文件化但 `grep 融資|margin src/` 零使用；CLAUDE.md 人設籌碼段明文要求「融資增減」、目前產不出來。
+
+- **資料層 `data/twse.py`**：`_parse_margin`（OpenAPI `/exchangeReport/MI_MARGN` 回 list[dict]・**單位張不除 1000**・端點不含日期故由 `latest_trading_date()` 錨定，同 `fetch_institutional`）→ date/stock_id/stock_name/margin_balance/margin_chg/short_balance/short_chg/note。`fetch_margin`（逐日累積 `margin_{YYYYMMDD}.parquet`・TTL）。`load_margin_signals`（純讀近 6 日快取・`select_recent_cache_files` 縮檔・回最新日每股餘額/增減＋`margin_chg_5d`＝最新 − 第 6 新；**不足 6 日 → null**，誠實不假裝）。`_safe_int` 把空欄位/「-」視為 0。
+- **衍生**：`margin_chg`/`short_chg` 由單日記錄即可算（今日−前日餘額）；`margin_chg_5d` 需 6 日快取累積；`margin_to_vol`（融資餘額÷20日均量・幾日均量）在 group_report 由既有 tot20 算。
+- **接線**：`fetch-twse` 末段多抓 MI_MARGN（`make week` 自動含）；`group_report._build_enriched_rows` 經 `margin_map` 加 6 欄（margin_balance_lots/margin_chg_lots/margin_chg_5d_lots/short_balance_lots/short_chg_lots/margin_to_vol）＋併入 `_CANONICAL_REUSE_FIELDS`（三 CSV 一致）；cli `analysis group` 純讀 `load_margin_signals` 建 map。
+- **個股報告**：`data_fetcher._format_margin_summary`（餘額/增減/近5日/券資比）進 bundle；builder inline draft＋j2 prompt 加「融資融券（上市 MI_MARGN）」區塊；docs/11 補欄說明＋讀法（融資增減＝散戶槓桿；融資增+價漲＝追價過熱、融資減+價漲＝融資減肥籌碼洗清偏多）。
+- **僅上市**：MI_MARGN 為上市；**上櫃融資融券為缺口、登記 D6 backlog**（候選宇宙約半數上櫃股 margin 欄一律 null，誠實非 0）。實測 OpenAPI 為乾淨 per-stock JSON，無 legacy CSV 的「資券當沖/鉅額」特殊列、無需過濾。
+- **舊版 margin 快取地雷（實作中發現）**：`data/cache/twse/` 有 **497 個某次廢棄嘗試遺留的 margin 快取**——舊 5 欄 schema（`margin_bal`/`short_bal`）的上市 `margin_*.parquet`（251 個）＋上櫃 `margin_otc_*.parquet`（246 個）。`load_margin_signals` 已硬化：**排除 `margin_otc_` 前綴＋只讀含本版 `_MARGIN_SCHEMA` 欄的檔**（舊 5 欄檔在 select_recent 的 40 日緩衝窗內會被撈到、直接 concat 會 ShapeError）。未刪舊檔（非本次建立）；使用者可日後 `data prune-cache` 清。
+- 驗收：`make test` **571 綠**（+7 margin：parse 增減/單位/空輸入/safe_int/chg_5d/不足歷史/無快取/略過舊 schema）、ruff/mypy baseline 零淨增；`_parse_margin` 對 2330 算出 融資 −681 張、融券 −3 張。
+  **注意：W26+ `make week` 重跑才把 margin 欄寫進 reports；`margin_chg_5d` 需累積 6 個交易日快取才有值（初期 null）。**

@@ -104,6 +104,11 @@ def data_fetch_twse(
     n_pe = df_val["pe"].drop_nulls().len() if len(df_val) else 0
     console.print(f"  估值比：{len(df_val)} 檔（有 PE {n_pe}）")
 
+    # 上市融資融券（MI_MARGN）；逐日累積供 margin_chg_5d（規劃書 02 D4）。上櫃為缺口（D6 backlog）。
+    console.print("[bold]抓取上市融資融券（MI_MARGN）...[/bold]")
+    df_margin = client.fetch_margin()
+    console.print(f"  融資融券：{len(df_margin)} 檔（上市）")
+
     console.print("[green]fetch-twse 完成[/green]")
 
 
@@ -1030,12 +1035,20 @@ def analysis_group(
         else {}
     )
 
+    # 上市融資融券（D4）：純讀快取（make week 的 fetch-twse 累積）。上櫃缺→該股 margin 欄 null。
+    margin_df = client.load_margin_signals()
+    margin_map: dict[str, dict] = (
+        {str(r["stock_id"]): r for r in margin_df.iter_rows(named=True)}
+        if not margin_df.is_empty()
+        else {}
+    )
+
     csv_path = output_path.parent / "candidates_enriched.csv"
     cand_rows = write_candidates_enriched_csv(
         leaders, themes_long, screener_results, csv_path,
         flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map,
         fundamentals_map=fundamentals_map, valuation_map=valuation_map,
-        big_holder_map=big_holder_map,
+        big_holder_map=big_holder_map, margin_map=margin_map,
     )
     # 重疊股重用：庫存/觀察清單同檔一律沿用 candidates 那筆，避免跨 CSV 量比/集中度/成交額分岔
     canonical_rows = {row["stock_id"]: row for row in cand_rows}
@@ -1072,7 +1085,7 @@ def analysis_group(
             wl_members, themes_long, wl_synth, out_csv,
             flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map,
             fundamentals_map=fundamentals_map, valuation_map=valuation_map,
-            big_holder_map=big_holder_map,
+            big_holder_map=big_holder_map, margin_map=margin_map,
             holdings_map=hmap, canonical_rows=canonical_rows,
         )
         console.print(f"[green]  {label}_enriched.csv：{n} 檔 → {out_csv}[/green]")
