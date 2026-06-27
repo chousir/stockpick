@@ -237,7 +237,11 @@ def build_cp_candidates(
         rows.append(row)
     # 以 flow_z 為次序鍵：反轉股多離低 → room=0 → cp_score 全 0，靠資金 z 才排得開。
     sort_keys, sort_desc = ["cp_score", "flow_z"], [True, True]
-    out = pl.DataFrame(rows).sort(sort_keys, descending=sort_desc, nulls_last=True)
+    # infer_schema_length=None：掃全部列推斷型別。否則 rs_subind / above_*_pct 等
+    # 欄前 100 列全 None、後段才出現浮點時，polars 會推成 Null 型而 append 失敗。
+    out = pl.DataFrame(rows, infer_schema_length=None).sort(
+        sort_keys, descending=sort_desc, nulls_last=True
+    )
     # 每個主型態各取前 max_candidates：三型態是各自獵場（docs/13 §3），全域排名會讓
     # 「貼低高分」的埋伏淹沒「離低」的反轉，故分型態截斷確保各型態都看得到。
     if max_candidates > 0:

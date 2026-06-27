@@ -262,6 +262,36 @@ def test_laggard_disabled_keeps_legacy_columns():
     assert "rs_subind" not in out.columns and "cp_boosted" not in out.columns
 
 
+def test_build_handles_nulls_before_floats_over_infer_window():
+    # 回歸：>100 列候選、rs_subind 前段全 None、後段才出現浮點時，
+    # pl.DataFrame(rows) 預設 infer_schema_length=100 會把該欄推成 Null 型而崩。
+    # 修法＝infer_schema_length=None 掃全列（順修自 make week 主流程的 ComputeError）。
+    n = 120
+    ids = [f"S{i:03d}" for i in range(n)]
+    rs = [None] * 110 + [-3.0] * (n - 110)  # 前 110 檔 rs 缺、最後 10 檔才有落後值
+    snap = pl.DataFrame(
+        {
+            "stock_id": ids,
+            "date": [date(2026, 6, 12)] * n,
+            "foreign_flow_20d_z": [1.0] * n,
+            "trust_flow_20d_z": [0.0] * n,
+            "flow_momentum": [0.0] * n,
+            "trust_momentum": [0.0] * n,
+            "foreign_momentum": [0.0] * n,
+            "above_low_60d_pct": [4.0] * n,
+            "above_high_60d_pct": [-5.0] * n,
+            "rs_subind_20d": rs,
+        },
+        schema_overrides={"rs_subind_20d": pl.Float64},
+    )
+    out = build_cp_candidates(
+        snap, _confirm({sid: True for sid in ids}), RULES, max_candidates=0, **_LAG
+    )
+    assert out.height == n  # 不崩、全數產出
+    assert out.schema["rs_subind"] == pl.Float64
+    assert -3.0 in out["rs_subind"].to_list()  # 後段落後值有保留
+
+
 # ── 疊圖：象限 / 持有狀態 ─────────────────────────────────────────────────────
 
 
