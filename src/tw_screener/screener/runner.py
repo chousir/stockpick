@@ -9,6 +9,7 @@ from loguru import logger
 
 from tw_screener.screener.goodinfo.fetcher import GoodinfoBlockedError, create_fetcher
 from tw_screener.screener.goodinfo.parser import (
+    GoodinfoParseError,
     GoodinfoTooManyResultsError,
     parse_screener_result,
 )
@@ -56,6 +57,8 @@ class ScreenerRunner:
         self._detail_base = f"{self._goodinfo_base}/StockDetail.asp"
         # screened_at 用 trading_date 對齊整批執行；取一次避免每個策略各別查
         self._trading_date: date | None = None
+        # run_all 期間累積的「本週未取得」策略 → reason（規劃書 02 D1 韌性）
+        self.failures: dict[str, str] = {}
 
     def _resolve_trading_date(self) -> date:
         """Lazily resolve trading_date once per runner instance."""
@@ -125,6 +128,10 @@ class ScreenerRunner:
         """跑 strategies_dir 下 YAML，輸出 CSV 到 reports/YYYY-Www/。
 
         group: "abc" 只跑 id 開頭 a/b/c；"def" 只跑 d/e/f；None 跑全部。
+
+        韌性（規劃書 02 D1）：單一策略 parse 改版或結果超限時降級為「本週未取得」，
+        記入 self.failures 與 screen_log.md，其餘策略照跑、整批不中斷。
+        GoodinfoBlockedError 為 IP 層封鎖 → 保留中斷整批的語意（再打也是被擋）。
         """
         if week_tag is None:
             week_tag = derive_week_tag(self._settings_path)
@@ -136,6 +143,7 @@ class ScreenerRunner:
 
         results: dict[str, pl.DataFrame] = {}
         strategy_names: dict[str, str] = {}
+        self.failures = {}
         for yaml_path in yaml_paths:
             strategy = load_strategy(yaml_path)
             strategy_names[strategy.id] = strategy.name
@@ -145,11 +153,18 @@ class ScreenerRunner:
             except GoodinfoBlockedError:
                 self.write_blocked_log(strategy.id, week_tag)
                 raise
+            except (GoodinfoParseError, GoodinfoTooManyResultsError) as exc:
+                reason = f"{type(exc).__name__}: {exc}"
+                logger.error("Strategy {} 本週未取得：{}", strategy.id, reason)
+                self.failures[strategy.id] = reason
+                continue
             results[strategy.id] = df
             self.export_csv(df, strategy.id, week_tag)
 
-        if results:
-            write_screen_log(results, strategy_names, week_tag, self._reports_dir)
+        if results or self.failures:
+            write_screen_log(
+                results, strategy_names, week_tag, self._reports_dir, failures=self.failures
+            )
 
         return results
 

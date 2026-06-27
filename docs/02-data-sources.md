@@ -94,6 +94,12 @@ data/cache/goodinfo/
 - 解析器測試**禁止打網**，用 `tests/fixtures/goodinfo/*.html` 離線檔。
 - 加新策略時，跑一次抓真實 HTML 存進 fixtures，作為回歸測試基準。
 
+### 健康檢查 `screen doctor`（規劃書 02 D1，2026-06-27 新增）
+- **合規確認**：doctor 探針沿用同一個 `GoodinfoFetcher`，上述「強制規則」（3s±1 間隔、交易日/24h 快取、concurrency=1、指數退避、可換 UA）**全部不變**。
+- doctor 預設**不 force**、與 `screen-all` 共用快取行為：同一交易日只有第一次打網、之後讀快取，**不額外增加 Goodinfo 請求量**。
+- 探針＝`config/doctor_probe.yaml`（純流動性 成交筆數≥50000，恆 >0 且遠低於匿名 300 上限），用來探「正常／被擋／改版／欄位改名」。
+- `--replay` 離線解析既有 committed fixture 驗 parser 沒退化（不打網）；`--save-fixture` 才手動刷新黃金樣本，**不在每次抓取自動寫 fixtures**。
+
 ## 證交所 OpenAPI + Legacy
 
 文件：https://openapi.twse.com.tw/

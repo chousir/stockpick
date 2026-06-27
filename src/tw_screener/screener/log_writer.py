@@ -39,15 +39,18 @@ def write_screen_log(
     strategy_names: dict[str, str],
     week_tag: str,
     reports_dir: Path,
+    failures: dict[str, str] | None = None,
 ) -> Path:
     """寫入 reports/YYYY-Www/screen_log.md。
 
     內容：
       - 各策略篩出檔數表
+      - 「本週未取得」策略段（failures，規劃書 02 D1 韌性：誠實標記 parse 失敗的策略）
       - 兩兩交集 + 三方交集（依 strategy_id 字典序排列）
 
     results 空 dict 或全部策略 0 檔仍會寫檔（內容會顯示 0 / 無）。
     """
+    failures = failures or {}
     report_dir = reports_dir / week_tag
     report_dir.mkdir(parents=True, exist_ok=True)
     output = report_dir / "screen_log.md"
@@ -56,6 +59,13 @@ def write_screen_log(
     strategy_ids = sorted(results.keys())
 
     lines: list[str] = [f"# 本週篩選紀錄 — {week_tag}", "", f"執行日期：{today}", ""]
+
+    if failures:
+        lines += ["## 本週未取得策略（資料源異常，已略過）", ""]
+        for sid in sorted(failures):
+            name = strategy_names.get(sid, "")
+            lines.append(f"- {sid} {name}：{failures[sid]}")
+        lines.append("")
 
     lines += ["## 各策略篩出數量", "", "| 策略 ID | 名稱 | 篩出檔數 |", "|---|---|---|"]
     for sid in strategy_ids:

@@ -1,0 +1,15 @@
+id: _doctor_probe
+name: "健康檢查探針"
+description: "screen doctor 用的極簡固定篩選——只用高流動性門檻取最熱門股，結果小而穩定（正常交易日恆 >0 且 <300），用來探 Goodinfo 是否正常/被擋/改版。不參與 make week 任何策略組。"
+market: "上市/上櫃"
+
+# 純流動性探針：不放任何技術 rule，避免大盤回檔時篩出 0 檔誤判改版。
+# 成交筆數門檻拉高 → 只剩最熱門的數十檔，永遠 >0 且遠低於匿名 300 筆上限。
+filters:
+  - item: "成交筆數"
+    min: 50000
+
+rules: []
+
+display_sheet: "交易狀況"
+display_period: "日"

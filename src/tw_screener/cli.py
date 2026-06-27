@@ -557,8 +557,44 @@ def screen_run_all(
             line += "  [yellow]⚠ 條件可能太寬鬆[/yellow]"
         console.print(line)
 
+    for strategy_id, reason in runner.failures.items():
+        console.print(f"  {strategy_id}: [red]本週未取得[/red]（{reason}）")
+
     week_tag = derive_week_tag(settings)
     console.print(f"\n[bold]報告目錄：reports/{week_tag}/[/bold]")
+
+
+@screen_app.command("doctor")
+def screen_doctor(
+    replay: bool = typer.Option(
+        False, "--replay", help="離線：用 committed fixture 驗 parser 沒退化（不打網）"
+    ),
+    save_fixture: bool = typer.Option(
+        False, "--save-fixture", help="live 且結果 OK 時，把抓到的 HTML 落地供手動刷新 fixture"
+    ),
+    force: bool = typer.Option(False, "--force", help="略過快取強制打網（預設沿用快取）"),
+    fixture: Path = typer.Option(None, "--fixture", help="replay fixture 路徑（預設讀 settings）"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """Goodinfo 健康檢查：判斷正常／被擋／改版／欄位改名並回傳診斷碼。OK→exit 0，其餘→exit 1。"""
+    from tw_screener.screener.goodinfo.doctor import (
+        DoctorStatus,
+        replay_doctor,
+        run_doctor,
+    )
+
+    if replay:
+        result = replay_doctor(settings, fixture=fixture)
+    else:
+        result = run_doctor(settings, force=force, save_fixture=save_fixture)
+
+    mode = "replay" if replay else "live"
+    if result.status is DoctorStatus.OK:
+        console.print(f"[green]✓ ({mode}) {result.status}[/green] — {result.message}")
+        raise typer.Exit(0)
+
+    console.print(f"[red]✗ ({mode}) {result.status}[/red] — {result.message}")
+    raise typer.Exit(1)
 
 
 # ─── analysis 子指令 ──────────────────────────────────────────────────────────
