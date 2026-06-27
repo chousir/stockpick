@@ -107,6 +107,27 @@ def data_fetch_twse(
     console.print("[green]fetch-twse 完成[/green]")
 
 
+@data_app.command("fetch-tdcc")
+def data_fetch_tdcc(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """抓 TDCC 集保戶股權分散表（每週大戶持股比），逐週累積快取（規劃書 02 D3）。"""
+    import polars as pl
+
+    from tw_screener.data.tdcc import create_tdcc_client
+
+    client = create_tdcc_client(settings)
+    console.print("[bold]抓取 TDCC 集保戶股權分散表...[/bold]")
+    df = client.fetch_distribution()
+    if df.is_empty():
+        console.print("[yellow]TDCC 集保分散表未取得；大戶欄本週退化為 null[/yellow]")
+        return
+    n_stocks = df.select(pl.col("stock_id").n_unique()).item()
+    data_date = df.select(pl.col("data_date").max()).item()
+    console.print(f"  集保分散表：{n_stocks} 檔個股（資料日 {data_date}）")
+    console.print("[green]fetch-tdcc 完成[/green]")
+
+
 @data_app.command("fetch-stock")
 def data_fetch_stock(
     stock_id: str = typer.Argument(help="股票代號，如 2330"),
@@ -998,11 +1019,23 @@ def analysis_group(
         else {}
     )
 
+    # D3 集保大戶持股比（≥400張 / ≥1000張＋WoW）：純讀快取（make week 的 fetch-tdcc 累積）。
+    # TDCC 異常時回空表 → 大戶欄誠實 null，不擋報告。
+    from tw_screener.data.tdcc import create_tdcc_client
+
+    bh_df = create_tdcc_client(settings).load_big_holders()
+    big_holder_map: dict[str, dict] = (
+        {str(r["stock_id"]): r for r in bh_df.iter_rows(named=True)}
+        if not bh_df.is_empty()
+        else {}
+    )
+
     csv_path = output_path.parent / "candidates_enriched.csv"
     cand_rows = write_candidates_enriched_csv(
         leaders, themes_long, screener_results, csv_path,
         flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map,
         fundamentals_map=fundamentals_map, valuation_map=valuation_map,
+        big_holder_map=big_holder_map,
     )
     # 重疊股重用：庫存/觀察清單同檔一律沿用 candidates 那筆，避免跨 CSV 量比/集中度/成交額分岔
     canonical_rows = {row["stock_id"]: row for row in cand_rows}
@@ -1039,6 +1072,7 @@ def analysis_group(
             wl_members, themes_long, wl_synth, out_csv,
             flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map,
             fundamentals_map=fundamentals_map, valuation_map=valuation_map,
+            big_holder_map=big_holder_map,
             holdings_map=hmap, canonical_rows=canonical_rows,
         )
         console.print(f"[green]  {label}_enriched.csv：{n} 檔 → {out_csv}[/green]")

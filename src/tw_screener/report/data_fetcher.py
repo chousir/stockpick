@@ -81,6 +81,27 @@ def _format_institutional_summary(df: pl.DataFrame) -> str:
     return "\n".join(lines)
 
 
+def _format_big_holder_summary(row: dict | None, data_date: object) -> str:
+    """格式化單檔集保大戶持股比（占集保庫存≈流通量，非占股本）＋WoW。"""
+    if not row or row.get("big_holder_pct") is None:
+        return "未取得（TDCC 集保分散表本週無此股資料；可執行 make fetch-tdcc 累積）"
+
+    def _pct(v: object) -> str:
+        return f"{float(v):.2f}%" if v is not None else "未取得"  # type: ignore[arg-type]
+
+    def _pp(v: object) -> str:
+        return f"週變化 {float(v):+.2f}pp" if v is not None else "週變化 N/A（僅一週資料）"  # type: ignore[arg-type]
+
+    return "\n".join(
+        [
+            f"資料日：{data_date}（占集保庫存≈流通量比例，非占股本）",
+            f"≥400 張大戶：{_pct(row.get('big_holder_pct'))}（{_pp(row.get('big_holder_wow'))}）",
+            f"≥1000 張（千張大戶）：{_pct(row.get('big_holder_1000_pct'))}"
+            f"（{_pp(row.get('big_holder_1000_wow'))}）",
+        ]
+    )
+
+
 def _get_stock_name(stock_id: str, settings_path: Path) -> str:
     """Try to get stock name from screener CSVs (most reliable source)."""
     with open(settings_path, encoding="utf-8") as fh:
@@ -162,6 +183,18 @@ def fetch_stock_bundle(stock_id: str, settings_path: Path) -> dict:
     group_info = _find_group_info(stock_id, settings_path)
     name = _get_stock_name(stock_id, settings_path)
 
+    # 集保大戶持股比（D3）：純讀 TDCC 快取（make fetch-tdcc 累積），無此股則誠實標未取得
+    from tw_screener.data.tdcc import create_tdcc_client
+
+    bh_df = create_tdcc_client(settings_path).load_big_holders()
+    bh_row = None
+    bh_date: object = ""
+    if not bh_df.is_empty():
+        match = bh_df.filter(pl.col("stock_id") == stock_id)
+        if not match.is_empty():
+            bh_row = match.row(0, named=True)
+            bh_date = bh_row.get("data_date", "")
+
     # Industry
     listed_df = client.fetch_listed_industry()
     otc_df = client.fetch_otc_industry()
@@ -189,6 +222,7 @@ def fetch_stock_bundle(stock_id: str, settings_path: Path) -> dict:
         "price_summary": _format_price_summary(price_history),
         "revenue_summary": _format_revenue_summary(monthly_revenue),
         "institutional_summary": _format_institutional_summary(institutional),
+        "big_holder_summary": _format_big_holder_summary(bh_row, bh_date),
         "group_info": group_info,
         "fetched_at": date.today().isoformat(),
     }

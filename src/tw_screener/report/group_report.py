@@ -636,6 +636,7 @@ def _build_enriched_rows(
     rev_yoy_map: dict | None = None,
     fundamentals_map: dict | None = None,
     valuation_map: dict | None = None,
+    big_holder_map: dict | None = None,
 ) -> list[dict]:
     """組「每檔 × 技術/籌碼/估值/基本面 + flags」列（candidates / 庫存 / 觀察 共用）。"""
     if members.is_empty():
@@ -740,6 +741,12 @@ def _build_enriched_rows(
         inst_10d_lots = _lots(r.get("inst_net_10d"))
         # 修法6（6b）近 10 日報酬：趨勢鏡頭，區分健康回踩 vs 下跌反彈
         ret_10d = _num(r.get("ret_10d"), 2)
+        # D3 集保大戶持股比（占集保庫存≈流通量）＋WoW；TDCC 獨立來源，不受 inst_missing 影響
+        bh = (big_holder_map or {}).get(sid)
+        big_holder_pct = _num(bh.get("big_holder_pct"), 2) if bh else None
+        big_holder_1000_pct = _num(bh.get("big_holder_1000_pct"), 2) if bh else None
+        big_holder_wow = _num(bh.get("big_holder_wow"), 2) if bh else None
+        big_holder_1000_wow = _num(bh.get("big_holder_1000_wow"), 2) if bh else None
         vlots = _num(vol_map.get(sid), 0)
         # 近 20 日總成交量（張）：20日均量=今日量/vol_ratio，×20。供集中度與土洋對作相對門檻共用
         tot20 = (vlots / vr) * 20.0 if (vlots and vr and vr > 0) else None
@@ -831,6 +838,11 @@ def _build_enriched_rows(
                 "trust_net_lots": trust_lots,
                 "trust_net_5d_lots": trust_5d_lots,    # 投信近5日
                 "trust_net_10d_lots": trust_10d_lots,  # 投信近10日
+                # D3 集保大戶（占集保庫存≈流通量）：≥400張(級距12-15)、≥1000張(千張大戶,級距15)＋WoW
+                "big_holder_pct": big_holder_pct,
+                "big_holder_wow": big_holder_wow,
+                "big_holder_1000_pct": big_holder_1000_pct,
+                "big_holder_1000_wow": big_holder_1000_wow,
                 "flags": ";".join(flags),
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
             }
@@ -847,6 +859,7 @@ def write_candidates_enriched_csv(
     rev_yoy_map: dict | None = None,
     fundamentals_map: dict | None = None,
     valuation_map: dict | None = None,
+    big_holder_map: dict | None = None,
 ) -> list[dict]:
     """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
 
@@ -858,7 +871,7 @@ def write_candidates_enriched_csv(
     """
     rows = _build_enriched_rows(
         members, themes_long, screener_results, flags_cfg, rev_yoy_map,
-        fundamentals_map, valuation_map,
+        fundamentals_map, valuation_map, big_holder_map,
     )
     if not rows:
         return []
@@ -906,6 +919,10 @@ _CANONICAL_REUSE_FIELDS = (
     "trust_net_lots",
     "trust_net_5d_lots",
     "trust_net_10d_lots",
+    "big_holder_pct",
+    "big_holder_wow",
+    "big_holder_1000_pct",
+    "big_holder_1000_wow",
     "flags",
 )
 
@@ -920,6 +937,7 @@ def write_named_list_csv(
     rev_yoy_map: dict | None = None,
     fundamentals_map: dict | None = None,
     valuation_map: dict | None = None,
+    big_holder_map: dict | None = None,
     holdings_map: dict | None = None,
     canonical_rows: dict[str, dict] | None = None,
 ) -> int:
@@ -932,7 +950,7 @@ def write_named_list_csv(
     """
     rows = _build_enriched_rows(
         members, themes_long, screener_results, flags_cfg, rev_yoy_map,
-        fundamentals_map, valuation_map,
+        fundamentals_map, valuation_map, big_holder_map,
     )
     if not rows:
         return 0
