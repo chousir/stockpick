@@ -1537,6 +1537,77 @@ def test_parse_quarterly_fundamentals_merges_four_endpoints():
     assert phison["gross_margin_pct"] == 32.1 and phison["eps"] == 10.5
 
 
+def test_parse_quarterly_fundamentals_derives_balance_sheet_metrics():
+    """D5：負債比/流動比/每股淨值/單季ROE 由簡式資產負債表＋EPS 衍生；缺表者誠實 null。"""
+    from tw_screener.data.twse import _parse_quarterly_fundamentals
+
+    # 2330 上市（一般業，有資產負債表）；2880 上市金融業（無資產負債表）→ 體質 null
+    margin_listed = [
+        {"年度": "115", "季別": "1", "公司代號": "2330",
+         "營業收入(百萬元)": "1134103.44",
+         "毛利率(%)(營業毛利)/(營業收入)": "66.25",
+         "營業利益率(%)(營業利益)/(營業收入)": "58.10",
+         "稅前純益率(%)(稅前純益)/(營業收入)": "60.65",
+         "稅後純益率(%)(稅後純益)/(營業收入)": "50.51"},
+        {"年度": "115", "季別": "1", "公司代號": "2880",
+         "營業收入(百萬元)": "0", "毛利率(%)(營業毛利)/(營業收入)": "",
+         "營業利益率(%)(營業利益)/(營業收入)": "",
+         "稅前純益率(%)(稅前純益)/(營業收入)": "40.0",
+         "稅後純益率(%)(稅後純益)/(營業收入)": "33.0"},
+    ]
+    eps_listed = [{"年度": "115", "季別": "1", "公司代號": "2330", "基本每股盈餘(元)": "22.08"}]
+    # 6182 上櫃（一般業）：欄名用「總計」、key 用「年度/季別」
+    margin_otc = [{"Year": "115", "季別": "1", "SecuritiesCompanyCode": "6182",
+                   "營業收入百萬元": "2477.64", "毛利率": "19.03", "營業利益率": "1.06",
+                   "稅前純益率": "1.46", "稅後純益率": "0.86"}]
+    eps_otc = [{"Year": "115", "季別": "1", "SecuritiesCompanyCode": "6182",
+                "基本每股盈餘": "0.50"}]
+    bs_listed = [{"年度": "115", "季別": "1", "公司代號": "2330",
+                  "資產總額": "8660949685.00", "負債總額": "2728560764.00",
+                  "流動資產": "4265512176.00", "流動負債": "1714253448.00",
+                  "每股參考淨值": "227.17"}]
+    bs_otc = [{"年度": "115", "季別": "1", "SecuritiesCompanyCode": "6182",
+               "資產總計": "40292986.00", "負債總計": "14110241.00",
+               "流動資產": "10827445.00", "流動負債": "4948733.00",
+               "每股參考淨值": "26.60"}]
+    df = _parse_quarterly_fundamentals(
+        margin_listed, margin_otc, eps_listed, eps_otc, bs_listed, bs_otc
+    )
+
+    tsmc = df.filter(pl.col("stock_id") == "2330").row(0, named=True)
+    assert tsmc["net_margin_pct"] == 50.51 and tsmc["pretax_margin_pct"] == 60.65
+    assert round(tsmc["debt_ratio_pct"], 2) == 31.50  # 2728560764/8660949685
+    assert round(tsmc["current_ratio"], 2) == 2.49    # 4265512176/1714253448
+    assert tsmc["bvps"] == 227.17
+    assert round(tsmc["roe_q_pct"], 2) == 9.72        # 22.08/227.17
+
+    otc = df.filter(pl.col("stock_id") == "6182").row(0, named=True)
+    assert round(otc["debt_ratio_pct"], 2) == 35.02
+    assert round(otc["roe_q_pct"], 2) == 1.88
+
+    # 金融業（無資產負債表）：純益率仍在，但體質欄誠實 null（不硬湊）
+    fin = df.filter(pl.col("stock_id") == "2880").row(0, named=True)
+    assert fin["net_margin_pct"] == 33.0
+    assert fin["debt_ratio_pct"] is None and fin["current_ratio"] is None
+    assert fin["bvps"] is None and fin["roe_q_pct"] is None
+
+
+def test_parse_quarterly_fundamentals_roe_null_when_bvps_nonpositive():
+    """每股淨值缺/非正 → ROE null（避免無意義或除零）。"""
+    from tw_screener.data.twse import _parse_quarterly_fundamentals
+
+    eps_listed = [{"年度": "115", "季別": "1", "公司代號": "1111", "基本每股盈餘(元)": "1.5"}]
+    bs_listed = [{"年度": "115", "季別": "1", "公司代號": "1111",
+                  "資產總額": "1000", "負債總額": "1200",  # 資不抵債：負債比>100%
+                  "流動資產": "500", "流動負債": "0",      # 流動負債 0 → 流動比 null
+                  "每股參考淨值": "-2.0"}]                  # 淨值為負 → ROE null
+    df = _parse_quarterly_fundamentals([], [], eps_listed, [], bs_listed, [])
+    row = df.row(0, named=True)
+    assert round(row["debt_ratio_pct"], 1) == 120.0
+    assert row["current_ratio"] is None
+    assert row["roe_q_pct"] is None
+
+
 def test_load_latest_fundamentals(tmp_path: Path):
     client = _make_client(tmp_path)
     assert client.load_latest_fundamentals().is_empty()

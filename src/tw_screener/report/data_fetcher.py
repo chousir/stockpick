@@ -128,6 +128,34 @@ def _format_margin_summary(row: dict | None) -> str:
     )
 
 
+def _format_fundamentals_summary(row: dict | None) -> str:
+    """格式化單檔單季財報體質（D5）：獲利能力＋財務結構，缺值誠實標未取得、不硬湊。"""
+    if not row:
+        return "未取得（fundamentals 快取無此股；可執行 make fetch-twse 累積）"
+
+    def _p(v: object, nd: int = 1) -> str:
+        return f"{float(v):.{nd}f}%" if v is not None else "未取得"  # type: ignore[arg-type]
+
+    def _f(v: object, nd: int = 2) -> str:
+        return f"{float(v):.{nd}f}" if v is not None else "未取得"  # type: ignore[arg-type]
+
+    y, q = row.get("year"), row.get("quarter")
+    lines = [
+        f"資料季：{y} Q{q}（單季）" if y and q else "資料季：未知",
+        f"獲利能力：毛利率 {_p(row.get('gross_margin_pct'))}、"
+        f"營益率 {_p(row.get('op_margin_pct'))}、"
+        f"稅前純益率 {_p(row.get('pretax_margin_pct'))}、"
+        f"稅後純益率 {_p(row.get('net_margin_pct'))}",
+        f"單季EPS：{_f(row.get('eps'))} 元　"
+        f"單季ROE：{_p(row.get('roe_q_pct'))}（＝EPS/每股淨值，未年化）",
+        f"財務結構：負債比 {_p(row.get('debt_ratio_pct'))}、"
+        f"流動比 {_f(row.get('current_ratio'))}、"
+        f"每股淨值 {_f(row.get('bvps'))} 元",
+        "（負債比/ROE 僅一般業；金融業與營業現金流、存貨/應收週轉率 OpenAPI 未提供 → 未取得）",
+    ]
+    return "\n".join(lines)
+
+
 def _get_stock_name(stock_id: str, settings_path: Path) -> str:
     """Try to get stock name from screener CSVs (most reliable source)."""
     with open(settings_path, encoding="utf-8") as fh:
@@ -229,6 +257,14 @@ def fetch_stock_bundle(stock_id: str, settings_path: Path) -> dict:
         if not m.is_empty():
             margin_row = m.row(0, named=True)
 
+    # 單季財報體質（D5）：純讀 fundamentals 快取，無此股則誠實標未取得
+    fund_df = client.load_latest_fundamentals()
+    fund_row = None
+    if not fund_df.is_empty():
+        f = fund_df.filter(pl.col("stock_id") == stock_id)
+        if not f.is_empty():
+            fund_row = f.row(0, named=True)
+
     # Industry
     listed_df = client.fetch_listed_industry()
     otc_df = client.fetch_otc_industry()
@@ -258,6 +294,7 @@ def fetch_stock_bundle(stock_id: str, settings_path: Path) -> dict:
         "institutional_summary": _format_institutional_summary(institutional),
         "big_holder_summary": _format_big_holder_summary(bh_row, bh_date),
         "margin_summary": _format_margin_summary(margin_row),
+        "fundamentals_summary": _format_fundamentals_summary(fund_row),
         "group_info": group_info,
         "fetched_at": date.today().isoformat(),
     }

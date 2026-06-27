@@ -630,3 +630,17 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **舊版 margin 快取地雷（實作中發現）**：`data/cache/twse/` 有 **497 個某次廢棄嘗試遺留的 margin 快取**——舊 5 欄 schema（`margin_bal`/`short_bal`）的上市 `margin_*.parquet`（251 個）＋上櫃 `margin_otc_*.parquet`（246 個）。`load_margin_signals` 已硬化：**排除 `margin_otc_` 前綴＋只讀含本版 `_MARGIN_SCHEMA` 欄的檔**（舊 5 欄檔在 select_recent 的 40 日緩衝窗內會被撈到、直接 concat 會 ShapeError）。未刪舊檔（非本次建立）；使用者可日後 `data prune-cache` 清。
 - 驗收：`make test` **571 綠**（+7 margin：parse 增減/單位/空輸入/safe_int/chg_5d/不足歷史/無快取/略過舊 schema）、ruff/mypy baseline 零淨增；`_parse_margin` 對 2330 算出 融資 −681 張、融券 −3 張。
   **注意：W26+ `make week` 重跑才把 margin 欄寫進 reports；`margin_chg_5d` 需累積 6 個交易日快取才有值（初期 null）。**
+
+## M-R-Data5：財報細項擴充—體質維度（規劃書 02 D5）
+
+> 對應規劃書 [docs/proposals/02-data-resilience-and-expansion.md](proposals/02-data-resilience-and-expansion.md) D5。
+> 動機：基本面只有 營收YoY/毛利率/營益率/單季EPS，缺體質維度（負債比/ROE/純益率）→ D（品質龍頭）/F（價值）的體質判斷踩空。
+
+- **盤點結論（step1，2026-06-27 實測）**：TWSE/TPEX OpenAPI **無現金流量表端點**（全目錄 143 path 無「現金」）、資產負債表為**簡式**（只有資產/負債/權益彙總、**無存貨/應收明細**）→ **營業現金流、存貨/應收週轉率不可得**。使用者拍板「**改抓確定可得者**」（不爬 MOPS、守 API-first），成功標準 #2 由「營業現金流＋負債比」**修正為「負債比＋單季ROE＋稅後純益率」**。
+- **資料層 `data/twse.py`**：`_FUNDAMENTALS_SCHEMA` 加 6 欄。`pretax_margin_pct`/`net_margin_pct` 來自**已抓的營益分析**（`t187ap17_L`／`mopsfin_187ap17_O`，0 新端點、全市場含金融業）；`debt_ratio_pct`（負債/資產×100）/`current_ratio`（流動資產/流動負債）/`bvps`（每股參考淨值）/`roe_q_pct`（＝EPS/每股淨值×100，單季、歸屬母公司、**未年化**）來自**新增簡式資產負債表一般業端點**（上市 `/opendata/t187ap07_L_ci`＋上櫃 `mopsfin_t187ap07_O_ci`）。`_parse_quarterly_fundamentals` 擴成 6 端點輸入（bs_listed/bs_otc 預設 None＝向後相容既有 4-arg 呼叫/測試）。`_safe_ratio` 守除零/None。
+- **欄名雙保險地雷**：⚠ **上市用「資產總額/負債總額」、上櫃用「資產總計/負債總計」**；**上櫃資產負債表 key 用「年度/季別」（非 Year，與上櫃營益分析/EPS 的 Year 不一致）**；2026-06-27 實測為準。
+- **僅一般業 `_ci`**：資產負債表/綜合損益表各分 6 種公司型態端點（`_ci`一般業/`_bd`/`_fh`/`_ins`/`_mim`/`_basi`），D5 只取一般業 → **金融業（金控/銀行/保險/證期）與缺表者負債比/ROE/淨值誠實 null**（金融業負債結構語意本就不同；純益率仍在，來自全市場的營益分析）。
+- **接線**：`fetch_quarterly_fundamentals` 多抓 2 端點（`make fetch-twse`/`make week` 自動含、端點失敗回 [] 該批體質欄 null 不擋）；`group_report._build_enriched_rows` 經既有 `fundamentals_map` 加 3 欄（`net_margin_pct`/`debt_ratio_pct`/`roe_q_pct`）＋併入 `_CANONICAL_REUSE_FIELDS`（三 CSV 一致）。
+- **個股報告**：`data_fetcher._format_fundamentals_summary`（獲利能力＋財務結構＋誠實標未取得項）進 bundle；builder inline draft＋j2 prompt 加「單季財報體質」區塊、並改基本面段指示（單季值用 OpenAPI、近4季趨勢/本益比河流圖才查 Goodinfo）；docs/02 補端點表＋盤點結論、docs/11 補讀法。
+- 驗收：`make test` 綠（+5：parser 衍生/金融業 null/淨值非正 ROE null、formatter empty/有值/null 三路徑）、ruff/mypy 零淨增；2330 算出 負債比 31.50%／流動比 2.49／ROE 9.72%、6182 負債比 35.02%／ROE 1.88%、金融業體質欄 null。
+  **注意：W26+ `make fetch-twse`（fundamentals 過 TTL）重跑才把體質欄寫進快取/reports；同季既有 `fundamentals_{Y}Q{q}.parquet` 在 TTL 內會回舊 schema（無新欄），須 TTL 過或刪檔重抓。**

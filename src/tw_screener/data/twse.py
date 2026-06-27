@@ -288,6 +288,13 @@ _TPEX_DAILY_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close
 # ⚠ TPEX 端點命名不一致（187ap17 無 t、t187ap14 有 t），2026-06-12 實測為準。
 _FUND_MARGIN_OTC_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_187ap17_O"
 _FUND_EPS_OTC_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap14_O"
+# D5 體質細項：簡式資產負債表（一般業）→ 負債比/流動比/每股淨值/單季ROE。
+# 上市 t187ap07_L_ci（OpenAPI base 下）+ 上櫃 mopsfin_t187ap07_O_ci，2026-06-27 實測為準。
+# ⚠ 上市欄名用「總額」、上櫃用「總計」；上櫃 key 用「年度/季別」（非 Year）。僅一般業（_ci）：
+# 金融業（金控/銀行/保險/證期）負債結構語意不同、不在此表 → 該股負債比/ROE 誠實 null。
+# OpenAPI 無現金流量表端點、簡式表無存貨/應收明細 → 營業現金流/週轉率不可得（D5 盤點結論）。
+_FUND_BS_LISTED_PATH = "/opendata/t187ap07_L_ci"
+_FUND_BS_OTC_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap07_O_ci"
 # 官方日估值比（trailing PE / PBR / 殖利率）：上市 TWSE BWIBBU_d（OpenAPI base 下）+ 上櫃 TPEX。
 # 取代 valuation.compute_pe 的單季 EPS×4 年化代理 → 官方真 trailing PE；PBR 補虧損股；逐日累積。
 _BWIBBU_PATH = "/exchangeReport/BWIBBU_d"
@@ -347,8 +354,27 @@ _FUNDAMENTALS_SCHEMA: dict[str, type[pl.DataType]] = {
     "revenue_m": pl.Float64,  # 營業收入（百萬元）
     "gross_margin_pct": pl.Float64,
     "op_margin_pct": pl.Float64,
+    "pretax_margin_pct": pl.Float64,  # 稅前純益率（%，營益分析，D5）
+    "net_margin_pct": pl.Float64,     # 稅後純益率（%，營益分析，D5）
     "eps": pl.Float64,        # 單季基本每股盈餘（元）
+    "debt_ratio_pct": pl.Float64,     # 負債比＝負債總額/資產總額（%，一般業，D5）
+    "current_ratio": pl.Float64,      # 流動比＝流動資產/流動負債（倍，一般業，D5）
+    "bvps": pl.Float64,               # 每股淨值（元，每股參考淨值，一般業，D5）
+    "roe_q_pct": pl.Float64,          # 單季ROE＝EPS/每股淨值（%，歸屬母公司，D5）
 }
+
+# _parse_quarterly_fundamentals 組列時用（schema 中除識別欄外的值欄，roe_q_pct 為衍生欄另算）
+_FUND_VALUE_COLS = (
+    "revenue_m", "gross_margin_pct", "op_margin_pct", "pretax_margin_pct",
+    "net_margin_pct", "eps", "debt_ratio_pct", "current_ratio", "bvps", "roe_q_pct",
+)
+
+
+def _safe_ratio(num: float | None, den: float | None) -> float | None:
+    """num/den；任一為 None 或 den<=0 → None（守「沒抓到不要編」、避免除零）。"""
+    if num is None or den is None or den <= 0:
+        return None
+    return num / den
 
 
 def _parse_quarterly_fundamentals(
@@ -356,12 +382,16 @@ def _parse_quarterly_fundamentals(
     margin_otc: list[dict[str, Any]],
     eps_listed: list[dict[str, Any]],
     eps_otc: list[dict[str, Any]],
+    bs_listed: list[dict[str, Any]] | None = None,
+    bs_otc: list[dict[str, Any]] | None = None,
 ) -> pl.DataFrame:
-    """合併四端點 → 全市場單季基本面（毛利率/營益率/EPS）。
+    """合併六端點 → 全市場單季基本面（毛利率/營益率/純益率/EPS＋負債比/流動比/淨值/ROE）。
 
-    上市/上櫃欄名不同（上市「公司代號」「毛利率(%)(營業毛利)/(營業收入)」；
-    上櫃「SecuritiesCompanyCode」「毛利率」），統一成 _FUNDAMENTALS_SCHEMA。
-    EPS 以 (stock_id, year, quarter) join 進毛利列；缺一方則該欄 null。
+    上市/上櫃欄名不同（上市「公司代號」「毛利率(%)(營業毛利)/(營業收入)」「資產總額」；
+    上櫃「SecuritiesCompanyCode」「毛利率」「資產總計」），統一成 _FUNDAMENTALS_SCHEMA。
+    各端點以 (stock_id, year, quarter) join；缺一方則該欄 null（守「沒抓到不要編」）。
+    D5 衍生：負債比＝負債/資產、流動比＝流動資產/流動負債、ROE＝EPS/每股淨值（單季、歸屬母公司）。
+    資產負債表僅一般業（_ci）→ 金融業/缺表者體質欄 null。
     """
     rec: dict[tuple[str, int, int], dict[str, Any]] = {}
 
@@ -378,6 +408,8 @@ def _parse_quarterly_fundamentals(
                 "revenue_m": _clean_float(r.get("營業收入(百萬元)", "")),
                 "gross_margin_pct": _clean_float(r.get("毛利率(%)(營業毛利)/(營業收入)", "")),
                 "op_margin_pct": _clean_float(r.get("營業利益率(%)(營業利益)/(營業收入)", "")),
+                "pretax_margin_pct": _clean_float(r.get("稅前純益率(%)(稅前純益)/(營業收入)", "")),
+                "net_margin_pct": _clean_float(r.get("稅後純益率(%)(稅後純益)/(營業收入)", "")),
             }
     for r in margin_otc:
         k = _key(r.get("SecuritiesCompanyCode", ""), r.get("Year", ""), r.get("季別", ""))
@@ -386,6 +418,8 @@ def _parse_quarterly_fundamentals(
                 "revenue_m": _clean_float(r.get("營業收入百萬元", "")),
                 "gross_margin_pct": _clean_float(r.get("毛利率", "")),
                 "op_margin_pct": _clean_float(r.get("營業利益率", "")),
+                "pretax_margin_pct": _clean_float(r.get("稅前純益率", "")),
+                "net_margin_pct": _clean_float(r.get("稅後純益率", "")),
             }
     for r in eps_listed:
         k = _key(r.get("公司代號", ""), r.get("年度", ""), r.get("季別", ""))
@@ -396,14 +430,49 @@ def _parse_quarterly_fundamentals(
         if k:
             rec.setdefault(k, {})["eps"] = _clean_float(r.get("基本每股盈餘", ""))
 
+    def _merge_balance_sheet(
+        d: dict[str, Any], assets: float | None, liab: float | None,
+        cur_assets: float | None, cur_liab: float | None, bvps: float | None,
+    ) -> None:
+        debt = _safe_ratio(liab, assets)
+        d["debt_ratio_pct"] = debt * 100 if debt is not None else None
+        d["current_ratio"] = _safe_ratio(cur_assets, cur_liab)
+        d["bvps"] = bvps
+
+    for r in bs_listed or []:  # 上市資產負債表（一般業）：欄名用「總額」
+        k = _key(r.get("公司代號", ""), r.get("年度", ""), r.get("季別", ""))
+        if k:
+            _merge_balance_sheet(
+                rec.setdefault(k, {}),
+                assets=_clean_float(r.get("資產總額", "")),
+                liab=_clean_float(r.get("負債總額", "")),
+                cur_assets=_clean_float(r.get("流動資產", "")),
+                cur_liab=_clean_float(r.get("流動負債", "")),
+                bvps=_clean_float(r.get("每股參考淨值", "")),
+            )
+    for r in bs_otc or []:  # 上櫃資產負債表（一般業）：欄名用「總計」、key 用「年度/季別」
+        k = _key(r.get("SecuritiesCompanyCode", ""), r.get("年度", ""), r.get("季別", ""))
+        if k:
+            _merge_balance_sheet(
+                rec.setdefault(k, {}),
+                assets=_clean_float(r.get("資產總計", "")),
+                liab=_clean_float(r.get("負債總計", "")),
+                cur_assets=_clean_float(r.get("流動資產", "")),
+                cur_liab=_clean_float(r.get("流動負債", "")),
+                bvps=_clean_float(r.get("每股參考淨值", "")),
+            )
+
     if not rec:
         return pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA)
-    rows = [
-        {"stock_id": sid, "year": y, "quarter": q, **{
-            c: v.get(c) for c in ("revenue_m", "gross_margin_pct", "op_margin_pct", "eps")
-        }}
-        for (sid, y, q), v in rec.items()
-    ]
+    rows = []
+    for (sid, y, q), v in rec.items():
+        # 單季 ROE＝EPS/每股淨值（皆歸屬母公司、單季；淨值非正→null 避免無意義值）
+        roe = _safe_ratio(v.get("eps"), v.get("bvps"))
+        v["roe_q_pct"] = roe * 100 if roe is not None else None
+        rows.append(
+            {"stock_id": sid, "year": y, "quarter": q,
+             **{c: v.get(c) for c in _FUND_VALUE_COLS}}
+        )
     return pl.DataFrame(rows, schema=_FUNDAMENTALS_SCHEMA).sort("stock_id")
 
 
@@ -1430,9 +1499,11 @@ class TWSEClient:
         return df
 
     def fetch_quarterly_fundamentals(self) -> pl.DataFrame:
-        """抓上市+上櫃單季基本面（毛利率/營益率/EPS，4 端點），快取 fundamentals_{Y}Q{q}.parquet。
+        """抓上市+上櫃單季基本面（毛利率/營益率/純益率/EPS＋負債比/流動比/淨值/ROE，6 端點），
+        快取 fundamentals_{Y}Q{q}.parquet。
 
         各端點只回最新一季全體公司。TTL 用 ttl_hours×24（季資料、約週級重查即可）。
+        體質欄（D5）來自簡式資產負債表（_ci 一般業）→ 金融業/缺表者該欄 null。
         """
         latest_cache = self._latest_cache_file("fundamentals_*.parquet")
         if latest_cache is not None and is_fresh(latest_cache, self.ttl_hours * 24):
@@ -1443,7 +1514,12 @@ class TWSEClient:
         eps_listed = self._get("/opendata/t187ap14_L")
         margin_otc = self._get_openapi_json(_FUND_MARGIN_OTC_URL, "上櫃營益分析")
         eps_otc = self._get_openapi_json(_FUND_EPS_OTC_URL, "上櫃損益表")
-        df = _parse_quarterly_fundamentals(margin_listed, margin_otc, eps_listed, eps_otc)
+        # D5 體質：簡式資產負債表（一般業）→ 負債比/流動比/淨值/ROE；端點失敗回 [] 該批體質欄 null。
+        bs_listed = self._get(_FUND_BS_LISTED_PATH)
+        bs_otc = self._get_openapi_json(_FUND_BS_OTC_URL, "上櫃資產負債表")
+        df = _parse_quarterly_fundamentals(
+            margin_listed, margin_otc, eps_listed, eps_otc, bs_listed, bs_otc
+        )
         if df.is_empty():
             logger.warning("單季基本面解析結果為空")
             return df

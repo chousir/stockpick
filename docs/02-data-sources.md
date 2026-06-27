@@ -119,8 +119,19 @@ data/cache/goodinfo/
 | 融資融券餘額 | OpenAPI `/v1/exchangeReport/MI_MARGN` | |
 | 上市官方日估值比 | OpenAPI `/v1/exchangeReport/BWIBBU_d` | 官方 trailing 本益比/殖利率/股價淨值比；只回最新交易日（逐日累積）|
 | 上櫃官方日估值比 | TPEX OpenAPI `/openapi/v1/tpex_mainboard_peratio_analysis` | 同上（上櫃）；只回最新交易日 |
+| 單季營益分析（上市） | OpenAPI `/v1/opendata/t187ap17_L` | 營收/毛利率/營益率/**稅前純益率/稅後純益率**；全市場、最新一季 |
+| 單季營益分析（上櫃） | TPEX `/openapi/v1/mopsfin_187ap17_O` | 同上；欄名無括號（`稅前純益率`/`稅後純益率`）|
+| 單季 EPS（上市/上櫃） | OpenAPI `/v1/opendata/t187ap14_L`／TPEX `mopsfin_t187ap14_O` | 基本每股盈餘；ROE 由 EPS/每股淨值算 |
+| 單季簡式資產負債表（上市，一般業） | OpenAPI `/v1/opendata/t187ap07_L_ci` | 資產**總額**/負債**總額**/流動資產/流動負債/每股參考淨值 → 負債比/流動比/淨值（D5）|
+| 單季簡式資產負債表（上櫃，一般業） | TPEX `/openapi/v1/mopsfin_t187ap07_O_ci` | 同上但欄名用「總**計**」、key 用「年度/季別」（非 Year）（D5）|
 
 > 已知陷阱見 `docs/99-troubleshooting.md` #1（T86 endpoint 變化）與 #2（STOCK_DAY_ALL 不支援歷史日期）。
+
+> **D5 財報體質盤點結論（2026-06-27）**：TWSE/TPEX OpenAPI **無現金流量表端點**（全目錄 143 path
+> 無「現金」），且資產負債表為**簡式**（只有資產/負債/權益彙總，**無存貨、應收明細**）→
+> **營業現金流、存貨/應收週轉率不可得**，個股報告誠實標「未取得」、不硬湊。資產負債表/綜合損益表
+> 各依公司型態分 6 端點（`_ci`一般業/`_bd`/`_fh`/`_ins`/`_mim`/`_basi`），D5 只取 `_ci`（一般業）：
+> 金融業負債結構語意本就不同，**金融業負債比/ROE 留 null**。
 
 櫃買中心 OpenAPI: https://www.tpex.org.tw/openapi/
 

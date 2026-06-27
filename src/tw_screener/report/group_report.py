@@ -715,6 +715,10 @@ def _build_enriched_rows(
         fund = fundamentals_map.get(sid) if fundamentals_map else None
         gross_margin = _num(fund.get("gross_margin_pct"), 1) if fund else None
         eps_q = _num(fund.get("eps"), 2) if fund else None
+        # D5 體質：稅後純益率＋負債比＋單季ROE（一般業；金融業/缺表者 null）
+        net_margin = _num(fund.get("net_margin_pct"), 1) if fund else None
+        debt_ratio = _num(fund.get("debt_ratio_pct"), 1) if fund else None
+        roe_q = _num(fund.get("roe_q_pct"), 2) if fund else None
         amt = _num(r.get("amount_million"), 0)
         # 估值：官方 BWIBBU 為主、Goodinfo 兜底（官方缺才用爬來值）；殖利率僅官方有
         vrow = valuation_map.get(sid) if valuation_map else None
@@ -841,7 +845,10 @@ def _build_enriched_rows(
                 "cheap_flag": cheap_flag,  # 相對便宜 / 相對便宜(PB) / 空（同儕不足）
                 "rev_yoy_pct": ryoy,
                 "gross_margin_pct": gross_margin,  # 最新單季毛利率（TWSE/TPEX OpenAPI）
+                "net_margin_pct": net_margin,      # 最新單季稅後純益率（%，D5 體質）
                 "eps_q": eps_q,                    # 最新單季 EPS（元）
+                "debt_ratio_pct": debt_ratio,      # 負債比＝負債/資產（%，一般業；金融業空）
+                "roe_q_pct": roe_q,                # 單季ROE＝EPS/每股淨值（%，歸屬母公司）
                 "volume_lots_today": vlots,
                 "inst_net_lots": inst_lots,
                 "inst_net_5d_lots": inst_5d_lots,    # 三大法人近5日：揭露近端轉向(20日恐為殘留)
@@ -930,7 +937,10 @@ _CANONICAL_REUSE_FIELDS = (
     "cheap_flag",
     "rev_yoy_pct",
     "gross_margin_pct",
+    "net_margin_pct",
     "eps_q",
+    "debt_ratio_pct",
+    "roe_q_pct",
     "volume_lots_today",
     "inst_net_lots",
     "inst_net_5d_lots",

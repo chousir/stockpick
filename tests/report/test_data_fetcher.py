@@ -5,6 +5,7 @@ from datetime import date, timedelta
 import polars as pl
 
 from tw_screener.report.data_fetcher import (
+    _format_fundamentals_summary,
     _format_institutional_summary,
     _format_price_summary,
     _format_revenue_summary,
@@ -122,3 +123,35 @@ def test_format_institutional_summary_correct_total():
     result = _format_institutional_summary(df)
     # foreign_net sum = 1000 + (-500) + 2000 + 800 + (-200) = 3100
     assert "3,100" in result or "+3,100" in result
+
+
+# ─── _format_fundamentals_summary（D5）────────────────────────────────────────
+
+def test_format_fundamentals_summary_empty():
+    assert "未取得" in _format_fundamentals_summary(None)
+
+
+def test_format_fundamentals_summary_shows_quality_and_structure():
+    row = {
+        "year": 2026, "quarter": 1, "gross_margin_pct": 66.25,
+        "op_margin_pct": 58.10, "pretax_margin_pct": 60.65, "net_margin_pct": 50.51,
+        "eps": 22.08, "debt_ratio_pct": 31.50, "current_ratio": 2.49,
+        "bvps": 227.17, "roe_q_pct": 9.72,
+    }
+    result = _format_fundamentals_summary(row)
+    assert "負債比 31.5%" in result
+    assert "稅後純益率 50.5%" in result
+    assert "單季ROE：9.7%" in result
+    assert "2026 Q1" in result
+
+
+def test_format_fundamentals_summary_null_balance_sheet_honest():
+    """金融業/缺表：純益率仍在、體質欄標未取得（不硬湊）。"""
+    row = {
+        "year": 2026, "quarter": 1, "gross_margin_pct": None, "op_margin_pct": None,
+        "pretax_margin_pct": 40.0, "net_margin_pct": 33.0, "eps": None,
+        "debt_ratio_pct": None, "current_ratio": None, "bvps": None, "roe_q_pct": None,
+    }
+    result = _format_fundamentals_summary(row)
+    assert "稅後純益率 33.0%" in result
+    assert "負債比 未取得" in result
