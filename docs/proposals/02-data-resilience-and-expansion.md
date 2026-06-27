@@ -102,7 +102,15 @@ TDCC 為週頻、且公布有遞延 → meta 明標資料日，避免與日頻�
 
 ---
 
-## D4 — 啟用既有但閒置的融資融券（MI_MARGN）
+## D4 — 啟用既有但閒置的融資融券（MI_MARGN）✅ 完成（2026-06-27）
+
+> 收官：`data/twse.py` 加 `_parse_margin`（OpenAPI MI_MARGN list[dict]・單位張・由 latest_trading_date 錨日）
+> ＋`fetch_margin`（逐日累積 `margin_{YYYYMMDD}.parquet`）＋`load_margin_signals`（最新日每股餘額/增減＋
+> `margin_chg_5d`，快取不足 6 日 → null）。接進 `fetch-twse`（多一步）、candidates/holdings/watchlist
+> enriched.csv（`margin_map`：margin_balance/chg/chg_5d/short_balance/short_chg/`margin_to_vol`＋併入
+> `_CANONICAL_REUSE_FIELDS`）、個股報告籌碼段（`_format_margin_summary`＋券資比）。docs/11 補欄＋讀法
+> （融資增減＝散戶槓桿；融資減肥＝籌碼洗清偏多）。**僅上市；上櫃融資融券為缺口、登記 D6 backlog。**
+> 詳見 docs/08「M-R-Data4」。
 
 ### 問題
 `docs/02` 列了 `MI_MARGN` 端點，但 `grep -r 融資|margin src/` **零使用**。
@@ -115,14 +123,15 @@ CLAUDE.md 人設籌碼段明文要求「融資增減」，目前產不出來。
 2. 衍生 `margin_chg_5d`、`margin_to_volume` 進候選表與個股 bundle。
 
 ### 成功標準
-- [ ] `make fetch-twse` 多一步抓融資融券、parser 離線測試過。
-- [ ] 候選表/個股報告出現融資增減欄。
+- [x] `make fetch-twse` 多一步抓融資融券、parser 離線測試過。（`_parse_margin` + `tests/data/test_twse.py` 6 測，fixture `margin.json`）
+- [x] 候選表/個股報告出現融資增減欄。（candidates/holdings/watchlist 6 欄＋個股報告籌碼段）
 
 ### 可動檔案範圍
 `src/tw_screener/data/twse.py`、`cli.py`、`Makefile`（fetch-twse 串接）、`tests/`。
+（實作另觸及 `report/group_report.py`／`report/data_fetcher.py`／`report/builder.py`／`prompts/stock_report.md.j2`／`docs/11`——成功標準「候選表/個股報告出現融資增減欄」必經，範圍清單原漏列。）
 
 ### 風險
-低。端點合法、結構穩定。注意「資券當沖」「鉅額」等特殊列的過濾。
+低。端點合法、結構穩定。**實測 OpenAPI MI_MARGN 為乾淨 per-stock JSON（無「資券當沖/鉅額」section header 特殊列，那是 legacy CSV 格式的問題）**，故無需特殊列過濾；空欄位以 `_safe_int` 視為 0。
 
 ---
 
@@ -189,6 +198,7 @@ README 把 cron 降「選配」對法人正確（可回補），但對**全市�
 |---|---|---|---|
 | 市值／流通在外股數 | TWSE 基本資料 | 中 | 解鎖真周轉率、市值分層；團隊 2026-06-24 曾裁定不補，重新評估 |
 | 外資持股比率 | TWSE 外資持股 | 中 | 與 D3 集保互補 |
+| 上櫃融資融券（OTC margin） | TPEX OpenAPI（端點待查，obvious 名 302） | 中 | D4 僅做上市 MI_MARGN；上櫃股 margin 欄目前一律 null。約佔候選宇宙半數，補上提升覆蓋，2026-06-27 登記 |
 | 分點/主力券商買賣 | 券商分點（爬蟲・灰區） | 高但風險高 | 合規與穩定度需評估，預設不做 |
 | 法說會/財測行事曆 | 公開資訊觀測站 | 中 | 補 macro_calendar 的個股事件層 |
 | `ScreenerSource` protocol（D1 Part 4） | — | 低（目前單一來源） | 2026-06-27 拍板延後；要接第二篩選來源（FinMind/自建）時再抽 build_url/fetch/parse 三方法，避免空殼指向 |

@@ -219,6 +219,63 @@ def _parse_institutional(payload: dict[str, Any]) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=schema)
 
 
+_MARGIN_SCHEMA = {
+    "date": pl.Date,
+    "stock_id": pl.Utf8,
+    "stock_name": pl.Utf8,
+    "margin_balance": pl.Int64,   # 融資今日餘額（張）
+    "margin_chg": pl.Int64,       # 融資今日 − 前日餘額（張）
+    "short_balance": pl.Int64,    # 融券今日餘額（張）
+    "short_chg": pl.Int64,        # 融券今日 − 前日餘額（張）
+    "note": pl.Utf8,              # 註記（處置/全額交割等狀態旗標）
+}
+
+
+def _safe_int(s: object) -> int:
+    """MI_MARGN 欄位可能為空字串／"-" → 視為 0（融資融券無餘額），其餘去千分位轉 int。"""
+    if not isinstance(s, str):
+        return int(s) if isinstance(s, (int,)) else 0
+    cleaned = s.strip().replace(",", "")
+    if not cleaned or cleaned in ("-", "--"):
+        return 0
+    try:
+        return int(cleaned)
+    except ValueError:
+        return 0
+
+
+def _parse_margin(data: list[dict[str, Any]], trade_date: date) -> pl.DataFrame:
+    """解析 TWSE OpenAPI MI_MARGN（上市融資融券）list[dict] → DataFrame。
+
+    端點不含日期欄 → 由呼叫端以 latest_trading_date() 錨定 trade_date。
+    融資/融券單位為「張」（1 張＝1000 股），不再除 1000。空輸入回空表。
+    """
+    if not data:
+        return pl.DataFrame(schema=_MARGIN_SCHEMA)
+    rows = []
+    for r in data:
+        sid = str(r.get("股票代號", "")).strip()
+        if not sid:
+            continue
+        mb = _safe_int(r.get("融資今日餘額", ""))
+        mb_prev = _safe_int(r.get("融資前日餘額", ""))
+        sb = _safe_int(r.get("融券今日餘額", ""))
+        sb_prev = _safe_int(r.get("融券前日餘額", ""))
+        rows.append(
+            {
+                "date": trade_date,
+                "stock_id": sid,
+                "stock_name": str(r.get("股票名稱", "")).strip(),
+                "margin_balance": mb,
+                "margin_chg": mb - mb_prev,
+                "short_balance": sb,
+                "short_chg": sb - sb_prev,
+                "note": str(r.get("註記", "")).strip(),
+            }
+        )
+    return pl.DataFrame(rows, schema=_MARGIN_SCHEMA)
+
+
 _TPEX_BASE = "https://www.tpex.org.tw"
 _TPEX_STOCK_DAY_PATH = "/www/zh-tw/afterTrading/tradingStock"
 _TPEX_INST_URL = "https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading"
@@ -1150,6 +1207,80 @@ class TWSEClient:
         )
         recent_dates = merged["date"].unique().sort(descending=True).head(n_days).to_list()
         return merged.filter(pl.col("date").is_in(recent_dates))
+
+    def fetch_margin(self) -> pl.DataFrame:
+        """抓上市融資融券（OpenAPI MI_MARGN），逐日累積 margin_{date}.parquet（規劃書 02 D4）。
+
+        端點不含日期 → 以 latest_trading_date() 錨定檔名/date 欄（同 fetch_institutional）。
+        融資/融券單位＝張。同交易日 TTL 內重跑讀快取。只有上市；上櫃融資融券為缺口（D6 backlog）。
+        """
+        trading_date = self.latest_trading_date()
+        if trading_date is None:
+            logger.warning("fetch_margin: 無法取得 trading_date，略過 MI_MARGN")
+            return pl.DataFrame(schema=_MARGIN_SCHEMA)
+
+        date_str = trading_date.strftime("%Y%m%d")
+        cache_file = self.cache_dir / f"margin_{date_str}.parquet"
+        if is_fresh(cache_file, self.ttl_hours):
+            logger.info(f"命中快取 {cache_file}")
+            return load_parquet(cache_file)
+
+        data = self._get("/exchangeReport/MI_MARGN")
+        df = _parse_margin(data, trading_date)
+        if not df.is_empty():
+            save_parquet(df, cache_file)
+        else:
+            logger.warning("MI_MARGN {} 回傳空資料（端點異常或非交易日）", date_str)
+        return df
+
+    def load_margin_signals(self, n_days: int = 6) -> pl.DataFrame:
+        """純讀近 n_days 個交易日 margin_*.parquet，回最新日每股融資融券＋margin_chg_5d（不打網）。
+
+        margin_chg_5d ＝最新日融資餘額 − 第 6 新（≈5 交易日前）融資餘額；快取不足 6 日 → null
+        （誠實，不假裝有 5 日變化）。供 group / 個股報告 join，無快取回空表（欄位齊全）。
+
+        穩健性：排除舊版遺留的 `margin_otc_*`（上櫃、舊 schema）與任何缺本版欄位的舊格式
+        margin 快取（過去某次廢棄嘗試留下 251+246 個 `margin_bal`/`short_bal` 5 欄檔）→
+        只讀符合本版 _MARGIN_SCHEMA 的檔，避免 concat schema 衝突。
+        """
+        empty = pl.DataFrame(schema=_MARGIN_SCHEMA).with_columns(
+            pl.lit(None, dtype=pl.Int64).alias("margin_chg_5d")
+        )
+        files = sorted(
+            f
+            for f in self.cache_dir.glob("margin_*.parquet")
+            if not f.name.startswith("margin_otc_")
+        )
+        if not files:
+            return empty
+        files = select_recent_cache_files(files, n_days)
+        required = list(_MARGIN_SCHEMA.keys())
+        frames: list[pl.DataFrame] = []
+        for f in files:
+            df = pl.read_parquet(f)
+            if set(required).issubset(df.columns):
+                frames.append(df.select(required))
+            else:
+                logger.debug("略過 schema 不符的舊版 margin 快取：{}", f.name)
+        if not frames:
+            return empty
+        merged = (
+            pl.concat(frames)
+            .unique(subset=["date", "stock_id"])
+            .sort("date")
+        )
+        dates = merged["date"].unique().sort(descending=True).to_list()
+        latest = merged.filter(pl.col("date") == dates[0])
+
+        if len(dates) < 6:
+            return latest.with_columns(pl.lit(None, dtype=pl.Int64).alias("margin_chg_5d"))
+
+        prev5 = merged.filter(pl.col("date") == dates[5]).select(
+            "stock_id", pl.col("margin_balance").alias("_mb_5d_ago")
+        )
+        return latest.join(prev5, on="stock_id", how="left").with_columns(
+            (pl.col("margin_balance") - pl.col("_mb_5d_ago")).alias("margin_chg_5d")
+        ).drop("_mb_5d_ago")
 
     def fetch_otc_institutional(self) -> pl.DataFrame:
         """抓上櫃三大法人（TPEX OpenAPI 最新一日），存 institutional_otc_{date}.parquet。

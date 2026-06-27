@@ -102,6 +102,32 @@ def _format_big_holder_summary(row: dict | None, data_date: object) -> str:
     )
 
 
+def _format_margin_summary(row: dict | None) -> str:
+    """格式化單檔上市融資融券（MI_MARGN，單位張）＋券資比。"""
+    if not row or row.get("margin_balance") is None:
+        return "未取得（上市 MI_MARGN 無此股，或上櫃股未涵蓋；可執行 make fetch-twse 累積）"
+
+    def _i(v: object) -> int | None:
+        return int(v) if v is not None else None  # type: ignore[call-overload]
+
+    mb = _i(row.get("margin_balance"))
+    mc = _i(row.get("margin_chg"))
+    mc5 = _i(row.get("margin_chg_5d"))
+    sb = _i(row.get("short_balance"))
+    sc = _i(row.get("short_chg"))
+    chg5 = f"近5日 {mc5:+,}" if mc5 is not None else "近5日 N/A（資料累積中）"
+    short_ratio = (
+        f"，券資比 {sb / mb * 100:.1f}%" if (mb and mb > 0 and sb is not None) else ""
+    )
+    return "\n".join(
+        [
+            f"資料日：{row.get('date', '')}（上市，單位：張）",
+            f"融資餘額 {mb:,} 張（日增減 {mc:+,}、{chg5}）",
+            f"融券餘額 {sb:,} 張（日增減 {sc:+,}）{short_ratio}",
+        ]
+    )
+
+
 def _get_stock_name(stock_id: str, settings_path: Path) -> str:
     """Try to get stock name from screener CSVs (most reliable source)."""
     with open(settings_path, encoding="utf-8") as fh:
@@ -195,6 +221,14 @@ def fetch_stock_bundle(stock_id: str, settings_path: Path) -> dict:
             bh_row = match.row(0, named=True)
             bh_date = bh_row.get("data_date", "")
 
+    # 上市融資融券（D4）：純讀快取（make fetch-twse 累積），無此股（含上櫃）則誠實標未取得
+    margin_df = client.load_margin_signals()
+    margin_row = None
+    if not margin_df.is_empty():
+        m = margin_df.filter(pl.col("stock_id") == stock_id)
+        if not m.is_empty():
+            margin_row = m.row(0, named=True)
+
     # Industry
     listed_df = client.fetch_listed_industry()
     otc_df = client.fetch_otc_industry()
@@ -223,6 +257,7 @@ def fetch_stock_bundle(stock_id: str, settings_path: Path) -> dict:
         "revenue_summary": _format_revenue_summary(monthly_revenue),
         "institutional_summary": _format_institutional_summary(institutional),
         "big_holder_summary": _format_big_holder_summary(bh_row, bh_date),
+        "margin_summary": _format_margin_summary(margin_row),
         "group_info": group_info,
         "fetched_at": date.today().isoformat(),
     }

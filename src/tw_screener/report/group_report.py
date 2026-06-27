@@ -637,6 +637,7 @@ def _build_enriched_rows(
     fundamentals_map: dict | None = None,
     valuation_map: dict | None = None,
     big_holder_map: dict | None = None,
+    margin_map: dict | None = None,
 ) -> list[dict]:
     """組「每檔 × 技術/籌碼/估值/基本面 + flags」列（candidates / 庫存 / 觀察 共用）。"""
     if members.is_empty():
@@ -755,6 +756,20 @@ def _build_enriched_rows(
         if inst_lots is not None and tot20 and tot20 > 0:
             inst_pct20d = round(inst_lots / tot20 * 100, 1)
 
+        # D4 上市融資融券（張）：散戶槓桿動向；MI_MARGN 獨立來源，不受 inst_missing 影響
+        mg = (margin_map or {}).get(sid)
+        margin_balance_lots = _num(mg.get("margin_balance"), 0) if mg else None
+        margin_chg_lots = _num(mg.get("margin_chg"), 0) if mg else None
+        margin_chg_5d_lots = _num(mg.get("margin_chg_5d"), 0) if mg else None
+        short_balance_lots = _num(mg.get("short_balance"), 0) if mg else None
+        short_chg_lots = _num(mg.get("short_chg"), 0) if mg else None
+        # 融資餘額相當於幾日均量（融資沉澱/籌碼壓力 proxy）；20 日均量＝tot20/20
+        margin_to_vol = (
+            round(margin_balance_lots / (tot20 / 20.0), 1)
+            if (margin_balance_lots is not None and tot20 and tot20 > 0)
+            else None
+        )
+
         # 法人快取缺漏（join 不到，非真實零買賣超）：四欄顯示空白，由 flag 標示供人工查證
         inst_missing = bool(r.get("inst_missing"))
         if inst_missing:
@@ -843,6 +858,13 @@ def _build_enriched_rows(
                 "big_holder_wow": big_holder_wow,
                 "big_holder_1000_pct": big_holder_1000_pct,
                 "big_holder_1000_wow": big_holder_1000_wow,
+                # D4 上市融資融券（張）：融資餘額/增減/近5日增減、融券餘額/增減、融資相當幾日均量
+                "margin_balance_lots": margin_balance_lots,
+                "margin_chg_lots": margin_chg_lots,
+                "margin_chg_5d_lots": margin_chg_5d_lots,
+                "short_balance_lots": short_balance_lots,
+                "short_chg_lots": short_chg_lots,
+                "margin_to_vol": margin_to_vol,
                 "flags": ";".join(flags),
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
             }
@@ -860,6 +882,7 @@ def write_candidates_enriched_csv(
     fundamentals_map: dict | None = None,
     valuation_map: dict | None = None,
     big_holder_map: dict | None = None,
+    margin_map: dict | None = None,
 ) -> list[dict]:
     """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
 
@@ -871,7 +894,7 @@ def write_candidates_enriched_csv(
     """
     rows = _build_enriched_rows(
         members, themes_long, screener_results, flags_cfg, rev_yoy_map,
-        fundamentals_map, valuation_map, big_holder_map,
+        fundamentals_map, valuation_map, big_holder_map, margin_map,
     )
     if not rows:
         return []
@@ -923,6 +946,12 @@ _CANONICAL_REUSE_FIELDS = (
     "big_holder_wow",
     "big_holder_1000_pct",
     "big_holder_1000_wow",
+    "margin_balance_lots",
+    "margin_chg_lots",
+    "margin_chg_5d_lots",
+    "short_balance_lots",
+    "short_chg_lots",
+    "margin_to_vol",
     "flags",
 )
 
@@ -938,6 +967,7 @@ def write_named_list_csv(
     fundamentals_map: dict | None = None,
     valuation_map: dict | None = None,
     big_holder_map: dict | None = None,
+    margin_map: dict | None = None,
     holdings_map: dict | None = None,
     canonical_rows: dict[str, dict] | None = None,
 ) -> int:
@@ -950,7 +980,7 @@ def write_named_list_csv(
     """
     rows = _build_enriched_rows(
         members, themes_long, screener_results, flags_cfg, rev_yoy_map,
-        fundamentals_map, valuation_map, big_holder_map,
+        fundamentals_map, valuation_map, big_holder_map, margin_map,
     )
     if not rows:
         return 0

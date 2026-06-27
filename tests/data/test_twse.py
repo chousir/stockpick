@@ -19,6 +19,7 @@ from tw_screener.data.twse import (
     _parse_dividend_calendar,
     _parse_institutional,
     _parse_listed_industry,
+    _parse_margin,
     _parse_revenue,
     _parse_stock_day,
     _parse_tpex_institutional,
@@ -1545,3 +1546,107 @@ def test_load_latest_fundamentals(tmp_path: Path):
         tmp_path / "fundamentals_2026Q1.parquet")
     df = client.load_latest_fundamentals()
     assert df["eps"][0] == 13.94
+
+
+# ─── D4 融資融券（MI_MARGN）─────────────────────────────────────────────────
+
+MARGIN_FIXTURE = FIXTURE_DIR / "margin.json"
+
+
+def _load_margin_fixture() -> list:
+    import json
+    return json.loads(MARGIN_FIXTURE.read_text(encoding="utf-8"))
+
+
+def test_parse_margin_changes_and_units():
+    df = _parse_margin(_load_margin_fixture(), date(2026, 6, 26))
+    assert df.columns == [
+        "date", "stock_id", "stock_name",
+        "margin_balance", "margin_chg", "short_balance", "short_chg", "note",
+    ]
+    r = {x["stock_id"]: x for x in df.iter_rows(named=True)}
+    # 單位＝張（不除 1000）；chg = 今日 − 前日
+    assert r["2330"]["margin_balance"] == 31215 and r["2330"]["margin_chg"] == -681
+    assert r["2330"]["short_chg"] == -3
+    assert r["2317"]["margin_chg"] == 316 and r["2317"]["short_chg"] == -141
+    assert r["2603"]["short_chg"] == 52
+    assert df["date"][0] == date(2026, 6, 26)
+
+
+def test_parse_margin_empty():
+    assert _parse_margin([], date(2026, 6, 26)).is_empty()
+
+
+def test_parse_margin_safe_int_handles_blank():
+    # 融券各欄空字串 → 視為 0、不 crash
+    data = [{
+        "股票代號": "9999", "股票名稱": "測試", "融資今日餘額": "100",
+        "融資前日餘額": "", "融券今日餘額": "", "融券前日餘額": "", "註記": " ",
+    }]
+    df = _parse_margin(data, date(2026, 6, 26))
+    row = df.row(0, named=True)
+    assert row["margin_balance"] == 100 and row["margin_chg"] == 100  # 前日空→0
+    assert row["short_balance"] == 0 and row["short_chg"] == 0
+
+
+def _write_margin_day(cache_dir: Path, d: date, balance_2330: int) -> None:
+    pl.DataFrame(
+        {
+            "date": [d], "stock_id": ["2330"], "stock_name": ["台積電"],
+            "margin_balance": [balance_2330], "margin_chg": [0],
+            "short_balance": [40], "short_chg": [0], "note": [""],
+        }
+    ).write_parquet(cache_dir / f"margin_{d.strftime('%Y%m%d')}.parquet")
+
+
+def _margin_client(tmp_path: Path) -> TWSEClient:
+    return TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+
+
+def test_load_margin_signals_chg_5d(tmp_path: Path):
+    # 6 個交易日：最新 31000、5 日前 30000 → margin_chg_5d = +1000
+    days = [date(2026, 6, d) for d in (16, 17, 18, 19, 22, 23)]
+    balances = [30000, 30200, 30400, 30600, 30800, 31000]
+    for d, b in zip(days, balances):
+        _write_margin_day(tmp_path, d, b)
+    out = _margin_client(tmp_path).load_margin_signals()
+    row = out.filter(pl.col("stock_id") == "2330").row(0, named=True)
+    assert row["date"] == date(2026, 6, 23)
+    assert row["margin_balance"] == 31000
+    assert row["margin_chg_5d"] == 1000  # 31000 − 30000（dates[5]）
+
+
+def test_load_margin_signals_insufficient_history_null(tmp_path: Path):
+    # 只有 3 日 < 6 → margin_chg_5d null（誠實，不假裝）
+    for d, b in [(date(2026, 6, 19), 30600), (date(2026, 6, 22), 30800),
+                 (date(2026, 6, 23), 31000)]:
+        _write_margin_day(tmp_path, d, b)
+    out = _margin_client(tmp_path).load_margin_signals()
+    assert "margin_chg_5d" in out.columns
+    assert out["margin_chg_5d"].is_null().all()
+
+
+def test_load_margin_signals_no_cache(tmp_path: Path):
+    out = _margin_client(tmp_path).load_margin_signals()
+    assert out.is_empty()
+    assert "margin_chg_5d" in out.columns
+
+
+def test_load_margin_signals_skips_legacy_schema(tmp_path: Path):
+    # 廢棄舊版遺留：margin_otc_*（上櫃）與舊 5 欄 schema（margin_bal/short_bal）須被略過、不 crash
+    _write_margin_day(tmp_path, date(2026, 6, 23), 31000)  # 本版 8 欄
+    pl.DataFrame({  # 舊版 5 欄 上市（同窗、不同 schema）
+        "date": [date(2026, 6, 22)], "stock_id": ["2330"],
+        "margin_bal": [30000], "margin_chg": [0], "short_bal": [40],
+    }).write_parquet(tmp_path / "margin_20260622.parquet")
+    pl.DataFrame({  # 舊版 上櫃
+        "date": [date(2026, 6, 23)], "stock_id": ["6488"],
+        "margin_bal": [500], "margin_chg": [0], "short_bal": [5],
+    }).write_parquet(tmp_path / "margin_otc_20260623.parquet")
+    out = _margin_client(tmp_path).load_margin_signals()
+    # 只剩本版那筆 2330；上櫃/舊 schema 都被略過
+    assert out["stock_id"].to_list() == ["2330"]
+    assert out["margin_balance"][0] == 31000
