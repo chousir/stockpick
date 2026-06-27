@@ -944,35 +944,14 @@ class TWSEClient:
         if elapsed < self.interval_sec:
             time.sleep(self.interval_sec - elapsed)
 
-    def _get(self, endpoint: str) -> list[dict[str, Any]]:
-        """限速後發 GET 到 base_url + endpoint，回傳 JSON list。"""
-        self._throttle()
-        url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        logger.info(f"HTTP GET {url}")
-        resp = httpx.get(
-            url,
-            headers={"User-Agent": self.user_agent},
-            timeout=30.0,
-            follow_redirects=True,
-        )
-        resp.raise_for_status()
-        self._last_req = time.monotonic()
-        content_type = resp.headers.get("content-type", "")
-        if "application/json" not in content_type:
-            logger.warning(f"{endpoint} 回傳非 JSON（{content_type[:40]}），略過")
-            return []
-        data = resp.json()
-        return data if isinstance(data, list) else []
+    def _request_json(self, url: str, max_retries: int = 2) -> Any | None:
+        """限速＋指數退避地 GET 一個 JSON 端點，回傳解析後的 JSON（list 或 dict）。
 
-    def _get_legacy(self, url: str, max_retries: int = 2) -> dict[str, Any]:
-        """
-        限速後發 GET 到完整 URL（legacy TWSE / TPEX 端點），回傳整個 JSON dict。
-
-        對「回傳非 JSON」（TWSE 偶發限速時回 HTML 錯誤頁）做指數退避重試
+        對 transient 失敗（4xx/5xx／timeout／連線錯誤／回傳非 JSON）退避重試
         max_retries 次（預設 2 → 共 3 次嘗試，退避 5s / 10s）。
-        最終仍非 JSON 則記 warning 並回空 dict。
+        最終仍失敗回 None；呼叫端自行對應成各自的空值（[] 或 {}）。
 
-        HTTP 4xx/5xx 同樣會 retry；timeout 也會。
+        TWSE/TPEX 偶發限速時會以 HTML 錯誤頁取代 JSON，故「非 JSON」也視為可重試。
         """
         for attempt in range(max_retries + 1):
             self._throttle()
@@ -991,17 +970,16 @@ class TWSEClient:
             except (httpx.RequestError, httpx.HTTPStatusError) as e:
                 logger.warning(f"{url} HTTP error: {e}")
                 if attempt < max_retries:
-                    wait = 5 * (2 ** attempt)
-                    time.sleep(wait)
+                    time.sleep(5 * (2 ** attempt))
                     continue
-                return {}
+                return None
 
             self._last_req = time.monotonic()
             content_type = resp.headers.get("content-type", "")
             if "json" in content_type.lower():
                 return resp.json()
 
-            # 非 JSON：TWSE 限速時回 HTML 錯誤頁；退避重試
+            # 非 JSON：TWSE/TPEX 限速時回 HTML 錯誤頁；退避重試
             if attempt < max_retries:
                 wait = 5 * (2 ** attempt)
                 logger.warning(
@@ -1012,8 +990,19 @@ class TWSEClient:
             logger.warning(
                 f"{url} 回傳非 JSON（{content_type[:40]}），多次重試失敗，略過"
             )
-            return {}
-        return {}
+            return None
+        return None
+
+    def _get(self, endpoint: str) -> list[dict[str, Any]]:
+        """限速＋退避地 GET base_url + endpoint，回傳 JSON list（失敗回 []）。"""
+        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        data = self._request_json(url)
+        return data if isinstance(data, list) else []
+
+    def _get_legacy(self, url: str, max_retries: int = 2) -> dict[str, Any]:
+        """限速＋退避地 GET 完整 URL（legacy TWSE / TPEX 端點），回整個 JSON dict（失敗回 {}）。"""
+        data = self._request_json(url, max_retries=max_retries)
+        return data if isinstance(data, dict) else {}
 
     def fetch_daily_all(self) -> pl.DataFrame:
         """
@@ -1277,20 +1266,9 @@ class TWSEClient:
         )
 
     def _get_openapi_json(self, url: str, label: str) -> list[dict[str, Any]]:
-        """打單一 OpenAPI URL（含限速），回 JSON list；失敗回空 list（warning 不 raise）。"""
-        self._throttle()
-        try:
-            resp = httpx.get(
-                url,
-                headers={"User-Agent": self.user_agent},
-                timeout=30.0,
-                follow_redirects=True,
-            )
-            self._last_req = time.monotonic()
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            logger.warning("{} 網路錯誤：{}", label, e)
+        """打單一 OpenAPI URL（含限速＋退避），回 JSON list；失敗回空 list（warning 不 raise）。"""
+        data = self._request_json(url)
+        if data is None:
             return []
         if not isinstance(data, list):
             logger.warning("{} 回傳非 list，略過", label)

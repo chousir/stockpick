@@ -1076,6 +1076,122 @@ def test_get_legacy_gives_up_after_max_retries(tmp_path: Path, monkeypatch: pyte
     assert result == {}
 
 
+# ─── _get / _get_openapi_json retry 邏輯（規劃書 01 P4）──────────────────────
+
+
+def test_get_retries_on_transient_http_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """_get（OpenAPI）遇 5xx 應退避重試，恢復後回 list。"""
+    import httpx
+
+    client = TWSEClient(
+        base_url="https://test.invalid",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+
+    call_count = [0]
+
+    class FakeResp:
+        def __init__(self, status: int, payload: list):
+            self.headers = {"content-type": "application/json"}
+            self._status = status
+            self._payload = payload
+
+        def raise_for_status(self):
+            if self._status >= 400:
+                raise httpx.HTTPStatusError(
+                    "boom", request=httpx.Request("GET", "https://test.invalid"),
+                    response=httpx.Response(self._status),
+                )
+
+        def json(self):
+            return self._payload
+
+    def mock_get(url, **kw):
+        call_count[0] += 1
+        # 前兩次 503，第三次成功
+        if call_count[0] <= 2:
+            return FakeResp(503, [])
+        return FakeResp(200, [{"ok": 1}])
+
+    import time as _time
+    monkeypatch.setattr(httpx, "get", mock_get)
+    monkeypatch.setattr(_time, "sleep", lambda s: None)
+
+    result = client._get("/opendata/foo")
+    assert call_count[0] == 3
+    assert result == [{"ok": 1}]
+
+
+def test_get_gives_up_returns_empty_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """_get retry 用盡仍失敗 → 回空 list（不拋例外）。"""
+    import httpx
+
+    client = TWSEClient(
+        base_url="https://test.invalid",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+
+    call_count = [0]
+
+    def mock_get(url, **kw):
+        call_count[0] += 1
+        raise httpx.ConnectTimeout("timeout")
+
+    import time as _time
+    monkeypatch.setattr(httpx, "get", mock_get)
+    monkeypatch.setattr(_time, "sleep", lambda s: None)
+
+    result = client._get("/opendata/foo")
+    assert call_count[0] == 3  # max_retries=2 → 共 3 次
+    assert result == []
+
+
+def test_get_openapi_json_retries_then_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """_get_openapi_json 遇 timeout 退避重試，恢復後回 list。"""
+    import httpx
+
+    client = TWSEClient(
+        base_url="https://test.invalid",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+
+    call_count = [0]
+
+    class FakeResp:
+        headers = {"content-type": "application/json"}
+        def raise_for_status(self): pass
+        def json(self): return [{"a": 1}]
+
+    def mock_get(url, **kw):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise httpx.ConnectTimeout("timeout")
+        return FakeResp()
+
+    import time as _time
+    monkeypatch.setattr(httpx, "get", mock_get)
+    monkeypatch.setattr(_time, "sleep", lambda s: None)
+
+    result = client._get_openapi_json("https://test.invalid/foo", "測試端點")
+    assert call_count[0] == 2
+    assert result == [{"a": 1}]
+
+
 # ─── TPEX 上櫃法人 ────────────────────────────────────────────────────────────
 
 
