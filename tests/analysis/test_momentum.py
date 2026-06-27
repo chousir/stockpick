@@ -1,6 +1,8 @@
 """tests/analysis/test_momentum.py — momentum.compute_n_day_return 單元測試。"""
 
-from datetime import date
+import random
+import time
+from datetime import date, timedelta
 
 import polars as pl
 import pytest
@@ -232,3 +234,142 @@ def test_aggregate_group_momentum_empty_group():
     groups = {"empty": ["X", "Y"]}
     result = aggregate_group_momentum(momentum, groups)
     assert result["empty"] == (0.0, 0)
+
+
+# ─── 大宇宙向量化等價性基準（規劃書 01 P3）─────────────────────────────────────
+# 把舊的 per-stock 迴圈實作逐字搬進測試當「黃金基準」，向量化版必須逐值相同。
+# 同時量測耗時，斷言向量化不慢於迴圈（1800 檔下應快數量級）。
+
+
+def _naive_n_day_return(stock_ids, price_history, n=5):
+    if price_history.is_empty():
+        return {}
+    if not {"stock_id", "date", "close"}.issubset(set(price_history.columns)):
+        return {}
+    result = {}
+    ph_sorted = price_history.sort("date")
+    for stock_id in stock_ids:
+        stock_df = ph_sorted.filter(pl.col("stock_id") == stock_id)
+        if len(stock_df) < 2:
+            continue
+        gap = min(n, len(stock_df) - 1)
+        c_now = stock_df["close"][-1]
+        c_back = stock_df["close"][-(gap + 1)]
+        if c_now is None or c_back is None or c_back == 0:
+            continue
+        result[stock_id] = (float((c_now - c_back) / c_back * 100), int(gap))
+    return result
+
+
+def _naive_rolling_extrema(stock_ids, price_history, windows=(20, 60)):
+    if price_history.is_empty():
+        return {}
+    if not {"stock_id", "date", "close"}.issubset(set(price_history.columns)):
+        return {}
+    result = {}
+    ph_sorted = price_history.sort("date")
+    for stock_id in stock_ids:
+        closes = ph_sorted.filter(pl.col("stock_id") == stock_id)["close"].drop_nulls().to_list()
+        if not closes:
+            continue
+        result[stock_id] = {w: (float(min(closes[-w:])), float(max(closes[-w:]))) for w in windows}
+    return result
+
+
+def _naive_dividend_addback(stock_ids, price_history, dividends, n=5):
+    if price_history.is_empty() or not {"stock_id", "date", "close"}.issubset(
+        set(price_history.columns)
+    ):
+        return {}
+    if dividends.is_empty() or not {"stock_id", "ex_date", "cash_dividend"}.issubset(
+        set(dividends.columns)
+    ):
+        return {}
+    div_by_stock = {}
+    for r in dividends.iter_rows(named=True):
+        cash, ex = r.get("cash_dividend"), r.get("ex_date")
+        if cash is None or cash <= 0 or ex is None:
+            continue
+        div_by_stock.setdefault(str(r["stock_id"]), []).append((ex, float(cash)))
+    result = {}
+    ph_sorted = price_history.sort("date")
+    for stock_id in stock_ids:
+        events = div_by_stock.get(stock_id)
+        if not events:
+            continue
+        stock_df = ph_sorted.filter(pl.col("stock_id") == stock_id)
+        if len(stock_df) < 2:
+            continue
+        gap = min(n, len(stock_df) - 1)
+        date_back = stock_df["date"][-(gap + 1)]
+        latest = stock_df["date"][-1]
+        c_back = stock_df["close"][-(gap + 1)]
+        if c_back is None or c_back == 0:
+            continue
+        total_cash = sum(cash for ex, cash in events if date_back < ex <= latest)
+        if total_cash <= 0:
+            continue
+        result[stock_id] = (float(total_cash / c_back * 100), float(total_cash))
+    return result
+
+
+def _make_universe(n_stocks=1800, n_days=80, seed=42):
+    """合成大宇宙：含長短不一的歷史、零星 null 收盤、隨機除息。"""
+    rng = random.Random(seed)
+    start = date(2026, 3, 2)
+    rows_sid, rows_date, rows_close = [], [], []
+    div_sid, div_ex, div_cash = [], [], []
+    stock_ids = [f"{4000 + i}" for i in range(n_stocks)]
+    for sid in stock_ids:
+        length = rng.choice([1, 2, 3, 25, n_days])  # 含 1 筆(應被略過)與部分資料
+        price = rng.uniform(20, 500)
+        for d in range(length):
+            # 偶發 null 收盤 / 偶發 0 收盤，逼出邊界
+            if rng.random() < 0.01:
+                close = None
+            elif rng.random() < 0.005:
+                close = 0.0
+            else:
+                price *= 1 + rng.uniform(-0.05, 0.05)
+                close = round(price, 2)
+            rows_sid.append(sid)
+            rows_date.append(start + timedelta(days=d))
+            rows_close.append(close)
+        if rng.random() < 0.3 and length >= 3:  # 30% 有除息，落在歷史區間內某天
+            div_sid.append(sid)
+            div_ex.append(start + timedelta(days=rng.randint(0, length - 1)))
+            div_cash.append(round(rng.uniform(0.5, 8.0), 2))
+    price_history = pl.DataFrame(
+        {"stock_id": rows_sid, "date": rows_date, "close": rows_close}
+    )
+    dividends = pl.DataFrame(
+        {"stock_id": div_sid, "ex_date": div_ex, "cash_dividend": div_cash}
+    )
+    return stock_ids, price_history, dividends
+
+
+def test_vectorized_matches_naive_large_universe():
+    """1800 檔合成資料：向量化版與迴圈版逐值相同，且耗時不增。"""
+    stock_ids, price_history, dividends = _make_universe()
+
+    t0 = time.perf_counter()
+    naive_ret = _naive_n_day_return(stock_ids, price_history, n=5)
+    naive_ext = _naive_rolling_extrema(stock_ids, price_history, windows=(20, 60))
+    naive_div = _naive_dividend_addback(stock_ids, price_history, dividends, n=5)
+    naive_time = time.perf_counter() - t0
+
+    t1 = time.perf_counter()
+    vec_ret = compute_n_day_return(stock_ids, price_history, n=5)
+    vec_ext = compute_rolling_extrema(stock_ids, price_history, windows=(20, 60))
+    vec_div = compute_dividend_addback(stock_ids, price_history, dividends, n=5)
+    vec_time = time.perf_counter() - t1
+
+    # 逐值相同（dict 相等忽略順序）
+    assert vec_ret == naive_ret
+    assert vec_ext == naive_ext
+    assert vec_div == naive_div
+    # 確認測資真的有打到各分支
+    assert len(naive_ret) > 100
+    assert len(naive_div) > 10
+    # 向量化在大宇宙下應更快（留充裕餘裕、避免 CI 抖動誤殺）
+    assert vec_time < naive_time

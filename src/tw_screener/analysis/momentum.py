@@ -33,23 +33,43 @@ def compute_n_day_return(
     if not required.issubset(set(price_history.columns)):
         return {}
 
-    result: dict[str, tuple[float, int]] = {}
-    ph_sorted = price_history.sort("date")
+    # 向量化：每股一次標出列數(_n)與組內序(_i)，取末列(c_now)與起點列(c_back=index
+    # max(0, _n-1-n))，再 join 算報酬。等價於 per-stock 迴圈、但只掃全表一次。
+    tagged = (
+        price_history.filter(pl.col("stock_id").is_in(stock_ids))
+        .sort(["stock_id", "date"])
+        .with_columns(
+            pl.len().over("stock_id").cast(pl.Int64).alias("_n"),
+            pl.int_range(pl.len()).over("stock_id").alias("_i"),
+        )
+        .filter(pl.col("_n") >= 2)
+    )
+    if tagged.is_empty():
+        return {}
 
-    for stock_id in stock_ids:
-        stock_df = ph_sorted.filter(pl.col("stock_id") == stock_id)
-        if len(stock_df) < 2:
-            continue
-        available_gap = len(stock_df) - 1
-        gap = min(n, available_gap)
-        c_now = stock_df["close"][-1]
-        c_back = stock_df["close"][-(gap + 1)]
-        if c_now is None or c_back is None or c_back == 0:
-            continue
-        ret_pct = (c_now - c_back) / c_back * 100
-        result[stock_id] = (float(ret_pct), int(gap))
-
-    return result
+    back_idx = pl.max_horizontal(pl.col("_n") - 1 - n, pl.lit(0))
+    c_now = tagged.filter(pl.col("_i") == pl.col("_n") - 1).select(
+        "stock_id", pl.col("close").alias("_c_now"), "_n"
+    )
+    c_back = tagged.filter(pl.col("_i") == back_idx).select(
+        "stock_id", pl.col("close").alias("_c_back")
+    )
+    merged = (
+        c_now.join(c_back, on="stock_id")
+        .filter(
+            pl.col("_c_now").is_not_null()
+            & pl.col("_c_back").is_not_null()
+            & (pl.col("_c_back") != 0)
+        )
+        .with_columns(
+            pl.min_horizontal(pl.lit(n), pl.col("_n") - 1).alias("_gap"),
+            ((pl.col("_c_now") - pl.col("_c_back")) / pl.col("_c_back") * 100).alias("_ret"),
+        )
+    )
+    return {
+        row["stock_id"]: (float(row["_ret"]), int(row["_gap"]))
+        for row in merged.iter_rows(named=True)
+    }
 
 
 def compute_rolling_extrema(
@@ -78,16 +98,23 @@ def compute_rolling_extrema(
     if not required.issubset(set(price_history.columns)):
         return {}
 
+    # 向量化：丟掉 null 收盤後，每股各視窗取最近 w 列(tail)的 min/max，一次 group_by 算完。
+    agg_exprs = []
+    for w in windows:
+        agg_exprs.append(pl.col("close").tail(w).min().alias(f"_min_{w}"))
+        agg_exprs.append(pl.col("close").tail(w).max().alias(f"_max_{w}"))
+    grouped = (
+        price_history.filter(pl.col("stock_id").is_in(stock_ids))
+        .sort(["stock_id", "date"])
+        .filter(pl.col("close").is_not_null())
+        .group_by("stock_id", maintain_order=True)
+        .agg(agg_exprs)
+    )
+
     result: dict[str, dict[int, tuple[float, float]]] = {}
-    ph_sorted = price_history.sort("date")
-    for stock_id in stock_ids:
-        closes = (
-            ph_sorted.filter(pl.col("stock_id") == stock_id)["close"].drop_nulls().to_list()
-        )
-        if not closes:
-            continue
-        result[stock_id] = {
-            w: (float(min(closes[-w:])), float(max(closes[-w:]))) for w in windows
+    for row in grouped.iter_rows(named=True):
+        result[row["stock_id"]] = {
+            w: (float(row[f"_min_{w}"]), float(row[f"_max_{w}"])) for w in windows
         }
     return result
 
@@ -125,36 +152,65 @@ def compute_dividend_addback(
     ):
         return {}
 
-    # 預先把每檔現金股利收進 dict，避免 per-stock filter 重複掃全表
-    div_by_stock: dict[str, list[tuple[object, float]]] = {}
-    for r in dividends.iter_rows(named=True):
-        cash = r.get("cash_dividend")
-        ex = r.get("ex_date")
-        if cash is None or cash <= 0 or ex is None:
-            continue
-        div_by_stock.setdefault(str(r["stock_id"]), []).append((ex, float(cash)))
+    # 向量化：先一次算出每股視窗起點(date_back/c_back)與最新日(latest)，再與現金股利
+    # join、篩 ex_date 落在視窗內者合計。等價於 per-stock 迴圈、但只掃全表一次。
+    tagged = (
+        price_history.filter(pl.col("stock_id").is_in(stock_ids))
+        .sort(["stock_id", "date"])
+        .with_columns(
+            pl.len().over("stock_id").cast(pl.Int64).alias("_n"),
+            pl.int_range(pl.len()).over("stock_id").alias("_i"),
+        )
+        .filter(pl.col("_n") >= 2)
+    )
+    if tagged.is_empty():
+        return {}
 
-    result: dict[str, tuple[float, float]] = {}
-    ph_sorted = price_history.sort("date")
-    for stock_id in stock_ids:
-        events = div_by_stock.get(stock_id)
-        if not events:
-            continue
-        stock_df = ph_sorted.filter(pl.col("stock_id") == stock_id)
-        if len(stock_df) < 2:
-            continue
-        gap = min(n, len(stock_df) - 1)
-        date_back = stock_df["date"][-(gap + 1)]  # 視窗起點（c_back 的日期）
-        latest = stock_df["date"][-1]
-        c_back = stock_df["close"][-(gap + 1)]
-        if c_back is None or c_back == 0:
-            continue
-        # ex_date 嚴格晚於視窗起點收盤、且不晚於最新日 → 缺口落在視窗內，需加回
-        total_cash = sum(cash for ex, cash in events if date_back < ex <= latest)
-        if total_cash <= 0:
-            continue
-        result[stock_id] = (float(total_cash / c_back * 100), float(total_cash))
-    return result
+    back_idx = pl.max_horizontal(pl.col("_n") - 1 - n, pl.lit(0))
+    back = tagged.filter(pl.col("_i") == back_idx).select(
+        "stock_id",
+        pl.col("date").alias("_date_back"),  # 視窗起點（c_back 的日期）
+        pl.col("close").alias("_c_back"),
+    )
+    latest = tagged.filter(pl.col("_i") == pl.col("_n") - 1).select(
+        "stock_id", pl.col("date").alias("_latest")
+    )
+    windows = back.join(latest, on="stock_id").filter(
+        pl.col("_c_back").is_not_null() & (pl.col("_c_back") != 0)
+    )
+    if windows.is_empty():
+        return {}
+
+    # 只留正現金股利（比照舊版 cash > 0；stock_id 轉字串對齊呼叫端代號）
+    divs = dividends.with_columns(pl.col("stock_id").cast(pl.Utf8)).filter(
+        pl.col("cash_dividend").is_not_null()
+        & (pl.col("cash_dividend") > 0)
+        & pl.col("ex_date").is_not_null()
+    )
+    if divs.is_empty():
+        return {}
+
+    # ex_date 嚴格晚於視窗起點收盤、且不晚於最新日 → 缺口落在視窗內，需加回
+    joined = (
+        windows.join(divs, on="stock_id")
+        .filter(
+            (pl.col("_date_back") < pl.col("ex_date"))
+            & (pl.col("ex_date") <= pl.col("_latest"))
+        )
+        .group_by("stock_id")
+        .agg(
+            pl.col("cash_dividend").sum().alias("_total_cash"),
+            pl.col("_c_back").first().alias("_c_back"),
+        )
+        .filter(pl.col("_total_cash") > 0)
+    )
+    return {
+        row["stock_id"]: (
+            float(row["_total_cash"] / row["_c_back"] * 100),
+            float(row["_total_cash"]),
+        )
+        for row in joined.iter_rows(named=True)
+    }
 
 
 def aggregate_group_momentum(
