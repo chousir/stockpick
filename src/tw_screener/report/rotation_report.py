@@ -306,6 +306,7 @@ def render_rotation_report(
     cp_position_ceiling: float = 60.0,
     top_n: int = 10,
     data_date: str = "",
+    density_note: str = "",
     participation: list[dict] | None = None,
 ) -> Path:
     """渲染 sector_rotation.md + 寫 sector_rotation.csv，回傳 md 路徑。
@@ -343,6 +344,7 @@ def render_rotation_report(
     md = tpl.render(
         week_tag=week_tag,
         data_date=data_date,
+        density_note=density_note,
         s=s,
         lw=lw,
         top_n=top_n,

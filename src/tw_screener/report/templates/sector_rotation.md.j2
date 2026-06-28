@@ -8,7 +8,8 @@
 # {{ week_tag }} 次產業資金流向輪動
 
 > 資料日期：{{ data_date }}・法人滾動視窗 {{ s }}/{{ lw }} 交易日・位階基準：距 60 日低點 {{ position_low_pct }}%
-> ★＝校準進場訊號 {{ sig_label }} 觸發中・◆＝確認鏡頭 {{ confirm_label }} 達標（R2 校準，見 docs/12）
+{% if density_note %}> {{ density_note }}
+{% endif %}> ★＝校準進場訊號 {{ sig_label }} 觸發中・◆＝確認鏡頭 {{ confirm_label }} 達標（R2 校準，見 docs/12）
 > 本報告為機械篩選輸出，僅供族群資金輪動參考；多空判讀與進出決策由人負責。
 {% if not has_prev %}
 > ΔRank 無上週 sector_rotation.csv 快照（首週正常），本週標 `—`。

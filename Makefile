@@ -1,6 +1,6 @@
 .PHONY: init sync test test-unit test-integration lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry doctor \
-        group leaders report week weekend backtest-strategies rotation-calib rotation backfill-otc-history \
+        group leaders report week weekend backtest-strategies rotation-calib rotation backfill-otc-history backfill-universe-history \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test
 
@@ -63,6 +63,9 @@ fetch-institutional-history:  ## 回補近 N 個交易日三大法人（DAYS=20 
 
 backfill-otc-history:  ## ⏳ 一次性回補上櫃次產業成員日線（~600 檔×13 月，2-3 小時，可中斷續跑）
 	uv run tw-screener data backfill-otc-history --months $(or $(MONTHS),13)
+
+backfill-universe-history:  ## ⏳ 一次性回補全部次產業成員日線（上市+上櫃，~1500 檔×13 月，8-12 小時，可中斷續跑）
+	uv run tw-screener data backfill-universe-history --months $(or $(MONTHS),13)
 
 build-themes:  ## 爬 Yahoo 概念股 merge 進 config/concepts.yaml（DRY=1 只產 candidate 不覆蓋）
 	uv run tw-screener data build-themes $(if $(DRY),--dry-run,)

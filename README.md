@@ -280,14 +280,21 @@ FOMC/CPI/台股結算/法說等市場級事件 → `group_analysis.md` Section 0
 候選新訊號源（主動式 ETF 每日持股異動）。資料公開但後端 geo-fence 台灣，完整抓取需在
 台灣本機跑，目前擱置、與主流程隔離（見 `poc/active_etf/README.md`）。
 
-### 12. 每日資料排程（cron · 選配）
+### 12. 每日資料排程（cron · 法人可不靠它、全市場日線密度建議常駐）
 
-> **過去的「上櫃法人缺日不可回補」前提已推翻（commit 57ab1f7）**：上櫃法人改用
+> **法人**：「上櫃法人缺日不可回補」前提已推翻（commit 57ab1f7）——上櫃法人改用
 > TPEX 舊版 `3itrade_hedge` 端點（吃民國日期、逐股回傳）**可逐日回補**。`make week` 已內含
 > `fetch-institutional-history`（回補近 20 日**上市＋上櫃**法人），**隔幾天沒開機/沒跑也會自動補齊**
-> → **cron 不再必要，降為選配**（只有想保證每交易日、或超出 20 日窗的更早缺口才需要）。
+> → 就**法人完整度**而言 cron 非必要。
+>
+> **全市場日線**：`STOCK_DAY_ALL` / `otc_daily_all` 的 `date` 參數被無視、**只能往未來累積、過去補不回**
+> （docs/02）。rotation z 需 ~60+ 日、calibration 需 ~250 日 → 新環境若不每日累積，前幾個月歷史窗偏短、
+> 訊號統計意義有限（報表頭已誠實標「歷史窗：實際 N 交易日」）。**兩種補法**：
+> ① 把 `scripts/fetch_cron.sh` **排成常駐**每交易日盤後跑（建議）；或
+> ② 一次性 `make backfill-universe-history`（對 concepts.yaml 全部次產業成員逐檔走可回補的單檔 `STOCK_DAY`，
+> 把輪動籃子歷史補成 ~1 年；~1500 檔×13 月、8-12 小時、永久快取可中斷續跑）。
 
-若仍想每交易日盤後自動抓全市場資料，`scripts/fetch_cron.sh` 已備好（解析專案路徑、補 cron 精簡
+`scripts/fetch_cron.sh` 已備好（解析專案路徑、補 cron 精簡
 PATH、`flock` 防重入、寫 `logs/cron_fetch.log`）。T86 法人收盤後約 90 分鐘、**15:00 起穩定**（docs/02），
 故排 18:00 穩妥；crontab 加一行（交易日 18:00，盤後法人/月營收都已公布；依系統時區）：
 

@@ -644,3 +644,15 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **個股報告**：`data_fetcher._format_fundamentals_summary`（獲利能力＋財務結構＋誠實標未取得項）進 bundle；builder inline draft＋j2 prompt 加「單季財報體質」區塊、並改基本面段指示（單季值用 OpenAPI、近4季趨勢/本益比河流圖才查 Goodinfo）；docs/02 補端點表＋盤點結論、docs/11 補讀法。
 - 驗收：`make test` 綠（+5：parser 衍生/金融業 null/淨值非正 ROE null、formatter empty/有值/null 三路徑）、ruff/mypy 零淨增；2330 算出 負債比 31.50%／流動比 2.49／ROE 9.72%、6182 負債比 35.02%／ROE 1.88%、金融業體質欄 null。
   **注意：W26+ `make fetch-twse`（fundamentals 過 TTL）重跑才把體質欄寫進快取/reports；同季既有 `fundamentals_{Y}Q{q}.parquet` 在 TTL 內會回舊 schema（無新欄），須 TTL 過或刪檔重抓。**
+
+## M-R-Data2：全市場日線歷史密度—冷啟動（規劃書 02 D2）
+
+> 對應規劃書 [docs/proposals/02-data-resilience-and-expansion.md](proposals/02-data-resilience-and-expansion.md) D2（§2.2 冷啟動歷史密度）。
+> 動機：`STOCK_DAY_ALL`/`otc_daily_all` 的 date 參數被無視、**只能往未來累積、過去補不回**；rotation z 需 ~60+ 日、calibration 需 ~250 日 → 新環境前幾個月歷史窗偏短、訊號統計意義薄弱。
+
+- **回補指令（核心交付）**：新增 `data backfill-universe-history`（CLI＋Makefile `backfill-universe-history`）。對 **concepts.yaml 全部次產業成員（上市＋上櫃）** 逐檔走既有 `fetch_stock_history`（自動分派 TWSE `STOCK_DAY`／TPEX `tradingStock`，限速 1 秒/請求，過去月份永久快取＝天然可中斷續跑）。**依次產業成員數由多到少排序、跨次產業去重**（成員多的先補、密度優先見效）。為 `backfill-otc-history` 的**超集**（後者只 ∩ 上櫃）→ 兩者並存、舊指令未退役。全量首跑 ~1500 檔×13 月、估 8-12 小時、建議掛背景。
+- **報表誠實密度註記**：新 `report/density.py`（純函式 `data_density_note(actual_days)`＋常數 `Z_MIN_DAYS=60`/`CALIB_TARGET_DAYS=250`），依實際交易日數分三段信心（≥250 充足／≥60 中等／<60 統計意義有限）。接進 **rotation 報表頭**（`render_rotation_report` 加 `density_note` 參數＝`market["date"].n_unique()`）與 **group/cp 報表頭**（`render_group_report` 加 `density_note`＝候選股 `price_history["date"].n_unique()`）；空字串則整行不渲染（向後相容）。
+- **文件校正**：README §12 cron 段改定位「法人可不靠它（可回補）、**全市場日線密度建議常駐**」＋補「兩種補法：常駐 cron 或一次性 `backfill-universe-history`」；`scripts/fetch_cron.sh` 頭註補「全市場日線不可回補＝建議常駐的第一理由」；docs/02 端點表＋累積表標明 `STOCK_DAY_ALL` 不可回補、單檔 `STOCK_DAY` 可回補（backfill 用）。
+- **未做（誠實）**：原方案列的 README §2.2「正式化每日抓取＝改建議常駐」採「保留 cron 為法人選配、但對日線密度明標建議常駐」的折衷（不全面反轉 57ab1f7 對法人的正確降級）；rotation/cp 密度註記為「揭露」非「擋流程」。
+- 驗收：`uv run tw-screener data backfill-universe-history --help` 註冊正常；`make test` 581 綠（+8：density 三段信心＋邊界、rotation 報表頭密度有/無兩路徑）、ruff/mypy 零淨增（mypy 58＝D5 基線）。
+  **注意：W26+ 跑 `make rotation`/`make group` 才把密度註記寫進 reports；歷史密度本身需跑一次 `make backfill-universe-history` 或讓 cron 累積數月後才補足。**

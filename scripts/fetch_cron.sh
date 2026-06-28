@@ -2,9 +2,13 @@
 #
 # fetch_cron.sh —— 每交易日盤後抓 TWSE/TPEX 全市場資料，寫本地 parquet 快取。
 #
-# 為什麼要排程：上櫃法人（TPEX）只供「最新交易日」、缺日不可回補（TPEX 端無歷史日期參數）。
-# 沒在當天抓，那天的上櫃資金流就永久缺，rotation 的上櫃籃子會被低估。fetch-twse 雖會印
-# 「上櫃法人落後」警告，但補不回來——所以靠這支 cron 每交易日固定抓。
+# 為什麼建議常駐排程（規劃書 02 D2）：
+#  1) 全市場日線 STOCK_DAY_ALL / otc_daily_all 的 date 參數被無視、只能往未來累積、過去補不回。
+#     不每日累積，rotation z(~60 日)/calibration(~250 日) 的歷史窗就偏短、訊號統計意義有限
+#     （報表頭會誠實標「歷史窗：實際 N 交易日」）。另可一次性 make backfill-universe-history
+#     補單檔歷史，但最新交易日仍得靠每日累積。
+#  2) 上櫃法人（TPEX 3itrade_hedge）改版後雖可逐日回補（cron 對法人非必要），但每日抓最省事。
+# fetch-twse 雖會印「上櫃法人落後」警告，但日線缺日補不回來——所以建議靠這支 cron 每交易日固定抓。
 # 排程時段：T86 法人收盤後約 90 分鐘、15:00 起穩定（docs/02），建議排 18:00 之後。
 #
 # 安裝：見 README「每日資料排程（cron）」。手動跑也可：bash scripts/fetch_cron.sh

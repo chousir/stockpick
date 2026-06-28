@@ -179,7 +179,13 @@ CLAUDE.md 人設籌碼段明文要求「融資增減」，目前產不出來。
 
 ---
 
-## D2 — 全市場日線歷史密度（冷啟動）
+## D2 — 全市場日線歷史密度（冷啟動）✅ 完成（2026-06-27）
+
+> 收官：新指令 `data backfill-universe-history`（＋Makefile target）對 concepts.yaml 全部次產業成員
+> （上市＋上櫃）逐檔走可回補的單檔 `STOCK_DAY`/`tradingStock`、依次產業成員數排序、永久快取可中斷續跑
+> ——為 `backfill-otc-history` 的超集；新 `report/density.py`（`data_density_note` 三段信心）接進 rotation／
+> group(cp) 報表頭誠實標「歷史窗：實際 N 交易日／建議 ~250（z 需 ≥60）」；docs/02＋README §12＋fetch_cron.sh
+> 校正「STOCK_DAY_ALL 不可回補、cron 對全市場日線密度建議常駐」。詳見 docs/08「M-R-Data2」。
 
 ### 問題（§2.2）
 `STOCK_DAY_ALL` 的 `date` 參數被無視、永遠回今天
@@ -197,9 +203,9 @@ README 把 cron 降「選配」對法人正確（可回補），但對**全市�
    並在 README 修正 §2.2 的樂觀描述。
 
 ### 成功標準
-- [ ] rotation/cp 報表顯示實際歷史窗天數與信心註記。
-- [ ] `data backfill-universe-history` 能對次產業全成員回補日線（可中斷續跑）。
-- [ ] README/docs/02 對「全市場日線不可回補」與 cron 必要性的描述校正一致。
+- [x] rotation/cp 報表顯示實際歷史窗天數與信心註記。（`render_rotation_report`/`render_group_report` 加 `density_note`；`report/density.py` 三段信心）
+- [x] `data backfill-universe-history` 能對次產業全成員回補日線（可中斷續跑）。（全成員、依次產業成員數排序、永久快取續跑；CLI＋Makefile）
+- [x] README/docs/02 對「全市場日線不可回補」與 cron 必要性的描述校正一致。（README §12＋docs/02 端點/累積表＋fetch_cron.sh 頭註）
 
 ### 可動檔案範圍
 `src/tw_screener/data/twse.py`、`cli.py`、`report/rotation_report.py`、

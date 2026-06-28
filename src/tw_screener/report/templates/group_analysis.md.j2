@@ -1,7 +1,9 @@
 # {{ week_tag }} 族群分析報告
 
 生成時間：{{ generated_at }}
-
+{% if density_note %}
+> {{ density_note }}（候選股日線快取窗；資金z/動能/均線距離受此密度影響）
+{% endif %}
 ## 0. 策略代號說明
 
 {% for s in strategy_legend -%}
