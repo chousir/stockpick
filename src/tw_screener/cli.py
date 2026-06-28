@@ -50,6 +50,11 @@ market_app = typer.Typer(
 )
 app.add_typer(market_app, name="market")
 
+portfolio_app = typer.Typer(
+    help="組合層風控：集中度/相關簇/因子簇（規劃書 03 V3）", no_args_is_help=True
+)
+app.add_typer(portfolio_app, name="portfolio")
+
 # ─── 頂層指令 ─────────────────────────────────────────────────────────────────
 
 
@@ -1058,13 +1063,17 @@ def analysis_group(
     regime = describe_regime(regime_result)
     console.print(f"  {regime['line']}")
 
+    # 組合層風控（規劃書 03 V3）：持股標籤集中度＋因子簇曝險（價格無關、render 期即可得）。
+    # 報酬相關簇需全市場日線，留給 `portfolio check` CLI；報告段只揭露集中度/因子簇。
+    portfolio = _portfolio_section_for_report(cfg, industry_df, themes_long)
+
     _hist_days = price_history["date"].n_unique() if not price_history.is_empty() else 0
     render_group_report(
         groups, leaders, screener_results, week_tag, output_path, top_groups, top_stocks,
         dividend_events=dividends, themes_long=themes_long, macro_events=macro_events,
         radar_cfg=ga_cfg.get("radar"),
         density_note=data_density_note(_hist_days),
-        regime=regime,
+        regime=regime, portfolio=portfolio,
     )
 
     from tw_screener.report.group_report import write_candidates_enriched_csv
@@ -1931,6 +1940,176 @@ def market_regime_cmd(
         console.print(f"  資金：全市場法人日均淨流 {flows}")
     console.print(
         "\n[dim]定位＝輔助姿態揭露，非硬性 gate；最終由人決策（CLAUDE.md Part 3）。[/dim]"
+    )
+
+
+def _resolve_week_dir(cfg: dict, week: str) -> "Path | None":
+    """解析 --week：空＝最新一週目錄；否則取 reports/<week>。找不到回 None。"""
+    rdir = Path(cfg["paths"]["reports_dir"])
+    if not rdir.exists():
+        return None
+    if week:
+        d = rdir / week
+        return d if d.is_dir() else None
+    week_dirs = sorted(
+        (d for d in rdir.iterdir() if d.is_dir()), key=lambda d: d.name, reverse=True
+    )
+    return week_dirs[0] if week_dirs else None
+
+
+def _load_portfolio_members(week_dir: "Path", include_candidates: bool) -> "pl.DataFrame":
+    """讀 holdings_enriched.csv（持股為主）；--include-candidates 時併入候選（去重 keep 持股）。"""
+    import polars as _pl
+
+    cols = ["stock_id", "name", "industry", "theme"]
+
+    def _read(path: Path) -> "pl.DataFrame":
+        if not path.exists():
+            return _pl.DataFrame()
+        df = _pl.read_csv(str(path), infer_schema_length=2000)
+        keep = [c for c in cols if c in df.columns]
+        return df.select(keep).with_columns(_pl.col("stock_id").cast(_pl.Utf8))
+
+    holdings = _read(week_dir / "holdings_enriched.csv")
+    if not include_candidates:
+        return holdings
+    candidates = _read(week_dir / "candidates_enriched.csv")
+    if candidates.is_empty():
+        return holdings
+    if holdings.is_empty():
+        return candidates
+    held = set(holdings["stock_id"].to_list())
+    extra = candidates.filter(~_pl.col("stock_id").is_in(list(held)))
+    return _pl.concat([holdings, extra], how="diagonal")
+
+
+def _portfolio_section_for_report(
+    cfg: dict, industry_df: "pl.DataFrame | None", themes_long: "pl.DataFrame | None"
+) -> "dict | None":
+    """group_analysis.md 組合體檢段：持股 ids ＋ industry_df ＋ themes_long → 標籤集中度/因子簇。
+
+    純本地、不抓網、不需價格（相關簇留給 `portfolio check` CLI）。無持股回 None（不渲染該段）。
+    """
+    import polars as _pl
+
+    from tw_screener.analysis.portfolio import (
+        compute_portfolio_check,
+        describe_portfolio_check,
+    )
+
+    wl_dir = Path(cfg["paths"].get("watchlist_dir", "watchlist"))
+    holdings_ids = list(_read_holdings_csv(wl_dir / "holdings.csv"))
+    if not holdings_ids:
+        return None
+    base = _pl.DataFrame({"stock_id": [str(s) for s in holdings_ids]})
+    if (
+        industry_df is not None
+        and not industry_df.is_empty()
+        and {"stock_id", "industry_name"}.issubset(industry_df.columns)
+    ):
+        ind = industry_df.select(
+            _pl.col("stock_id").cast(_pl.Utf8),
+            _pl.col("industry_name").alias("industry"),
+        ).unique(subset=["stock_id"])
+        base = base.join(ind, on="stock_id", how="left")
+    if themes_long is not None and not themes_long.is_empty():
+        th = (
+            themes_long.with_columns(_pl.col("stock_id").cast(_pl.Utf8))
+            .group_by("stock_id")
+            .agg(_pl.col("theme"))
+            .with_columns(_pl.col("theme").list.join("、"))
+        )
+        base = base.join(th, on="stock_id", how="left")
+    # 價格史傳空：報告段只取 label/factor（價格無關）；相關簇由 CLI 提供
+    result = compute_portfolio_check(base, _pl.DataFrame(), cfg.get("portfolio", {}))
+    return describe_portfolio_check(result)
+
+
+@portfolio_app.command("check")
+def portfolio_check_cmd(
+    week: str = typer.Option("", "--week", help="週別（如 2026-W26）；空＝最新一週"),
+    include_candidates: bool = typer.Option(
+        False, "--include-candidates", help="併入本週候選股（預設只看 holdings 持股）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """V3 組合層風控：對持股算 標籤集中度／報酬相關簇／因子簇曝險（風險揭露，非硬約束）。"""
+    import yaml
+
+    from tw_screener.analysis.portfolio import (
+        compute_portfolio_check,
+        describe_portfolio_check,
+    )
+    from tw_screener.analysis.rotation import load_market_history
+
+    with open(settings, encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh)
+
+    week_dir = _resolve_week_dir(cfg, week)
+    if week_dir is None:
+        console.print("[red]找不到 reports 週別目錄——先跑 make week 產出 enriched CSV[/red]")
+        raise typer.Exit(1)
+
+    members = _load_portfolio_members(week_dir, include_candidates)
+    if members.is_empty():
+        console.print(f"[red]{week_dir.name} 無 holdings_enriched.csv（或欄位缺）[/red]")
+        raise typer.Exit(1)
+
+    pcfg = cfg.get("portfolio", {})
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+    price_history = load_market_history(cache_dir, n_days=int(pcfg.get("history_days", 90)))
+    result = compute_portfolio_check(members, price_history, pcfg)
+    desc = describe_portfolio_check(result)
+
+    src = "持股＋候選" if include_candidates else "持股"
+    console.print(f"\n[bold]{desc['line']}[/bold]（{week_dir.name}・{src}）")
+    if desc.get("as_of"):
+        console.print(f"  價格史截至 {desc['as_of']}")
+
+    # 1. 標籤集中度
+    flagged_labels = cast("list", desc["flagged_labels"])
+    if flagged_labels:
+        console.print("\n[yellow]標籤集中（次產業/主題）：[/yellow]")
+        for d in flagged_labels:
+            console.print(
+                f"  {d['label']}：{d['count']} 檔（{float(d['share']):.0%}）"
+                f"　{', '.join(cast('list', d['stock_ids']))}"
+            )
+    else:
+        console.print("\n  標籤集中：無達門檻")
+
+    # 2. 報酬相關簇
+    corr_clusters = cast("list", desc["corr_clusters"])
+    if corr_clusters:
+        console.print("\n[yellow]高相關簇（近報酬共動）：[/yellow]")
+        for cl in corr_clusters:
+            top = cast("list", cl["pairs"])[:3]
+            pairs_s = "、".join(f"{p['a']}~{p['b']} ρ{float(p['rho']):+.2f}" for p in top)
+            console.print(
+                f"  {cl['size']} 檔：{', '.join(cast('list', cl['stock_ids']))}　[{pairs_s}]"
+            )
+    else:
+        console.print("\n  高相關簇：無")
+
+    # 3. 因子簇曝險
+    console.print("\n  因子簇曝險：")
+    for d in cast("list", desc["factor_clusters"]):
+        mark = "[red]⚠ 超限[/red]" if d.get("flagged") else "ok"
+        cap = []
+        if d.get("max_count") is not None:
+            cap.append(f"≤{d['max_count']}檔")
+        if d.get("max_share") is not None:
+            cap.append(f"≤{float(d['max_share']):.0%}")
+        console.print(
+            f"  {d['name']}：{d['count']} 檔（{float(d['share']):.0%}，上限 {'/'.join(cap)}）"
+            f" {mark}　{', '.join(cast('list', d['stock_ids']))}"
+        )
+
+    for note in cast("list", desc["notes"]):
+        console.print(f"  [dim]註：{note}[/dim]")
+    console.print(
+        "\n[dim]定位＝風險揭露，非硬約束；「合計%」為等權檔數佔比近似（無部位大小）；"
+        "相關隨市況變、由人決策（規劃書 03 V3）。[/dim]"
     )
 
 
