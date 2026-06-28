@@ -66,7 +66,7 @@
 | `src/tw_screener/screener/runner.py` | 讀 YAML、跑策略、輸出 CSV | polars |
 | `src/tw_screener/analysis/grouping.py` | 按官方產業分組計分 | polars |
 | `src/tw_screener/analysis/leader.py` | 相對強度、領頭羊判斷 | polars |
-| `src/tw_screener/analysis/indicators/` | 技術指標（MACD/KD/RSI 等），預埋 Rust 替換空間 | polars |
+| `src/tw_screener/analysis/momentum.py`、`stock_panel.py` | 技術指標（N 日報酬、相對強度、均線距離、價格位階、z-score 等）以 Polars 向量化內嵌實作 | polars |
 | `src/tw_screener/report/group_report.py` | 族群分析 Markdown 渲染 | jinja2 |
 | `src/tw_screener/report/data_fetcher.py` | 個股報告資料打包（OHLCV + 營收 + 法人 + 族群資訊） | polars |
 | `src/tw_screener/report/builder.py` | 個股報告 builder（API 模式 / 草稿模式） | anthropic, jinja2 |
@@ -80,19 +80,16 @@
 3. **族群分析在選股之後**：因為「族群強度」要看當週入選分布，不是事前定義。
 4. **個股報告獨立**：產報告是 Claude Code 互動式做的，不是 batch job，不能跟前面 pipeline 綁死。
 
-## Rust 預埋位置（Phase 2 才導入）
+## 技術指標實作（原「Rust 預埋」計畫已放棄）
 
-`src/tw_screener/analysis/indicators/` 目錄下，每個指標一個檔：
-- `macd.py` — 純 Python 實作（MVP）
-- `kd.py`
-- `rsi.py`
+> 早期規劃在 `src/tw_screener/analysis/indicators/` 下每指標一檔（macd.py/kd.py/rsi.py），
+> Phase 2 再以 Rust + PyO3 重寫「換實作不換介面」——**此目錄與 Rust 計畫從未實作、已放棄**。
 
-每個檔 export 一個 pure function：
-```python
-def calculate(df: pl.DataFrame, **params) -> pl.DataFrame: ...
-```
+技術指標實際以 **Polars 向量化內嵌**在 `analysis/` 既有模組：
+- `analysis/momentum.py` — N 日報酬、rolling 高低、除息加回、相對強度／族群動能聚合。
+- `analysis/stock_panel.py` — 均線距離（MA20/60/240）、價格位階（距 N 日高/低 %）、rolling z-score 等。
 
-Phase 2 用 Rust + PyO3 重寫時，**換實作不換介面**，呼叫端不動。
+Polars 向量化效能已足夠，無 MACD/KD/RSI 一檔一指標的拆分需求。若未來真出現效能瓶頸再評估換實作，現階段不預埋抽象層。
 
 ## 非目標（明確不做）
 
