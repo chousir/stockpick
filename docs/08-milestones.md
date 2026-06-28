@@ -165,7 +165,7 @@ head reports/$(date +%Y-W%V)/screen_result_a_breakout.csv
 ### 可動檔案範圍
 - `src/tw_screener/analysis/grouping.py`
 - `src/tw_screener/analysis/leader.py`
-- `src/tw_screener/analysis/indicators/` (MACD/RS 等，pure function)
+- `src/tw_screener/analysis/indicators/` (MACD/RS 等，pure function)　※歷史紀錄：此目錄最終未建立，指標改以 Polars 向量化內嵌於 `momentum.py`/`stock_panel.py`（見 docs/00、規劃書 04 A6）
 - `src/tw_screener/report/group_report.py`
 - `src/tw_screener/report/templates/group_analysis.md.j2`
 - `src/tw_screener/cli.py`（加 `group`, `leaders` 指令）
@@ -705,3 +705,17 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
   - 相關隨市況變、非穩定 → 守規劃書風險段，定位風險揭露非硬 gate。
 - **未做（誠實）**：dashboard 持股頁顯集中度（使用者拍板本輪只做 CLI＋報告段，frontend 留下一輪）；regime/組合風控的回測驗證（屬 V1 衍生後續）。**group_analysis.md 組合體檢段需 W27+ 重跑才顯示**（程式碼已落地即生效）。
 - 驗收：`uv run tw-screener portfolio check` 印當前持股集中度/相關簇/因子簇；`make test` 綠（+13：標籤拆解/集中度 count·share 兩路徑/多標籤/因子簇超限·零命中/相關簇分群·低重疊跳過·單檔 noop/合成 orchestration·空持股·無價格/describe 形狀）；新檔 ruff 淨、mypy 零淨增。
+
+---
+
+## M-R-Refactor-A6：文件漂移修正（規劃書 04 A6）
+
+> 對應規劃書 [docs/proposals/04-architecture-refactor-and-slimming.md](proposals/04-architecture-refactor-and-slimming.md) A6（審查 §1#8/§5#7 文件漂移）。
+> 規劃書 04（架構重構）建議順序 A6→A1→A2→A3→A4→A5→A7，A6 零風險先做。**純文件、不動程式碼。**
+
+- **盤點結論**：A6 列的三處漂移，其中 **README §12／docs/02 §2.2 的 cron／歷史密度描述早在 D2 已校正**（`STOCK_DAY_ALL`／`otc_daily_all` 只能往未來累積·不可回補；法人改 TPEX `3itrade_hedge` 可逐日回補故 cron 非必要），本輪確認為正確版、不動。
+- **真正殘留＝docs/00 的幽靈目錄**：[docs/00-architecture.md](00-architecture.md) 仍宣稱不存在的 `analysis/indicators/`（macd/kd/rsi 一檔一指標）與「Rust + PyO3 預埋」計畫。實際指標以 **Polars 向量化內嵌**在 `analysis/momentum.py`（N 日報酬／rolling 高低／除息加回／RS／族群動能）與 `analysis/stock_panel.py`（均線距離 MA20/60/240／價格位階／rolling z-score），且從無 MACD/KD/RSI 實作。
+  - 模組表幽靈列改為實際的 `momentum.py`／`stock_panel.py`。
+  - 「Rust 預埋位置」整段改寫為「**原計畫從未實作、已放棄**」，指向實際內嵌實作，註明現階段不預埋抽象層。
+- **docs/08 歷史註記**：M4「可動檔案範圍」仍列 `indicators/`，加一行歷史註記（不改寫歷史、只說明該目錄最終未建立）——超出 A6 明列三檔範圍一行，因 A6 成功標準是「`grep -r indicators docs/ README.md` 無誤導描述」，docs/08 那行會被掃到。
+- 驗收：`grep -rn indicators docs/ README.md` 剩餘三筆全非誤導（規劃書本身描述問題／docs/00 明標「已放棄」／docs/08 明標「歷史紀錄·未建立」）；純文件變更、`make test/lint/typecheck` 不受影響（測試護欄留給 A1–A7 動程式碼的 milestone）。
