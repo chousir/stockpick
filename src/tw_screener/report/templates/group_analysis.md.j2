@@ -14,6 +14,26 @@
 > **定位＝輔助姿態揭露，非硬性 gate 掉訊號；防禦期請降低總曝險、嚴設停損，最終由人決策。**
 
 {% endif %}
+{% if portfolio %}
+## 組合體檢（持股集中度・規劃書 03 V3）
+
+**{{ portfolio.line }}**
+
+{% if portfolio.flagged_factors %}
+- **因子簇超限**（同一總經/利率事件單點風險）：
+{% for d in portfolio.flagged_factors %}  - {{ d.name }}：{{ d.count }} 檔（{{ '%.0f'|format(d.share * 100) }}%，上限 {% if d.max_count is not none %}≤{{ d.max_count }} 檔{% endif %}{% if d.max_share is not none %} / ≤{{ '%.0f'|format(d.max_share * 100) }}%{% endif %}）　{{ d.stock_ids | join(', ') }}
+{% endfor %}{% endif %}
+{% if portfolio.flagged_labels %}
+- **集中標籤**（次產業/主題）：
+{% for d in portfolio.flagged_labels %}  - {{ d.label }}：{{ d.count }} 檔（{{ '%.0f'|format(d.share * 100) }}%）　{{ d.stock_ids | join(', ') }}
+{% endfor %}{% endif %}
+{% if not portfolio.flagged_factors and not portfolio.flagged_labels %}
+- 持股集中度未達門檻。
+{% endif %}
+> 因子簇＝同向共動鏈（如利率敏感＝銀行＋建材營造＋產險＋壽險），同簇多檔＝押同一事件、分批時當「一個部位」控管。
+> **定位＝風險揭露，非硬約束；「合計%」為等權檔數佔比近似（持股無部位大小）。報酬相關簇與完整檢核見 `tw-screener portfolio check`。由人決策。**
+
+{% endif %}
 ## 0. 策略代號說明
 
 {% for s in strategy_legend -%}

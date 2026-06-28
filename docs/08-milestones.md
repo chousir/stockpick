@@ -687,3 +687,21 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **明文修正（對規劃書）**：規劃書 §V2 廣度寫「上漲家數比、距低位階」——單日上漲家數比噪音大，改用截面位階廣度（站上 MA60 比例）＋指數自身位階，語意一致且穩健；flow 單位＝**股**（T86 `total_net` 為股數非張），`saturate_shares` 為正規化常數（非門檻、隨資料校準）。
 - **未做（誠實）**：regime 本身的回測（V1 完成後可順帶驗「防禦期是否真少賠」，屬後續）；V3 組合層風控（未開始）。**報表畫面需 W27+ 重跑才顯示 regime 段**（程式碼已落地即生效）。
 - 驗收：`uv run tw-screener market regime` 印當前 regime＋分項；`make test` 綠（+9：bull→進攻/bear→防禦/空輸入→資料不足/趨勢排列/資金正負+飽和/廣度 gate 重正規化/短歷史僅資金/門檻三branch/describe 形狀）；新檔 ruff 淨、mypy 零淨增。
+
+## M-R-Val3：組合層風控（規劃書 03 V3）
+
+> 對應規劃書 [docs/proposals/03-quant-validation-loop.md](proposals/03-quant-validation-loop.md) V3（審查 §4#6，缺組合層風控）。
+> 動機：把 [docs/14](14-entry-ladder-portfolio-fix.md) D4「因子簇上限」目前**只在 prompt 層的人工檢核**（[docs/11:202](11-propicks-analysis.md#L202)）落成**可計算模組**——揭露 picks/holdings 五檔其實押同一題材/事件的隱性集中。**定位＝風險揭露，非硬約束（守 CLAUDE.md Part 3「由人決策」）。**
+
+- **portfolio 計算層（核心交付）**：新 [analysis/portfolio.py](../src/tw_screener/analysis/portfolio.py)（純函式、IO 由 cli 載入）
+  - `compute_label_concentration`：次產業/主題標籤逐標籤統計持有檔數／佔比（**多標籤 aware**，industry＋theme 以「、」拆，一檔可計入多標籤），達 `min_count` 或 `min_share` → flagged。
+  - `compute_correlation_clusters`：近 `window` 日**日報酬**兩兩 Pearson 相關，|ρ| ≥ `threshold` → union-find 連通成簇（size ≥ 2）；重疊有效交易日 < `min_overlap` 的對跳過、無價格史的檔標進 notes。日報酬夾 ±漲跌停防未還原毒化。
+  - `compute_factor_cluster_exposure`：預定義因子簇（settings，如「利率敏感＝銀行＋建材營造＋產險＋壽險」）標籤任一命中即歸屬，命中檔數 > `max_count` 或佔比 > `max_share` → flagged。
+  - `compute_portfolio_check` 合成三段＋`describe_portfolio_check` 產報表/CLI 共用顯示 dict（摘要行＋三段＋警示計數）。
+- **CLI／設定／報表介接**：新 `portfolio` sub-app＋`tw-screener portfolio check [--week] [--include-candidates]`（預設讀 holdings_enriched.csv＝**持股為主**，可選併入候選；印標籤集中度/相關簇/因子簇）；`settings.portfolio`（history_days/corr.{window,min_overlap,threshold,clip}/label_concentration/factor_clusters 全參數化、簇定義不寫死）；`analysis group`（group_analysis.md「組合體檢」段）顯示持股**因子簇超限＋集中標籤**。
+- **設計取捨（誠實）**：
+  - holdings_enriched **無部位大小欄** → 所有「合計%」皆為**等權檔數佔比近似**，CLI/報告皆明標。
+  - **報告段只揭露標籤集中度＋因子簇曝險**（價格無關、render 期即可得）；**報酬相關簇需全市場日線、留給 `portfolio check` CLI**——因 group 流程的 `price_history` 只含候選股、非全持股，render 期算相關不可靠（不半套上報告）。
+  - 相關隨市況變、非穩定 → 守規劃書風險段，定位風險揭露非硬 gate。
+- **未做（誠實）**：dashboard 持股頁顯集中度（使用者拍板本輪只做 CLI＋報告段，frontend 留下一輪）；regime/組合風控的回測驗證（屬 V1 衍生後續）。**group_analysis.md 組合體檢段需 W27+ 重跑才顯示**（程式碼已落地即生效）。
+- 驗收：`uv run tw-screener portfolio check` 印當前持股集中度/相關簇/因子簇；`make test` 綠（+13：標籤拆解/集中度 count·share 兩路徑/多標籤/因子簇超限·零命中/相關簇分群·低重疊跳過·單檔 noop/合成 orchestration·空持股·無價格/describe 形狀）；新檔 ruff 淨、mypy 零淨增。

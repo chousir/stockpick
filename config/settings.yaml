@@ -320,3 +320,23 @@ regime:                        # 規劃書 03 V2 大盤 regime 總控閘門（ma
   thresholds:                  # 連續分數 regime_score ∈ [-1, 1] 切三態
     attack: 0.33               # ≥ 此值＝進攻
     defense: -0.33             # ≤ 此值＝防禦；之間＝中性
+
+portfolio:                     # 規劃書 03 V3 組合層風控（portfolio check）
+                               # 對持股（holdings_enriched，可選併入候選）算 標籤集中度／
+                               # 近 N 日報酬相關簇／預定義因子簇曝險。定位＝風險揭露，非硬約束
+                               # （holdings 無部位大小欄→所有「合計%」皆為等權檔數佔比近似）。
+  history_days: 90             # 載入日線天數（需 ≥ corr.window + 緩衝供算日報酬）
+  corr:                        # 報酬相關簇：找彼此高度共動的持股（隱性集中）
+    window: 60                 # 近 N 交易日「日報酬」算 Pearson 相關（規劃書 §V3）
+    min_overlap: 40            # 兩股重疊有效交易日 < 此 → 該對相關不可信、跳過
+    threshold: 0.7            # |ρ| ≥ 此 → 高相關對；高相關對連通成簇（union-find）
+    clip_daily_return_pct: 10.0 # 日報酬夾限＝台股漲跌停，防未還原事件毒化相關
+  label_concentration:        # 次產業/主題標籤集中度（多標籤：一檔可計入多個標籤）
+    min_count: 3              # 同一標籤 ≥ 此檔數 → 列為集中（揭露）
+    min_share: 0.4           # 或同一標籤佔組合檔數比例 ≥ 此 → 集中
+  factor_clusters:            # 預定義因子簇：吃 industry＋theme 多標籤，任一命中即歸屬該簇。
+                              # 簇定義＝交易紀律（docs/11:202 利率敏感簇），可調、不寫死數字在程式
+    - name: 利率敏感
+      labels: [銀行, 建材營造, 產險, 壽險]  # 同一總經/利率事件（如 PCE）會一次打到的共動鏈
+      max_count: 2           # 同簇至多 N 檔（超過＝集中警示）
+      max_share: 0.5         # 同簇合計佔組合檔數比例上限（無部位大小→等權近似）
