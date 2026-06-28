@@ -296,3 +296,27 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     trading_days_per_week: 5     # 持有週→交易日換算
     clip_daily_return_pct: 10.0  # 大盤等權指數日報酬夾限（漲跌停外＝未還原事件，夾住防毒化）
     min_sample_warn: 20          # 樣本低於此 → 報表標「僅供方向性、未達顯著」
+
+regime:                        # 規劃書 03 V2 大盤 regime 總控閘門（market regime）
+                               # 用等權全市場指數＋全市場法人快取算 趨勢/廣度/資金 三分項，
+                               # 合成連續分數→進攻/中性/防禦。定位＝輔助姿態揭露，不硬性 gate 訊號。
+  history_days: 250            # 載入日線/法人歷史天數（≈ 1 年，需覆蓋最長 MA120）
+  clip_daily_return_pct: 10.0  # 等權指數日報酬夾限＝台股漲跌停，防未還原事件毒化指數
+  trend:                       # 趨勢分項：等權指數 vs 多條均線多空排列
+    ma_windows: [20, 60, 120]  # 由短到長；多頭排列＝指數 > MA20 > MA60 > MA120
+  breadth:                     # 廣度分項：個股位階廣度＋指數距低位階
+    ma_window: 60              # 個股站上自身此均線的比例（位階廣度）
+    position_window: 120       # 指數距自身此窗高低點的位階（距低=弱、距高=強）
+    min_priced: 200            # 當日有效報價個股數低於此 → 廣度視為不可信（回 null）
+  flow:                        # 資金分項：全市場三大法人淨流方向
+    windows: [5, 20]           # 各窗取近 N 交易日 total_net 全市場日均淨流（股）判方向
+    saturate_shares: 800000000 # 日均淨流飽和股數（≈8 億股）：|日均| 達此 → 分項封頂 ±1
+                               # 依實測全市場日均淨流量級設（短窗激烈週才封頂、長窗保留漸層）；
+                               # 為正規化常數非門檻，每季隨資料校準（類同 rotation 門檻）
+  weights:                     # 三分項合成權重（自動正規化為和=1）
+    trend: 0.4
+    breadth: 0.3
+    flow: 0.3
+  thresholds:                  # 連續分數 regime_score ∈ [-1, 1] 切三態
+    attack: 0.33               # ≥ 此值＝進攻
+    defense: -0.33             # ≤ 此值＝防禦；之間＝中性

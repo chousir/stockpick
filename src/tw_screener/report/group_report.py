@@ -595,12 +595,14 @@ def render_group_report(
     macro_events: pl.DataFrame | None = None,
     radar_cfg: dict | None = None,
     density_note: str = "",
+    regime: dict | None = None,
 ) -> None:
     """Render group_analysis.md to output_path using Jinja2 template.
 
     members: rank_within_groups 的回傳；含 rank_in_group / leader_score / momentum_5d。
     dividend_events: 候選股未來窗內除權息（filter_dividend_calendar 的回傳）；None/空則不渲染該段。
     themes_long: load_themes() 的 (stock_id, theme, kind) long table；None/空則主題排名留空。
+    regime: regime.describe_regime() 的顯示 dict（規劃書 03 V2）；None 則不渲染大盤姿態段。
     """
     context = _build_context(
         groups,
@@ -616,6 +618,7 @@ def render_group_report(
         radar_cfg=radar_cfg,
     )
     context["density_note"] = density_note
+    context["regime"] = regime
 
     env = Environment(
         loader=FileSystemLoader(str(_TEMPLATE_DIR)),

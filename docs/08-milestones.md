@@ -671,3 +671,19 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **未做（誠實）**：V2 大盤 regime 閘門、V3 組合層風控（規劃書 03 後續，未開始）；max_drawdown 定義為「最差單檔報酬」非組合權益曲線回撤（組合層屬 V3）；樣本仍薄（W21–W26＝6 週，2/4 週窗才有樣本、8/12 週窗全未到期被排除），結論定位方向性、隨週數變厚每季重算。
 - 驗收：`make backtest-strategies` 產各策略×持有窗 勝率/報酬/回撤/超額表（不再 exit 1）；`make test` 594 綠（+13：load/forward(基本·未到期·下市·除息·超額)/summary(統計·下市·空)/render(小樣本旗標·空)）；新檔 ruff 淨、mypy 58＝D2 基線零淨增。
   **注意：W27+ 隨 `reports/` 週數增厚重跑才會填出 8/12 週窗樣本與更紮實的統計。**
+
+## M-R-Val2：大盤 regime 總控閘門（規劃書 03 V2）
+
+> 對應規劃書 [docs/proposals/03-quant-validation-loop.md](proposals/03-quant-validation-loop.md) V2（審查 §4#2，缺市場層剎車）。
+> 動機：所有訊號都在個股/族群層，缺市場層的多空/位階剎車——空頭或高位期照推 breakout 危險。補一個市場層姿態訊號，**定位＝輔助姿態揭露，不硬性 gate 掉訊號（守 CLAUDE.md Part 3「由人決策」）**。
+
+- **regime 計算層（核心交付）**：新 [analysis/regime.py](../src/tw_screener/analysis/regime.py)（純函式、IO 由 cli 載入）
+  - `compute_trend_score`：等權全市場指數 vs MA20/60/120 多空排列（[指數,MA20,MA60,MA120] 相鄰「前>後」各 ±1 取均值；多頭排列 +1、空頭 −1）。資料不足最長 MA → None。
+  - `compute_breadth_score`：個股站上自身 MA60 比例（截面位階廣度）＋ 等權指數在自身 120 日高低區間位階，各映射 [-1,1] 取均值；有效報價檔數 < `min_priced` → None。
+  - `compute_flow_score`：全市場三大法人近 5/20 日 `total_net` **日均**淨流（股）÷ `saturate_shares` 夾 ±1，多窗取均值。無法人 → None。
+  - `compute_regime`：三分項各正規化、按 `weights` 對「可得分項」正規化加權合成連續分數 ∈ [-1,1]，門檻切 進攻/中性/防禦；全缺 → 「資料不足」。`describe_regime` 產報表/CLI 共用顯示 dict（一行摘要＋姿態建議）。
+  - 共用 helper：等權指數邏輯抽成 `rotation.compute_market_index`（regime 與 backtest 共用大盤基準；V1 backtest 私有 `_market_index` 維持不動＝外科手術，接受小重複）。
+- **CLI／設定／報表介接**：新 `market` sub-app＋`tw-screener market regime`（印 regime＋趨勢/廣度/資金分項依據）；`settings.regime`（history_days/clip/trend.ma_windows/breadth/flow/weights/thresholds 全參數化）；`analysis group`（group_analysis.md 大盤姿態段）與 `sector rotation`（表頭 regime 行）報表頭顯示姿態、防禦期提示「降低總曝險」。
+- **明文修正（對規劃書）**：規劃書 §V2 廣度寫「上漲家數比、距低位階」——單日上漲家數比噪音大，改用截面位階廣度（站上 MA60 比例）＋指數自身位階，語意一致且穩健；flow 單位＝**股**（T86 `total_net` 為股數非張），`saturate_shares` 為正規化常數（非門檻、隨資料校準）。
+- **未做（誠實）**：regime 本身的回測（V1 完成後可順帶驗「防禦期是否真少賠」，屬後續）；V3 組合層風控（未開始）。**報表畫面需 W27+ 重跑才顯示 regime 段**（程式碼已落地即生效）。
+- 驗收：`uv run tw-screener market regime` 印當前 regime＋分項；`make test` 綠（+9：bull→進攻/bear→防禦/空輸入→資料不足/趨勢排列/資金正負+飽和/廣度 gate 重正規化/短歷史僅資金/門檻三branch/describe 形狀）；新檔 ruff 淨、mypy 零淨增。
