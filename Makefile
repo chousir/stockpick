@@ -134,11 +134,10 @@ endif
 	  git commit -m "Weekly analysis $$(date +%Y-W%V)" && git push; \
 	fi
 
-# ─── 回測（預留，三個月後實作）───────────────────────────────────────────────
+# ─── 回測 ─────────────────────────────────────────────────────────────────────
 
-backtest-strategies:  ## ⚠️ 回測三組策略勝率（需 3 個月以上歷史資料，功能尚未實作）
-	@echo "backtest-strategies 尚未實作，需累積至少 3 個月的 reports/ 歷史資料（預計 2026-08 後）"
-	@exit 1
+backtest-strategies:  ## 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤（規劃書 03 V1，產 research/strategy_backtest/）
+	uv run tw-screener backtest strategies
 
 rotation-calib:  ## R2 起漲點回測校準（研究軌，產 research/rotation/ 校準報告；docs/12）
 	uv run tw-screener sector calibrate

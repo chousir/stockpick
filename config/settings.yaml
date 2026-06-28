@@ -288,3 +288,11 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
     min_peers: 5             # 次產業同儕有效數下限，低於不計相對位階（樣本太小無代表性）
     cheap_pctile: 30.0       # 次產業升冪百分位 ≤ 此值標「相對便宜」（0=次產業內最便宜；PE 主、PB 補虧損股）
     max_rows: 40             # cp_valuation.md 列出前 N（依百分位遞增）；≤0 不截
+
+backtest:                    # 規劃書 03 V1 策略回測閉環（make backtest-strategies）
+  strategies:
+    hold_weeks: [2, 4, 8, 12]   # 報全部持有窗看 edge 隨持有衰減（不掃窗挑最好；規劃書 03 §V1）
+    history_days: 250            # 載入日線快取的回看交易日數
+    trading_days_per_week: 5     # 持有週→交易日換算
+    clip_daily_return_pct: 10.0  # 大盤等權指數日報酬夾限（漲跌停外＝未還原事件，夾住防毒化）
+    min_sample_warn: 20          # 樣本低於此 → 報表標「僅供方向性、未達顯著」

@@ -656,3 +656,18 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **未做（誠實）**：原方案列的 README §2.2「正式化每日抓取＝改建議常駐」採「保留 cron 為法人選配、但對日線密度明標建議常駐」的折衷（不全面反轉 57ab1f7 對法人的正確降級）；rotation/cp 密度註記為「揭露」非「擋流程」。
 - 驗收：`uv run tw-screener data backfill-universe-history --help` 註冊正常；`make test` 581 綠（+8：density 三段信心＋邊界、rotation 報表頭密度有/無兩路徑）、ruff/mypy 零淨增（mypy 58＝D5 基線）。
   **注意：W26+ 跑 `make rotation`/`make group` 才把密度註記寫進 reports；歷史密度本身需跑一次 `make backfill-universe-history` 或讓 cron 累積數月後才補足。**
+
+## M-R-Val1：個股策略回測閉環（規劃書 03 V1）
+
+> 對應規劃書 [docs/proposals/03-quant-validation-loop.md](proposals/03-quant-validation-loop.md) V1（審查 §4#1，整份審查 ROI 最高）。
+> 動機：核心主張「D/E/F/G 選股策略本身有效」從未被回測——`backtest/strategies.py` 三函式原為 `NotImplementedError`、`make backtest-strategies` 直接 exit 1。**取代 M5 預留的「印未實作提示並 exit 1」占位**（M5 §驗收該項已被本里程碑落實）。
+
+- **三函式落實（核心交付）**：[backtest/strategies.py](../src/tw_screener/backtest/strategies.py)
+  - `load_historical_screens`：掃 `reports/<week_tag>/screen_result_*.csv` 合併長表（week_tag/screened_at/stock_id/name/close/change_pct/strategy_id；stock_id 保留前導碼）。
+  - `compute_forward_returns`：entry＝入選日**次一交易日收盤**（嚴格晚於 `screened_at`，防前視）、exit＝entry 起 `hold_weeks×5` 交易日；**三類邊界明確**——未到期（大盤日曆不足 → 整批排除不污染）、下市/停牌（個股序列早停 → exit null 非 0）、除權息（ex_date∈(entry,exit] 現金股利加回）；併同期等權全市場指數算超額。
+  - `strategy_summary`：按 (strategy_id, hold_weeks) 算 勝率/平均/中位/最差單檔(max_drawdown)/樣本數/平均超額/勝過大盤率，下市另計 n_delisted 不入勝率。
+  - `render_backtest_report`：產 markdown，樣本<門檻標 ⚠️＋「僅供方向性」。
+- **CLI／設定／Makefile**：新 `backtest` sub-app＋`tw-screener backtest strategies`（`--hold-weeks`/`--out-dir`）；`settings.backtest.strategies`（hold_weeks/history_days/trading_days_per_week/clip/min_sample_warn 全參數化）；`Makefile backtest-strategies` 移除 exit 1、改真的跑（輸出 `research/strategy_backtest/`＝gitignore 本地研究產物）。
+- **未做（誠實）**：V2 大盤 regime 閘門、V3 組合層風控（規劃書 03 後續，未開始）；max_drawdown 定義為「最差單檔報酬」非組合權益曲線回撤（組合層屬 V3）；樣本仍薄（W21–W26＝6 週，2/4 週窗才有樣本、8/12 週窗全未到期被排除），結論定位方向性、隨週數變厚每季重算。
+- 驗收：`make backtest-strategies` 產各策略×持有窗 勝率/報酬/回撤/超額表（不再 exit 1）；`make test` 594 綠（+13：load/forward(基本·未到期·下市·除息·超額)/summary(統計·下市·空)/render(小樣本旗標·空)）；新檔 ruff 淨、mypy 58＝D2 基線零淨增。
+  **注意：W27+ 隨 `reports/` 週數增厚重跑才會填出 8/12 週窗樣本與更紮實的統計。**
