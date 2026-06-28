@@ -130,6 +130,26 @@ def test_render_report_and_csv(table: pl.DataFrame, tmp_path: Path):
     assert {"sub_industry", "radar_rank", "quadrant"}.issubset(csv.columns)
 
 
+def test_render_report_density_note(table: pl.DataFrame, tmp_path: Path):
+    """density_note 有傳就出現在報表頭；空字串則整行不渲染（D2）。"""
+    md_path = render_rotation_report(
+        table, week_tag="2026-W24", output_dir=tmp_path / "with-note",
+        short_window=5, long_window=20,
+        entry_signal={"signal": "trust_flow_20d", "mode": "z", "threshold": 1.0},
+        position_low_pct=10.0, top_n=10, data_date="2026-03-21",
+        density_note="歷史窗：實際 42 交易日",
+    )
+    assert "歷史窗：實際 42 交易日" in md_path.read_text(encoding="utf-8")
+
+    md_empty = render_rotation_report(
+        table, week_tag="2026-W24", output_dir=tmp_path / "no-note",
+        short_window=5, long_window=20,
+        entry_signal={"signal": "trust_flow_20d", "mode": "z", "threshold": 1.0},
+        position_low_pct=10.0, top_n=10, data_date="2026-03-21",
+    )
+    assert "歷史窗：" not in md_empty.read_text(encoding="utf-8")
+
+
 # ─── A1 連續 CP 補漲分數 ──────────────────────────────────────────────────────
 
 

@@ -112,8 +112,8 @@ data/cache/goodinfo/
 |---|---|---|
 | 上市公司產業 | OpenAPI `/v1/opendata/t187ap03_L` | 只含上市股 |
 | 上櫃公司產業 | ISIN `isin.twse.com.tw/isin/C_public.jsp?strMode=4` | MS950 編碼，需 HTML 解析 |
-| 全市場當日 OHLCV | OpenAPI `/v1/exchangeReport/STOCK_DAY_ALL` | **`date` 參數被無視，永遠回今天** |
-| 單檔月份 OHLCV | Legacy `www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=YYYYMM01&stockNo=XXXX` | 支援歷史，按需回補 3 個月 |
+| 全市場當日 OHLCV | OpenAPI `/v1/exchangeReport/STOCK_DAY_ALL` | **`date` 參數被無視，永遠回今天 → 只能往未來累積、過去補不回**（同 `otc_daily_all`）|
+| 單檔月份 OHLCV | Legacy `www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=YYYYMM01&stockNo=XXXX` | 支援歷史，**可回補**；冷啟動歷史密度靠它（`backfill-universe-history` 對次產業全成員逐檔補，D2）|
 | 三大法人買賣超 | Legacy `www.twse.com.tw/fund/T86?response=json&date=YYYYMMDD&selectType=ALLBUT0999` | OpenAPI 版已失效（回 HTML）|
 | 個股月營收 | OpenAPI `/v1/opendata/t187ap05_L` | |
 | 融資融券餘額 | OpenAPI `/v1/exchangeReport/MI_MARGN` | |
@@ -173,7 +173,7 @@ Goodinfo 主要用在「條件組合篩選」這個它真正強的地方。
 |---|---|---|---|
 | Goodinfo 篩選結果 | 收盤後 30–60 分鐘 | 每週一次或更頻繁 | 對齊交易日：同日讀 cache、跨交易日重抓 |
 | Yahoo 概念股主題成分 | 即時 | 鮮少變（季度級） | 24h 快取；手動 `make build-themes` 更新 |
-| TWSE 日線（STOCK_DAY_ALL）| 收盤後 ~30 分鐘 | 每交易日 | 累積 parquet |
+| TWSE 日線（STOCK_DAY_ALL）| 收盤後 ~30 分鐘 | 每交易日 | 累積 parquet（**不可回補**：每日累積或一次性 `backfill-universe-history` 補單檔歷史）|
 | TWSE T86 三大法人 | 收盤後約 90 分鐘（**15:00 起穩定**）| 每交易日 | 累積 parquet |
 | 官方日估值比（BWIBBU_d / peratio）| 收盤後 ~30 分鐘 | 每交易日 | 累積 parquet（自身歷史百分位用）|
 | 月營收（t187ap05_L） | 每月 10 號前 | 每月 | cron 或手動 |

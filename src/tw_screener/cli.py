@@ -228,6 +228,65 @@ def data_backfill_otc_history(
     console.print(f"[green]回補完成：成功 {done}、失敗 {failed}[/green]")
 
 
+@data_app.command("backfill-universe-history")
+def data_backfill_universe_history(
+    months: int = typer.Option(13, "--months", help="每檔回補月數（13≈年線）"),
+    limit: int = typer.Option(0, "--limit", help="只跑前 N 檔（測試用；0=全部）"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """一次性回補「全部次產業成員（上市＋上櫃）」的日線歷史（規劃書 02 D2 冷啟動）。
+
+    為何需要：STOCK_DAY_ALL / otc_daily_all 都只能往未來累積、過去補不回（docs/02），
+    rotation z 需 60+ 日、calibration 需 ~250 日。本指令對 concepts.yaml 全部次產業成員
+    逐檔走 `fetch_stock_history`（自動分派 TWSE STOCK_DAY / TPEX tradingStock，限速 1 秒/請求），
+    把輪動籃子的歷史密度從「snapshot 累積」補成「~1 年」。
+
+    優先補成員多的次產業（成員數由多到少排序、跨次產業去重）。過去月份永久快取——中斷重跑
+    會自動跳過已完成的檔（fast path），天然可續跑。全量首跑約 8-12 小時，建議掛背景；
+    之後每日 fetch-twse 累積即可，不需重跑。涵蓋上櫃成員，故為 backfill-otc-history 的超集。
+    """
+    from tw_screener.analysis.sector_universe import list_subindustries
+    from tw_screener.data.twse import create_client
+
+    client = create_client(settings)
+    members = list_subindustries()
+    if members.is_empty():
+        console.print("[red]缺 concepts.yaml 次產業成員[/red]")
+        raise typer.Exit(1)
+
+    # 依次產業成員數由多到少排序、跨次產業去重（成員多的次產業先補，密度優先見效）
+    counts = members.group_by("sub_industry").len()
+    ordered = (
+        members.join(counts, on="sub_industry")
+        .sort("len", descending=True)["stock_id"]
+        .to_list()
+    )
+    seen: set[str] = set()
+    targets: list[str] = []
+    for sid in ordered:
+        if sid not in seen:
+            seen.add(sid)
+            targets.append(sid)
+    if limit > 0:
+        targets = targets[:limit]
+    n_sub = members["sub_industry"].n_unique()
+    console.print(
+        f"[bold]全次產業成員回補：{len(targets)} 檔（{n_sub} 個次產業）× {months} 個月[/bold]"
+    )
+
+    done = failed = 0
+    for i, sid in enumerate(targets, 1):
+        try:
+            df = client.fetch_stock_history(sid, months=months)
+            done += 1
+            if i % 25 == 0 or i == len(targets):
+                console.print(f"  進度 {i}/{len(targets)}（最新：{sid} {len(df)} 日）")
+        except Exception as e:  # noqa: BLE001 — 單檔失敗不該中斷整批
+            failed += 1
+            console.print(f"[yellow]  {sid} 失敗：{e}[/yellow]")
+    console.print(f"[green]回補完成：成功 {done}、失敗 {failed}[/green]")
+
+
 @data_app.command("fetch-candidates-history")
 def data_fetch_candidates_history(
     week: str = typer.Option("", "--week", help="週別標籤，預設取最新一週"),
@@ -974,10 +1033,14 @@ def analysis_group(
             console.print("  次產業：電子候選股全數已標")
 
     output_path = Path(cfg["paths"]["reports_dir"]) / week_tag / "group_analysis.md"
+    from tw_screener.report.density import data_density_note
+
+    _hist_days = price_history["date"].n_unique() if not price_history.is_empty() else 0
     render_group_report(
         groups, leaders, screener_results, week_tag, output_path, top_groups, top_stocks,
         dividend_events=dividends, themes_long=themes_long, macro_events=macro_events,
         radar_cfg=ga_cfg.get("radar"),
+        density_note=data_density_note(_hist_days),
     )
 
     from tw_screener.report.group_report import write_candidates_enriched_csv
@@ -1424,6 +1487,7 @@ def sector_rotation_cmd(
         load_industry_mapping,
     )
     from tw_screener.data.twse import create_client
+    from tw_screener.report.density import data_density_note
     from tw_screener.report.rotation_report import (
         build_participation,
         build_rotation_table,
@@ -1531,6 +1595,7 @@ def sector_rotation_cmd(
         cp_position_ceiling=cp_ceiling,
         top_n=top_n,
         data_date=str(flows["date"].max()),
+        density_note=data_density_note(market["date"].n_unique()),
         participation=participation,
     )
     n_next = table.filter(pl.col("quadrant") == "下一棒").height

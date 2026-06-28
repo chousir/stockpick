@@ -594,6 +594,7 @@ def render_group_report(
     themes_long: pl.DataFrame | None = None,
     macro_events: pl.DataFrame | None = None,
     radar_cfg: dict | None = None,
+    density_note: str = "",
 ) -> None:
     """Render group_analysis.md to output_path using Jinja2 template.
 
@@ -614,6 +615,7 @@ def render_group_report(
         report_dir=output_path.parent,
         radar_cfg=radar_cfg,
     )
+    context["density_note"] = density_note
 
     env = Environment(
         loader=FileSystemLoader(str(_TEMPLATE_DIR)),
