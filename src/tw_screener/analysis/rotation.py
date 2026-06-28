@@ -93,6 +93,38 @@ def load_market_history(
     return merged.filter(pl.col("date").is_in(recent)).sort(["stock_id", "date"])
 
 
+def compute_market_index(
+    price_history: pl.DataFrame, clip_daily_return_pct: float = 10.0
+) -> pl.DataFrame:
+    """等權全市場指數：每日全市場個股日報酬均值累乘，首日 = 100（與次產業籃子同法）。
+
+    日報酬夾限 ±clip%（漲跌停外＝減資/分割/未還原事件，夾住避免毒化指數）；設 0 停用。
+    供 regime（趨勢/廣度位階）與 backtest（超額報酬基準）共用大盤基準。
+
+    Returns: (date, market_index) 依日期排序；空輸入回空表（schema 一致）。
+    """
+    if price_history.is_empty() or not {"date", "stock_id", "close"}.issubset(
+        price_history.columns
+    ):
+        return pl.DataFrame(schema={"date": pl.Date, "market_index": pl.Float64})
+    ret = pl.col("close") / pl.col("close").shift(1).over("stock_id") - 1.0
+    if clip_daily_return_pct > 0:
+        bound = clip_daily_return_pct / 100
+        ret = ret.clip(-bound, bound)
+    daily = (
+        price_history.select(["date", "stock_id", "close"])
+        .sort(["stock_id", "date"])
+        .with_columns(ret.alias("_ret"))
+        .drop_nulls("_ret")
+        .group_by("date")
+        .agg(pl.col("_ret").mean().alias("_mkt_ret"))
+        .sort("date")
+    )
+    return daily.with_columns(
+        ((pl.col("_mkt_ret") + 1.0).cum_prod() * 100).alias("market_index")
+    ).select(["date", "market_index"])
+
+
 def otc_institutional_lag(cache_dir: Path) -> tuple[int, str | None, str | None]:
     """上櫃法人快取落後上市幾個交易日（TPEX 僅供最新日、缺日不可回補）。
 

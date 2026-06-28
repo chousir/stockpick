@@ -4,6 +4,16 @@
 {% if density_note %}
 > {{ density_note }}（候選股日線快取窗；資金z/動能/均線距離受此密度影響）
 {% endif %}
+{% if regime %}
+## 大盤姿態（regime 總控・規劃書 03 V2）
+
+**{{ regime.line }}**{% if regime.as_of %}（截至 {{ regime.as_of }}）{% endif %}
+
+> 姿態建議：{{ regime.advice }}
+> 趨勢＝等權全市場指數 vs MA20/60/120 多空排列；廣度＝個股站上 MA60 比例＋指數自身位階；資金＝全市場三大法人日均淨流方向。分數區間 [−1, 1]，達進攻門檻＝進攻、達防禦門檻＝防禦。
+> **定位＝輔助姿態揭露，非硬性 gate 掉訊號；防禦期請降低總曝險、嚴設停損，最終由人決策。**
+
+{% endif %}
 ## 0. 策略代號說明
 
 {% for s in strategy_legend -%}

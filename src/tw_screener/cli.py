@@ -1,11 +1,17 @@
 """CLI 入口：tw-screener 命令。"""
 
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import typer
 from rich.console import Console
 
 from tw_screener import __version__
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from tw_screener.analysis.regime import RegimeResult
 
 app = typer.Typer(help="台股波段選股與分析工具", no_args_is_help=True)
 console = Console()
@@ -38,6 +44,11 @@ backtest_app = typer.Typer(
     help="策略回測閉環（規劃書 03 量化驗證）", no_args_is_help=True
 )
 app.add_typer(backtest_app, name="backtest")
+
+market_app = typer.Typer(
+    help="大盤 regime 總控閘門（規劃書 03 V2）", no_args_is_help=True
+)
+app.add_typer(market_app, name="market")
 
 # ─── 頂層指令 ─────────────────────────────────────────────────────────────────
 
@@ -1038,7 +1049,14 @@ def analysis_group(
             console.print("  次產業：電子候選股全數已標")
 
     output_path = Path(cfg["paths"]["reports_dir"]) / week_tag / "group_analysis.md"
+    # 大盤 regime 總控（規劃書 03 V2）：全市場日線＋已載法人快取 → 進攻/中性/防禦姿態
+    from tw_screener.analysis.regime import describe_regime
     from tw_screener.report.density import data_density_note
+
+    console.print("  計算大盤 regime（趨勢/廣度/資金）...")
+    regime_result = _compute_market_regime(cfg, settings, institutional=institutional)
+    regime = describe_regime(regime_result)
+    console.print(f"  {regime['line']}")
 
     _hist_days = price_history["date"].n_unique() if not price_history.is_empty() else 0
     render_group_report(
@@ -1046,6 +1064,7 @@ def analysis_group(
         dividend_events=dividends, themes_long=themes_long, macro_events=macro_events,
         radar_cfg=ga_cfg.get("radar"),
         density_note=data_density_note(_hist_days),
+        regime=regime,
     )
 
     from tw_screener.report.group_report import write_candidates_enriched_csv
@@ -1589,6 +1608,12 @@ def sector_rotation_cmd(
         names=names,
     )
 
+    # 大盤 regime 總控（規劃書 03 V2）：重用已載全市場日線＋法人快取
+    from tw_screener.analysis.regime import compute_regime, describe_regime
+
+    regime = describe_regime(compute_regime(market, institutional, cfg.get("regime", {})))
+    console.print(f"  {regime['line']}")
+
     md_path = render_rotation_report(
         table,
         week_tag=week_tag,
@@ -1602,6 +1627,7 @@ def sector_rotation_cmd(
         data_date=str(flows["date"].max()),
         density_note=data_density_note(market["date"].n_unique()),
         participation=participation,
+        regime=regime,
     )
     n_next = table.filter(pl.col("quadrant") == "下一棒").height
     n_trig = table.filter(pl.col("entry_triggered")).height
@@ -1834,6 +1860,78 @@ def backtest_strategies_cmd(
             f"  {r['strategy_id']} / {r['hold_weeks']}週：勝率 {wr}・平均 {avg}"
             f"・超額 {exc}・n={r['sample_count']}{warn}"
         )
+
+
+def _compute_market_regime(
+    cfg: dict,
+    settings_path: Path,
+    institutional: "pl.DataFrame | None" = None,
+) -> "RegimeResult":
+    """載入全市場日線＋法人快取，算當前大盤 regime（規劃書 03 V2）。
+
+    institutional 可由呼叫端（group/rotation 已載過）傳入避免重複讀；否則自行載最近窗。
+    回傳 RegimeResult。純讀快取、不打網（法人 loader 只讀本地 parquet）。
+    """
+    from tw_screener.analysis.regime import compute_regime
+    from tw_screener.analysis.rotation import load_market_history
+
+    rcfg = cfg.get("regime", {})
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+    market = load_market_history(cache_dir, n_days=int(rcfg.get("history_days", 250)))
+    if institutional is None:
+        from tw_screener.data.twse import create_client
+
+        flow_windows = [int(w) for w in rcfg.get("flow", {}).get("windows", [5, 20])]
+        institutional = create_client(settings_path).load_institutional_history(
+            n_days=max(flow_windows) if flow_windows else 20
+        )
+    return compute_regime(market, institutional, rcfg)
+
+
+@market_app.command("regime")
+def market_regime_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """V2 大盤 regime 總控：印當前 進攻/中性/防禦 與 趨勢/廣度/資金 分項依據。"""
+    import yaml
+
+    from tw_screener.analysis.regime import describe_regime
+
+    with open(settings, encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh)
+
+    result = _compute_market_regime(cfg, settings)
+    if result.as_of is None:
+        console.print("[red]無日線快取（daily_*.parquet）——先跑 data fetch-twse[/red]")
+        raise typer.Exit(1)
+
+    desc = describe_regime(result)
+    color = {"進攻": "green", "中性": "yellow", "防禦": "red"}.get(result.regime, "white")
+    console.print(
+        f"\n[bold {color}]{desc['line']}[/bold {color}]  （截至 {desc['as_of']}）"
+    )
+    console.print(f"  姿態建議：{desc['advice']}\n")
+    ev = result.evidence
+    t = cast("dict", ev.get("trend", {}))
+    b = cast("dict", ev.get("breadth", {}))
+    fl = cast("dict", ev.get("flow", {}))
+    if "index" in t:
+        mas = "、".join(f"{k.upper()} {v}" for k, v in t.get("ma", {}).items())
+        console.print(f"  趨勢：指數 {t['index']}　vs　{mas}")
+    if "frac_above_ma" in b:
+        console.print(
+            f"  廣度：站上均線比例 {b['frac_above_ma']:.0%}（{b['n_priced']} 檔）"
+            f"・指數位階 {b.get('index_position')}"
+        )
+    if fl:
+        flows = "、".join(
+            f"{k.replace('avg_daily_net_', '').replace('d', '日')} {v:+,} 股"
+            for k, v in fl.items()
+        )
+        console.print(f"  資金：全市場法人日均淨流 {flows}")
+    console.print(
+        "\n[dim]定位＝輔助姿態揭露，非硬性 gate；最終由人決策（CLAUDE.md Part 3）。[/dim]"
+    )
 
 
 @cp_app.command("calibrate")

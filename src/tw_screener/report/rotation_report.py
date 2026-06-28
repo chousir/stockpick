@@ -308,10 +308,12 @@ def render_rotation_report(
     data_date: str = "",
     density_note: str = "",
     participation: list[dict] | None = None,
+    regime: dict | None = None,
 ) -> Path:
     """渲染 sector_rotation.md + 寫 sector_rotation.csv，回傳 md 路徑。
 
     participation：build_participation 輸出；None/空 → 略過「我的參與度」段（誠實降級）。
+    regime：regime.describe_regime() 顯示 dict（規劃書 03 V2）；None 則略過大盤姿態行。
     """
     s, lw = short_window, long_window
     env = Environment(loader=FileSystemLoader(_TEMPLATE_DIR), keep_trailing_newline=True)
@@ -362,6 +364,7 @@ def render_rotation_report(
         triggered=list(_rows(table.filter(pl.col("entry_triggered")).sort("radar_rank"))),
         has_prev=table["rank_delta"].null_count() < table.height if not table.is_empty() else False,
         participation=participation or [],
+        regime=regime,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     md_path = output_dir / "sector_rotation.md"
