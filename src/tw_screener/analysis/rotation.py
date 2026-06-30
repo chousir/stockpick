@@ -21,6 +21,7 @@ import polars as pl
 from loguru import logger
 
 from tw_screener.analysis.grouping import attach_rank_delta
+from tw_screener.analysis.strength import clipped_daily_returns
 from tw_screener.data.cache import select_recent_cache_files
 
 _NET_COLS = ("total_net", "foreign_net", "trust_net")
@@ -107,15 +108,8 @@ def compute_market_index(
         price_history.columns
     ):
         return pl.DataFrame(schema={"date": pl.Date, "market_index": pl.Float64})
-    ret = pl.col("close") / pl.col("close").shift(1).over("stock_id") - 1.0
-    if clip_daily_return_pct > 0:
-        bound = clip_daily_return_pct / 100
-        ret = ret.clip(-bound, bound)
     daily = (
-        price_history.select(["date", "stock_id", "close"])
-        .sort(["stock_id", "date"])
-        .with_columns(ret.alias("_ret"))
-        .drop_nulls("_ret")
+        clipped_daily_returns(price_history, clip_daily_return_pct)
         .group_by("date")
         .agg(pl.col("_ret").mean().alias("_mkt_ret"))
         .sort("date")
@@ -159,16 +153,7 @@ def compute_subindustry_baskets(
     """
     if membership.is_empty() or price_history.is_empty():
         return pl.DataFrame(schema=_BASKET_SCHEMA)
-    ret_expr = pl.col("close") / pl.col("close").shift(1).over("stock_id") - 1.0
-    if clip_daily_return_pct > 0:
-        bound = clip_daily_return_pct / 100
-        ret_expr = ret_expr.clip(-bound, bound)
-    rets = (
-        price_history.select(["date", "stock_id", "close"])
-        .sort(["stock_id", "date"])
-        .with_columns(ret_expr.alias("_ret"))
-        .drop_nulls("_ret")
-    )
+    rets = clipped_daily_returns(price_history, clip_daily_return_pct)
     joined = membership.join(rets, on="stock_id", how="inner")
     if joined.is_empty():
         return pl.DataFrame(schema=_BASKET_SCHEMA)
