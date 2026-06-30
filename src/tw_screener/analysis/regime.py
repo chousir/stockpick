@@ -11,7 +11,8 @@
   三分項各正規化到 [-1, 1]，加權合成連續分數 regime_score，門檻切 進攻 / 中性 / 防禦。
 
 關鍵約定：
-  - 純函式計算，IO（讀價量/法人快取）由呼叫端（cli.py）負責，沿用既有 loader。
+  - 評分為純函式；IO（讀價量/法人快取）集中在 compute_market_regime 便利包裝
+    （供報告/CLI 共用），沿用既有 loader。
   - 所有視窗、權重、門檻由 settings.regime 傳入，不寫死。
   - 定位＝**輔助姿態揭露**，不硬性 gate 掉訊號（守 docs CLAUDE.md Part 3「由人決策」）。
   - 任一分項資料不足回 None；合成時只對「可得分項」按權重正規化；全缺→regime「資料不足」。
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 from typing import cast
 
 import polars as pl
@@ -299,3 +301,28 @@ def compute_regime(
         flow_score=flow_score,
         evidence=evidence,
     )
+
+
+def compute_market_regime(
+    cfg: dict,
+    settings_path: Path,
+    institutional: pl.DataFrame | None = None,
+) -> RegimeResult:
+    """IO 便利包裝：載入全市場日線＋法人快取後呼叫純函式 compute_regime（規劃書 03 V2）。
+
+    供 group 報告與 market regime CLI 共用。institutional 可由呼叫端（group/rotation 已載過）
+    傳入避免重複讀；否則自行載最近窗。純讀快取、不打網（法人 loader 只讀本地 parquet）。
+    """
+    from tw_screener.analysis.rotation import load_market_history
+
+    rcfg = cfg.get("regime", {})
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+    market = load_market_history(cache_dir, n_days=int(rcfg.get("history_days", 250)))
+    if institutional is None:
+        from tw_screener.data.twse import create_client
+
+        flow_windows = [int(w) for w in rcfg.get("flow", {}).get("windows", [5, 20])]
+        institutional = create_client(settings_path).load_institutional_history(
+            n_days=max(flow_windows) if flow_windows else 20
+        )
+    return compute_regime(market, institutional, rcfg)

@@ -380,7 +380,7 @@ class _FakeClient:
 
 def test_enrich_named_list_fetches_uncached_and_names_from_industry():
     """回歸：上櫃股無快取時主動 fetch_stock_history 不被丟；name 由 industry_df 補。"""
-    from tw_screener.cli import _enrich_named_list
+    from tw_screener.analysis.watchlist import enrich_named_list
 
     cached, otc = "2330", "6231"
     industry_df = pl.DataFrame(
@@ -393,7 +393,7 @@ def test_enrich_named_list_fetches_uncached_and_names_from_industry():
     )
     client = _FakeClient(cached, otc)
     # name_map 只有上市股、缺上櫃 6231 → 6231 的名字必須走 industry_df fallback
-    members, _ = _enrich_named_list(
+    members, _ = enrich_named_list(
         client, [cached, otc], industry_df, pl.DataFrame(), None, name_map={cached: "台積電"}
     )
 
