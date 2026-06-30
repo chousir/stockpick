@@ -1,10 +1,11 @@
 # 03 — 策略定義
 
 > **現行主流程：`make week GROUP=defg`（D/E/F/G ProPicks 復刻組，見 Part B）。**
-> 以下 Part A 的「經典三角」A/B/C 為**早期實驗、已停用**：YAML 檔保留、`GROUP=abc`
-> 仍可跑（不破壞），但不再維護，新功能（法人籌碼、量比、均線、策略 G）只接 D/E/F/G。
+> 以下 Part A 的「經典三角」A/B/C 為**早期實驗、已退役**（規劃書 04 A4）：YAML 檔已移至
+> `config/strategies/archive/`，`GROUP=abc` **不再可跑**（會明確報退役）。本段僅留作
+> 歷史紀錄；新功能（法人籌碼、量比、均線、策略 G）只接 D/E/F/G。
 
-## Part A：經典三角（A/B/C・legacy）
+## Part A：經典三角（A/B/C・已退役）
 
 ## 設計哲學
 
@@ -152,15 +153,14 @@ rules: []
 
 # Part B：ProPicks 復刻組（D/E/F/G）— 現行主流程
 
-> **現行主流程是 `make week GROUP=defg`（D/E/F/G）。** A/B/C「經典三角」已列為
-> legacy（保留檔案與 `GROUP=abc` 可跑，但不再維護、文件不再主推）。
+> **現行主流程是 `make week GROUP=defg`（D/E/F/G）。** A/B/C「經典三角」已退役
+> （規劃書 04 A4）：YAML 移至 `config/strategies/archive/`，`GROUP=abc` 不再可跑。
 
 D/E/F 是 ProPicks 復刻組，**每組混合多個 ProPicks 因子**（財務/成長/估值/動能），
 目標是逼近 Investing.com ProPicks AI 在台股的選股風格；**G（成長拉回）是 E 的逆勢
 孿生**，補抓「長多短空、回踩季線」的優質成長股（見下方策略 G）。
 
-各組透過 `make week GROUP=defg`（主流程）/ `GROUP=def` / `GROUP=abc`（legacy）
-切換（見下方「GROUP 機制」）。
+透過 `make week GROUP=defg`（現行唯一主流程）執行；abc/def 已退役（見下方「GROUP 機制」）。
 
 | | 策略 D | 策略 E | 策略 F |
 |---|---|---|---|
@@ -312,20 +312,20 @@ rules: []   # 刻意不放均線 rule；拉回 timing 在分析層做
 `make week` 強制要求 `GROUP`，無預設值。**現行主流程是 `GROUP=defg`**。
 
 ```bash
-make week GROUP=defg       # ★ 主流程：D/E/F/G（含成長拉回 G）
-make week GROUP=def        # D/E/F（不含 G）
-make week GROUP=abc        # A/B/C 經典三角（legacy）
-make week                  # ❌ 報錯：請指定 GROUP=defg / def / abc
+make week GROUP=defg       # ★ 現行唯一主流程：D/E/F/G（含成長拉回 G）
+make week GROUP=abc        # ❌ 已退役（規劃書 04 A4）：明確報退役、不跑
+make week GROUP=def        # ❌ 已退役：併入 defg
+make week                  # ❌ 報錯：請指定 GROUP=defg
 make weekend GROUP=defg    # 含 commit/push
 make screen-all GROUP=defg # 只跑 screen-all 部分
 make screen STRATEGY=d_quality_leader  # 單策略仍可（不需 GROUP）
 ```
 
 **實作**：
-- `config/strategies/` 平鋪 yaml，不用子目錄
-- `tw-screener screen run-all --group defg|def|abc`：runner 依 `strategy.id` 首字母過濾
-  （a/b/c 屬 abc；d/e/f 屬 def；d/e/f/g 屬 defg）
-- 組間互斥語意：本週跑了 ABC，reports/Www/ 不會有 D/E/F/G CSV，反之亦然
+- `config/strategies/` 平鋪 yaml，不用子目錄；退役策略移至 `config/strategies/archive/`
+- `tw-screener screen run-all --group defg`：runner 依 `strategy.id` 首字母過濾
+  （d/e/f/g 屬 defg；abc/def 已退役，給定即明確報退役）
+- 互斥語意：reports/Www/ 只會有 defg（d/e/f/g）的 CSV
 
 ---
 
@@ -333,11 +333,10 @@ make screen STRATEGY=d_quality_leader  # 單策略仍可（不需 GROUP）
 
 ```bash
 # 跑單一策略（不需 GROUP）
-make screen STRATEGY=a_breakout
+make screen STRATEGY=d_quality_leader
 
 # 跑指定組（GROUP 必填）
-make screen-all GROUP=defg   # 主流程
-make screen-all GROUP=abc    # legacy
+make screen-all GROUP=defg   # 現行唯一主流程（abc/def 已退役）
 
 # 看本週結果
 ls reports/$(date +%Y-W%V)/

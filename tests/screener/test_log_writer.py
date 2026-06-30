@@ -136,4 +136,4 @@ def test_run_all_writes_screen_log(tmp_path: Path):
     assert log_path.exists()
     content = log_path.read_text(encoding="utf-8")
     assert "本週篩選紀錄" in content
-    assert "a_breakout" in content
+    assert "d_quality_leader" in content

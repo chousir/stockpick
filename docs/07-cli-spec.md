@@ -30,9 +30,9 @@ fetch-stock STOCK_ID=2330:  ## 抓單檔個股完整資料
 fetch-candidates-history:   ## 對本週入選股聯集補抓 STOCK_DAY 歷史（動能 + MA60 斜率用，MONTHS=13 預設）
 
 # ─── 選股 ───────────────────────────────────────
-screen STRATEGY=a_breakout: ## 跑單一策略
-screen-all GROUP=defg: ## 跑指定組策略（defg 主流程 / def / abc legacy）
-screen-dry STRATEGY=a_breakout: ## 預演（不打網，只組 URL 給看）
+screen STRATEGY=d_quality_leader: ## 跑單一策略
+screen-all GROUP=defg: ## 跑指定組策略（defg 現行唯一主流程；abc/def 已退役）
+screen-dry STRATEGY=d_quality_leader: ## 預演（不打網，只組 URL 給看）
 
 # ─── 分析 ───────────────────────────────────────
 group:          ## 跑族群分析，產出 group_analysis.md（觀察段留空）
@@ -131,13 +131,13 @@ tw-screener report stock STOCK_ID [--week WEEK]
 
 ```bash
 # 強制不讀 cache
-FORCE=1 make screen STRATEGY=a_breakout
+FORCE=1 make screen STRATEGY=d_quality_leader
 
 # 改 sleep 秒數（debug 時）
-GOODINFO_INTERVAL=10 make screen STRATEGY=a_breakout
+GOODINFO_INTERVAL=10 make screen STRATEGY=d_quality_leader
 
 # 用不同 settings 檔
-SETTINGS=config/settings.test.yaml make screen STRATEGY=a_breakout
+SETTINGS=config/settings.test.yaml make screen STRATEGY=d_quality_leader
 ```
 
 ## 輸出格式約定
@@ -145,20 +145,20 @@ SETTINGS=config/settings.test.yaml make screen STRATEGY=a_breakout
 CLI 輸出用 `rich` 美化：
 
 ```
-$ make screen-all
-┌─ 跑策略 a_breakout ────────────────────────┐
+$ make screen-all GROUP=defg
+┌─ 跑策略 d_quality_leader ──────────────────┐
 │ URL 組裝完成                                │
 │ 讀快取... 命中（剩 18h 過期）               │
 │ 解析中... 找到 18 檔                        │
-│ 寫入 reports/2026-W21/screen_result_a_breakout.csv │
+│ 寫入 reports/2026-W21/screen_result_d_quality_leader.csv │
 └────────────────────────────────────────────┘
 
-┌─ 跑策略 b_growth_institutional ────────────┐
+┌─ 跑策略 e_growth_momentum ─────────────────┐
 │ URL 組裝完成                                │
 │ Sleep 3.4s (rate limit)                    │
 │ HTTP GET... 200 OK (1.2s)                  │
 │ 解析中... 找到 12 檔                        │
-│ 寫入 reports/2026-W21/screen_result_b_growth_institutional.csv │
+│ 寫入 reports/2026-W21/screen_result_e_growth_momentum.csv │
 └────────────────────────────────────────────┘
 ...
 ```

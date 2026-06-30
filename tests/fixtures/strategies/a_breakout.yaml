@@ -1,0 +1,25 @@
+# 測試用樣本策略（url_builder / parser 單元測試的固定輸入）。
+# 沿用已退役的 a_breakout 經典三角內容（規劃書 04 A4 退役）——凍結為穩定測試 fixture，
+# 與 config/strategies/ 的生產策略解耦，不隨主流程策略增刪而漂移。
+id: a_breakout
+name: "動能突破"
+description: "週MACD翻多 + 5/10/20 均線多頭排列且走揚 + 流動性過濾的攻擊型短線股"
+holding_period: "1-4 weeks"
+market: "上市/上櫃"
+
+filters:
+  - item: "成交筆數"
+    min: 15000
+
+rules:
+  - "MACD||週MACD ↗–還原權值@@週MACD走勢@@還原權值–MACD ↗"
+  - "均線位置||5日/10日/20日線多頭排列且走揚@@均價線多頭排列且走揚@@5日/10日/20日"
+
+display_sheet: "交易狀況"
+display_period: "日"
+
+post_filter_sort:
+  - field: "漲跌幅"
+    order: "desc"
+  - field: "成交張數"
+    order: "desc"

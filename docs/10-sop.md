@@ -33,8 +33,8 @@
 ### Step 1：抓資料 + 跑篩選 + 族群分析
 
 ```bash
-make week GROUP=defg   # 主流程：D/E/F/G（ProPicks 復刻組＋成長拉回）
-# （def=D/E/F 不含 G；abc=A/B/C 經典三角 legacy）
+make week GROUP=defg   # 現行唯一主流程：D/E/F/G（ProPicks 復刻組＋成長拉回）
+# （abc/def 已退役，規劃書 04 A4）
 ```
 
 等同於：
@@ -52,7 +52,7 @@ make group                     # 族群分析，產 group_analysis.md＋candidat
 
 ```
 reports/YYYY-Www/
-  ├─ screen_result_*.csv              ← 4 個 CSV（GROUP=defg → d/e/f/g；legacy abc → a/b/c）
+  ├─ screen_result_*.csv              ← 4 個 CSV（GROUP=defg → d/e/f/g）
   ├─ sector_rotation.md               ← ★ 全市場資金輪動地圖（四象限/★訊號/ΔRank）貼給 Claude
   ├─ cp_candidates.md                 ← ★ 個股 CP 補漲候選＋三重濾網（group Section 6 要讀）貼給 Claude
   ├─ group_analysis.md                ← Step 2 看這個（族群脈絡）貼給 Claude

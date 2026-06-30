@@ -10,7 +10,8 @@ from tw_screener.screener.goodinfo.url_builder import (
     load_strategy,
 )
 
-STRATEGY_PATH = Path("config/strategies/a_breakout.yaml")
+# a_breakout 已退役（規劃書 04 A4）；url_builder 單元測試改吃凍結的 fixture 樣本策略。
+STRATEGY_PATH = Path("tests/fixtures/strategies/a_breakout.yaml")
 BASE_URL = "https://goodinfo.tw/tw"
 
 
