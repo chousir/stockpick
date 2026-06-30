@@ -113,6 +113,17 @@ def test_empty_price_returns_empty_schema():
     assert "stock_id" in ep.columns and "fwd_return_pct" in ep.columns
 
 
+def test_zero_close_skipped_no_zerodivision():
+    # 髒資料：中間插一筆 close=0（停牌）。修前 rolling_min 被 0 毒化＋前瞻基準除以 0 會
+    # ZeroDivisionError；修後 _prep 在算 ctx 前剔非正收盤 → 不崩，仍以有效價偵到貼低起漲。
+    closes = [100] * 6 + [0] + [105, 110, 118, 125]
+    ep = detect_ambush_episodes(
+        _prices({"A": closes}), m_days=5, tol_pct=2.0, x_pct=15.0, n_days=5, cooldown_days=5
+    )
+    assert ep.height >= 1
+    assert all(b > 0 for b in ep["base_close"].to_list())
+
+
 # ── 訊號掃描 ──────────────────────────────────────────────────────────────────
 
 
