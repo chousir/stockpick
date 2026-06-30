@@ -118,13 +118,18 @@ def _scan_episodes(
 
 
 def _prep(price_history: pl.DataFrame, ctx: pl.Expr) -> pl.DataFrame:
-    """價格去重、drop_null close、排序後加情境布林欄 _ctx（null → False）。"""
+    """價格去重、drop_null close、剔非正收盤、排序後加情境布林欄 _ctx（null → False）。
+
+    剔 close ≤ 0（停牌/髒資料）須在算 ctx 前：否則 0 會毒化 rolling_min（low=0→ctx 恆 False），
+    且 _scan_episodes 以 close[i] 當前瞻報酬基準、close[i]=0 會 ZeroDivisionError。
+    """
     if price_history.is_empty():
         return price_history  # _scan_episodes 的空判斷會回 episode schema
     return (
         price_history.select(["date", "stock_id", "close"])
         .unique(subset=["date", "stock_id"], keep="first")
         .drop_nulls("close")
+        .filter(pl.col("close") > 0)
         .sort(["stock_id", "date"])
         .with_columns(ctx.fill_null(False).alias("_ctx"))
     )
