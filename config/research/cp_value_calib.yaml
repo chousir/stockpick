@@ -1,0 +1,70 @@
+# config/research/cp_value_calib.yaml — 個股 CP 值研究軌校準旋鈕（規劃書 04 A2）
+#
+# 這些是「已下結論的研究軌」參數：窗集合 / episode 純價格定義 / 因子門檻網格 /
+# 穩健度 / 單調性 / 交互 / top_calib。只有 `cp calibrate`（make cp-value-calib）會載入
+# 並合併進 cfg["cp_value"]；主 make week 與生產候選（cp candidates / cp valuation）
+# 完全不讀本檔。每季重校在這裡調，不污染 config/settings.yaml 的生產設定。
+#
+# 生產+研究共用的旋鈕（history_days / z_window / z_min_periods / position_low_pct /
+# early_gate / overheat_watch）仍住 config/settings.yaml，本檔不重複（避免兩處真相）。
+# 缺本檔時 cp_calib_runner 回退函式內建預設（與此處數值一致），不會壞。
+
+cp_value:
+  windows: [1, 3, 5, 10, 20] # M-MH 多窗鏡頭（docs/13 Phase D）：panel 每窗各產 flow 滾動加總＋
+                             # 自身 z＋momentum，並衍生 flow_decel / price_flow_div 背離因子；
+                             # short/long 為子集，5d/20d 逐值不變（純加法）
+  short_window: 5            # 短窗（交易日）：unsuffixed momentum / flow_decel / volume_z 的錨
+  long_window: 20            # 長窗（交易日）：windows 子集，保 net_flow_20d 既有欄
+  lead_window: 15            # 訊號領先視窗（觸發後此窗內有事件＝命中）
+  z_thresholds: [0.5, 1.0, 1.5, 2.0]   # 資金 z 訊號掃描門檻
+  volume_thresholds: [1.0, 1.5, 2.0]   # 成交量 z 訊號掃描門檻
+  min_triggers: 8            # 進建議因子名單最低觸發數
+  min_lift: 1.3              # 進建議名單最低 lift；個股現實天花板較低（§1.2）；L3 裁決同門檻
+  robustness:                # ★ B-P1 穩健度四件套（docs/15 T3；研究軌、不改生產判讀）
+    anchor_label: ambush     # 錨定 label（L1 CP 補漲、現任冠軍之家）；取其主掃描勝出因子剖析
+    top_k: 6                 # 取錨定主掃描合格前 K 名因子（觸發≥min_triggers・lift≥min_lift）
+    horizons: [5, 10, 20, 40]  # decay 前瞻窗（交易日）：edge 隨持有期衰減曲線
+    holdout_frac: 0.7        # 時間樣本外切分：前段占比（前段選因子、後段驗 lift 撐不撐）
+    adv_window: 20           # 流動性硬化：ADV（成交額）回看窗（交易日）
+    adv_min_amount: 100      # 流動性門檻（百萬元）；觸發日 ADV < 此值＝剔除（大資金進不去）
+  monotonicity:              # ★ B-P2 買方主導度單調性（docs/15 T1；研究軌、不改生產判讀）
+    # 錨定起漲 label 沿用 robustness.anchor_label（同 ambush，不另立）；dom 窗＝面板 long_window
+    n_buckets: 5             # dom 分位桶數（D-E2 拍板：個股事件稀疏、避 tiny-N；ordinal rank 切）
+    fwd_window: 20           # 連續單調性檢定的前瞻報酬窗（沿用冠軍 20d；亦＝dom 窗）
+    z_sig: 1.96              # 顯著界：大樣本 z=ρ·√(n−1)，|z|>此≈雙尾 5%（ρ>0 且 z>此＝單調顯著）
+  interaction:               # ★ B-P3 個股×族群 2×2 交互（docs/15 T2；研究軌、不改生產判讀）
+    # 錨定 label 沿用 robustness.anchor_label（ambush）；G＝面板 rs_subind（個股相對次產業、非族群絕對）
+    s_flow_col: foreign_flow_20d_z  # 個股訊號 S 的資金 z 欄（冠軍；D-E3 固定冠軍 S）
+    s_z_threshold: 0.5       # S 高：資金 z > 此（＋下方 above_low 貼低條件＝冠軍 +low 變體）
+    g_threshold: 0.0         # G 高：rs_subind > 此（個股相對次產業領先；>0＝贏過自己族群）
+    z_sig: 1.96              # 族群確認加分顯著界（S+ 內 G高 vs G低 兩比例 z 檢定）
+  labels:                    # episode 純價格定義（資金因子留訊號端，避免循環，使用者拍板）
+    ambush:                  # L1 埋伏：貼低基期 + 前瞻續漲（抓起漲前）
+      m_days: 60             # 低基期回看（交易日）
+      tol_pct: 5.0           # 距 M 日低點容忍（%）；個股波動大於族群 X=3%
+      x_pct: 15.0            # 前瞻漲幅門檻（個股波動大，>族群 10%）
+      n_days: 20             # 前瞻視窗（主訊號 20 日窗，領先 ~8 日夠用）
+      cooldown_days: 20      # 事件後冷卻（同波段不重複計）
+    breakout:                # L2 追突破：剛離低點帶 + 前瞻續漲（抓起漲初）
+      m_days: 60
+      lo_pct: 3.0            # 距低帶下界（剛離低）
+      hi_pct: 8.0            # 距低帶上界
+      x_pct: 12.0
+      n_days: 10             # 追突破用較短前瞻窗
+      cooldown_days: 15
+    reversal:                # L3 超跌反轉（選配）：深跌 + 前瞻反彈（抓 V 底）
+      l_days: 60             # 距高回看（交易日）
+      drawdown_pct: 20.0     # 距 L 日高 ≤ −此值＝深跌
+      x_pct: 15.0
+      n_days: 15
+      cooldown_days: 15
+    top:                     # ★ L4 頂部/出貨（M-MH 精修・退潮警示校準；前瞻絕對下跌、與 L1 對稱）
+      m_days: 60             # 高基期回看（交易日）
+      tol_pct: 8.0           # 距 M 日高 ≤ 此％＝已在區間高位（對齊 overheat_watch.near_high_pct）
+      drop_pct: 10.0         # 前瞻谷底跌幅門檻（個股波動大）
+      n_days: 10             # 前瞻視窗（出貨/回檔較快，對齊 breakout）
+      cooldown_days: 15      # 事件後冷卻（同波段不重複計）
+  top_calib:                 # ★ L4 退潮訊號掃描門檻（研究軌；near_high/div/vol 沿用 overheat_watch 生產值）
+    sell_z_thresholds: [1.0, 1.5]       # 法人短窗賣超基準：foreign/net_flow_5d_z < −此值
+    sell_prefixes: [foreign_flow, net_flow]  # 賣超基準的法人別
+    decel_thresholds: [0.0]             # flow_decel < 此值＝短窗買盤減速（生產規則用 0.0）
