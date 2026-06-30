@@ -123,7 +123,7 @@ def run_cp_candidates(settings: Path) -> None:
     early_cfg = cp.get("early_gate", {})
     ew_cfg = cp.get("early_watch", {})
     early_watch = None
-    if bool(ew_cfg.get("enabled", True)):
+    if bool(ew_cfg.get("enabled", False)):  # 研究中・預設關（規劃書 04 A3）
         early = compute_early_inflow(
             snapshot,
             prefixes=tuple(ew_cfg.get("prefixes", ["foreign_flow", "net_flow"])),
@@ -137,7 +137,7 @@ def run_cp_candidates(settings: Path) -> None:
     # 精修・點 5：過熱-退潮警示（庫存/觀察已漲到高位但短窗退潮＝停利提醒；未校準啟發式）
     oh_cfg = cp.get("overheat_watch", {})
     overheat_watch = None
-    if bool(oh_cfg.get("enabled", True)):
+    if bool(oh_cfg.get("enabled", False)):  # 研究中・預設關（規劃書 04 A3）
         overheat = compute_overheat_warning(
             snapshot,
             near_high_pct=float(oh_cfg.get("near_high_pct", 8.0)),
