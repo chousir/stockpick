@@ -57,6 +57,14 @@ def run_cp_calibration(out_dir: Path, settings: Path) -> None:
 
     with open(settings) as f:
         cfg = yaml.safe_load(f)
+    # 研究軌旋鈕（windows/labels/門檻網格/robustness/monotonicity/interaction/top_calib）集中於
+    # 獨立研究檔，主 make week 不載、與生產設定分離（規劃書 04 A2）；合併進 cfg["cp_value"]，
+    # 既有 cp.get(...) 讀法不變。缺檔則回退函式內建預設（與舊值一致），不會壞。
+    calib_path = Path(settings).parent / "research" / "cp_value_calib.yaml"
+    if calib_path.exists():
+        with open(calib_path) as f:
+            calib = yaml.safe_load(f) or {}
+        cfg.setdefault("cp_value", {}).update(calib.get("cp_value", {}))
     cp = cfg.get("cp_value", {})
     rot = cfg.get("rotation", {})
     history_days = int(cp.get("history_days", 250))

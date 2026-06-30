@@ -235,7 +235,11 @@ surface 成「短窗早訊號」低信心觀察欄（`cp_candidates.py` compute_
 - **回測引擎**：B2 直接沿用 docs/12 R2 的 event-study 框架（起漲定義、lift、領先、z 視窗、walk-forward），
   只是把宇宙從「次產業籃子」換成「個股」、label 從一種變兩種。
 - **資料**：全吃 `data/cache/`（日線 `daily_*` / `stock_day_*`、法人 `institutional_*`、EPS）。不新增資料源。
-- **設定**：所有門檻（X/K/N、CP 分數權重、PE 百分位界線）進 `config/settings.yaml`，不寫死。
+- **設定**：所有門檻不寫死。**生產旨**（candidate.rules、valuation、laggard、early/overheat_watch、
+  早偵測閘 early_gate、z 視窗）住 `config/settings.yaml`；**研究軌旋鈕**（windows、labels 純價格定義、
+  z/量門檻網格、min_triggers/min_lift、robustness/monotonicity/interaction/top_calib）已抽到
+  `config/research/cp_value_calib.yaml`（規劃書 04 A2）——只有 `cp calibrate` 載入合併，主 make week／
+  生產候選不讀。每季重校在研究檔調，不污染生產設定。
 - **次產業分類**：沿用 `config/concepts.yaml`（未標股的資金/估值方向「無法判讀」，不硬塞）。
 - **新依賴**：預期**不需要**。若 B 階段覺得要（如建模庫），**先問**。
 

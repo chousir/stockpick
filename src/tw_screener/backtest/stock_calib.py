@@ -17,6 +17,17 @@
   避免廣訊號因觸發到無事件股而灌大 lift。
 - 統計力但書由呼叫端寫進報告：個股事件比族群更稀疏、L3 又更稀少，lift 1.3 與 1.5 之差
   可能只是雜訊；現實天花板大概 1.3–1.5（疊高勝率、非預測）。
+
+區塊導覽（全檔純研究軌，由 backtest/cp_calib_runner.py 編排；門檻/網格旋鈕在
+config/research/cp_value_calib.yaml，規劃書 04 A2）：
+  1. 事件偵測         detect_*_episodes（L1–L4 純價格 label）
+  2. 因子訊號掃描      scan_stock_signals / scan_top_signals（z/量/+low/+early 網格 → lift）
+  3. 跨窗配對領先      compute_cross_window_lead（M-MH Phase 2 GATE 核心）
+  4. 校準報告輸出      render_cp_calibration_report / render_top_calibration_report
+  5. B-P1 穩健度       payoff/decay/holdout/流動性硬化（docs/15 T3）
+  6. B-P2 主導度單調    dom 分位 × 控制位階（docs/15 T1）
+  7. B-P3 個股×族群交互  S×G 2×2（docs/15 T2）
+  8. Part C 落後度      族群內落後度單調 + 冠軍 S+ 落後濾鏡（docs/16 C-P1/C-P2）
 """
 
 from __future__ import annotations
@@ -58,6 +69,8 @@ def _flow_z_cols(cols: set[str]) -> list[tuple[str, str, int]]:
     return sorted(out, key=lambda t: (t[0].split("_")[0], t[2]))
 
 
+# ── 事件偵測：L1–L4 起漲/出貨純價格 label（前置情境 ＋ 前瞻報酬；docs/13 §4）──────────
+# episode 只由價格界定，資金/加速度因子全留訊號端被掃描（避免循環、量到的領先才誠實）。
 def _scan_episodes(
     priced: pl.DataFrame, x_pct: float, n_days: int, cooldown_days: int, direction: str = "up"
 ) -> pl.DataFrame:
@@ -182,6 +195,8 @@ def detect_top_episodes(
     return _scan_episodes(_prep(price_history, ctx), drop_pct, n_days, cooldown_days, "down")
 
 
+# ── 因子訊號掃描：資金 z／量／+low／+early 變體網格 → lift/recall/領先（沿用 R2 穿越觸發）──
+# 隨機基率以全上市宇宙一次算好（rotation_calib.compute_base_rate），對所有訊號一致。
 def _position_low_col(panel: pl.DataFrame) -> str | None:
     """panel 的「距 N 日低 %」欄名（B1 隨 position_window 命名，如 above_low_60d_pct）。"""
     cols = [c for c in panel.columns if c.startswith("above_low_") and c.endswith("d_pct")]
@@ -470,6 +485,7 @@ def scan_top_signals(
     ).sort("lift", descending=True, nulls_last=True)
 
 
+# ── M-MH Phase 2：跨窗配對領先（直接驗短窗是否早於 20d-z 達標＝GATE 核心；docs/13 Phase D）──
 def compute_cross_window_lead(
     panel: pl.DataFrame,
     episodes: pl.DataFrame,
@@ -593,6 +609,7 @@ def render_cross_window_lead(
     return lines
 
 
+# ── 校準報告輸出：每 label 一張 lift 表 ＋ L4 退潮對照（render_*；供裁決哪組因子最領先）──
 def render_cp_calibration_report(
     scan: pl.DataFrame,
     episodes: pl.DataFrame,
