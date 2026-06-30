@@ -45,7 +45,7 @@ reports/YYYY-Www/
   └─ theme_strength.csv                    ← ⚙️ 內部快照（次產業 lead_score/排名，供下週算 ΔRank）・**不必貼給 Claude**（內容已在 group_analysis.md Section 2.8）
 ```
 
-（跑 legacy `GROUP=abc` 則對應 a/b/c 三個 CSV）
+（A/B/C 經典三角已退役——規劃書 04 A4，`GROUP=abc` 不再可跑）
 （holdings/watchlist_enriched.csv 由 `watchlist/holdings.csv`＋`watchlist/watchlist.csv` 維護後、`make group` 自動產出）
 
 ### Step B：開 Claude Opus 對話

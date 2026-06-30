@@ -82,7 +82,7 @@ watchlist/watchlist.csv    stock_id,note                     # 例：3035,等回
 平時**只需要這一條**（整合最完整的主流程，含資料抓取＋法人回補＋篩選＋資金輪動＋個股 CP 補漲＋族群分析）：
 
 ```bash
-make week GROUP=defg          # def=D/E/F 不含 G；abc=A/B/C 已 legacy
+make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退役（規劃書 04 A4）
 ```
 
 跑完產出全在 `reports/YYYY-Www/`，分兩類：
@@ -389,9 +389,10 @@ D/E/F 對標 Investing.com ProPicks，共用「市值≥100 億」；**G 是 E �
 > **E 順勢、G 逆勢**：G 的拉回過濾在分析層用快取 MA60/量比計算；G 的 CSV 是基本面宇宙，
 > 有效拉回命中見 `group_analysis.md` 標 G 者。
 
-### A/B/C 經典三角（legacy）
+### A/B/C 經典三角（已退役）
 
-早期實驗、已停用（檔案保留、`GROUP=abc` 可跑、新功能不接）。
+早期實驗，已退役（規劃書 04 A4）：YAML 移至 `config/strategies/archive/`，
+`GROUP=abc` 不再可跑（會明確報退役）。僅留作歷史紀錄，
 詳細條件與設計取捨見 [docs/03-strategies.md](./docs/03-strategies.md)。
 
 ## 核心設計原則
@@ -429,7 +430,7 @@ make typecheck   # mypy
 | [`docs/00-architecture.md`](./docs/00-architecture.md) | 系統架構、資料流、模組職責 |
 | [`docs/01-environment.md`](./docs/01-environment.md) | 環境設定、依賴管理、devcontainer |
 | [`docs/02-data-sources.md`](./docs/02-data-sources.md) | Goodinfo 爬蟲規範、證交所 OpenAPI、合規限速 |
-| [`docs/03-strategies.md`](./docs/03-strategies.md) | D/E/F/G 主策略 + A/B/C legacy、GROUP 機制、YAML 規範 |
+| [`docs/03-strategies.md`](./docs/03-strategies.md) | D/E/F/G 主策略 + A/B/C（已退役）、GROUP 機制、YAML 規範 |
 | [`docs/04-screener-spec.md`](./docs/04-screener-spec.md) | 選股模組規格 |
 | [`docs/05-group-analysis.md`](./docs/05-group-analysis.md) | 族群分析、族群內排名 |
 | [`docs/06-report-spec.md`](./docs/06-report-spec.md) | 個股深度報告框架與輸出規範 |

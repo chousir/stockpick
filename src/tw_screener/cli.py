@@ -595,7 +595,7 @@ def _print_strategy_url(strategy: str, settings: Path) -> None:
 
 @screen_app.command("run")
 def screen_run(
-    strategy: str = typer.Argument(help="策略 ID，如 a_breakout"),
+    strategy: str = typer.Argument(help="策略 ID，如 d_quality_leader"),
     dry_run: bool = typer.Option(False, "--dry-run", help="只組 URL，不打網"),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
@@ -646,12 +646,25 @@ def screen_run_all(
     group: str = typer.Option(
         ...,
         "--group",
-        help="策略組：defg（D/E/F/G 現行主流程）、def（D/E/F）、abc（A/B/C legacy）",
+        help="策略組：defg（D/E/F/G 現行唯一主流程）",
     ),
 ) -> None:
-    """執行指定組策略（--group defg 跑 d/e/f/g，def 跑 d/e/f，abc 跑 a/b/c）。"""
-    if group not in ("abc", "def", "defg"):
-        console.print(f"[red]❌ 未知 group：{group!r}，請用 defg / def / abc[/red]")
+    """執行指定組策略（--group defg 跑 d/e/f/g）。abc/def 已退役（規劃書 04 A4）。"""
+    if group == "abc":
+        console.print(
+            "[red]❌ group=abc 已退役（規劃書 04 A4）[/red]："
+            "A/B/C 經典三角 YAML 已移至 config/strategies/archive/，不再可跑。"
+            "請改用 [bold]--group defg[/bold]（現行主流程）。"
+        )
+        raise typer.Exit(1)
+    if group == "def":
+        console.print(
+            "[red]❌ group=def 已退役（規劃書 04 A4）[/red]："
+            "D/E/F 已併入主流程，請改用 [bold]--group defg[/bold]（含 G 成長拉回）。"
+        )
+        raise typer.Exit(1)
+    if group != "defg":
+        console.print(f"[red]❌ 未知 group：{group!r}，請用 defg（現行主流程）[/red]")
         raise typer.Exit(1)
 
     from tw_screener.screener.runner import ScreenerRunner, derive_week_tag

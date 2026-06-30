@@ -157,7 +157,7 @@ def test_full_chain_yaml_to_df():
     """YAML → build_data_url → 用 fixture HTML → 解析出正確 DataFrame。"""
     from tw_screener.screener.goodinfo.url_builder import build_data_url, load_strategy
 
-    strategy = load_strategy(Path("config/strategies/a_breakout.yaml"))
+    strategy = load_strategy(Path("tests/fixtures/strategies/a_breakout.yaml"))
     url = build_data_url(strategy, "https://goodinfo.tw/tw")
 
     assert "StockList.asp" in url

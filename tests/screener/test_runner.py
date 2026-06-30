@@ -9,7 +9,7 @@ import pytest
 from tw_screener.screener.runner import ScreenerRunner
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "goodinfo"
-STRATEGY_PATH = Path("config/strategies/a_breakout.yaml")
+STRATEGY_PATH = Path("config/strategies/d_quality_leader.yaml")
 SETTINGS_PATH = Path("config/settings.yaml")
 
 
@@ -55,7 +55,7 @@ def test_run_strategy_has_strategy_id(tmp_path: Path):
     runner = make_runner(tmp_path)
     df = runner.run_strategy(STRATEGY_PATH)
     assert "strategy_id" in df.columns
-    assert df["strategy_id"][0] == "a_breakout"
+    assert df["strategy_id"][0] == "d_quality_leader"
 
 
 def test_run_strategy_has_screened_at(tmp_path: Path):

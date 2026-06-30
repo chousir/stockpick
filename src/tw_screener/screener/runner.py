@@ -21,10 +21,10 @@ from tw_screener.screener.goodinfo.url_builder import (
 from tw_screener.screener.log_writer import write_screen_log
 
 _GROUP_PREFIX: dict[str, set[str]] = {
-    "abc": {"a", "b", "c"},
-    "def": {"d", "e", "f"},
     "defg": {"d", "e", "f", "g"},  # 現行主流程：D/E/F + G（成長拉回）
 }
+# A/B/C（abc）已退役（規劃書 04 A4）：YAML 移至 config/strategies/archive/，
+# def 子集併入主流程 defg。退役 group 的明確報錯在 CLI screen run-all 層。
 
 
 def derive_week_tag(settings_path: Path = Path("config/settings.yaml")) -> str:
@@ -127,7 +127,8 @@ class ScreenerRunner:
     ) -> dict[str, pl.DataFrame]:
         """跑 strategies_dir 下 YAML，輸出 CSV 到 reports/YYYY-Www/。
 
-        group: "abc" 只跑 id 開頭 a/b/c；"def" 只跑 d/e/f；None 跑全部。
+        group: "defg" 只跑 id 開頭 d/e/f/g（現行唯一主流程）；None 跑全部。
+        abc/def 已退役（規劃書 04 A4）。
 
         韌性（規劃書 02 D1）：單一策略 parse 改版或結果超限時降級為「本週未取得」，
         記入 self.failures 與 screen_log.md，其餘策略照跑、整批不中斷。
@@ -138,6 +139,10 @@ class ScreenerRunner:
 
         yaml_paths = sorted(self._strategies_dir.glob("*.yaml"))
         if group is not None:
+            if group not in _GROUP_PREFIX:
+                raise ValueError(
+                    f"未知或已退役的 group={group!r}；現僅支援 {sorted(_GROUP_PREFIX)}"
+                )
             prefixes = _GROUP_PREFIX[group]
             yaml_paths = [p for p in yaml_paths if p.stem[:1].lower() in prefixes]
 

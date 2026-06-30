@@ -72,17 +72,17 @@ build-themes:  ## 爬 Yahoo 概念股 merge 進 config/concepts.yaml（DRY=1 只
 
 # ─── 選股 ────────────────────────────────────────────────────────────────────
 
-screen:  ## 跑單一策略（STRATEGY=a_breakout）
+screen:  ## 跑單一策略（STRATEGY=d_quality_leader）
 	uv run tw-screener screen run $(STRATEGY)
 
-screen-all:  ## 跑指定組策略（GROUP=defg 主流程；亦可 def / abc legacy）
+screen-all:  ## 跑指定組策略（GROUP=defg 現行唯一主流程；abc/def 已退役）
 ifndef GROUP
-	@echo "❌ 請指定 GROUP=defg（主流程）、def 或 abc（legacy）"
+	@echo "❌ 請指定 GROUP=defg（現行唯一主流程；abc/def 已退役）"
 	@exit 1
 endif
 	uv run tw-screener screen run-all --group $(GROUP)
 
-screen-dry:  ## 預演（不打網，只組 URL）（STRATEGY=a_breakout）
+screen-dry:  ## 預演（不打網，只組 URL）（STRATEGY=d_quality_leader）
 	uv run tw-screener screen run $(STRATEGY) --dry-run
 
 doctor:  ## Goodinfo 健康檢查（被擋/改版→exit 1）；make week 在 screen-all 前先擋
@@ -108,7 +108,7 @@ report:  ## 產單檔個股報告（STOCK_ID=2330，首次跑該檔會花 5-10 �
 
 week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-all → fetch-candidates-history → rotation → cp-value-candidates → group
 ifndef GROUP
-	@echo "❌ 請指定 GROUP=defg（主流程）、def 或 abc（legacy）"
+	@echo "❌ 請指定 GROUP=defg（現行唯一主流程；abc/def 已退役）"
 	@exit 1
 endif
 	$(MAKE) fetch-twse
@@ -123,7 +123,7 @@ endif
 
 weekend:  ## 完整週流程並 commit 結果（GROUP=defg 主流程）
 ifndef GROUP
-	@echo "❌ 請指定 GROUP=defg（主流程）、def 或 abc（legacy）"
+	@echo "❌ 請指定 GROUP=defg（現行唯一主流程；abc/def 已退役）"
 	@exit 1
 endif
 	$(MAKE) week GROUP=$(GROUP)
