@@ -195,11 +195,11 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
   #    已移至 config/research/cp_value_calib.yaml（規劃書 04 A2）：cp calibrate 載入合併，
   #    主 make week／生產候選（cp candidates / valuation）不讀。每季重校在該檔調，不污染生產設定。
   early_watch:               # ★ M-MH Phase 3 短窗早訊號加值欄（GATE ❌ 但 short_only ~30% 真覆蓋）
-    enabled: true            # 開：cp_candidates.md 加「庫存/觀察・20d 未確認」低信心早訊區塊
+    enabled: false           # 研究中・預設關（規劃書 04 A3）；開＝cp_candidates.md 加「庫存/觀察・20d 未確認」低信心早訊區塊
     prefixes: [foreign_flow, net_flow]  # 早訊掃描的法人別（投信雜訊高、預設不納）
     # z 門檻 / 20d 上限 / 未減速 floor 沿用 cp_value.early_gate（同一定義，不另立）
   overheat_watch:            # ★ 精修・點 5：過熱-退潮警示（停利提醒；**未校準啟發式**，非賣訊）
-    enabled: true            # 開：cp_candidates.md 加「過熱-退潮警示（庫存/觀察）」區塊
+    enabled: false           # 研究中・預設關（規劃書 04 A3）；開＝cp_candidates.md 加「過熱-退潮警示（庫存/觀察）」區塊
     near_high_pct: 8.0       # 距 60 日高 ≥ −此值＝已漲到區間高位（20d 動能起來）
     div_floor: 0.0           # price_flow_div_5d > 此＝量價背離（價漲、5 日資金未跟）
     vol_contract_floor: 0.0  # volume_z_5d < 此＝量縮（必要：短窗 flow_decel<0 減速）

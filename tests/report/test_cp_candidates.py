@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from pathlib import Path
 
 import polars as pl
 
@@ -635,3 +636,18 @@ def test_render_includes_overheat_section(tmp_path):
     )
     text = md.read_text(encoding="utf-8")
     assert "過熱-退潮警示" in text and "HOLD" in text and "未校準" in text
+
+
+def test_watch_flags_default_off_in_shipped_settings():
+    """A3：出貨的 config/settings.yaml 兩個未校準區塊預設關——make week 不背它們（關態）。
+
+    開態行為由 test_render_includes_{early_inflow,overheat}_section 覆蓋（傳入 watch
+    DataFrame → 區塊照常出現），test_render_without_*_unchanged 覆蓋 None（不出區塊）。
+    """
+    import yaml
+
+    repo_root = Path(__file__).resolve().parents[2]
+    cfg = yaml.safe_load((repo_root / "config" / "settings.yaml").read_text(encoding="utf-8"))
+    cp = cfg["cp_value"]
+    assert cp["early_watch"]["enabled"] is False
+    assert cp["overheat_watch"]["enabled"] is False
