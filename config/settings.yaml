@@ -107,6 +107,10 @@ tpex:
 
 report:
   default_top_n: 10
+  llm:                            # 規劃書 04 A7：個股報告 LLM 配置（builder 讀取，不寫死）
+    model: claude-opus-4-8        # 深度個股報告品質優先；省成本可改 claude-sonnet-4-6
+    max_tokens: 4000              # 10 段框架＋多空各 3-5 點，避免截斷（原 2500 易截）
+    temperature: 0.3              # 事實導向分析，降低變異
 
 group_analysis:
   weights:

@@ -13,6 +13,14 @@ from tw_screener.report.data_fetcher import fetch_stock_bundle
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
 
+# 規劃書 04 A7：LLM 配置預設值。實際值由 settings.yaml 的 report.llm 覆寫，
+# 這裡只是 settings 缺該段時的向後相容回退。
+_DEFAULT_LLM = {
+    "model": "claude-opus-4-8",
+    "max_tokens": 4000,
+    "temperature": 0.3,
+}
+
 _SYSTEM_PROMPT = """\
 你是台股波段分析助理。根據使用者提供的資料，產出個股分析報告。
 
@@ -32,17 +40,33 @@ def _render_prompt(bundle: dict) -> str:
     return template.render(**bundle)
 
 
-def _call_claude(prompt: str, api_key: str) -> str:
+def _resolve_llm_cfg(cfg: dict) -> dict:
+    """合併 settings.yaml 的 report.llm 與預設值（settings 缺鍵時回退預設）。"""
+    return {**_DEFAULT_LLM, **(cfg.get("report", {}).get("llm") or {})}
+
+
+def _warn_if_truncated(content: str, stop_reason: str | None) -> None:
+    """偵測疑似截斷：達 max_tokens 上限或缺「資料來源」尾段 → warning（不擋輸出）。"""
+    if stop_reason == "max_tokens":
+        logger.warning("報告疑似截斷：stop_reason=max_tokens，建議調高 report.llm.max_tokens")
+    if "資料來源" not in content:
+        logger.warning("報告疑似不完整：未偵測到「資料來源」尾段")
+
+
+def _call_claude(prompt: str, api_key: str, llm_cfg: dict) -> str:
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2500,
+        model=llm_cfg["model"],
+        max_tokens=llm_cfg["max_tokens"],
+        temperature=llm_cfg["temperature"],
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
     )
-    return str(message.content[0].text)
+    content = str(message.content[0].text)
+    _warn_if_truncated(content, message.stop_reason)
+    return content
 
 
 def _build_data_draft(bundle: dict) -> str:
@@ -164,9 +188,10 @@ def build_stock_report(
     bundle = fetch_stock_bundle(stock_id, settings_path)
 
     if api_key:
-        logger.info("呼叫 Claude API 產出 {} 報告", stock_id)
+        llm_cfg = _resolve_llm_cfg(cfg)
+        logger.info("呼叫 Claude API（{}）產出 {} 報告", llm_cfg["model"], stock_id)
         prompt = _render_prompt(bundle)
-        content = _call_claude(prompt, api_key)
+        content = _call_claude(prompt, api_key, llm_cfg)
     else:
         logger.warning("未設定 ANTHROPIC_API_KEY，產出資料草稿（{}）", stock_id)
         content = _build_data_draft(bundle)
