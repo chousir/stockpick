@@ -114,6 +114,8 @@ def _market_index(price_history: pl.DataFrame, clip_daily_return_pct: float = 10
         ret = ret.clip(-bound, bound)
     daily = (
         price_history.select(["date", "stock_id", "close"])
+        # close=0 髒資料（權證/ETF 缺報價日）會產生 0/0=NaN，毒化 cum_prod 之後所有指數值
+        .filter(pl.col("close") > 0)
         .sort(["stock_id", "date"])
         .with_columns(ret.alias("_ret"))
         .drop_nulls("_ret")
@@ -162,6 +164,7 @@ def compute_forward_returns(
     px = (
         price_history.select(["date", "stock_id", "close"])
         .drop_nulls("close")
+        .filter(pl.col("close") > 0)  # close=0 髒資料不可當 entry/exit 價
         .unique(subset=["stock_id", "date"], keep="first")
         .sort(["stock_id", "date"])
         .with_columns(pl.int_range(pl.len()).over("stock_id").alias("_i"))
