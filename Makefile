@@ -1,6 +1,6 @@
 .PHONY: init sync test test-unit test-integration lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry doctor \
-        group leaders report week weekend backtest-strategies rotation-calib rotation backfill-otc-history backfill-universe-history \
+        group leaders report week weekend backtest-strategies pick-outcome rotation-calib rotation backfill-otc-history backfill-universe-history \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test
 
@@ -138,6 +138,9 @@ endif
 
 backtest-strategies:  ## 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤（規劃書 03 V1，產 research/strategy_backtest/）
 	uv run tw-screener backtest strategies
+
+pick-outcome:  ## pick 閉環：分層命中率×α（vs 大盤＋vs 族群）＋偽陰性帳（規劃書 05 F1，產 research/pick_outcome/）
+	uv run tw-screener picks outcome
 
 rotation-calib:  ## R2 起漲點回測校準（研究軌，產 research/rotation/ 校準報告；docs/12）
 	uv run tw-screener sector calibrate

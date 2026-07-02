@@ -210,6 +210,32 @@ def test_forward_return_excess_vs_market():
     assert abs(row["excess_return_pct"] - (row["return_pct"] - row["market_return_pct"])) < 1e-6
 
 
+def test_forward_return_zero_close_does_not_poison_market_index():
+    # 快取髒資料：某檔中途出現 close=0（0/0=NaN）→ 指數 cum_prod 之後全 NaN。
+    # 防護後：該列被濾掉，market/excess 不得為 NaN。
+    target = _price_series("2330", date(2026, 5, 4), [100, 100, 101, 102, 103, 104, 110])
+    dirty = _price_series("020011", date(2026, 5, 4), [50, 50, 0, 0, 50, 50, 50])
+    filler = _price_series("0050", date(2026, 5, 4), [50] * 7)
+    px = pl.concat([target, dirty, filler])
+    screens = pl.DataFrame(
+        {
+            "week_tag": ["2026-W21"],
+            "screened_at": [date(2026, 5, 4)],
+            "stock_id": ["2330"],
+            "name": ["台積電"],
+            "close": [100.0],
+            "change_pct": [0.0],
+            "strategy_id": ["d_quality_leader"],
+        }
+    )
+    out = compute_forward_returns(screens, px, hold_weeks=1, trading_days_per_week=5)
+    row = out.row(0, named=True)
+    import math
+
+    assert row["market_return_pct"] is not None and not math.isnan(row["market_return_pct"])
+    assert row["excess_return_pct"] is not None and not math.isnan(row["excess_return_pct"])
+
+
 # ─── strategy_summary ─────────────────────────────────────────────────────────
 
 
