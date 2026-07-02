@@ -719,3 +719,20 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
   - 「Rust 預埋位置」整段改寫為「**原計畫從未實作、已放棄**」，指向實際內嵌實作，註明現階段不預埋抽象層。
 - **docs/08 歷史註記**：M4「可動檔案範圍」仍列 `indicators/`，加一行歷史註記（不改寫歷史、只說明該目錄最終未建立）——超出 A6 明列三檔範圍一行，因 A6 成功標準是「`grep -r indicators docs/ README.md` 無誤導描述」，docs/08 那行會被掃到。
 - 驗收：`grep -rn indicators docs/ README.md` 剩餘三筆全非誤導（規劃書本身描述問題／docs/00 明標「已放棄」／docs/08 明標「歷史紀錄·未建立」）；純文件變更、`make test/lint/typecheck` 不受影響（測試護欄留給 A1–A7 動程式碼的 milestone）。
+
+---
+
+## M-F1：pick 閉環＋反事實追蹤（規劃書 05 F1・PO1–PO4）
+
+> 對應規劃書 [docs/proposals/05-efficacy-overhaul.md](proposals/05-efficacy-overhaul.md) F1（2026-07-02 實證重寫第一批；裁決點 #1–#5 已於 2026-07-02 全數拍板）。
+> 動機：pick 層從無裁判——每週核心對不對、被旗標剔除的錯不錯，全靠人腦印象。§1.2 實算 W22–W25 核心 α≈−2.1pp／勝率 40%，且產物斷供（W26）與命名漂移（W24 picks.md）讓閉環前置條件是壞的。本 milestone 建底帳＋裁判。
+
+- **PO1 持久化**：新 [report/pick_store.py](../src/tw_screener/report/pick_store.py)——`reports/<week>/picks.csv`（week/data_date/stock_id/name/layer(core|opportunity|pool)/sub_industry/entry_zone/stop/ext_ma60_pct/thesis_tag）＋ **excluded.csv**（reason/detail＝被旗標剔除底帳）；upsert 冪等、schema 驗證、`weeks_without_picks` 斷供偵測。CLI `picks record`（data_date 自動取 screen_result screened_at、name/ext_ma60 自動讀 candidates_enriched，皆可覆寫）。**回填 W21–W27 共 95 picks＋83 excluded**（自各週 pick.md 人工萃取；W22 資料基準 05-29 依報告表頭覆寫；W26 缺週如實標＝不造檔、報告明列斷供）。
+- **PO2 命中率×α**：新 [backtest/picks_outcome.py](../src/tw_screener/backtest/picks_outcome.py)＋runner——①**到期快照**（entry＝資料日次一交易日收盤防前視、exit＝`--exit-date`（預設快取最新日）、除息加回、路徑最深回撤；基準＝同窗快取宇宙等權**中位**（§1.2 口徑）＋所屬次產業籃中位（concepts.yaml 成員、<3 檔標 null）雙超額）；②**固定持有窗**整套複用 V1 `compute_forward_returns`/`strategy_summary`（layer 當 strategy_id）。
+- **PO3 翻轉解剖**：`picks outcome --diff`——相鄰紀錄週 layer 降級（core→opportunity→pool→除名）＋降級當週 enriched 可見訊號（距月/季線、外資近5/20日、投信近5日、flags）。
+- **PO4 反事實**：excluded.csv 算同樣前進報酬，按 reason 分桶＝**旗標偽陰性帳**。首跑（至 7/1）：**土洋對作 n=15 平均 α +2.5pp、67% 跑贏大盤（最大遺珠台新新光金 +20.2%）；投信主導＝W21 國巨 +65.8%**——「旗標流放真領頭」首次有數字；反面：高PE（−9.6pp α）、強漲法人賣（−5.1pp）、族群逆風確實擋掉虧損＝旗標非全壞，F2/F3 校準有據。
+- **附帶修復（根因與 stock_calib 零收盤防護 9c768b4 同類）**：V1 `strategies.py` 等權指數被快取 close=0 髒資料（6/26 起權證/ETF 類 30 筆）毒化——0/0=NaN 使 cum_prod 之後全 NaN、W24 持有窗超額全 nan；`_market_index`／px 各加 `close > 0` 濾網＋回歸測試。
+- **設定／Makefile**：`settings.backtest.picks`（history_days/hold_weeks/trading_days_per_week/clip/min_sample_warn/min_subind_members/output_dir）；`make pick-outcome` → `research/pick_outcome/outcome_<date>.md`＋picks/excluded returns CSV＋layer_diff CSV。
+- **§1.2 重現驗收**：`picks outcome --exit-date 2026-07-01` 逐週勝率 1/5、2/5、2/5、3/5（合計 8/20＝40%）與規劃書全同；W24 −1.43%／W25 +0.09% 平均精確吻合；純價逐檔（創見 −29.93／華碩 −21.51／研華 −2.71／緯創 −8.33／國碩 +11.98／聯詠 +13.74）與 §1.3 全同；W22/W23 週平均差異＝**除息加回**（工具做了規劃書 §1.1 自承缺的還原：慧洋 −9.04→−4.59% 正是規劃書預告值）＋基準宇宙（全市場快取 vs 手算 176 檔追蹤宇宙）。
+- **未做（誠實）**：excluded 回填只收「旗標型」剔除（過熱/土洋對作/投信主導/強漲法人賣/法人倒貨/近端倒貨/低流動/高PE/量能未確認/爆量/族群逆風＋個案營收衰退），「轉弱/跌破均線」等趨勢型拒絕不入帳（PO4 的問題是旗標、不是趨勢判斷）；樣本 6 週屬方向性、每季重算；F2 位階門檻校準／F3 旗標改規則皆待樣本變厚後由本閉環裁決。
+- 驗收：`make pick-outcome` 產分層命中率×α（vs 大盤＋vs 族群）＋偽陰性報表；`make test` 綠（+18：store 6＋outcome 11＋零收盤回歸 1）；lint/typecheck 新檔淨、零淨增。

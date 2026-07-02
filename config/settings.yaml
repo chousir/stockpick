@@ -245,6 +245,14 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     trading_days_per_week: 5     # 持有週→交易日換算
     clip_daily_return_pct: 10.0  # 大盤等權指數日報酬夾限（漲跌停外＝未還原事件，夾住防毒化）
     min_sample_warn: 20          # 樣本低於此 → 報表標「僅供方向性、未達顯著」
+  picks:                     # 規劃書 05 F1 pick 閉環（make pick-outcome）：picks/excluded 底帳 → 命中率×α×偽陰性
+    history_days: 250            # 載入日線快取的回看交易日數
+    hold_weeks: [2, 4, 8, 12]   # 固定持有窗（同 V1 全報、不掃窗挑好看）
+    trading_days_per_week: 5
+    clip_daily_return_pct: 10.0  # 持有窗大盤等權指數日報酬夾限（複用 V1 機制）
+    min_sample_warn: 20          # 樣本低於此 → 報表標「僅供方向性、未達顯著」
+    min_subind_members: 3        # 次產業同窗有價成員低於此 → 族群超額標 null（樣本太小）
+    output_dir: research/pick_outcome
 
 regime:                        # 規劃書 03 V2 大盤 regime 總控閘門（market regime）
                                # 用等權全市場指數＋全市場法人快取算 趨勢/廣度/資金 三分項，

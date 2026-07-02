@@ -57,6 +57,11 @@ portfolio_app = typer.Typer(
 )
 app.add_typer(portfolio_app, name="portfolio")
 
+picks_app = typer.Typer(
+    help="每週 pick 閉環：底帳記錄與命中率×α×反事實（規劃書 05 F1）", no_args_is_help=True
+)
+app.add_typer(picks_app, name="picks")
+
 # ─── 頂層指令 ─────────────────────────────────────────────────────────────────
 
 
@@ -901,6 +906,53 @@ def backtest_strategies_cmd(
     from tw_screener.backtest.strategies_runner import run_backtest_strategies
 
     run_backtest_strategies(hold_weeks, out_dir, settings)
+
+
+@picks_app.command("record")
+def picks_record_cmd(
+    week: str = typer.Option(..., help="週次目錄名（如 2026-W27）"),
+    stock: str = typer.Option(..., help="股號"),
+    layer: str | None = typer.Option(None, help="core|opportunity|pool（非 --excluded 必填）"),
+    sub: str | None = typer.Option(None, help="所屬次產業（族群超額基準，用 concepts.yaml 名稱）"),
+    entry: str | None = typer.Option(None, help="進場條件（自由文字）"),
+    stop: str | None = typer.Option(None, help="停損條件（自由文字）"),
+    thesis: str | None = typer.Option(None, help="入選論點短標（如「F 主升續勢」）"),
+    ext_ma60: float | None = typer.Option(
+        None, help="入選時距季線乖離%（預設自動讀該週 candidates_enriched）"
+    ),
+    excluded: bool = typer.Option(False, "--excluded", help="記錄為被旗標剔除（寫 excluded.csv）"),
+    reason: str | None = typer.Option(None, help="剔除旗標類別（--excluded 必填，如 過熱）"),
+    detail: str | None = typer.Option(None, help="剔除補充說明"),
+    name: str | None = typer.Option(None, help="股名（預設自動讀該週 candidates_enriched）"),
+    data_date: str | None = typer.Option(
+        None, help="資料日 YYYY-MM-DD（預設自動讀該週 screen_result 的 screened_at）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """F1-PO1：把一檔 pick／剔除紀錄寫進 reports/<week>/picks.csv 或 excluded.csv（冪等）。"""
+    from tw_screener.report.picks_runner import run_pick_record
+
+    run_pick_record(
+        settings, week, stock, layer, sub, entry, stop, thesis, ext_ma60,
+        excluded, reason, detail, name, data_date,
+    )
+
+
+@picks_app.command("outcome")
+def picks_outcome_cmd(
+    exit_date: str | None = typer.Option(
+        None, help="到期快照截止日 YYYY-MM-DD（預設快取最新交易日）"
+    ),
+    diff: bool = typer.Option(False, "--diff", help="附 PO3 翻轉解剖（週對週降級＋翻轉前訊號）"),
+    hold_weeks: str | None = typer.Option(
+        None, help="固定持有窗清單（逗號分隔，預設讀 settings，如 2,4,8,12）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """F1 PO2–PO4：分層命中率×α（vs 大盤＋vs 族群）＋偽陰性帳，產 research/pick_outcome/。"""
+    from tw_screener.backtest.picks_outcome_runner import run_picks_outcome
+
+    run_picks_outcome(settings, exit_date, diff, hold_weeks)
 
 
 @market_app.command("regime")
