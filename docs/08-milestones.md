@@ -736,3 +736,16 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **§1.2 重現驗收**：`picks outcome --exit-date 2026-07-01` 逐週勝率 1/5、2/5、2/5、3/5（合計 8/20＝40%）與規劃書全同；W24 −1.43%／W25 +0.09% 平均精確吻合；純價逐檔（創見 −29.93／華碩 −21.51／研華 −2.71／緯創 −8.33／國碩 +11.98／聯詠 +13.74）與 §1.3 全同；W22/W23 週平均差異＝**除息加回**（工具做了規劃書 §1.1 自承缺的還原：慧洋 −9.04→−4.59% 正是規劃書預告值）＋基準宇宙（全市場快取 vs 手算 176 檔追蹤宇宙）。
 - **未做（誠實）**：excluded 回填只收「旗標型」剔除（過熱/土洋對作/投信主導/強漲法人賣/法人倒貨/近端倒貨/低流動/高PE/量能未確認/爆量/族群逆風＋個案營收衰退），「轉弱/跌破均線」等趨勢型拒絕不入帳（PO4 的問題是旗標、不是趨勢判斷）；樣本 6 週屬方向性、每季重算；F2 位階門檻校準／F3 旗標改規則皆待樣本變厚後由本閉環裁決。
 - 驗收：`make pick-outcome` 產分層命中率×α（vs 大盤＋vs 族群）＋偽陰性報表；`make test` 綠（+18：store 6＋outcome 11＋零收盤回歸 1）；lint/typecheck 新檔淨、零淨增。
+
+---
+
+## M-F4：一頁決策卡＋產物完整性檢查（規劃書 05 F4）
+
+> 對應規劃書 [docs/proposals/05-efficacy-overhaul.md](proposals/05-efficacy-overhaul.md) F4（第一批、與 F1 平行；裁決點 #4 決策卡 ≤60 行已於 2026-07-02 拍板）。
+> 動機：§1.6 決策密度過低——pick.md 底稿擺最前、200 行讀不完；且 make week 容錯步驟（rotation/cp-value-candidates）失敗無聲，cp_candidates.md 曾 W25–W27 連三週斷供無人知、W26 整週 pick 斷供也是事後才發現。
+
+- **決策卡框架（docs/11 交付結構重寫）**：pick.md 分兩層——首屏**一頁決策卡 ≤60 行**（①姿態一行 ②持股動作表（0-A 蒸餾）③核心每檔 ≤5 行（次產業/趨勢階段/進場階梯/停損/風險）④機會表一行式（瑕疵明說）⑤本週三風險）→ **附錄 A–F**（補充池／訊號交集／市場節奏／觀察名單觸發表／watchlist 逐檔／族群深度解讀底稿）。**不刪資訊、只分層**；行數預算與「超過 60 行往附錄搬、不壓縮成不可讀」自查規則入框架。**W28+ 起生效（報告不回溯）**。
+- **產物完整性檢查（承舊 09 RQ3）**：新 [report/artifact_check.py](../src/tw_screener/report/artifact_check.py)——比對 `settings.report.artifact_check` 應產出清單，**machine**（4 篩選 CSV＋enriched＋group_analysis＋sector_rotation md/csv＋theme_strength＋cp_candidates.md）只查最新週＝步驟無聲失敗偵測；**analyst**（pick.md/picks.csv）往週缺＝斷供 WARNING（W26 型）、最新週缺＝僅提醒（剛篩完本來就沒有）；excluded.csv 不查（當週可能真無旗標剔除）。CLI `report check`／`make week-check`，掛 `make week` 尾段；**只 WARNING 不擋流程（exit 0）**。首跑即抓到真洞：W27 缺 cp_candidates.md、W21/W24 缺 pick 底帳。
+- **附帶**：docs/11 流程範例 `picks.md` → `pick.md` 命名漂移修正（W24 漂移根源、F1 斷供偵測認 pick.md）＋補「定稿後 picks record 落底帳」步驟；`pick_store._week_dirs` 升格公開 `week_dirs`（檢查器共用週次目錄判準）。
+- **未做（誠實）**：本 milestone 是「框架＋檢查器」——現存 W27 pick.md 不回頭重排（報告不回溯，W28 起新框架產出）；本機 reports/ 的 F1 底帳缺口（W21/W24 無 picks.csv、全部週次無 excluded.csv、現存 picks.csv 為舊 schema）屬 F1 資料重建，另案處理，檢查器已如實點名。
+- 驗收：`make week-check` 對真實 reports/ 印出上述 WARNING；`make test` 綠（+7 artifact_check）；lint/typecheck 零淨增。

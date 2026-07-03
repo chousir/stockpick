@@ -79,8 +79,11 @@ def load_week_excluded(week_dir: Path) -> pl.DataFrame:
     return _read_csv(week_dir / EXCLUDED_FILENAME, EXCLUDED_SCHEMA)
 
 
-def _week_dirs(reports_dir: Path) -> list[Path]:
-    """reports/ 下的週次目錄（名稱含 -W 的目錄，如 2026-W21），依名稱排序。"""
+def week_dirs(reports_dir: Path) -> list[Path]:
+    """reports/ 下的週次目錄（名稱含 -W 的目錄，如 2026-W21），依名稱排序。
+
+    週次目錄的唯一判準，artifact_check（F4 產物完整性檢查）亦共用。
+    """
     if not reports_dir.exists():
         return []
     return sorted(p for p in reports_dir.iterdir() if p.is_dir() and "-W" in p.name)
@@ -88,14 +91,14 @@ def _week_dirs(reports_dir: Path) -> list[Path]:
 
 def load_all_picks(reports_dir: Path) -> pl.DataFrame:
     """合併所有週次的 picks.csv（無任何檔 → 空表）。"""
-    frames = [df for d in _week_dirs(reports_dir) if not (df := load_week_picks(d)).is_empty()]
+    frames = [df for d in week_dirs(reports_dir) if not (df := load_week_picks(d)).is_empty()]
     return pl.concat(frames) if frames else pl.DataFrame(schema=PICKS_SCHEMA)
 
 
 def load_all_excluded(reports_dir: Path) -> pl.DataFrame:
     """合併所有週次的 excluded.csv（無任何檔 → 空表）。"""
     frames = [
-        df for d in _week_dirs(reports_dir) if not (df := load_week_excluded(d)).is_empty()
+        df for d in week_dirs(reports_dir) if not (df := load_week_excluded(d)).is_empty()
     ]
     return pl.concat(frames) if frames else pl.DataFrame(schema=EXCLUDED_SCHEMA)
 
@@ -103,7 +106,7 @@ def load_all_excluded(reports_dir: Path) -> pl.DataFrame:
 def weeks_without_picks(reports_dir: Path) -> list[str]:
     """有篩選產物（screen_result_*.csv）但沒有 picks.csv 的週次——產物斷供如實標（W26 型）。"""
     missing: list[str] = []
-    for d in _week_dirs(reports_dir):
+    for d in week_dirs(reports_dir):
         has_screen = any(d.glob("screen_result_*.csv"))
         if has_screen and not (d / PICKS_FILENAME).exists():
             missing.append(d.name)

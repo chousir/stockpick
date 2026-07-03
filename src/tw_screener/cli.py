@@ -908,6 +908,16 @@ def backtest_strategies_cmd(
     run_backtest_strategies(hold_weeks, out_dir, settings)
 
 
+@report_app.command("check")
+def report_check_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """F4：產物完整性檢查——比對本週應產出清單＋歷週 pick 底帳，缺者 WARNING（不擋流程）。"""
+    from tw_screener.report.artifact_check import run_artifact_check
+
+    run_artifact_check(settings)
+
+
 @picks_app.command("record")
 def picks_record_cmd(
     week: str = typer.Option(..., help="週次目錄名（如 2026-W27）"),

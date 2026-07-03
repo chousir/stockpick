@@ -104,9 +104,12 @@ audit-concepts:  ## 清查 concepts.yaml 次產業無價成員（興櫃/下市/�
 report:  ## 產單檔個股報告（STOCK_ID=2330，首次跑該檔會花 5-10 秒補 3 個月歷史 OHLCV）
 	uv run tw-screener report stock $(STOCK_ID)
 
+week-check:  ## 產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（規劃書 05 F4；不擋流程）
+	uv run tw-screener report check
+
 # ─── 完整流程 ─────────────────────────────────────────────────────────────────
 
-week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-all → fetch-candidates-history → rotation → cp-value-candidates → group
+week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-all → fetch-candidates-history → rotation → cp-value-candidates → group → week-check
 ifndef GROUP
 	@echo "❌ 請指定 GROUP=defg（現行唯一主流程；abc/def 已退役）"
 	@exit 1
@@ -120,6 +123,7 @@ endif
 	-$(MAKE) rotation   # 先跑輪動（group 的 2.8 雷達要讀 sector_rotation.csv 並列；失敗不擋主流程）
 	-$(MAKE) cp-value-candidates   # 個股 CP 補漲候選＋三重濾網（group 的 7. 分析請求要讀 cp_candidates.md；失敗不擋）
 	$(MAKE) group
+	$(MAKE) week-check   # 尾段產物完整性檢查（規劃書 05 F4）：上面容錯步驟若無聲失敗，這裡點名
 
 weekend:  ## 完整週流程並 commit 結果（GROUP=defg 主流程）
 ifndef GROUP
