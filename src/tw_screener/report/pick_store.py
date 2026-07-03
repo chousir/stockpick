@@ -113,6 +113,27 @@ def weeks_without_picks(reports_dir: Path) -> list[str]:
     return missing
 
 
+def core_extension_violation(
+    layer: str | None, ext_ma60_pct: float | None, max_pct: float | None
+) -> str | None:
+    """F2 位階紀律：core 距季線乖離 > 門檻 → 回擋下訊息；通過回 None。
+
+    §1.3 主虧損剖面：入選時 >15% 的 8 檔平均 −9.17% vs ≤15% 的 12 檔 +1.19%——
+    核心層不再收延伸股（裁決點 #1 收回買強勢例外、#2 拍板 +15% 嚴）。
+    乖離未知（None）不在此擋：由呼叫端警告「位階無法查核」後如實記錄。
+    門檻 None 或 ≤0 ＝未設定，不啟用。
+    """
+    if layer != "core" or ext_ma60_pct is None or not max_pct or max_pct <= 0:
+        return None
+    if ext_ma60_pct <= max_pct:
+        return None
+    return (
+        f"距季線 {ext_ma60_pct:+.1f}% > 核心層上限 +{max_pct:g}%（F2 位階紀律）——"
+        f"延伸股不得入 core；改列 opportunity（買強勢僅存在趨勢領頭板，F3）"
+        f"或等回踩 ≤+{max_pct:g}% 再記"
+    )
+
+
 def _validate(row: dict, schema: dict[str, type[pl.DataType]]) -> None:
     if not str(row.get("stock_id") or "").strip():
         raise ValueError("stock_id 不可為空")

@@ -35,7 +35,11 @@ def run_pick_record(
     import polars as pl
     import yaml
 
-    from tw_screener.report.pick_store import upsert_excluded, upsert_pick
+    from tw_screener.report.pick_store import (
+        core_extension_violation,
+        upsert_excluded,
+        upsert_pick,
+    )
 
     with open(settings) as f:
         cfg = yaml.safe_load(f)
@@ -94,6 +98,19 @@ def run_pick_record(
             if layer is None:
                 console.print("[red]非 --excluded 時必須給 --layer core|opportunity|pool[/red]")
                 raise typer.Exit(1)
+            # F2 位階紀律：核心層距季線乖離硬上限（settings.picks.core_ext_ma60_max_pct）
+            max_ext = cfg.get("picks", {}).get("core_ext_ma60_max_pct")
+            violation = core_extension_violation(
+                layer, resolved_ext, float(max_ext) if max_ext is not None else None
+            )
+            if violation:
+                console.print(f"[red]❌ {stock_id} {resolved_name or ''}：{violation}[/red]")
+                raise typer.Exit(1)
+            if layer == "core" and resolved_ext is None and max_ext is not None:
+                console.print(
+                    "[yellow]⚠️ 距季線乖離未知（candidates_enriched 無此檔且未給 "
+                    "--ext-ma60）——F2 位階紀律無法查核，如實記錄[/yellow]"
+                )
             upsert_pick(
                 week_dir,
                 {
