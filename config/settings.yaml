@@ -111,6 +111,22 @@ report:
     model: claude-opus-4-8        # 深度個股報告品質優先；省成本可改 claude-sonnet-4-6
     max_tokens: 4000              # 10 段框架＋多空各 3-5 點，避免截斷（原 2500 易截）
     temperature: 0.3              # 事實導向分析，降低變異
+  artifact_check:                 # 規劃書 05 F4：make week 尾段產物完整性檢查（缺者 WARNING、不擋流程）
+    machine:                      # make week 機器產物——只查最新週，缺＝該步驟無聲失敗
+                                  # （cp_candidates.md 曾 W25–W27 連三週斷供無人知，即本清單動機）
+      - screen_result_d_quality_leader.csv
+      - screen_result_e_growth_momentum.csv
+      - screen_result_f_value_rebound.csv
+      - screen_result_g_growth_pullback.csv
+      - candidates_enriched.csv
+      - group_analysis.md
+      - sector_rotation.md
+      - sector_rotation.csv
+      - theme_strength.csv
+      - cp_candidates.md
+    analyst:                      # 分析師產物——往週缺＝斷供 WARNING（W26 型）；最新週缺＝提醒
+      - pick.md                   # excluded.csv 不列：當週可能真無旗標剔除，缺檔合法
+      - picks.csv
 
 group_analysis:
   weights:
