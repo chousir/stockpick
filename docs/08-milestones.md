@@ -749,3 +749,16 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **附帶**：docs/11 流程範例 `picks.md` → `pick.md` 命名漂移修正（W24 漂移根源、F1 斷供偵測認 pick.md）＋補「定稿後 picks record 落底帳」步驟；`pick_store._week_dirs` 升格公開 `week_dirs`（檢查器共用週次目錄判準）。
 - **未做（誠實）**：本 milestone 是「框架＋檢查器」——現存 W27 pick.md 不回頭重排（報告不回溯，W28 起新框架產出）；本機 reports/ 的 F1 底帳缺口（W21/W24 無 picks.csv、全部週次無 excluded.csv、現存 picks.csv 為舊 schema）屬 F1 資料重建，另案處理，檢查器已如實點名。
 - 驗收：`make week-check` 對真實 reports/ 印出上述 WARNING；`make test` 綠（+7 artifact_check）；lint/typecheck 零淨增。
+
+---
+
+## M-F2：核心層位階紀律（規劃書 05 F2）
+
+> 對應規劃書 [docs/proposals/05-efficacy-overhaul.md](proposals/05-efficacy-overhaul.md) F2（第二批；裁決點 #1 收回買強勢例外・#2 位階門檻 **+15%（嚴）** 已分別於 2026-07-02／07-03 拍板並回寫規劃書 §5）。
+> 動機：§1.3 主虧損剖面——入選時距季線 >15% 的 8 檔核心平均 −9.17% vs ≤15% 的 12 檔 +1.19%，且 W27 核心 3/4 重演同剖面；研究層（CP 貼低 lift 1.6–1.8、C-P2 落後濾鏡）早已反覆證明低位階進場贏，pick 層卻反其道而行。
+
+- **硬擋板**：[pick_store.core_extension_violation](../src/tw_screener/report/pick_store.py)（純函式）＋ `picks record` 落帳前查核——**core 且距季線乖離 > `settings.picks.core_ext_ma60_max_pct`（15.0 試行）→ 拒收（exit 1）**，訊息導向「改列 opportunity／等 F3 趨勢領頭板／等回踩」。乖離未知（enriched 無此檔）→ 警告「位階無法查核」後如實記錄、不硬擋；opportunity/pool 不受限（延伸股降層仍可入帳）。
+- **收回修法 5 例外（裁決 #1）**：docs/11——`強勢領頭` 由「可納核心/機會」改為「**可納機會/趨勢領頭板，不得入核心**」；核心精選段加位階紀律硬規則（核心保留給起漲/健康拉回/CP 貼低＋族群內落後）；買強勢階梯標「僅適用機會/領頭板、核心層禁用」。
+- **歷史重跑驗收（成功標準①②）**：測試以 §1.3 與 W27 實際乖離重放——創見 +24.8／華碩 +26.3／W27 華航 +23.7・長榮航 +23.5・矽創 +27.5 **全數被 +15% 擋下**；贏家層彰銀 +8.6／遠東銀 +4.4 通過；實機對真實 W27 記矽創入 core 被硬擋（exit 1、底帳未動）。
+- **未做（誠實）**：F3 趨勢領頭板未建——F2 生效期間延伸強勢股先列機會/觀察（docs/11 已明標）；成功標準③「首季核心（新規則）α ≥ 舊規則模擬 α」屬 F1 閉環季度對照，樣本變厚後跑；門檻 +15% 標「試行」，每季由 make pick-outcome 校準。**既有底帳不回溯改層**（W22–W27 帳保持當時決策原貌，供新舊規則對照）。
+- 驗收：`picks record --week 2026-W27 --stock 8016 --layer core` 被硬擋；`make test` 綠（+4 gate 測試）；lint/typecheck 零淨增。

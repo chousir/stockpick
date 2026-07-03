@@ -13,6 +13,7 @@ import pytest
 from tw_screener.report.pick_store import (
     EXCLUDED_SCHEMA,
     PICKS_SCHEMA,
+    core_extension_violation,
     load_all_excluded,
     load_all_picks,
     load_week_excluded,
@@ -108,3 +109,40 @@ def test_load_week_picks_missing_file_empty_schema(tmp_path):
     out = load_week_picks(tmp_path / "2026-W99")
     assert out.is_empty()
     assert dict(out.schema) == dict(PICKS_SCHEMA)
+
+
+# ── F2 位階紀律：core 距季線乖離硬上限（裁決點 #2 拍板 +15% 嚴）──────────────
+
+
+def test_core_extension_gate_blocks_historical_extended():
+    """§1.3 主虧損剖面歷史重跑：創見/華碩/W27 三檔延伸股在 +15% 門檻下全數擋於核心之外。"""
+    historical_extended = {
+        "創見": 24.8,       # §1.3：入選 +24.8% → −29.9%
+        "華碩": 26.3,       # §1.3：入選 +26.3% → −21.5%
+        "華航(W27)": 23.7,  # W27 enriched 距季線
+        "長榮航(W27)": 23.5,
+        "矽創(W27)": 27.5,
+    }
+    for name, ext in historical_extended.items():
+        msg = core_extension_violation("core", ext, 15.0)
+        assert msg is not None, f"{name}（+{ext}%）應被 F2 位階紀律擋下"
+        assert "15" in msg
+
+
+def test_core_extension_gate_passes_clean_positions():
+    # §1.3 贏家層（≤15%）：彰銀 +8.6、遠東銀 +4.4 → 通過
+    assert core_extension_violation("core", 8.6, 15.0) is None
+    assert core_extension_violation("core", 4.4, 15.0) is None
+    assert core_extension_violation("core", 15.0, 15.0) is None  # 邊界含
+
+
+def test_core_extension_gate_only_applies_to_core():
+    # 延伸股仍可入 opportunity/pool（買強勢僅存在趨勢領頭板，F3 前先降層）
+    assert core_extension_violation("opportunity", 40.0, 15.0) is None
+    assert core_extension_violation("pool", 40.0, 15.0) is None
+
+
+def test_core_extension_gate_disabled_or_unknown():
+    assert core_extension_violation("core", 40.0, None) is None  # 未設定門檻＝不啟用
+    assert core_extension_violation("core", 40.0, 0.0) is None
+    assert core_extension_violation("core", None, 15.0) is None  # 乖離未知→runner 警告後如實記
