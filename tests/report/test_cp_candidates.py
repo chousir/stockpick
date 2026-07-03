@@ -146,6 +146,26 @@ def test_reversal_requires_drawdown_and_confirm():
     assert not_deep.is_empty()
 
 
+def test_zero_hit_week_keeps_schema_and_renders(tmp_path: Path):
+    """零命中週回歸：空表必須帶 schema，下游疊圖＋渲染不崩（W25–W27 無聲斷供根因）。"""
+    snap = _snap([{"stock_id": "A"}])  # 全欄預設值 → 三規則皆不命中
+    out = build_cp_candidates(snap, _confirm({"A": True}), RULES)
+    assert out.is_empty()
+    assert "stock_id" in out.columns
+    out = attach_subind_quadrant(out, pl.DataFrame(), tmp_path / "no_rotation.csv")
+    out = tag_holding_status(out, ["2330"], ["2610"], ["8016"])  # 有庫存/觀察→走逐列路徑
+    md = render_cp_candidates_report(
+        out, week_tag="2026-W99", output_dir=tmp_path,
+        params={"z_min_periods": 30},
+        coverage={"n_stocks": 1, "n_trading_days": 18, "inst_coverage_pct": 0.0},
+        rules=RULES,
+    )
+    assert md.exists()
+    text = md.read_text(encoding="utf-8")
+    assert "本週候選 **0** 檔" in text
+    assert "暖機期" in text  # 面板 18 日 < z_min_periods 30 → 標「資料未成熟」非「無訊號」
+
+
 def test_multi_label_hit_lists_both():
     # trust z 高 + 貼低 → 同時命中 L2（貼低）；foreign z 高 → L1
     snap = _snap(

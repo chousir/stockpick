@@ -31,6 +31,22 @@ _RS_SUBIND_RE = re.compile(r"^rs_subind_(\d+)d$")
 
 # label key → 報表顯示型態名
 _LABEL_NAMES: dict[str, str] = {"ambush": "埋伏", "breakout": "追突破", "reversal": "反轉"}
+# 候選表基底 schema——零命中週的空表也要帶（裸 pl.DataFrame() 沒有 stock_id 欄，
+# 曾讓下游 tag_holding_status 直接崩潰、make week 容錯吞掉＝cp_candidates 連週無聲斷供）
+_CANDIDATE_SCHEMA: dict[str, type[pl.DataType]] = {
+    "stock_id": pl.Utf8,
+    "date": pl.Date,
+    "primary_label": pl.Utf8,
+    "labels": pl.Utf8,
+    "rules": pl.Utf8,
+    "cp_score": pl.Float64,
+    "flow_z_col": pl.Utf8,
+    "flow_z": pl.Float64,
+    "freshness": pl.Utf8,
+    "above_low_pct": pl.Float64,
+    "above_high_pct": pl.Float64,
+    "confirm_buy": pl.Boolean,
+}
 # 資金 z 欄字首 → 其加速度欄（B1 stock_panel 命名；與 stock_calib 一致）
 _MOM_BY_PREFIX: dict[str, str] = {
     "net_flow": "flow_momentum",
@@ -136,7 +152,7 @@ def build_cp_candidates(
         落後濾鏡啟用時另含 rs_subind（揭露值）/cp_boosted（該列是否被輕加權）。
     """
     if snapshot.is_empty() or not rules:
-        return pl.DataFrame()
+        return pl.DataFrame(schema=_CANDIDATE_SCHEMA)
     low_col = _prefix_col(snapshot, "above_low_")
     high_col = _prefix_col(snapshot, "above_high_")
     rs_col = _rs_subind_col(snapshot)
@@ -176,11 +192,11 @@ def build_cp_candidates(
         )
         active.append((i, r))
     if not active:
-        return pl.DataFrame()
+        return pl.DataFrame(schema=_CANDIDATE_SCHEMA)
 
     cand = snap.filter(pl.any_horizontal([pl.col(f"_hit{i}") for i, _ in active]))
     if cand.is_empty():
-        return pl.DataFrame()
+        return pl.DataFrame(schema=_CANDIDATE_SCHEMA)
 
     rows: list[dict] = []
     for rec in cand.iter_rows(named=True):
@@ -630,6 +646,17 @@ def render_cp_candidates_report(
             if n_total
             else ""
         ),
+    ]
+    # 暖機期誠實標註：daily_* 快取只能往未來累積，面板日數未達 z 最短視窗時
+    # 資金 z 全 null → 候選必為 0，這是資料未成熟、不是「本週無訊號」
+    zmp = int(params.get("z_min_periods", 0))
+    n_days = int(coverage.get("n_trading_days", 0))
+    if n_total == 0 and zmp and n_days < zmp:
+        lines.append(
+            f"- ⚠️ **暖機期**：面板僅 {n_days} 交易日 < z 最短視窗 {zmp}——"
+            f"資金 z 未成熟、候選必為 0；快取逐日累積，補滿前本清單不具判讀意義"
+        )
+    lines += [
         "",
         "## 因子規則（B2 校準勝出組合；門檻見 settings.cp_value.candidate）",
         "",

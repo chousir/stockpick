@@ -169,12 +169,18 @@ def run_cp_candidates(settings: Path) -> None:
         if not industry.is_empty()
         else {}
     )
+    if candidates.is_empty() and int(coverage.get("n_trading_days", 0)) < z_min_periods:
+        console.print(
+            f"[yellow]⚠️ 暖機期：面板僅 {coverage.get('n_trading_days', 0)} 交易日 "
+            f"< z 最短視窗 {z_min_periods}——資金 z 未成熟、候選必為 0（快取逐日累積中）[/yellow]"
+        )
     md_path = render_cp_candidates_report(
         candidates,
         week_tag=week_tag,
         output_dir=out_dir,
         params={"drawdown_pct": float(cand.get("drawdown_pct", 20.0)),
-                "confirm_days": int(cand.get("confirm_days", 2))},
+                "confirm_days": int(cand.get("confirm_days", 2)),
+                "z_min_periods": z_min_periods},
         coverage=coverage,
         rules=rules,
         names=names,
