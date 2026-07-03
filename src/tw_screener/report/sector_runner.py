@@ -219,6 +219,8 @@ def run_sector_rotation(top: int | None, settings: Path) -> None:
     from tw_screener.analysis.rotation import (
         compute_fund_flows,
         compute_subindustry_baskets,
+        compute_trend_leaders,
+        compute_trend_scores,
         load_market_history,
         otc_institutional_lag,
     )
@@ -272,6 +274,31 @@ def run_sector_rotation(top: int | None, settings: Path) -> None:
         windows=windows,
     )
 
+    # F3：價格趨勢分數（主排序鍵）＋趨勢領頭板（旗標口徑沿 propicks_flags）
+    ts_cfg = rot.get("trend_score", {})
+    trend = compute_trend_scores(
+        baskets,
+        members,
+        market,
+        ma_short=int(ts_cfg.get("ma_short", 20)),
+        ma_long=int(ts_cfg.get("ma_long", 60)),
+        rs_window=int(ts_cfg.get("rs_window", 20)),
+        weights=ts_cfg.get("weights"),
+    )
+    ld_cfg = rot.get("leaders", {})
+    flags_cfg = cfg.get("propicks_flags", {})
+    leaders = compute_trend_leaders(
+        members,
+        market,
+        institutional,
+        top_n=int(ld_cfg.get("top_n", 15)),
+        rs_window=int(ld_cfg.get("rs_window", 20)),
+        min_amount_million=float(ld_cfg.get("min_amount_million", 100.0)),
+        overheat_ma60_pct=float(flags_cfg.get("overheated_ma60_pct", 40.0)),
+        cross_trade_lots=float(flags_cfg.get("cross_trade_lots", 5000.0)),
+        cross_trade_rel_pct=float(flags_cfg.get("cross_trade_rel_pct", 4.0)),
+    )
+
     week_tag = derive_week_tag(settings)
     prev = load_prev_rotation_snapshot(reports_dir, week_tag)
     table = build_rotation_table(
@@ -286,6 +313,7 @@ def run_sector_rotation(top: int | None, settings: Path) -> None:
         rank_by=rot.get("rank_by"),
         min_members=min_members,
         prev=prev,
+        trend=trend,
     )
     if table.is_empty():
         console.print("[red]輪動表為空（資料不足）[/red]")
@@ -344,13 +372,18 @@ def run_sector_rotation(top: int | None, settings: Path) -> None:
         density_note=data_density_note(market["date"].n_unique()),
         participation=participation,
         regime=regime,
+        leaders=leaders,
+        names=names,
     )
+    if not leaders.is_empty():
+        leaders.write_csv(reports_dir / week_tag / "trend_leaders.csv")
     n_next = table.filter(pl.col("quadrant") == "下一棒").height
     n_trig = table.filter(pl.col("entry_triggered")).height
     console.print(f"[green]輪動報表 → {md_path}[/green]")
     console.print(
         f"  次產業 {table.height} 個・下一棒候選 {n_next} 個・★訊號觸發 {n_trig} 個"
-        f"・ΔRank {'有上週快照' if prev is not None else '首週（無快照）'}"
+        f"・趨勢領頭板 {leaders.height} 檔・ΔRank "
+        f"{'有上週快照' if prev is not None else '首週（無快照）'}"
     )
 
 
