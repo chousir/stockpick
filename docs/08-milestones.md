@@ -776,3 +776,18 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **六月回放驗收（成功標準①）**：**證券 06-05 趨勢 #5 vs 流量 #28、06-12 #3 vs #35**＝價格證據比流量榜早數週浮出金融✓；銀行 06-19 趨勢 #5（其流量 06-12 已 #1＝資金先進型，雙鏡頭互補）；**國巨 W23–W27 全程入板（#1–#5・過熱;土洋對作標註）、台新新光金 W24/W26 入板**✓。**航空未達（如實）**：次產業僅 3 檔 < min_members=5 永不入排名、個股 6 月中 RS 前 15 被記憶體/被動 +50~100% 佔滿——屬排名門檻/板深結構限制，非分數失靈；要浮出需降 min_members 或加深板（動排名口徑，留使用者裁決）。
 - **W27 實跑**：銀行以價格證據坐 #1（雙線上・100% 站季線）；被動元件/PCB 價格強但流量負→趨勢分抬前＋出貨警訊象限與確認欄互制（風險不失控）。**主鍵切換首週 ΔRank 與舊流量榜相比、僅供方向參考（W28 起恢復同鍵可比）**。
 - 驗收：`make rotation` 產新版 sector_rotation.md（§1 價格趨勢主鍵＋§1.5 領頭板）＋trend_leaders.csv；`make test` 綠（+4 rotation 測試）；lint/typecheck 零淨增；回放腳本結果如上（scratchpad、一次性）。
+
+---
+
+## M-F5：揭露欄位包（規劃書 05 F5・沿舊 06 NF1＋07 TR1；收官）
+
+> 對應規劃書 [docs/proposals/05-efficacy-overhaul.md](proposals/05-efficacy-overhaul.md) F5（收尾批）。裁決 #3：舊 08 主動/被動 proxy 確認丟棄不做。
+> 動機：近端籌碼拆窗與「健康回踩 vs 下跌第一天」全靠分析師人工逐檔比對，遲早漏（台新新光金差點漏）；§1.4 實證近端佔比**單獨無判別力**（聯詠近端在賣仍 +13.7%）——固化成揭露欄、明確不當排序主判。
+
+- **NF1 近端籌碼欄**：[grouping.near_flow_state](../src/tw_screener/analysis/grouping.py)＋`classify_risk_kind` 純函式——`flow_state`（轉賣/熄火/加速/平穩＋主體，外資投信各評、警示邊優先）、`near_share_5d_pct`（近5佔20累計%）、`risk_kind`（**價格已跌＞籌碼熄火＞價格延伸**，延伸門檻對齊 F2 +15%）；`inst_missing`／無大額買超邊 → null 如實。門檻進 `settings.near_flow`。
+- **TR1 軌跡欄**：新 [analysis/trajectory.py](../src/tw_screener/analysis/trajectory.py)——`down_days_streak`／`pullback_vol_ratio`（回踩 5 日均量/前 20 日均量）／`above_ma20_days`（站上/跌破月線連續天數）／`pullback_quality`（**止穩＝縮量守月線；破線＝連跌≥3 或放量≥1.2 且破月線；其餘觀察**；無量資料不臆造止穩）。歷史 <25 日全 null（上櫃缺口如實）。門檻進 `settings.trajectory`。餵 F2「健康拉回」判定與 F1-PO3 翻轉解剖。
+- **接線**：group_stocks 加 `trajectory_cfg` join 軌跡欄；`_build_enriched_rows` 統一產 7 欄→candidates／holdings／watchlist 三份 enriched 同欄（watchlist 管線無軌跡來源＝null）；runner 量窗自動放大到 26 日（量比 tail 不受影響）。**附帶修復**：price_history 舊 schema volume 整欄 null 時 coalesce volume_history 補洞（原設計只查欄存在、量比恆 null）。
+- **三案例驗收（舊 06 沿用）**：台新新光金（外資 20日 +162,168、近5 +2,720＝1.7%）→ **熄火(外資)**；華航（近5佔比 54%、距季 +23.7%）→ **加速＋價格延伸**；國泰金（5日 −7.03%、破月線）→ **價格已跌**——測試＋W27 實跑皆過（華航實跑 53.6% 加速/延伸；國建 轉賣(外資)→籌碼熄火 與 pick.md 人工判讀一致）。W27 實跑分佈：flow_state 63/132 有值、止穩 23/觀察 87/破線 22。
+- **docs/11**：F5 揭露欄讀法＋**鐵律明寫「近端佔比單獨無判別力（2026-07-02 實證）——不得當排序主判或硬 gate」**；健康回踩判定改讀 `pullback_quality`。
+- **未做（誠實）**：各欄是否有 edge 交 F1 分桶回測（樣本變厚後跑，屆時才有資格談升主判）；watchlist/holdings 管線的軌跡欄（需該管線也載歷史，另案）；舊 08 被動 proxy 確認棄案。
+- 驗收：`make group` 產出含 7 揭露欄的三份 enriched；`make test` 綠（+9 trajectory/near_flow）；lint/typecheck 零淨增。**規劃書 05（F1–F5）全數收官。**

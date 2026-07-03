@@ -120,7 +120,15 @@ def run_group_analysis(settings: Path) -> None:
     else:
         console.print(f"  法人快取：{institutional['date'].n_unique()} 個交易日")
 
-    volume_history = client.load_volume_history(candidate_ids, n_days=21)
+    # 量窗：量比需 vol_lookback+1；F5 軌跡量比需 回踩窗+前段窗+1（取大；量比 tail 不受多載影響）
+    _traj_cfg = cfg.get("trajectory", {})
+    _vol_days = max(
+        vol_lookback + 1,
+        int(_traj_cfg.get("pullback_vol_window", 5))
+        + int(_traj_cfg.get("base_vol_window", 20))
+        + 1,
+    )
+    volume_history = client.load_volume_history(candidate_ids, n_days=_vol_days)
     if volume_history.is_empty():
         console.print(
             "[yellow]  無 trade_volume 快取，量比欄位將顯示 '-'[/yellow]"
@@ -189,6 +197,7 @@ def run_group_analysis(settings: Path) -> None:
         g_pullback=g_pullback,
         vol_lookback=vol_lookback,
         dividends=recent_dividends,
+        trajectory_cfg=cfg.get("trajectory", {}),  # F5 軌跡欄（沿舊 07 TR1）
     )
 
     if groups.is_empty():
@@ -304,6 +313,7 @@ def run_group_analysis(settings: Path) -> None:
         flags_cfg=cfg.get("propicks_flags"), rev_yoy_map=rev_yoy_map,
         fundamentals_map=fundamentals_map, valuation_map=valuation_map,
         big_holder_map=big_holder_map, margin_map=margin_map,
+        near_flow_cfg=cfg.get("near_flow", {}),  # F5 近端籌碼揭露欄（沿舊 06 NF1）
     )
     # 重疊股重用：庫存/觀察清單同檔一律沿用 candidates 那筆，避免跨 CSV 量比/集中度/成交額分岔
     canonical_rows = {row["stock_id"]: row for row in cand_rows}
@@ -342,6 +352,7 @@ def run_group_analysis(settings: Path) -> None:
             fundamentals_map=fundamentals_map, valuation_map=valuation_map,
             big_holder_map=big_holder_map, margin_map=margin_map,
             holdings_map=hmap, canonical_rows=canonical_rows,
+            near_flow_cfg=cfg.get("near_flow", {}),
         )
         console.print(f"[green]  {label}_enriched.csv：{n} 檔 → {out_csv}[/green]")
 
