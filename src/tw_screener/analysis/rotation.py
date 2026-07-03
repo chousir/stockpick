@@ -304,10 +304,262 @@ def rank_flows(
         pl.col("members") >= min_members
     )
     ranked = (
-        latest.sort(by, descending=True)
+        latest.sort(by, descending=True, nulls_last=True)
         .with_row_index("radar_rank", offset=1)
         .rename({"sub_industry": "theme"})
     )
     if prev is not None and "sub_industry" in prev.columns:
         prev = prev.rename({"sub_industry": "theme"})
     return attach_rank_delta(ranked, prev).rename({"theme": "sub_industry"})
+
+
+# ─── F3 價格趨勢分數＋趨勢領頭板（規劃書 05 F3）──────────────────────────────
+
+_TREND_WEIGHTS_DEFAULT = {"basket_ma": 0.40, "member_breadth": 0.35, "leader_rs": 0.25}
+
+
+def _stock_window_returns(price_history: pl.DataFrame, rs_window: int) -> pl.DataFrame:
+    """as-of（資料最新日）每檔 rs_window 交易日報酬（%）＋ 對全市場中位的 RS。
+
+    close ≤ 0 髒資料先濾（0 收盤曾毒化等權指數，5ae7a94 同類防護）；
+    視窗內資料不足（新股/停牌）→ 該檔無報酬、不進 RS 宇宙。
+    """
+    px = price_history.filter(pl.col("close") > 0).sort(["stock_id", "date"])
+    if px.is_empty():
+        return pl.DataFrame(
+            schema={"stock_id": pl.Utf8, "ret_pct": pl.Float64, "rs_pct": pl.Float64}
+        )
+    last_date = px["date"].max()
+    snap = (
+        px.with_columns(
+            ((pl.col("close") / pl.col("close").shift(rs_window).over("stock_id")) - 1.0)
+            .alias("_ret")
+        )
+        .filter((pl.col("date") == last_date) & pl.col("_ret").is_not_null())
+    )
+    if snap.is_empty():
+        return pl.DataFrame(
+            schema={"stock_id": pl.Utf8, "ret_pct": pl.Float64, "rs_pct": pl.Float64}
+        )
+    median_ret = snap["_ret"].median()
+    return snap.select(
+        "stock_id",
+        (pl.col("_ret") * 100).alias("ret_pct"),
+        ((pl.col("_ret") - median_ret) * 100).alias("rs_pct"),
+    )
+
+
+def compute_trend_scores(
+    baskets: pl.DataFrame,
+    membership: pl.DataFrame,
+    price_history: pl.DataFrame,
+    ma_short: int = 20,
+    ma_long: int = 60,
+    rs_window: int = 20,
+    weights: dict[str, float] | None = None,
+) -> pl.DataFrame:
+    """F3 價格證據優先的族群趨勢分數（0–100，輪動主排序鍵）。
+
+    動機（規劃書 05 §1.5#2）：20 日流量排序天然落後——航空/金融 W23–W24 價格已
+    走出來、流量榜 W27 才浮出。改以價格證據為主鍵、流量降為確認欄：
+      basket_ma      籃子等權指數 vs 自身 MA{短}/MA{長}（各占一半）
+      member_breadth 成員（as-of 有價者）站上自身 MA{長} 比例
+      leader_rs      領頭成員 RS（rs_window 報酬 − 全市場中位）跨次產業百分位
+    權重自動正規化；成分缺值以 0 計（誠實降級）；資料未滿窗時 MA 用可得窗。
+    as-of＝輸入資料最新日——回放歷史週：把 baskets/price_history 濾到目標日即可。
+
+    Returns:
+        每次產業一列：sub_industry / trend_score / trend_ma_state（雙線上｜月線上｜
+        季線上｜雙線下）/ above_ma60_breadth [0,1] / leader_stock_id / leader_rs_pct
+    """
+    if baskets.is_empty() or membership.is_empty() or price_history.is_empty():
+        return pl.DataFrame(
+            schema={
+                "sub_industry": pl.Utf8,
+                "trend_score": pl.Float64,
+                "trend_ma_state": pl.Utf8,
+                "above_ma60_breadth": pl.Float64,
+                "leader_stock_id": pl.Utf8,
+                "leader_rs_pct": pl.Float64,
+            }
+        )
+    w = {**_TREND_WEIGHTS_DEFAULT, **(weights or {})}
+    total = sum(w.values()) or 1.0
+    w = {k: v / total for k, v in w.items()}
+
+    # ① 籃子指數 vs 自身雙均線
+    b = baskets.sort(["sub_industry", "date"]).with_columns(
+        pl.col("basket_index").rolling_mean(ma_short, min_samples=1)
+        .over("sub_industry").alias("_ma_s"),
+        pl.col("basket_index").rolling_mean(ma_long, min_samples=1)
+        .over("sub_industry").alias("_ma_l"),
+    )
+    ma = (
+        b.filter(pl.col("date") == pl.col("date").max().over("sub_industry"))
+        .select(
+            "sub_industry",
+            (pl.col("basket_index") > pl.col("_ma_s")).alias("_above_s"),
+            (pl.col("basket_index") > pl.col("_ma_l")).alias("_above_l"),
+        )
+        .with_columns(
+            (pl.col("_above_s").cast(pl.Float64) * 0.5
+             + pl.col("_above_l").cast(pl.Float64) * 0.5).alias("_c_ma"),
+            pl.when(pl.col("_above_s") & pl.col("_above_l")).then(pl.lit("雙線上"))
+            .when(pl.col("_above_s")).then(pl.lit("月線上"))
+            .when(pl.col("_above_l")).then(pl.lit("季線上"))
+            .otherwise(pl.lit("雙線下")).alias("trend_ma_state"),
+        )
+    )
+
+    # ② 成員站上自身 MA{長} 比例（as-of 有價成員為分母）
+    px = price_history.filter(pl.col("close") > 0).sort(["stock_id", "date"])
+    px = px.with_columns(
+        pl.col("close").rolling_mean(ma_long, min_samples=1).over("stock_id").alias("_ma60")
+    )
+    snap = px.filter(pl.col("date") == px["date"].max())
+    breadth = (
+        membership.join(snap, on="stock_id", how="inner")
+        .group_by("sub_industry")
+        .agg((pl.col("close") > pl.col("_ma60")).mean().alias("above_ma60_breadth"))
+    )
+
+    # ③ 領頭成員 RS 跨次產業百分位
+    rs = _stock_window_returns(price_history, rs_window)
+    leaders = (
+        membership.join(rs, on="stock_id", how="inner")
+        .sort("rs_pct", descending=True)
+        .group_by("sub_industry", maintain_order=True)
+        .agg(
+            pl.col("stock_id").first().alias("leader_stock_id"),
+            pl.col("rs_pct").first().alias("leader_rs_pct"),
+        )
+    )
+    if not leaders.is_empty() and leaders.height > 1:
+        leaders = leaders.with_columns(
+            ((pl.col("leader_rs_pct").rank(method="average") - 1) / (leaders.height - 1))
+            .alias("_c_rs")
+        )
+    else:
+        leaders = leaders.with_columns(pl.lit(0.5).alias("_c_rs"))
+
+    out = (
+        ma.join(breadth, on="sub_industry", how="full", coalesce=True)
+        .join(leaders, on="sub_industry", how="full", coalesce=True)
+        .with_columns(
+            (
+                (
+                    pl.col("_c_ma").fill_null(0.0) * w["basket_ma"]
+                    + pl.col("above_ma60_breadth").fill_null(0.0) * w["member_breadth"]
+                    + pl.col("_c_rs").fill_null(0.0) * w["leader_rs"]
+                )
+                * 100
+            )
+            .round(1)
+            .alias("trend_score"),
+            pl.col("leader_rs_pct").round(1),
+        )
+    )
+    return out.select(
+        "sub_industry", "trend_score", "trend_ma_state",
+        "above_ma60_breadth", "leader_stock_id", "leader_rs_pct",
+    ).sort("trend_score", descending=True)
+
+
+def compute_trend_leaders(
+    membership: pl.DataFrame,
+    price_history: pl.DataFrame,
+    institutional: pl.DataFrame,
+    top_n: int = 15,
+    rs_window: int = 20,
+    min_amount_million: float = 100.0,
+    overheat_ma60_pct: float = 40.0,
+    cross_trade_lots: float = 5000.0,
+    cross_trade_rel_pct: float = 4.0,
+    ma_long: int = 60,
+) -> pl.DataFrame:
+    """F3 趨勢領頭板：全市場 RS 前 N 強＋所屬次產業＋位階＋旗標。
+
+    解「找不到趨勢標的」＋給 F2 被擋的延伸股合法出口（規劃書 05 §1.5）。
+    **過熱／土洋對作不剔除、只標註**（旗標口徑同 propicks_flags：過熱＝距季線 >
+    overheat_ma60_pct；土洋對作＝外資/投信 20 日反向、雙邊 ≥ cross_trade_lots 張
+    且弱邊 ≥ 近 20 日成交量 cross_trade_rel_pct%）。妖股濾除：近 20 日均成交額 <
+    min_amount_million（百萬）不入板（量能未知亦排除——寧缺勿雜）。
+    institutional 空 → 土洋對作欄如實缺（只標過熱）。
+
+    Returns:
+        RS 遞減前 top_n：stock_id / sub_industry（多標籤「、」併列，未標＝空）/
+        ret_pct（rs_window 報酬）/ rs_pct / dist_ma60_pct / flags
+    """
+    schema = {
+        "stock_id": pl.Utf8, "sub_industry": pl.Utf8, "ret_pct": pl.Float64,
+        "rs_pct": pl.Float64, "dist_ma60_pct": pl.Float64, "flags": pl.Utf8,
+    }
+    if price_history.is_empty():
+        return pl.DataFrame(schema=schema)
+
+    px = price_history.filter(pl.col("close") > 0).sort(["stock_id", "date"])
+    px = px.with_columns(
+        pl.col("close").rolling_mean(ma_long, min_samples=1).over("stock_id").alias("_ma60"),
+        (pl.col("close") * pl.col("volume"))
+        .rolling_mean(20, min_samples=1).over("stock_id").alias("_amt20"),
+        pl.col("volume").rolling_sum(20, min_samples=1).over("stock_id").alias("_vol20"),
+    )
+    snap = px.filter(pl.col("date") == px["date"].max())
+    rs = _stock_window_returns(price_history, rs_window)
+    board = (
+        snap.join(rs, on="stock_id", how="inner")
+        .filter(pl.col("_amt20") >= min_amount_million * 1e6)
+        .with_columns(((pl.col("close") / pl.col("_ma60") - 1) * 100).alias("dist_ma60_pct"))
+        .sort("rs_pct", descending=True)
+        .head(top_n)
+    )
+    if board.is_empty():
+        return pl.DataFrame(schema=schema)
+
+    # 旗標（只標註不剔除）：過熱＋土洋對作
+    if not institutional.is_empty():
+        recent = institutional.sort("date")
+        cutoff_dates = recent["date"].unique().sort(descending=True).head(20).to_list()
+        flows20 = (
+            recent.filter(pl.col("date").is_in(cutoff_dates))
+            .group_by("stock_id")
+            .agg(
+                pl.col("foreign_net").sum().alias("_f20"),
+                pl.col("trust_net").sum().alias("_t20"),
+            )
+        )
+        board = board.join(flows20, on="stock_id", how="left")
+    else:
+        board = board.with_columns(
+            pl.lit(None, dtype=pl.Float64).alias("_f20"),
+            pl.lit(None, dtype=pl.Float64).alias("_t20"),
+        )
+
+    min_shares = cross_trade_lots * 1000
+    weak_side = pl.min_horizontal(pl.col("_f20").abs(), pl.col("_t20").abs())
+    cross = (
+        (pl.col("_f20") * pl.col("_t20") < 0)
+        & (weak_side >= min_shares)
+        & (weak_side >= pl.col("_vol20") * cross_trade_rel_pct / 100)
+    ).fill_null(False)
+    overheat = (pl.col("dist_ma60_pct") > overheat_ma60_pct).fill_null(False)
+    board = board.with_columns(
+        pl.when(overheat & cross).then(pl.lit("過熱;土洋對作"))
+        .when(overheat).then(pl.lit("過熱"))
+        .when(cross).then(pl.lit("土洋對作"))
+        .otherwise(pl.lit("")).alias("flags")
+    )
+
+    subs = membership.group_by("stock_id").agg(
+        pl.col("sub_industry").sort().str.join("、").alias("sub_industry")
+    )
+    return (
+        board.join(subs, on="stock_id", how="left")
+        .with_columns(
+            pl.col("sub_industry").fill_null(""),
+            pl.col("ret_pct").round(1),
+            pl.col("rs_pct").round(1),
+            pl.col("dist_ma60_pct").round(1),
+        )
+        .select(list(schema))
+    )

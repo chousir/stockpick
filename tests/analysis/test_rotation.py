@@ -296,3 +296,93 @@ def test_load_market_history_includes_otc_daily(tmp_path: Path):
     df = load_market_history(tmp_path, n_days=250)
     assert set(df["stock_id"].to_list()) == {"2330", "8299"}
     assert df.filter(pl.col("stock_id") == "8299")["volume"][0] == 3000
+
+
+# ─── F3 價格趨勢分數＋趨勢領頭板（規劃書 05 F3）──────────────────────────────
+
+
+def _trend_price_history(n_days: int = 70) -> pl.DataFrame:
+    """合成 70 日日線：記憶體雙漲（2337 每日 +1.5%→距季線 >40% 過熱、8299 +0.5%）、
+    IC設計雙跌（2454 −1%、3034 −0.5%）。"""
+    ds = _dates(n_days)
+    rows = []
+    series = {"2337": 1.015, "8299": 1.005, "2454": 0.99, "3034": 0.995}
+    for sid, g in series.items():
+        c = 100.0
+        for d in ds:
+            rows.append({"date": d, "stock_id": sid, "close": round(c, 4), "volume": 1_000_000})
+            c *= g
+    return pl.DataFrame(rows)
+
+
+def _trend_membership() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "sub_industry": ["記憶體", "記憶體", "IC設計", "IC設計"],
+            "stock_id": ["2337", "8299", "2454", "3034"],
+        }
+    )
+
+
+def test_trend_scores_price_evidence_orders_rising_above_falling():
+    from tw_screener.analysis.rotation import compute_trend_scores
+
+    members = _trend_membership()
+    px = _trend_price_history()
+    baskets = compute_subindustry_baskets(members, px)
+    out = compute_trend_scores(baskets, members, px)
+    assert out["sub_industry"].to_list()[0] == "記憶體"  # 漲勢族群分數第一
+    mem = out.filter(pl.col("sub_industry") == "記憶體").row(0, named=True)
+    ic = out.filter(pl.col("sub_industry") == "IC設計").row(0, named=True)
+    assert mem["trend_score"] > ic["trend_score"]
+    assert mem["trend_ma_state"] == "雙線上"
+    assert ic["trend_ma_state"] == "雙線下"
+    assert mem["above_ma60_breadth"] == 1.0  # 兩成員皆站上自身季線
+    assert ic["above_ma60_breadth"] == 0.0
+    assert mem["leader_stock_id"] == "2337"  # 日漲 1% 者為領頭
+
+
+def test_trend_scores_empty_inputs():
+    from tw_screener.analysis.rotation import compute_trend_scores
+
+    members, px = _trend_membership(), _trend_price_history()
+    assert compute_trend_scores(pl.DataFrame(), members, px).is_empty()
+    assert compute_trend_scores(_trend_price_history(), pl.DataFrame(), pl.DataFrame()).is_empty()
+
+
+def test_trend_leaders_rs_top_and_flags_annotated_not_dropped():
+    from tw_screener.analysis.rotation import compute_trend_leaders
+
+    members = _trend_membership()
+    px = _trend_price_history()
+    ds = sorted(px["date"].unique().to_list())
+    # 2337 外資買/投信賣 各 10,000 張/日 → 土洋對作；日漲 1% × 70 日 → 距季線遠 → 過熱
+    inst = pl.DataFrame(
+        {
+            "date": ds * 1,
+            "stock_id": ["2337"] * len(ds),
+            "foreign_net": [10_000_000] * len(ds),
+            "trust_net": [-10_000_000] * len(ds),
+        }
+    )
+    out = compute_trend_leaders(
+        members, px, inst, top_n=3, min_amount_million=1.0
+    )
+    assert out.height == 3
+    top = out.row(0, named=True)
+    assert top["stock_id"] == "2337"  # RS 第一
+    assert "過熱" in top["flags"] and "土洋對作" in top["flags"]  # 只標註、不剔除
+    assert top["sub_industry"] == "記憶體"
+    # 無法人資料 → 土洋欄如實缺、僅標過熱
+    out2 = compute_trend_leaders(members, px, pl.DataFrame(), top_n=3, min_amount_million=1.0)
+    assert "土洋對作" not in out2.row(0, named=True)["flags"]
+
+
+def test_trend_leaders_liquidity_filter():
+    from tw_screener.analysis.rotation import compute_trend_leaders
+
+    px = _trend_price_history()
+    # 全部成交額 ≈ 1~2 億/日；門檻拉到 10 億 → 全被濾、空板
+    out = compute_trend_leaders(_trend_membership(), px, pl.DataFrame(), min_amount_million=1000.0)
+    assert out.is_empty()
+    assert "stock_id" in out.columns  # 空板也帶 schema

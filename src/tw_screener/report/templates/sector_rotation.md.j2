@@ -16,14 +16,32 @@
 > ΔRank 無上週 sector_rotation.csv 快照（首週正常），本週標 `—`。
 {% endif %}
 
-## 1. 資金流向排名（前 {{ top_n }}・按 {{ lw }} 日法人淨流）
+## 1. 輪動排名（前 {{ top_n }}・按{{ rank_label }}）
 
+{% if has_trend -%}
+| # | 次產業 | 檔數 | 趨勢分 | 價格證據（均線態・站季線比・領頭RS） | {{ lw }}日淨流(張) | {{ s }}日淨流(張) | breadth | 5日籃子 | 距低 | 象限 | 訊號 | ΔRank |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+{% for r in top_rows -%}
+| {{ r.radar_rank }} | {{ r.sub_industry }} | {{ r.members }} | {{ "%.1f"|format(r.trend_score) if r.trend_score is not none else "—" }} | {{ r.trend_ma_state or "—" }}・{{ pct(r.above_ma60_breadth * 100, 0) if r.above_ma60_breadth is not none else "—" }}・{{ r.leader_stock_id or "" }} {{ "%+.1f%%"|format(r.leader_rs_pct) if r.leader_rs_pct is not none else "—" }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ pct(r.above_low_pct) }} | {{ r.quadrant }}{{ turn(r) }} | {{ marks(r) }} | {{ delta(r) }} |
+{% endfor %}
+> **F3 主鍵＝價格趨勢分數**（籃子等權指數 vs 自身月/季線＋成員站上自身季線比例＋領頭股 RS 跨次產業百分位；權重 settings.rotation.trend_score）。**{{ lw }} 日流量降為確認欄**（§1.5#2：流量排序天然落後）。**仲裁**：本表（全市場）與 group_analysis 2.8 雷達（篩中股）矛盾時，以**價格趨勢分數**裁決（讀法見 docs/11）。
+{%- else -%}
 | # | 次產業 | 檔數 | {{ lw }}日淨流(張) | {{ s }}日淨流(張) | 動能(張) | breadth | 力度 | 5日籃子 | 距低 | 象限 | 訊號 | ΔRank |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for r in top_rows -%}
 | {{ r.radar_rank }} | {{ r.sub_industry }} | {{ r.members }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ lots(r.flow_momentum_lots) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ conc(r) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ pct(r.above_low_pct) }} | {{ r.quadrant }}{{ turn(r) }} | {{ marks(r) }} | {{ delta(r) }} |
 {% endfor %}
+{%- endif %}
+{% if leader_rows %}
+## 1.5 趨勢領頭板（全市場 RS 前 {{ leader_rows|length }}・過熱/土洋對作不剔除只標註）
 
+| # | 股票 | 次產業 | 20日報酬 | RS | 距季線 | 旗標 |
+|---|---|---|---|---|---|---|
+{% for r in leader_rows -%}
+| {{ loop.index }} | {{ r.stock_id }} {{ r.name }} | {{ r.sub_industry or "—" }} | {{ pct(r.ret_pct) }} | {{ "%+.1f%%"|format(r.rs_pct) }} | {{ pct(r.dist_ma60_pct) }} | {{ r.flags or "—" }} |
+{% endfor %}
+> **定位（F3）**：解「找不到趨勢標的」＋給 **F2 被擋的延伸股（距季線 >+15% 不得入核心）合法出口**。旗標**只標註、不剔除**（旗標命中率由 F1-PO4 偽陰性帳持續驗證）。**風險預算**：本板一律**部位減半、移動停損**（突破頸線/前波高失守，非 MA60）、走買強勢階梯；帶 `過熱`/`土洋對作` 再降一級。**這是參與管道、不是買進清單**——個股仍須過 docs/11 排雷＋精選判讀。
+{% endif %}
 ## 2. 出貨警訊（資金流出 × 位階已高）
 
 {% if outflow_rows -%}

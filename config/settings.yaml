@@ -122,6 +122,7 @@ report:
       - group_analysis.md
       - sector_rotation.md
       - sector_rotation.csv
+      - trend_leaders.csv      # F3 趨勢領頭板（sector rotation 一併產出）
       - theme_strength.csv
       - cp_candidates.md
     analyst:                      # 分析師產物——往週缺＝斷供 WARNING（W26 型）；最新週缺＝提醒
@@ -173,7 +174,20 @@ rotation:
   min_members: 5             # 籃子最小成員數（小於此不列排名，避免單檔灌水）
   clip_daily_return_pct: 10.0  # 籃子個股日報酬夾限＝台股漲跌停；防減資/分割未還原假跳動毒化指數
   top_n: 10                  # 報表/CLI 顯示前 N 名
-  rank_by: net_flow_20d      # 排名鍵（ΔRank 基準；R2 校準後可能改）
+  rank_by: trend_score       # 排名鍵（ΔRank 基準）。F3 改價格趨勢分數（價格證據優先）——
+                             # 舊值 net_flow_20d（20 日流量天然落後，§1.5#2）降為確認欄
+  trend_score:               # 規劃書 05 F3：價格證據優先的族群趨勢分數（0-100，主排序鍵）
+    ma_short: 20             # 籃子指數短均線（月線）
+    ma_long: 60              # 籃子指數長均線（季線；成員站上比例亦用此窗）
+    rs_window: 20            # 領頭股 RS 視窗（交易日；報酬 − 全市場中位）
+    weights:                 # 三成分權重（自動正規化）
+      basket_ma: 0.40        # 籃子等權指數 vs 自身月/季線
+      member_breadth: 0.35   # 成員站上自身季線比例
+      leader_rs: 0.25        # 領頭股 RS 跨次產業百分位
+  leaders:                   # 規劃書 05 F3：趨勢領頭板（全市場 RS 前 N；過熱/土洋對作只標註不剔除）
+    top_n: 15
+    rs_window: 20
+    min_amount_million: 100  # 近 20 日均成交額門檻（百萬；同 propicks 低流動線）——妖股不入板
   audit_lookback_days: 20    # sector universe --audit：近 N 日無日線收盤＝無價成員清查視窗
   quadrant:                  # R3 四象限：資金軸＝長窗淨流正負；價格軸＝籃子位階
     position_window: 60      # 位階回看（交易日）
