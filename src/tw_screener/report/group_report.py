@@ -646,11 +646,16 @@ def _build_enriched_rows(
     valuation_map: dict | None = None,
     big_holder_map: dict | None = None,
     margin_map: dict | None = None,
+    near_flow_cfg: dict | None = None,
 ) -> list[dict]:
-    """組「每檔 × 技術/籌碼/估值/基本面 + flags」列（candidates / 庫存 / 觀察 共用）。"""
+    """組「每檔 × 技術/籌碼/估值/基本面 + flags」列（candidates / 庫存 / 觀察 共用）。
+
+    near_flow_cfg（F5）：近端籌碼揭露欄門檻（settings.near_flow）；None＝欄位仍輸出、
+    用預設門檻。flow_state/near_share_5d_pct/risk_kind 為**純揭露非 gate**（§1.4）。
+    """
     if members.is_empty():
         return []
-    from tw_screener.analysis.grouping import rank_themes
+    from tw_screener.analysis.grouping import classify_risk_kind, near_flow_state, rank_themes
 
     themes_long = themes_long if themes_long is not None else pl.DataFrame()
     ranked = rank_themes(members, themes_long)
@@ -686,6 +691,12 @@ def _build_enriched_rows(
     cross_rel_pct = float(fc.get("cross_trade_rel_pct", 4))  # 弱邊張數須達近 20 日總量此% 才算對作
     rally = float(fc.get("strong_rally_pct", 15))
     strong_leader_yoy = float(fc.get("strong_leader_yoy_pct", 20))
+    nf = near_flow_cfg or {}
+    nf_min_shares = float(nf.get("min_lots", 1000)) * 1000.0  # 張 → 股
+    nf_stall = float(nf.get("stall_share_pct", 5))
+    nf_accel = float(nf.get("accel_share_pct", 40))
+    nf_ext = float(nf.get("risk_ext_ma60_pct", 15))
+    nf_down = float(nf.get("risk_down_5d_pct", -5))
 
     def _num(v: object, nd: int = 1) -> float | None:
         if v is None or (isinstance(v, float) and v != v):
@@ -789,6 +800,18 @@ def _build_enriched_rows(
             foreign_5d_lots = foreign_10d_lots = None
             trust_5d_lots = trust_10d_lots = inst_5d_lots = inst_10d_lots = None
 
+        # F5（沿舊 06 NF1）：近端籌碼狀態＋三風險分類（純揭露非 gate，§1.4 佔比單獨無判別力）
+        if inst_missing:
+            flow_state, near_share = None, None
+        else:
+            flow_state, near_share = near_flow_state(
+                fn, _num(r.get("foreign_net_5d"), 0), tn, _num(r.get("trust_net_5d"), 0),
+                min_shares=nf_min_shares, stall_share_pct=nf_stall, accel_share_pct=nf_accel,
+            )
+        risk_kind = classify_risk_kind(
+            flow_state, m60, m20, mom, ext_ma60_pct=nf_ext, down_5d_pct=nf_down
+        )
+
         flags: list[str] = []
         if m60 is not None and m60 > overheated:
             # 距季線高：區分「強勢領頭（順勢分批，不預設踢核心）」與「過熱（追高風險）」。
@@ -880,6 +903,15 @@ def _build_enriched_rows(
                 "short_balance_lots": short_balance_lots,
                 "short_chg_lots": short_chg_lots,
                 "margin_to_vol": margin_to_vol,
+                # F5 揭露欄（沿舊 06 NF1＋07 TR1）：近端籌碼狀態＋回踩品質軌跡——
+                # 純揭露非 gate（§1.4 近端佔比單獨無判別力）；軌跡欄缺歷史＝null 不臆造
+                "flow_state": flow_state,          # 轉賣/熄火/加速/平穩(主體)；null＝無大額買超邊
+                "near_share_5d_pct": near_share,   # 近5日佔20日累計%（台新新光金 2% 型）
+                "risk_kind": risk_kind,            # 價格已跌＞籌碼熄火＞價格延伸（三種動作不同）
+                "down_days_streak": r.get("down_days_streak"),
+                "pullback_vol_ratio": _num(r.get("pullback_vol_ratio"), 2),
+                "above_ma20_days": r.get("above_ma20_days"),
+                "pullback_quality": r.get("pullback_quality"),  # 止穩/觀察/破線（啟發式輔助）
                 "flags": ";".join(flags),
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
             }
@@ -898,6 +930,7 @@ def write_candidates_enriched_csv(
     valuation_map: dict | None = None,
     big_holder_map: dict | None = None,
     margin_map: dict | None = None,
+    near_flow_cfg: dict | None = None,
 ) -> list[dict]:
     """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
 
@@ -910,6 +943,7 @@ def write_candidates_enriched_csv(
     rows = _build_enriched_rows(
         members, themes_long, screener_results, flags_cfg, rev_yoy_map,
         fundamentals_map, valuation_map, big_holder_map, margin_map,
+        near_flow_cfg=near_flow_cfg,
     )
     if not rows:
         return []
@@ -988,6 +1022,7 @@ def write_named_list_csv(
     margin_map: dict | None = None,
     holdings_map: dict | None = None,
     canonical_rows: dict[str, dict] | None = None,
+    near_flow_cfg: dict | None = None,
 ) -> int:
     """輸出庫存/觀察清單 enriched CSV（同 candidates 欄位）。
 
@@ -999,6 +1034,7 @@ def write_named_list_csv(
     rows = _build_enriched_rows(
         members, themes_long, screener_results, flags_cfg, rev_yoy_map,
         fundamentals_map, valuation_map, big_holder_map, margin_map,
+        near_flow_cfg=near_flow_cfg,
     )
     if not rows:
         return 0

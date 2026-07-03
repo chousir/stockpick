@@ -178,6 +178,78 @@ def _sigmoid(x: float) -> float:
     return z / (1.0 + z)
 
 
+def near_flow_state(
+    foreign_20d: float | None,
+    foreign_5d: float | None,
+    trust_20d: float | None,
+    trust_5d: float | None,
+    min_shares: float = 1_000_000.0,
+    stall_share_pct: float = 5.0,
+    accel_share_pct: float = 40.0,
+) -> tuple[str | None, float | None]:
+    """F5（沿舊 06 NF1）：近端籌碼狀態旗標——把「拆窗」自動化，純揭露非 gate。
+
+    對外資/投信各評「20 日大幅買超邊」的近 5 日佔比（share＝5d/20d×100；均勻≈25%）：
+    5d 轉負＝轉賣、share < stall＝熄火（台新新光金 2% 型）、≥ accel＝加速、其餘平穩。
+    兩邊都夠大時取較警示者（轉賣＞熄火＞加速＞平穩）。20 日非大幅正（含賣超主導、
+    量小）＝無「前段買很兇」可揭露 → (None, None)。
+
+    §1.4 實證：近端佔比**單獨無判別力**（聯詠近端在賣仍 +13.7%、華碩近端仍熱也賠）
+    ——本欄只免除人工拆窗、標出「20 日累計蓋住的近端狀態」，不得當排序主判或 gate。
+
+    Returns:
+        (state, share_pct)：state ∈ {"轉賣(外資)", "熄火(投信)", ...} 帶主體標示。
+    """
+    order = {"轉賣": 0, "熄火": 1, "加速": 2, "平穩": 3}
+    sides: list[tuple[str, float, str]] = []
+    for s20, s5, label in ((foreign_20d, foreign_5d, "外資"), (trust_20d, trust_5d, "投信")):
+        if s20 is None or s5 is None or s20 < min_shares:
+            continue
+        share = s5 / s20 * 100
+        if s5 < 0:
+            state = "轉賣"
+        elif share < stall_share_pct:
+            state = "熄火"
+        elif share >= accel_share_pct:
+            state = "加速"
+        else:
+            state = "平穩"
+        sides.append((state, share, label))
+    if not sides:
+        return None, None
+    sides.sort(key=lambda x: order[x[0]])
+    state, share, label = sides[0]
+    return f"{state}({label})", round(share, 1)
+
+
+def classify_risk_kind(
+    flow_state: str | None,
+    ma60_dist_pct: float | None,
+    ma20_dist_pct: float | None,
+    momentum_5d_pct: float | None,
+    ext_ma60_pct: float = 15.0,
+    down_5d_pct: float = -5.0,
+) -> str:
+    """F5（沿舊 06 NF1）：三風險分類——同是「近端有狀況」但要三種動作，先替人分類。
+
+    價格已跌（5 日 < 門檻且破月線＝直接剔除級）＞ 籌碼熄火（轉賣/熄火＝降級等訊號）
+    ＞ 價格延伸（距季線 > 門檻＝買強勢階梯控小；門檻預設對齊 F2 核心位階紀律 +15%）。
+    皆非 → 空字串。純分類揭露、不改變入選（判斷權在人）。
+    """
+    if (
+        momentum_5d_pct is not None
+        and momentum_5d_pct < down_5d_pct
+        and ma20_dist_pct is not None
+        and ma20_dist_pct < 0
+    ):
+        return "價格已跌"
+    if flow_state is not None and ("熄火" in flow_state or "轉賣" in flow_state):
+        return "籌碼熄火"
+    if ma60_dist_pct is not None and ma60_dist_pct > ext_ma60_pct:
+        return "價格延伸"
+    return ""
+
+
 def group_stocks(
     screener_results: dict[str, pl.DataFrame],
     price_history: pl.DataFrame,
@@ -190,6 +262,7 @@ def group_stocks(
     g_pullback: dict[str, float] | None = None,
     vol_lookback: int = 20,
     dividends: pl.DataFrame | None = None,
+    trajectory_cfg: dict | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
     Group screened stocks by industry and compute group strength scores (動能主導).
@@ -404,6 +477,15 @@ def group_stocks(
         price_history, stock_df, slope_window=int(g_params["ma60_slope_window"])
     )
     stock_df = stock_df.join(ma_dist_df, on="stock_id", how="left")
+
+    # F5（沿舊 07 TR1）：回踩品質軌跡欄——連跌天數/回踩量比/站上月線天數/止穩｜觀察｜破線。
+    # 歷史不足（新股/上櫃缺口）→ 該檔 null 不臆造；trajectory_cfg=None＝不啟用（向後相容）。
+    if trajectory_cfg is not None and not price_history.is_empty():
+        from tw_screener.analysis.trajectory import compute_trajectories
+
+        traj = compute_trajectories(price_history, volume_history, trajectory_cfg)
+        if not traj.is_empty():
+            stock_df = stock_df.join(traj, on="stock_id", how="left")
 
     # 量比（今日量 / 近 N 日均量）—— 需 ≥ 3 個歷史日才輸出有效值
     if (
