@@ -630,7 +630,7 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **接線**：`fetch-twse` 末段多抓 MI_MARGN（`make week` 自動含）；`group_report._build_enriched_rows` 經 `margin_map` 加 6 欄（margin_balance_lots/margin_chg_lots/margin_chg_5d_lots/short_balance_lots/short_chg_lots/margin_to_vol）＋併入 `_CANONICAL_REUSE_FIELDS`（三 CSV 一致）；cli `analysis group` 純讀 `load_margin_signals` 建 map。
 - **個股報告**：`data_fetcher._format_margin_summary`（餘額/增減/近5日/券資比）進 bundle；builder inline draft＋j2 prompt 加「融資融券（上市 MI_MARGN）」區塊；docs/11 補欄說明＋讀法（融資增減＝散戶槓桿；融資增+價漲＝追價過熱、融資減+價漲＝融資減肥籌碼洗清偏多）。
 - **僅上市**：MI_MARGN 為上市；**上櫃融資融券為缺口、登記 D6 backlog**（候選宇宙約半數上櫃股 margin 欄一律 null，誠實非 0）。實測 OpenAPI 為乾淨 per-stock JSON，無 legacy CSV 的「資券當沖/鉅額」特殊列、無需過濾。
-- **舊版 margin 快取地雷（實作中發現）**：`data/cache/twse/` 有 **497 個某次廢棄嘗試遺留的 margin 快取**——舊 5 欄 schema（`margin_bal`/`short_bal`）的上市 `margin_*.parquet`（251 個）＋上櫃 `margin_otc_*.parquet`（246 個）。`load_margin_signals` 已硬化：**排除 `margin_otc_` 前綴＋只讀含本版 `_MARGIN_SCHEMA` 欄的檔**（舊 5 欄檔在 select_recent 的 40 日緩衝窗內會被撈到、直接 concat 會 ShapeError）。未刪舊檔（非本次建立）；使用者可日後 `data prune-cache` 清。
+- **舊版 margin 快取地雷（實作中發現）**：`data/cache/twse/` 有 **497 個某次廢棄嘗試遺留的 margin 快取**——舊 5 欄 schema（`margin_bal`/`short_bal`）的上市 `margin_*.parquet`（251 個）＋上櫃 `margin_otc_*.parquet`（246 個）。`load_margin_signals` 已硬化：**排除 `margin_otc_` 前綴＋只讀含本版 `_MARGIN_SCHEMA` 欄的檔**（舊 5 欄檔在 select_recent 的 40 日緩衝窗內會被撈到、直接 concat 會 ShapeError）。未刪舊檔（非本次建立）。**2026-07-04 M-Rev2 已按 schema 精準盤點後刪除全部 496 個孤兒**（新版檔 3 個保留、loader 驗證正常）。
 - 驗收：`make test` **571 綠**（+7 margin：parse 增減/單位/空輸入/safe_int/chg_5d/不足歷史/無快取/略過舊 schema）、ruff/mypy baseline 零淨增；`_parse_margin` 對 2330 算出 融資 −681 張、融券 −3 張。
   **注意：W26+ `make week` 重跑才把 margin 欄寫進 reports；`margin_chg_5d` 需累積 6 個交易日快取才有值（初期 null）。**
 

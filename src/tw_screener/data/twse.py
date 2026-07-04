@@ -563,7 +563,8 @@ def _parse_tpex_institutional(data: list[dict[str, Any]]) -> pl.DataFrame:
             trade_date = _roc_compact_to_date(str(r["Date"]))
             foreign_net = _net(
                 r,
-                "Foreign Investors include Mainland Area Investors (Foreign Dealers excluded)-Difference",
+                "Foreign Investors include Mainland Area Investors "
+                "(Foreign Dealers excluded)-Difference",
                 "Foreign_Investors_Difference",
             )
             trust_net = _net(

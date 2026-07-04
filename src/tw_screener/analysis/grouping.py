@@ -286,7 +286,8 @@ def group_stocks(
               entry_rate / momentum_5d（族群中位數）/ up_count / momentum_5d_days_used /
               rs_avg(alias) / inst_buy_count / inst_score / count_{sid} / score
     - enriched_stocks_df: per-stock data with industry, rs (= n_day_return), strategy flags,
-        momentum_5d, momentum_days_used, inst_net（三大法人總和）, foreign_net（外資）, trust_net（投信）
+        momentum_5d, momentum_days_used, inst_net（三大法人總和）,
+        foreign_net（外資）, trust_net（投信）
     """
     if weights is None:
         weights = _DEFAULT_WEIGHTS
@@ -564,7 +565,9 @@ def group_stocks(
     dropped_noise = int((stock_df["strategy_count"] == 0).sum())
     if dropped_noise:
         stock_df = stock_df.filter(pl.col("strategy_count") > 0)
-        logger.info("group_stocks: 排除 {} 檔無有效策略命中的宇宙雜訊（多為 G 未過濾股）", dropped_noise)
+        logger.info(
+            "group_stocks: 排除 {} 檔無有效策略命中的宇宙雜訊（多為 G 未過濾股）", dropped_noise
+        )
 
     # Join with industry classification
     if industry_df is not None and not industry_df.is_empty():

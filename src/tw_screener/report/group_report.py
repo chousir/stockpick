@@ -604,7 +604,8 @@ def render_group_report(
     dividend_events: 候選股未來窗內除權息（filter_dividend_calendar 的回傳）；None/空則不渲染該段。
     themes_long: load_themes() 的 (stock_id, theme, kind) long table；None/空則主題排名留空。
     regime: regime.describe_regime() 的顯示 dict（規劃書 03 V2）；None 則不渲染大盤姿態段。
-    portfolio: portfolio.describe_portfolio_check() 的顯示 dict（規劃書 03 V3）；None 則不渲染組合體檢段。
+    portfolio: portfolio.describe_portfolio_check() 的顯示 dict（規劃書 03 V3）；
+        None 則不渲染組合體檢段。
     """
     context = _build_context(
         groups,
