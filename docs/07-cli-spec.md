@@ -14,6 +14,9 @@
 ## Makefile 指令總覽
 
 ```makefile
+# ─── 主要（每週真的在用的三個；其餘進階，help 不列）──
+help:            ## 列主要三指令（裸打 make 即顯示；week / pick-outcome / dash-dev）
+
 # ─── 環境 ───────────────────────────────────────
 init:            ## 初始化資料夾結構（首次 clone 後跑）
 sync:            ## uv sync 安裝/更新依賴
@@ -24,7 +27,6 @@ deep-clean:      ## ⚠️ 清掉所有 data/cache 和 data/raw（保留 reports
 # ─── 開發 ───────────────────────────────────────
 test:            ## 跑全部測試（離線，fixtures/合成資料）
 test-unit:       ## 排除 integration 標記
-test-integration: ## 跑整合測試（會打網，慢，注意 rate limit）
 lint:            ## ruff check
 typecheck:       ## mypy
 fmt:             ## ruff format
@@ -35,7 +37,6 @@ fetch-stock STOCK_ID=2330:        ## 抓單檔個股完整資料
 fetch-tdcc:      ## TDCC 集保戶股權分散表（大戶持股比，規劃書 02 D3）
 fetch-candidates-history:         ## 對本週入選股補抓 STOCK_DAY 歷史（MONTHS=13 預設）
 fetch-institutional-history:      ## 回補近 N 日上市＋上櫃三大法人（DAYS=20 預設）
-backfill-otc-history:             ## ⏳ 一次性回補上櫃次產業成員日線（可中斷續跑）
 backfill-universe-history:        ## ⏳ 一次性回補全部次產業成員日線（~1500 檔，8-12 小時）
 build-themes:    ## 爬 Yahoo 概念股 merge 進 config/concepts.yaml（DRY=1 預演）
 
@@ -47,7 +48,6 @@ doctor:          ## Goodinfo 健康檢查（被擋/改版→exit 1；規劃書 0
 
 # ─── 分析 ───────────────────────────────────────
 group:           ## 族群分析 → group_analysis.md ＋ candidates_enriched.csv
-leaders:         ## 只跑領頭羊判斷
 audit-concepts:  ## 清查 concepts.yaml 無價成員（只報告不改檔）
 
 # ─── 報告 ───────────────────────────────────────

@@ -153,9 +153,18 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 
 ## 指令總覽
 
+### 主要（每週實際用的三個；`make help` 只列這三個）
+
 | 指令                                                     | 做什麼                                               | 何時用                               |
 | -------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------ |
 | `make week GROUP=defg`                                 | 完整週流程 ①~⑩                                     | **每週一次（主入口）**         |
+| `make pick-outcome`                                    | pick 閉環：分層命中率×α（vs 大盤＋族群）＋偽陰性帳 | 每季（pick 底帳變厚後）              |
+| `make dash-dev`                                        | 起 dashboard 開發伺服器（FastAPI:8000＋Vite:5173）   | 視覺化瀏覽本週報告（§13）           |
+
+### 進階（偶爾手動跑；均保留可用，`make help` 不列）
+
+| 指令                                                     | 做什麼                                               | 何時用                               |
+| -------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------ |
 | `make weekend GROUP=defg`                              | week ＋ git commit/push 結果                         | 想自動存檔時                         |
 | `make rotation`                                        | 次產業資金輪動報表（單獨重跑）                       | 盤後想單看資金流向                   |
 | `make group`                                           | 族群分析（單獨重跑，吃既有 CSV）                     | 改 concepts.yaml 後重產報告          |
@@ -164,7 +173,6 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make screen-dry STRATEGY=…`                          | 只組 Goodinfo URL 不打網                             | 驗證 YAML 條件                       |
 | `make rotation-calib`                                  | ★ 起漲點回測校準（研究軌）                          | 每季重校準訊號門檻                   |
 | `make cp-value-valuation`                              | 個股相對 PE 估值表（次產業橫斷面）                   | 估值位階單獨重看                     |
-| `make pick-outcome`                                    | pick 閉環：分層命中率×α（vs 大盤＋族群）＋偽陰性帳 | 每季（pick 底帳變厚後）              |
 | `uv run tw-screener picks record …`                   | 把當週 pick／剔除寫進 picks.csv／excluded.csv 底帳   | 每週 picks.md 定稿後                 |
 | `uv run tw-screener picks outcome --diff`              | pick-outcome ＋翻轉解剖（週對週降級＋翻轉前訊號）    | 個案覆盤                             |
 | `make backtest-strategies`                             | 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤            | 每季（規劃書 03 V1）                 |
@@ -182,7 +190,6 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make audit-concepts`                                  | 清查 concepts.yaml 無價成員（不改檔）                | 久久檢查興櫃/下市/誤標               |
 | `bash scripts/fetch_cron.sh`                           | 盤後抓全市場資料（cron 用，見 §12）                 | 每交易日（排程或手動）               |
 | `make dash-install`                                    | 裝 dashboard 前後端依賴（uv＋npm，首次一次）         | 第一次用儀表板                       |
-| `make dash-dev`                                        | 起 dashboard 開發伺服器（FastAPI:8000＋Vite:5173）   | 視覺化瀏覽本週報告（§13）           |
 | `make dash-build && make dash`                         | build 前端＋單一 FastAPI 服務（:8000）               | 自用正式跑、不需 Vite                |
 | `make test` / `make lint` / `make typecheck`       | 測試 / ruff / mypy                                   | 開發時                               |
 | `uv run tw-screener sector universe --list`            | 列出次產業宇宙與成員                                 | 檢查 concepts.yaml 覆蓋              |
