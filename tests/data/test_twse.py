@@ -1203,7 +1203,8 @@ def test_parse_tpex_institutional_basic():
             "Date": "1150520",
             "SecuritiesCompanyCode": "6488",
             "CompanyName": "環球晶",
-            "Foreign Investors include Mainland Area Investors (Foreign Dealers excluded)-Difference": "500000",
+            "Foreign Investors include Mainland Area Investors "
+            "(Foreign Dealers excluded)-Difference": "500000",
             "SecuritiesInvestmentTrustCompanies-Difference": "100000",
             "Dealers-Difference": "-50000",
             "TotalDifference": "550000",
@@ -1212,7 +1213,8 @@ def test_parse_tpex_institutional_basic():
             "Date": "1150520",
             "SecuritiesCompanyCode": "3105",
             "CompanyName": "穩懋",
-            "Foreign Investors include Mainland Area Investors (Foreign Dealers excluded)-Difference": "-200000",
+            "Foreign Investors include Mainland Area Investors "
+            "(Foreign Dealers excluded)-Difference": "-200000",
             "SecuritiesInvestmentTrustCompanies-Difference": "0",
             "Dealers-Difference": "0",
             "TotalDifference": "-200000",
@@ -1247,7 +1249,8 @@ def test_fetch_otc_institutional_saves_cache(tmp_path: Path, monkeypatch):
             "Date": "1150519",
             "SecuritiesCompanyCode": "6488",
             "CompanyName": "環球晶",
-            "Foreign Investors include Mainland Area Investors (Foreign Dealers excluded)-Difference": "200000",
+            "Foreign Investors include Mainland Area Investors "
+            "(Foreign Dealers excluded)-Difference": "200000",
             "SecuritiesInvestmentTrustCompanies-Difference": "50000",
             "Dealers-Difference": "0",
             "TotalDifference": "250000",

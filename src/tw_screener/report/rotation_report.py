@@ -354,7 +354,11 @@ def render_rotation_report(
     }
     # A1：CP 候選＝正分（資金流入 × 仍有位階空間）取前 top_n，跨象限排序
     cp_rows = (
-        list(_rows(table.filter(pl.col("cp_score") > 0).sort("cp_score", descending=True).head(top_n)))
+        list(
+            _rows(
+                table.filter(pl.col("cp_score") > 0).sort("cp_score", descending=True).head(top_n)
+            )
+        )
         if "cp_score" in table.columns
         else []
     )

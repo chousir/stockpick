@@ -510,12 +510,15 @@ def test_compute_rs_partial_data():
 # ─── 量比 ──────────────────────────────────────────────────────────────────────
 
 
-def _make_volume_history(stock_ids: list[str], dates_per_stock: list, volumes: list) -> pl.DataFrame:
-    from datetime import date as _date
+def _make_volume_history(
+    stock_ids: list[str], dates_per_stock: list, volumes: list
+) -> pl.DataFrame:
     rows = []
     for sid, d, v in zip(stock_ids, dates_per_stock, volumes):
         rows.append({"stock_id": sid, "date": d, "trade_volume": v})
-    return pl.DataFrame(rows, schema={"stock_id": pl.Utf8, "date": pl.Date, "trade_volume": pl.Int64})
+    return pl.DataFrame(
+        rows, schema={"stock_id": pl.Utf8, "date": pl.Date, "trade_volume": pl.Int64}
+    )
 
 
 def test_group_stocks_vol_ratio_computed():
@@ -699,7 +702,8 @@ def test_group_stocks_ma_no_history():
 
 # ─── 策略 G：MA60 斜率 + 拉回 setup 過濾 ──────────────────────────────────────
 
-from datetime import date as _date, timedelta as _timedelta  # noqa: E402
+from datetime import date as _date  # noqa: E402
+from datetime import timedelta as _timedelta  # noqa: E402
 
 # 80 日：先漲 70 日（100→169）再拉回 10 日（→149）。
 # MA60_today=146.75、MA60_10前=139.50 → 斜率 +5.2%；close 149 → 距季線 +1.53%（帶內）
