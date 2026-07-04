@@ -361,7 +361,7 @@ def data_fetch_candidates_history(
     for csv_file in csv_files:
         try:
             df = _pl.read_csv(str(csv_file), infer_schema_length=1000)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — 單檔失敗不該中斷整批
             console.print(f"[yellow]讀取 {csv_file.name} 失敗：{exc}[/yellow]")
             continue
         for sid in df["stock_id"].cast(_pl.Utf8).to_list():
@@ -413,7 +413,7 @@ def data_fetch_candidates_history(
                 failures += 1
             else:
                 fetched += 1
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — 單檔失敗計入 failures、不中斷整批
             failures += 1
             console.print(f"  [yellow]{sid}: {exc}[/yellow]")
 

@@ -37,7 +37,7 @@ def derive_week_tag(settings_path: Path = Path("config/settings.yaml")) -> str:
     try:
         client = create_client(settings_path)
         td = client.latest_trading_date()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — 取交易日失敗 fallback 今日
         logger.warning("derive_week_tag fallback to today: {}", exc)
         td = None
     return (td or date.today()).strftime("%Y-W%V")
@@ -68,7 +68,7 @@ class ScreenerRunner:
             try:
                 client = create_client(self._settings_path)
                 self._trading_date = client.latest_trading_date() or date.today()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — 取交易日失敗 fallback 今日
                 logger.warning("_resolve_trading_date fallback to today: {}", exc)
                 self._trading_date = date.today()
         return self._trading_date

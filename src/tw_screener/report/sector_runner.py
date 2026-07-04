@@ -5,6 +5,7 @@ universe / flows / rotation / calibrate 四命令的資料載入與報表產出�
 """
 
 from pathlib import Path
+from typing import Any, cast
 
 import typer
 from rich.console import Console
@@ -184,7 +185,7 @@ def run_sector_flows(week: str, dry: bool, settings: Path) -> None:
         long_window=long_w,
     )
     ranked = rank_flows(flows, by=rank_by, min_members=min_members)
-    latest_date = flows["date"].max()
+    latest_date = str(flows["date"].max())
     console.print(
         f"[bold]資金流向排名（{latest_date}・排名鍵 {rank_by}・籃子 ≥{min_members} 檔）[/bold]"
     )
@@ -324,9 +325,9 @@ def run_sector_rotation(top: int | None, settings: Path) -> None:
     holdings_ids = list(read_holdings_csv(wl_dir / "holdings.csv").keys())
     watch_ids = read_watchlist_csv(wl_dir / "watchlist.csv")
     hit_ids: list[str] = []
-    for f in sorted((reports_dir / week_tag).glob("screen_result_*.csv")):
+    for csv_path in sorted((reports_dir / week_tag).glob("screen_result_*.csv")):
         try:
-            df = pl.read_csv(f, infer_schema_length=0)
+            df = pl.read_csv(csv_path, infer_schema_length=0)
             if "stock_id" in df.columns:
                 hit_ids.extend(str(s) for s in df["stock_id"].to_list() if s)
         except Exception:  # noqa: BLE001 — 壞 CSV 不擋疊圖
@@ -417,7 +418,7 @@ def run_sector_calibrate(
         cfg = yaml.safe_load(f)
     rot = cfg.get("rotation", {})
     cal = rot.get("calibration", {})
-    p = {
+    p: dict[str, Any] = {
         "x_pct": x_pct if x_pct is not None else float(cal.get("breakout_x_pct", 10.0)),
         "n_days": n_days if n_days is not None else int(cal.get("breakout_n_days", 15)),
         "m_days": m_days if m_days is not None else int(cal.get("low_base_m_days", 60)),
@@ -486,7 +487,7 @@ def run_sector_calibrate(
         occupy_days=p["cooldown_days"],
     )
 
-    data_range = (market["date"].min(), market["date"].max())
+    data_range = (cast(_date, market["date"].min()), cast(_date, market["date"].max()))
     report = render_calibration_report(
         scan,
         episodes,
