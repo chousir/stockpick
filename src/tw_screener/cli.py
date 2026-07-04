@@ -10,6 +10,7 @@ from tw_screener import __version__
 from tw_screener.analysis.watchlist import (
     load_latest_screener_results,
 )
+from tw_screener.data.cache import find_latest
 
 if TYPE_CHECKING:
     import polars as pl
@@ -231,13 +232,13 @@ def data_backfill_otc_history(
     cache_dir = Path(_cfg["paths"]["cache_dir"]) / "twse"
 
     members = list_subindustries()
-    otc_files = sorted(cache_dir.glob("otc_industry_*.parquet"))
-    if members.is_empty() or not otc_files:
+    otc_latest = find_latest(cache_dir, "otc_industry_*.parquet", by="name")
+    if members.is_empty() or otc_latest is None:
         console.print("[red]缺 concepts.yaml 次產業或 otc_industry 快取[/red]")
         raise typer.Exit(1)
     import polars as _pl
 
-    otc_ids = set(_pl.read_parquet(otc_files[-1])["stock_id"].to_list())
+    otc_ids = set(_pl.read_parquet(otc_latest)["stock_id"].to_list())
     targets = sorted(set(members["stock_id"].to_list()) & otc_ids)
     if limit > 0:
         targets = targets[:limit]

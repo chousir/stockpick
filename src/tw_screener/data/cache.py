@@ -128,9 +128,17 @@ def load_parquet(path: Path) -> pl.DataFrame:
     return pl.read_parquet(path)
 
 
-def find_latest(directory: Path, pattern: str) -> Path | None:
-    """在 directory 找符合 pattern 的最新檔案（依修改時間降冪）。"""
+def find_latest(directory: Path, pattern: str, by: str = "mtime") -> Path | None:
+    """在 directory 找符合 pattern 的最新檔案；無則 None（全專案「取最新快取」單一入口）。
+
+    by="mtime"：修改時間最新（同家族被重抓時以抓取時間為準）；
+    by="name"：檔名排序最大（檔名含日期 token 的家族，日期即新舊，與重抓時間無關）。
+    """
     if not directory.exists():
         return None
-    files = sorted(directory.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
-    return files[0] if files else None
+    files = list(directory.glob(pattern))
+    if not files:
+        return None
+    if by == "name":
+        return sorted(files)[-1]
+    return max(files, key=lambda p: p.stat().st_mtime)

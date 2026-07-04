@@ -10,6 +10,7 @@ import yaml
 from loguru import logger
 
 from tw_screener.data.twse import create_client
+from tw_screener.screener.goodinfo.url_builder import stock_detail_url
 
 _STRATEGY_LABEL: dict[str, str] = {
     "a_breakout": "A（動能突破）",
@@ -285,7 +286,7 @@ def fetch_stock_bundle(stock_id: str, settings_path: Path) -> dict:
         "stock_id": stock_id,
         "name": name,
         "industry_name": industry_name,
-        "goodinfo_url": f"https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={stock_id}",
+        "goodinfo_url": stock_detail_url(stock_id),
         "price_history": price_history,
         "monthly_revenue": monthly_revenue,
         "institutional": institutional,

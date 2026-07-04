@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 
 from rich.console import Console
 
+from tw_screener.screener.goodinfo.url_builder import stock_detail_url
+
 if TYPE_CHECKING:
     import polars as pl
 
@@ -157,7 +159,7 @@ def enrich_named_list(
                 "volume_lots": round(float(d.get("trade_volume") or 0) / 1000.0),
                 "pe_ratio": None,
                 "pb_ratio": None,
-                "goodinfo_url": f"https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={sid}",
+                "goodinfo_url": stock_detail_url(sid),
                 "strategy_id": "_list",
             }
         )

@@ -25,7 +25,7 @@ import polars as pl
 import yaml
 from loguru import logger
 
-from tw_screener.data.cache import is_fresh, load_parquet, save_parquet
+from tw_screener.data.cache import find_latest, is_fresh, load_parquet, save_parquet
 
 # 集保戶股權分散表 CSV 的 6 個欄位（順序固定，避免 BOM/中文表頭編碼問題用位置覆寫）
 _COLUMNS = ["data_date", "stock_id", "level", "holders", "shares", "pct"]
@@ -212,17 +212,13 @@ class TDCCClient:
         if elapsed < self.interval_sec:
             time.sleep(self.interval_sec - elapsed)
 
-    def _latest_cache_file(self) -> Path | None:
-        files = sorted(self.cache_dir.glob("tdcc_distribution_*.parquet"))
-        return files[-1] if files else None
-
     def fetch_distribution(self, max_retries: int = 2) -> pl.DataFrame:
         """抓集保戶股權分散表，快取到 tdcc_distribution_{資料日}.parquet（逐週累積）。
 
         檔名錨點為資料內 max(資料日期)（TDCC 自帶週公布日），TTL 內同檔重跑讀快取。
         transient 失敗指數退避重試；最終失敗回空表（呼叫端降級）。
         """
-        latest = self._latest_cache_file()
+        latest = find_latest(self.cache_dir, "tdcc_distribution_*.parquet", by="name")
         if latest is not None and is_fresh(latest, self.ttl_hours):
             logger.info("命中快取 {}", latest)
             return load_parquet(latest)

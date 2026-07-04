@@ -6,13 +6,11 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from tw_screener.screener.goodinfo.url_builder import stock_detail_url
 from tw_screener.webapp import data_access as da
 from tw_screener.webapp.schemas import EnrichedRow, SectorRow, StockDetail
 
 router = APIRouter(prefix="/api/weeks", tags=["stock"])
-
-# CLAUDE.md Part 3.3 固定模板（CSV 無 goodinfo_url 時退此）
-_GOODINFO_TMPL = "https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={}"
 
 
 def _match_sectors(week: str, row: dict[str, Any]) -> list[SectorRow] | None:
@@ -40,7 +38,7 @@ def get_stock(week: str, stock_id: str) -> StockDetail:
     if merged is None:
         raise HTTPException(status_code=404, detail=f"本週查無個股 {stock_id}")
 
-    goodinfo = merged.get("goodinfo_url") or _GOODINFO_TMPL.format(stock_id)
+    goodinfo = merged.get("goodinfo_url") or stock_detail_url(stock_id)
     return StockDetail(
         stock_id=stock_id,
         week=week,
