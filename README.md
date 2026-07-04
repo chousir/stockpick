@@ -15,18 +15,23 @@
 ```
                     ┌─────────────── 資料層（全部本地 parquet 快取）───────────────┐
   TWSE/TPEX OpenAPI │ 日線 daily_*  法人 institutional_*(上市+上櫃)  月營收  產業別  官方估值比 valuation_ratios_* │
+                    │ 融資融券 margin_*(上市)  財報體質 fundamentals_*(負債比/ROE/純益率)   │
+  TDCC 集保         │ 大戶持股比 tdcc_*（≥400 張/≥1000 張＋WoW，規劃書 02 D3）        │
   Goodinfo（限速爬蟲）│ 策略篩選結果（YAML 條件 → URL → HTML → CSV）                │
   Yahoo 概念股       │ config/concepts.yaml 主題標籤（手標次產業＋自動爬概念股）      │
                     └──────────────────────────┬───────────────────────────────┘
                                                ▼
- make week GROUP=defg ＝ 一條指令串起以下步驟（含法人回補）：
+ make week GROUP=defg ＝ 一條指令串起以下十步：
  ① fetch-twse                日線/法人/月營收/產業別/官方估值比(PE/PB/殖利率) 增量入快取
- ② screen-all GROUP=defg     Goodinfo 跑 D/E/F/G 四策略 → screen_result_*.csv（純快照）
- ③ fetch-candidates-history  對命中股聯集補抓 13 個月個股日線（MA60/量比/動能用）
- ④ rotation                  ★ 次產業輪動（全市場宇宙・價格趨勢分數主鍵＋趨勢領頭板）→ sector_rotation.md/csv
- ⑤ cp-value-candidates       個股 CP 補漲候選＋C2 三重濾網 → cp_candidates.md（group Section 6 要讀）
- ⑥ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv（含揭露欄）
- ⑦ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
+ ② fetch-institutional-history 回補近 20 日上市＋上櫃法人（隔幾天沒跑也自動補齊）
+ ③ fetch-tdcc                集保大戶持股比（容錯：TDCC 異常不擋，大戶欄退化 null）
+ ④ doctor                    Goodinfo 健康檢查（被擋/改版早停，不讓 screen-all 白跑）
+ ⑤ screen-all GROUP=defg     Goodinfo 跑 D/E/F/G 四策略 → screen_result_*.csv（純快照）
+ ⑥ fetch-candidates-history  對命中股聯集補抓 13 個月個股日線（MA60/量比/動能用）
+ ⑦ rotation                  ★ 次產業輪動（全市場宇宙・價格趨勢分數主鍵＋趨勢領頭板）→ sector_rotation.md/csv
+ ⑧ cp-value-candidates       個股 CP 補漲候選＋C2 三重濾網 → cp_candidates.md（group Section 6 要讀）
+ ⑨ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv（含揭露欄）
+ ⑩ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
                                                ▼
  手動：把報告貼給 Claude（docs/11 prompt）→ picks.md（首屏 ≤60 行一頁決策卡；核心層距季線 >+15% 硬擋）
  手動：tw-screener picks record 把 pick／剔除寫進底帳 → 每季 make pick-outcome 算命中率×α（pick 閉環）
@@ -35,7 +40,7 @@
 
 兩個分析宇宙刻意不同、互相校驗：
 
-|      | ⑤ 族群分析（group_analysis.md）             | ④ 資金輪動（sector_rotation.md）          |
+|      | ⑨ 族群分析（group_analysis.md）             | ⑦ 資金輪動（sector_rotation.md）          |
 | ---- | -------------------------------------------- | ------------------------------------------ |
 | 宇宙 | **本週篩中的候選股**（精、有選擇偏誤） | **全次產業成員**（無偏、含未入選股） |
 | 鏡頭 | 漲幅/breadth/法人（候選股之間比強弱）        | 20 日法人資金流時間序列＋位階象限          |
@@ -82,7 +87,7 @@ watchlist/watchlist.csv    stock_id,note                     # 例：3035,等回
 
 ## 主流程：一條指令 `make week GROUP=defg`
 
-平時**只需要這一條**（整合最完整的主流程，含資料抓取＋法人回補＋篩選＋資金輪動＋個股 CP 補漲＋族群分析）：
+平時**只需要這一條**（整合最完整的主流程，含資料抓取＋法人回補＋集保大戶＋Goodinfo 健檢＋篩選＋資金輪動＋個股 CP 補漲＋族群分析＋產物檢查）：
 
 ```bash
 make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退役（規劃書 04 A4）
@@ -112,7 +117,7 @@ make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退�
 首次設定做完後，平時就這幾條（產出與貼 Claude 細節見上方「主流程」）：
 
 ```bash
-make week GROUP=defg                              # ①~⑦ 一鍵跑完（尾段 week-check 缺產物自動 WARNING）
+make week GROUP=defg                              # ①~⑩ 一鍵跑完（尾段 week-check 缺產物自動 WARNING）
 # 貼給 Claude 的 6 類檔（全在 reports/YYYY-Www/，詳見上方主流程表）：
 #   group_analysis.md  sector_rotation.md  candidates_enriched.csv
 #   cp_candidates.md  holdings/watchlist_enriched.csv  screen_result_*.csv
@@ -150,7 +155,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 
 | 指令                                                     | 做什麼                                               | 何時用                               |
 | -------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------ |
-| `make week GROUP=defg`                                 | 完整週流程 ①~⑥                                     | **每週一次（主入口）**         |
+| `make week GROUP=defg`                                 | 完整週流程 ①~⑩                                     | **每週一次（主入口）**         |
 | `make weekend GROUP=defg`                              | week ＋ git commit/push 結果                         | 想自動存檔時                         |
 | `make rotation`                                        | 次產業資金輪動報表（單獨重跑）                       | 盤後想單看資金流向                   |
 | `make group`                                           | 族群分析（單獨重跑，吃既有 CSV）                     | 改 concepts.yaml 後重產報告          |
@@ -158,14 +163,21 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make screen STRATEGY=d_quality_leader`                | 跑單一策略                                           | 調策略 YAML 後測試                   |
 | `make screen-dry STRATEGY=…`                          | 只組 Goodinfo URL 不打網                             | 驗證 YAML 條件                       |
 | `make rotation-calib`                                  | ★ 起漲點回測校準（研究軌）                          | 每季重校準訊號門檻                   |
+| `make cp-value-valuation`                              | 個股相對 PE 估值表（次產業橫斷面）                   | 估值位階單獨重看                     |
 | `make pick-outcome`                                    | pick 閉環：分層命中率×α（vs 大盤＋族群）＋偽陰性帳 | 每季（pick 底帳變厚後）              |
 | `uv run tw-screener picks record …`                   | 把當週 pick／剔除寫進 picks.csv／excluded.csv 底帳   | 每週 picks.md 定稿後                 |
 | `uv run tw-screener picks outcome --diff`              | pick-outcome ＋翻轉解剖（週對週降級＋翻轉前訊號）    | 個案覆盤                             |
 | `make backtest-strategies`                             | 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤            | 每季（規劃書 03 V1）                 |
+| `uv run tw-screener market regime`                     | 大盤 regime 姿態：進攻/中性/防禦（規劃書 03 V2）     | 盤後看大盤閘門                       |
+| `uv run tw-screener portfolio check`                   | 組合層風控體檢：標籤/因子簇集中度（規劃書 03 V3）    | 持股變動後                           |
 | `make week-check`                                      | 產物完整性檢查（week 已內含，可單獨重跑）            | 懷疑某步無聲失敗時                   |
+| `make doctor`                                          | Goodinfo 健康檢查（week 已內含，可單獨重跑）         | 懷疑被擋/改版時                      |
+| `make fetch-tdcc`                                      | TDCC 集保大戶持股比（week 已內含）                   | 大戶欄空值時單獨補                   |
 | `make fetch-twse`                                      | 增量抓日線/法人/月營收                               | 通常不必單獨跑（week 含）            |
 | `make fetch-stock STOCK_ID=2330`                       | 抓單檔完整資料                                       | 臨時看一檔沒快取的股                 |
 | `make fetch-institutional-history DAYS=20`             | 回補近 N 日法人                                      | 法人快取斷檔時                       |
+| `make backfill-universe-history`                       | 一次性回補全次產業成員日線（8-12 小時可續跑）        | 新環境冷啟動（§12）                 |
+| `uv run tw-screener data prune-cache`                  | 依 settings.cache 保留窗清舊快取                     | 快取肥大時                           |
 | `make build-themes`                                    | 爬 Yahoo 概念股更新 concepts.yaml                    | 每月或新題材出現時（`DRY=1` 預演） |
 | `make audit-concepts`                                  | 清查 concepts.yaml 無價成員（不改檔）                | 久久檢查興櫃/下市/誤標               |
 | `bash scripts/fetch_cron.sh`                           | 盤後抓全市場資料（cron 用，見 §12）                 | 每交易日（排程或手動）               |
@@ -384,14 +396,14 @@ make dash                # uv run tw-screener serve：單一 FastAPI 同時服�
 
 | 檔案                                                   | 誰產的                 | 內容 / 用途                                                                                                                                   |
 | ------------------------------------------------------ | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `screen_result_{d,e,f,g}_*.csv`                      | ② screen-all          | 各策略入選快照（純 Goodinfo 12 欄，不被後處理改寫）                                                                                           |
-| `screen_log.md`                                      | ② screen-all          | 各策略檔數＋交集統計                                                                                                                          |
-| `sector_rotation.md` / `.csv`                      | ④ rotation            | **輪動地圖**：價格趨勢分數主鍵排序＋流量確認欄/四象限/★訊號/趨勢領頭板/我的參與度；CSV 供下週 ΔRank                                   |
-| `cp_candidates.md` / `.csv`                        | ⑤ cp-value-candidates | 個股 CP 補漲候選＋C2 三重濾網（官方 trailing PE/PB；group Section 6 要讀）＋短窗早訊號／過熱-退潮警示（限庫存/觀察・低信心觀察，非進場/賣訊） |
-| `group_analysis.md`                                  | ⑥ group               | 族群分析主報告（Section 0-6）                                                                                                                 |
-| `candidates_enriched.csv`                            | ⑥ group               | 全候選股 × 完整欄位（含 flow_state/risk_kind/pullback_quality 揭露欄）＝**AI 挑股主宇宙**                                              |
-| `holdings_enriched.csv` / `watchlist_enriched.csv` | ⑥ group               | 庫存/觀察 enrich（有維護才產）                                                                                                                |
-| `theme_strength.csv`                                 | ⑥ group               | 2.8 雷達快照（供下週 ΔRank，不必貼給 Claude）                                                                                                |
+| `screen_result_{d,e,f,g}_*.csv`                      | ⑤ screen-all          | 各策略入選快照（純 Goodinfo 12 欄，不被後處理改寫）                                                                                           |
+| `screen_log.md`                                      | ⑤ screen-all          | 各策略檔數＋交集統計                                                                                                                          |
+| `sector_rotation.md` / `.csv`                      | ⑦ rotation            | **輪動地圖**：價格趨勢分數主鍵排序＋流量確認欄/四象限/★訊號/趨勢領頭板/我的參與度；CSV 供下週 ΔRank                                   |
+| `cp_candidates.md` / `.csv`                        | ⑧ cp-value-candidates | 個股 CP 補漲候選＋C2 三重濾網（官方 trailing PE/PB；group Section 6 要讀）＋短窗早訊號／過熱-退潮警示（限庫存/觀察・低信心觀察，非進場/賣訊） |
+| `group_analysis.md`                                  | ⑨ group               | 族群分析主報告（Section 0-6）                                                                                                                 |
+| `candidates_enriched.csv`                            | ⑨ group               | 全候選股 × 完整欄位（含 flow_state/risk_kind/pullback_quality 揭露欄）＝**AI 挑股主宇宙**                                              |
+| `holdings_enriched.csv` / `watchlist_enriched.csv` | ⑨ group               | 庫存/觀察 enrich（有維護才產）                                                                                                                |
+| `theme_strength.csv`                                 | ⑨ group               | 2.8 雷達快照（供下週 ΔRank，不必貼給 Claude）                                                                                                |
 | `picks.md`                                           | 手動 Step 3            | AI 精選進場清單（首屏 ≤60 行一頁決策卡）                                                                                                     |
 | `picks.csv` / `excluded.csv`                       | 手動 picks record      | pick／剔除底帳（pick 閉環`make pick-outcome` 的輸入）                                                                                       |
 | `stocks/XXXX_名稱.md`                                | make report            | 個股深度報告                                                                                                                                  |
@@ -464,7 +476,7 @@ make typecheck   # mypy
 | [`docs/05-group-analysis.md`](./docs/05-group-analysis.md)                                   | 族群分析、族群內排名                                                                                                |
 | [`docs/06-report-spec.md`](./docs/06-report-spec.md)                                         | 個股深度報告框架與輸出規範                                                                                          |
 | [`docs/07-cli-spec.md`](./docs/07-cli-spec.md)                                               | Makefile 指令、CLI 介面                                                                                             |
-| [`docs/08-milestones.md`](./docs/08-milestones.md)                                           | 建置期 M0-M7＋上線後研究軌（M-MH 多窗起漲／Part B·C／修法7 進場階梯／落後濾鏡）＋ M-Dash 0–4 dashboard milestones |
+| [`docs/08-milestones.md`](./docs/08-milestones.md)                                           | 建置期 M0-M7＋上線後研究軌（M-MH 多窗起漲／Part B·C／修法7 進場階梯／落後濾鏡）；M-Dash 0–4 在 docs/17-dashboard-spec |
 | [`docs/09-coding-conventions.md`](./docs/09-coding-conventions.md)                           | 程式碼風格、命名、測試規範                                                                                          |
 | [`docs/10-sop.md`](./docs/10-sop.md)                                                         | **每週使用 SOP**（手動 Claude 對話模式、含範本 prompt）                                                       |
 | [`docs/11-propicks-analysis.md`](./docs/11-propicks-analysis.md)                             | **ProPicks 全清單分析**（Step 3 完整 prompt + 流程）                                                          |
@@ -473,7 +485,7 @@ make typecheck   # mypy
 | [`docs/14-entry-ladder-portfolio-fix.md`](./docs/14-entry-ladder-portfolio-fix.md)           | 進場階梯 × 組合層修法（M-修法7：前重後輕分批、停損脫鉤、因子簇上限）                                               |
 | [`docs/15-launch-point-research-partB.md`](./docs/15-launch-point-research-partB.md)         | 起漲點研究 Part B（買方主導度／個股×族群交互／payoff·decay 穩健度）                                               |
 | [`docs/16-intra-sector-laggard-research.md`](./docs/16-intra-sector-laggard-research.md)     | 族群內落後度補漲因子研究（rs_subind 落後度 × 位階 × S+ 濾鏡）                                                     |
-| [`docs/17-intra-sector-laggard-production.md`](./docs/17-intra-sector-laggard-production.md) | 族群內落後濾鏡生產化（冠軍 S+ 內 rs_subind<0 進場加分上線）                                                         |
+| [`docs/18-intra-sector-laggard-production.md`](./docs/18-intra-sector-laggard-production.md) | 族群內落後濾鏡生產化（冠軍 S+ 內 rs_subind<0 進場加分上線）                                                         |
 | [`docs/17-dashboard-spec.md`](./docs/17-dashboard-spec.md)                                   | **投資戰情室 Dashboard** 規劃書（讀 reports/ 的本機 HUD、M-Dash 拆解、API/頁面/Privacy 遮罩）                 |
 | [`docs/proposals/`](./docs/proposals/00-index.md)                                            | 審查改善規劃書 01–05（效能技債/資料韌性/量化驗證閉環/架構瘦身/**選股有效性總改造 F1–F5**，皆已收官）        |
 | [`docs/99-troubleshooting.md`](./docs/99-troubleshooting.md)                                 | 常見問題與解法                                                                                                      |
