@@ -33,8 +33,8 @@
  ⑨ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv（含揭露欄）
  ⑩ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
                                                ▼
- 手動：把報告貼給 Claude（docs/11 prompt）→ picks.md（首屏 ≤60 行一頁決策卡；核心層距季線 >+15% 硬擋）
- 手動：tw-screener picks record 把 pick／剔除寫進底帳 → 每季 make pick-outcome 算命中率×α（pick 閉環）
+ 手動：把報告貼給 Claude（docs/11 prompt）→ pick.md（首屏 ≤60 行一頁決策卡；核心層距季線 >+15% 硬擋）
+ 手動：tw-screener picks sync 解析 pick.md 尾端區塊、整批寫底帳 → 每季 make pick-outcome 算命中率×α（pick 閉環）
  手動：make report STOCK_ID=XXXX → 個股深度報告
 ```
 
@@ -109,7 +109,7 @@ make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退�
 **⚙️ 不必貼**：`theme_strength.csv`（內容已在 Section 2.8）、`screen_log.md`（檔數統計）。
 
 **送給 Claude 的流程**：把上表 6 類貼進 Claude 網頁對話 → 套 [docs/11](./docs/11-propicks-analysis.md) 範本 prompt → Claude
-產出 `picks.md`（精選進場清單，三路匯流：族群深度＋全宇宙掃描＋CP 補漲候選）→ 對 picks 內每檔
+產出 `pick.md`（精選進場清單，三路匯流：族群深度＋全宇宙掃描＋CP 補漲候選）→ 對 picks 內每檔
 `make report STOCK_ID=XXXX` 產個股深度報告。
 
 ## 每週指令速查
@@ -121,8 +121,8 @@ make week GROUP=defg                              # ①~⑩ 一鍵跑完（尾�
 # 貼給 Claude 的 6 類檔（全在 reports/YYYY-Www/，詳見上方主流程表）：
 #   group_analysis.md  sector_rotation.md  candidates_enriched.csv
 #   cp_candidates.md  holdings/watchlist_enriched.csv  screen_result_*.csv
-# → 套 docs/11 範本 prompt → 得 picks.md（首屏 ≤60 行一頁決策卡）
-uv run tw-screener picks record --week 2026-Www --stock XXXX --layer core   # picks 定稿後逐檔寫底帳（閉環輸入，§10）
+# → 套 docs/11 範本 prompt → 得 pick.md（首屏 ≤60 行一頁決策卡＋尾端機器可讀區塊）
+uv run tw-screener picks sync --week 2026-Www     # pick.md 定稿後整批寫底帳（閉環輸入，§10；單檔補記用 picks record）
 make report STOCK_ID=2330                         # 對 picks 選出的每檔產個股深度報告（5-10 秒）
 make pick-outcome                                 # （每季）pick 閉環：分層命中率×α＋偽陰性帳 → research/pick_outcome/
 make dash-dev                                     # （選配）把本週報告開成可視化儀表板瀏覽（首次先 make dash-install）→ §13
@@ -173,7 +173,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make screen-dry STRATEGY=…`                          | 只組 Goodinfo URL 不打網                             | 驗證 YAML 條件                       |
 | `make rotation-calib`                                  | ★ 起漲點回測校準（研究軌）                          | 每季重校準訊號門檻                   |
 | `make cp-value-valuation`                              | 個股相對 PE 估值表（次產業橫斷面）                   | 估值位階單獨重看                     |
-| `uv run tw-screener picks record …`                   | 把當週 pick／剔除寫進 picks.csv／excluded.csv 底帳   | 每週 picks.md 定稿後                 |
+| `uv run tw-screener picks sync --week …`              | 解析 pick.md 尾端區塊，整批寫 picks.csv／excluded.csv 底帳（單檔補記用 `picks record`） | 每週 pick.md 定稿後                  |
 | `uv run tw-screener picks outcome --diff`              | pick-outcome ＋翻轉解剖（週對週降級＋翻轉前訊號）    | 個案覆盤                             |
 | `make backtest-strategies`                             | 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤            | 每季（規劃書 03 V1）                 |
 | `uv run tw-screener market regime`                     | 大盤 regime 姿態：進攻/中性/防禦（規劃書 03 V2）     | 盤後看大盤閘門                       |
@@ -268,11 +268,12 @@ Section 0 策略代號/除權息/總經事件、1 入選分布、2 族群強度�
 ### 5. AI 挑股（手動・docs/11）
 
 跑完 week 後把報告貼給 Claude 網頁版，用 [docs/11-propicks-analysis.md](./docs/11-propicks-analysis.md)
-的範本 prompt 產 `picks.md`——**首屏 ≤60 行一頁決策卡**（姿態一行 → 持股動作表 → 核心每檔 ≤5 行 →
+的範本 prompt 產 `pick.md`——**首屏 ≤60 行一頁決策卡**（姿態一行 → 持股動作表 → 核心每檔 ≤5 行 →
 機會表 → 本週三風險），觀察清單/族群底稿/交集分析全部後置附錄（不刪資訊、只分層；規劃書 05 F4）。
 **核心層位階紀律（規劃書 05 F2）**：距季線 >+15%（`settings.picks.core_ext_ma60_max_pct`，試行值、
 F1 每季校準）**硬擋入核心**，改列趨勢領頭板（部位減半＋移動停損）。**多空並陳、不下單一結論**。
-定稿後用 `tw-screener picks record` 把 pick／剔除寫進底帳，餵 §10 的 pick 閉環。
+定稿後用 `tw-screener picks sync` 解析 pick.md 尾端機器可讀區塊（docs/11 交付結構第三層）、
+整批寫進底帳（單檔補記用 `picks record`），餵 §10 的 pick 閉環。
 
 ### 6. 個股深度報告（`make report STOCK_ID=…`）
 
@@ -315,7 +316,7 @@ FOMC/CPI/台股結算/法說等市場級事件 → `group_analysis.md` Section 0
 
 - **策略層（規劃書 03 V1）**：`make backtest-strategies` 回測 D/E/F/G 入選後 2/4/8/12 週
   勝率/中位報酬/回撤 vs 大盤（除息還原、下市 null、未到期排除）→ `research/strategy_backtest/`。
-- **pick 層（規劃書 05 F1）**：每週 `picks.md` 定稿後用 `tw-screener picks record` 把 pick
+- **pick 層（規劃書 05 F1）**：每週 `pick.md` 定稿後用 `tw-screener picks sync` 把 pick
   （core/opportunity/pool 分層）與**被旗標剔除股**寫進 `reports/<week>/picks.csv`／`excluded.csv` 底帳；
   `make pick-outcome` 算分層命中率×α（**同列 vs 大盤、vs 所屬次產業兩個超額**）＋**偽陰性帳**
   （被剔除股同窗報酬——過熱/土洋對作等旗標第一次有績效裁判）→ `research/pick_outcome/`；
@@ -411,8 +412,8 @@ make dash                # uv run tw-screener serve：單一 FastAPI 同時服�
 | `candidates_enriched.csv`                            | ⑨ group               | 全候選股 × 完整欄位（含 flow_state/risk_kind/pullback_quality 揭露欄）＝**AI 挑股主宇宙**                                              |
 | `holdings_enriched.csv` / `watchlist_enriched.csv` | ⑨ group               | 庫存/觀察 enrich（有維護才產）                                                                                                                |
 | `theme_strength.csv`                                 | ⑨ group               | 2.8 雷達快照（供下週 ΔRank，不必貼給 Claude）                                                                                                |
-| `picks.md`                                           | 手動 Step 3            | AI 精選進場清單（首屏 ≤60 行一頁決策卡）                                                                                                     |
-| `picks.csv` / `excluded.csv`                       | 手動 picks record      | pick／剔除底帳（pick 閉環`make pick-outcome` 的輸入）                                                                                       |
+| `pick.md`                                            | 手動 Step 3            | AI 精選進場清單（首屏 ≤60 行一頁決策卡＋尾端機器可讀區塊）                                                                                   |
+| `picks.csv` / `excluded.csv`                       | 手動 picks sync        | pick／剔除底帳（pick 閉環`make pick-outcome` 的輸入）                                                                                       |
 | `stocks/XXXX_名稱.md`                                | make report            | 個股深度報告                                                                                                                                  |
 
 `reports/` 與 `research/`（校準報告）皆 gitignore——個人分析產物留本地。

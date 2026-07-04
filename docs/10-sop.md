@@ -76,7 +76,8 @@ reports/YYYY-Www/
 
 完整 prompt + 流程 → [`docs/11-propicks-analysis.md`](./11-propicks-analysis.md)
 
-Claude 回覆存到 `reports/YYYY-Www/picks.md`。
+Claude 回覆存到 `reports/YYYY-Www/pick.md`（固定檔名，week-check 認這個名）；
+定稿後 `uv run tw-screener picks sync --week YYYY-Www` 把尾端機器可讀區塊整批落底帳。
 
 **模式 2b：純人工**
 
@@ -91,7 +92,7 @@ Claude 回覆存到 `reports/YYYY-Www/picks.md`。
 - **第 6 節**：Claude CP 補漲候選分析請求（個股層，讀同夾 cp_candidates.md）
 - **第 7 節**：Claude 持有/觀察清單健檢請求（讀同夾 holdings/watchlist_enriched.csv，逐檔續抱/收緊/停利、接近進場/再等/剔除，與命中策略同等深度＝任務 0 的報告內版）
 
-挑股以 picks.md 精選清單或 candidates_enriched.csv 為準（族群/次產業強度排名是機械公式、僅輪動參考，勿直接照挑），記下股號（如 `2330`、`3008`、`6147`...）。
+挑股以 pick.md 精選清單或 candidates_enriched.csv 為準（族群/次產業強度排名是機械公式、僅輪動參考，勿直接照挑），記下股號（如 `2330`、`3008`、`6147`...）。
 
 > 模式 2b 簡單快，但只看機械強度排名（5 日漲幅 + 族群強度），會漏
 > 「逆勢佈局」「低基期反轉」這類 setup。建議用 2a。
@@ -120,7 +121,7 @@ reports/YYYY-Www/stocks/2330_台積電.md
 - **「給 Claude 的指示」段**（範本 prompt 已內建）
 - 多個 `<!-- TODO: Claude 補寫 -->` 待填段落
 
-依本週 `picks.md`（Claude 精選清單）逐檔跑 `make report STOCK_ID=XXXX`，即產出多份 draft。
+依本週 `pick.md`（Claude 精選清單）逐檔跑 `make report STOCK_ID=XXXX`，即產出多份 draft。
 
 ### Step 4：把 draft 貼到 Claude 對話
 
@@ -163,7 +164,7 @@ Claude 回覆完整 Markdown 後：
 
 ## 第 3 節 — 批次處理建議
 
-依本週 `picks.md` 逐檔跑 `make report STOCK_ID=XXXX` 產出多份 draft 後，建議的工作流：
+依本週 `pick.md` 逐檔跑 `make report STOCK_ID=XXXX` 產出多份 draft 後，建議的工作流：
 
 1. 多個 Claude 對話視窗各開一檔
 2. 平行貼上 + 等 Claude 回覆

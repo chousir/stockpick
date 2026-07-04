@@ -130,7 +130,8 @@ tw-screener cp candidates / calibrate / valuation
 
 # backtest / picks — 驗證閉環（規劃書 03 V1、05 F1）
 tw-screener backtest strategies
-tw-screener picks record --week 2026-Www --stock XXXX --layer core
+tw-screener picks sync --week 2026-Www          # 解析 pick.md 尾端區塊整批落底帳（主流程）
+tw-screener picks record --week 2026-Www --stock XXXX --layer core   # 單檔補記
 tw-screener picks outcome [--diff]
 
 # market / portfolio — 大盤 regime 與組合體檢（規劃書 03 V2、V3）
@@ -148,9 +149,9 @@ tw-screener portfolio check [--include-candidates]
 make week GROUP=defg           # 十步一鍵跑完
 open reports/2026-Www/group_analysis.md
 
-# 把 6 類報告貼給 Claude（docs/11 prompt）→ picks.md
-# picks 定稿後寫底帳（餵 pick 閉環）：
-uv run tw-screener picks record --week 2026-Www --stock XXXX --layer core
+# 把 6 類報告貼給 Claude（docs/11 prompt）→ pick.md（含尾端機器可讀區塊）
+# pick.md 定稿後整批寫底帳（餵 pick 閉環；單檔補記用 picks record）：
+uv run tw-screener picks sync --week 2026-Www
 
 make report STOCK_ID=2330      # 對 picks 每檔產深度報告
 make weekend GROUP=defg        # 或：week ＋ commit/push（已含空 commit 守衛）
