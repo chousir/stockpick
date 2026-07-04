@@ -51,3 +51,23 @@ def test_clipped_daily_returns_per_stock_shift():
     )
     b_first = df.filter((pl.col("stock_id") == "B") & (pl.col("date") == D1))["_ret"].item()
     assert abs(b_first - 0.10) < 1e-9
+
+
+def test_clipped_daily_returns_drops_zero_close_and_stays_finite():
+    # 連續 0 收盤（停牌/髒列）曾產生 0/0=NaN、經 cum_prod 毒化下游指數——
+    # 0 收盤列剔除、輸出報酬全有限
+    df = clipped_daily_returns(
+        _price(
+            [
+                ("A", D0, 0.0),
+                ("A", D1, 0.0),
+                ("A", D2, 10.0),
+                ("B", D0, 100.0),
+                ("B", D1, 101.0),
+                ("B", D2, 102.0),
+            ]
+        )
+    )
+    assert df.filter(pl.col("stock_id") == "A").height == 0  # 0 收盤剔後 A 無可算報酬
+    assert df.filter(pl.col("stock_id") == "B").height == 2
+    assert df["_ret"].is_finite().all()

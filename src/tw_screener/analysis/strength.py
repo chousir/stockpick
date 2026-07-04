@@ -25,6 +25,10 @@ def clipped_daily_returns(
     Returns:
         (date, stock_id, close, _ret) 依 (stock_id, date) 排序、首日 null 報酬剔除。
         供 compute_market_index（全市場等權）與 compute_subindustry_baskets（次產業籃子）共用。
+
+    close ≤ 0 的列（停牌/髒列，daily_all 自 2026-06 起混入 0 收盤的權證型代號）先剔除：
+    連續兩個 0 收盤會產生 0/0=NaN，經 cum_prod 毒化下游等權指數與籃子（regime「廣度 nan」
+    ＋輪動位階 nan 的共同根因）。尾端再守 is_finite 擋任何殘餘 NaN/inf。
     """
     ret = pl.col("close") / pl.col("close").shift(1).over("stock_id") - 1.0
     if clip_daily_return_pct > 0:
@@ -32,7 +36,9 @@ def clipped_daily_returns(
         ret = ret.clip(-bound, bound)
     return (
         price_history.select(["date", "stock_id", "close"])
+        .filter(pl.col("close") > 0)
         .sort(["stock_id", "date"])
         .with_columns(ret.alias("_ret"))
         .drop_nulls("_ret")
+        .filter(pl.col("_ret").is_finite())
     )

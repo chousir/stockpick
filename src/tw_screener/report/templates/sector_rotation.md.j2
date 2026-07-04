@@ -22,14 +22,14 @@
 | # | 次產業 | 檔數 | 趨勢分 | 價格證據（均線態・站季線比・領頭RS） | {{ lw }}日淨流(張) | {{ s }}日淨流(張) | breadth | 5日籃子 | 距低 | 象限 | 訊號 | ΔRank |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for r in top_rows -%}
-| {{ r.radar_rank }} | {{ r.sub_industry }} | {{ r.members }} | {{ "%.1f"|format(r.trend_score) if r.trend_score is not none else "—" }} | {{ r.trend_ma_state or "—" }}・{{ pct(r.above_ma60_breadth * 100, 0) if r.above_ma60_breadth is not none else "—" }}・{{ r.leader_stock_id or "" }} {{ "%+.1f%%"|format(r.leader_rs_pct) if r.leader_rs_pct is not none else "—" }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ pct(r.above_low_pct) }} | {{ r.quadrant }}{{ turn(r) }} | {{ marks(r) }} | {{ delta(r) }} |
+| {{ r.radar_rank }} | {{ r.sub_industry }} | {{ r.members }} | {{ "%.1f"|format(r.trend_score) if r.trend_score is not none else "—" }} | {{ r.trend_ma_state or "—" }}・{{ pct(r.above_ma60_breadth * 100, 0) if r.above_ma60_breadth is not none else "—" }}・{{ r.leader_stock_id or "" }} {{ "%+.1f%%"|format(r.leader_rs_pct) if r.leader_rs_pct is not none else "—" }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ pct(r.above_low_pct) }} | {{ r.quadrant or "位階未取得" }}{{ turn(r) }} | {{ marks(r) }} | {{ delta(r) }} |
 {% endfor %}
 > **F3 主鍵＝價格趨勢分數**（籃子等權指數 vs 自身月/季線＋成員站上自身季線比例＋領頭股 RS 跨次產業百分位；權重 settings.rotation.trend_score）。**{{ lw }} 日流量降為確認欄**（§1.5#2：流量排序天然落後）。**仲裁**：本表（全市場）與 group_analysis 2.8 雷達（篩中股）矛盾時，以**價格趨勢分數**裁決（讀法見 docs/11）。
 {%- else -%}
 | # | 次產業 | 檔數 | {{ lw }}日淨流(張) | {{ s }}日淨流(張) | 動能(張) | breadth | 力度 | 5日籃子 | 距低 | 象限 | 訊號 | ΔRank |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for r in top_rows -%}
-| {{ r.radar_rank }} | {{ r.sub_industry }} | {{ r.members }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ lots(r.flow_momentum_lots) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ conc(r) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ pct(r.above_low_pct) }} | {{ r.quadrant }}{{ turn(r) }} | {{ marks(r) }} | {{ delta(r) }} |
+| {{ r.radar_rank }} | {{ r.sub_industry }} | {{ r.members }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ lots(r.flow_momentum_lots) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ conc(r) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ pct(r.above_low_pct) }} | {{ r.quadrant or "位階未取得" }}{{ turn(r) }} | {{ marks(r) }} | {{ delta(r) }} |
 {% endfor %}
 {%- endif %}
 {% if leader_rows %}
@@ -63,7 +63,7 @@
 | # | 次產業 | CP 分數 | 資金z({{ lw }}d) | 距低 | 新鮮度 | 象限 | 訊號 |
 |---|---|---|---|---|---|---|---|
 {% for r in cp_rows -%}
-| {{ loop.index }} | {{ r.sub_industry }} | {{ "%.2f"|format(r.cp_score) }} | {{ "%.2f"|format(r["net_flow_" ~ lw ~ "d_z"]) if r["net_flow_" ~ lw ~ "d_z"] is not none else "—" }} | {{ pct(r.above_low_pct) }} | {{ fresh(r) }} | {{ r.quadrant }} | {{ marks(r) }} |
+| {{ loop.index }} | {{ r.sub_industry }} | {{ "%.2f"|format(r.cp_score) }} | {{ "%.2f"|format(r["net_flow_" ~ lw ~ "d_z"]) if r["net_flow_" ~ lw ~ "d_z"] is not none else "—" }} | {{ pct(r.above_low_pct) }} | {{ fresh(r) }} | {{ r.quadrant or "位階未取得" }} | {{ marks(r) }} |
 {% endfor %}
 > CP 分數 = 資金 z 分數 × 位階剩餘空間 room（room = max(0, 1 − 距低% / {{ cp_ceiling }}%)）。**錢進越多 × 越貼低點 → CP 越高（補漲機會）**；但「錢進、價不動」也可能是賣壓沉重承接（接刀），族群訊號僅供觀察，需個股層籌碼確認。
 > 新鮮度＝資金動能（{{ s }}日 vs 前 {{ s }}日，即資金加速度）方向：**加速中＝資金續強（CP 仍新鮮）、放緩中＝退潮（恐已來不及）**。
@@ -133,7 +133,7 @@ quadrantChart
 
 {% if triggered -%}
 {% for r in triggered -%}
-- **{{ r.sub_industry }}**（象限：{{ r.quadrant }}）：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}{{ "・◆確認達標" if r.confirm_triggered else "" }}
+- **{{ r.sub_industry }}**（象限：{{ r.quadrant or "位階未取得" }}）：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}{{ "・◆確認達標" if r.confirm_triggered else "" }}
 {% endfor %}
 歷史校準參考：此訊號觸發後 15 交易日內起漲命中率約為隨機 1.3-1.5 倍、中位領先 8-10 日（樣本 1 年、34 起漲點，統計力有限）。
 {%- else -%}

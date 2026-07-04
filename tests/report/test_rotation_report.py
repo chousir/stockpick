@@ -503,3 +503,76 @@ def test_render_without_participation_skips_section(table: pl.DataFrame, tmp_pat
     md = md_path.read_text(encoding="utf-8")
     assert "我的參與度" not in md
     assert "## 5. 資料來源與時間" in md
+
+
+# ── NaN 誠實化（hotfix）：位階未取得 → 象限/CP 誠實缺席，不誤標 ─────────────────
+
+
+def test_basket_position_nan_yields_none():
+    from tw_screener.report.rotation_report import _basket_position
+
+    ds = _dates(70)
+    baskets = pl.DataFrame(
+        {
+            "sub_industry": ["X"] * 70,
+            "date": ds,
+            "basket_return_pct": [0.0] * 70,
+            "basket_index": [100.0] * 69 + [float("nan")],
+            "members_priced": [3] * 70,
+        }
+    )
+    pos = _basket_position(baskets, position_window=60).row(0, named=True)
+    assert pos["above_low_pct"] is None
+    assert pos["basket_ret_5d_pct"] is None
+
+
+def test_unknown_position_null_quadrant_and_render(tmp_path: Path):
+    """位階 NaN 的次產業：象限 null（非誤標出貨/冷卻）、CP 不入榜、報表印「位階未取得」。"""
+    from tw_screener.report.rotation_report import build_participation
+
+    members = _membership()
+    market = _price_history()
+    baskets = compute_subindustry_baskets(members, market)
+    last_day = baskets["date"].max()
+    baskets = baskets.with_columns(
+        pl.when((pl.col("sub_industry") == "甲流入未漲") & (pl.col("date") == last_day))
+        .then(float("nan"))
+        .otherwise(pl.col("basket_index"))
+        .alias("basket_index")
+    )
+    flows = compute_fund_flows(
+        members,
+        _institutional(),
+        volume_history=market.select(["date", "stock_id", "volume"]),
+        short_window=5,
+        long_window=20,
+    )
+    tbl = build_rotation_table(
+        flows,
+        baskets,
+        short_window=5,
+        long_window=20,
+        entry_signal={"signal": "trust_flow_20d", "mode": "z", "threshold": 1.0},
+        position_window=60,
+        position_low_pct=10.0,
+        min_members=1,
+    )
+    row = tbl.filter(pl.col("sub_industry") == "甲流入未漲").row(0, named=True)
+    assert row["quadrant"] is None  # 不硬塞象限
+    assert row["cp_score"] is None  # NaN 不得靠 polars NaN>0 排上 CP 榜
+
+    part = build_participation([("庫存", ["1111"], False)], members, tbl, long_window=20)
+    assert part[0]["stocks"][0]["tags"][0]["quadrant"] == "位階未取得"
+
+    md_path = render_rotation_report(
+        tbl,
+        week_tag="2026-W99",
+        output_dir=tmp_path,
+        short_window=5,
+        long_window=20,
+        entry_signal={"signal": "trust_flow_20d", "mode": "z", "threshold": 1.0},
+        position_low_pct=10.0,
+    )
+    md = md_path.read_text(encoding="utf-8")
+    assert "位階未取得" in md
+    assert "nan" not in md.lower()  # 門面不得再出現 nan 字樣
