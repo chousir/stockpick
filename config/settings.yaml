@@ -80,6 +80,8 @@ themes_build:
 
 twse:
   base_url: "https://openapi.twse.com.tw/v1"
+  legacy_base_url: "https://www.twse.com.tw"   # 舊站 host（T86 法人/STOCK_DAY 月檔），路徑在程式
+  isin_base_url: "https://isin.twse.com.tw"    # ISIN 上櫃清單 host
   user_agent: "tw-stock-screener/0.1"
   request_interval_sec: 1
   cache_ttl_hours: 6
@@ -97,12 +99,11 @@ tdcc:
   big_holder_levels: [12, 13, 14, 15]   # ≥400 張大戶
   big_holder_1000_levels: [15]          # ≥1000 張（千張大戶）
 
-# TPEX（櫃買中心）上櫃股 OHLCV 來源，僅作說明用途
-# 目前 TWSEClient 透過 _load_otc_ids() 自動分派；TPEX 與 TWSE 共用 _get_legacy 的 throttle
-# 設定值寫在這裡是為了文件清楚，未來若分 client 再生效
+# TPEX（櫃買中心）：base_url 為所有上櫃端點（OpenAPI/舊版 .php/tradingStock）的 host，
+# TWSEClient 讀取生效（M-Rev3）；端點路徑屬 API 契約、留在 twse.py 常數。
+# TWSEClient 透過 _load_otc_ids() 自動分派上市/上櫃；TPEX 與 TWSE 共用 throttle。
 tpex:
   base_url: "https://www.tpex.org.tw"
-  stock_day_path: "/www/zh-tw/afterTrading/tradingStock"
   notes: "單位仟股 / 仟元（parser 自動 ×1000 對齊 TWSE）"
 
 report:

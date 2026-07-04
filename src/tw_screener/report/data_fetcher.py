@@ -179,7 +179,7 @@ def _get_stock_name(stock_id: str, settings_path: Path) -> str:
                 row = df.filter(pl.col("stock_id").cast(pl.Utf8) == str(stock_id))
                 if not row.is_empty():
                     return str(row["name"][0])
-            except Exception:
+            except Exception:  # noqa: BLE001 — best-effort 欄位，缺就留空
                 pass
     return ""
 
@@ -213,7 +213,7 @@ def _find_group_info(stock_id: str, settings_path: Path) -> dict:
             row = df.filter(pl.col("stock_id").cast(pl.Utf8) == str(stock_id))
             if not row.is_empty():
                 strategy_labels.append(_STRATEGY_LABEL.get(sid, sid))
-        except Exception:
+        except Exception:  # noqa: BLE001 — best-effort 欄位，缺就留空
             pass
 
     return {

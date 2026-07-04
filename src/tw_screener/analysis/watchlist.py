@@ -48,7 +48,7 @@ def load_latest_screener_results(settings: Path) -> tuple[str, dict]:
         try:
             df = _pl.read_csv(str(csv_file), infer_schema_length=1000)
             results[sid] = df
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — 單檔壞不擋整批
             console.print(f"[yellow]讀取 {csv_file.name} 失敗：{exc}[/yellow]")
 
     return week_tag, results
@@ -62,7 +62,7 @@ def read_watchlist_csv(path: Path) -> list[str]:
         return []
     try:
         df = _pl.read_csv(str(path), infer_schema_length=0)  # 全當字串、保留前導 0
-    except Exception:
+    except Exception:  # noqa: BLE001 — 清單檔壞掉誠實回空、主流程照跑
         return []
     if "stock_id" not in df.columns:
         return []
@@ -77,7 +77,7 @@ def read_holdings_csv(path: Path) -> dict:
         return {}
     try:
         df = _pl.read_csv(str(path), infer_schema_length=0)
-    except Exception:
+    except Exception:  # noqa: BLE001 — 清單檔壞掉誠實回空、主流程照跑
         return {}
     if "stock_id" not in df.columns:
         return {}

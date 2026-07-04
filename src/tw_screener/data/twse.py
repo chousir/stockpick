@@ -276,29 +276,28 @@ def _parse_margin(data: list[dict[str, Any]], trade_date: date) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=_MARGIN_SCHEMA)
 
 
-_TPEX_BASE = "https://www.tpex.org.tw"
+# 以下端點只放「路徑」（API 契約），host 由 settings 提供（tpex.base_url /
+# twse.legacy_base_url / twse.isin_base_url），client 以 f"{base}{PATH}" 組 URL。
 _TPEX_STOCK_DAY_PATH = "/www/zh-tw/afterTrading/tradingStock"
-_TPEX_INST_URL = "https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading"
+_TPEX_INST_PATH = "/openapi/v1/tpex_3insti_daily_trading"
 # 上櫃法人「歷史」回查：OpenAPI 只回最新日，舊版 .php 端點吃 d=民國日期可回補（避險版，逐股）。
-_TPEX_INST_HIST_URL = (
-    "https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php"
-)
-_TPEX_DAILY_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
+_TPEX_INST_HIST_PATH = "/web/stock/3insti/daily_trade/3itrade_hedge_result.php"
+_TPEX_DAILY_PATH = "/openapi/v1/tpex_mainboard_daily_close_quotes"
 # 單季基本面（毛利率/EPS）：TWSE OpenAPI（上市）+ TPEX OpenAPI（上櫃）。
 # ⚠ TPEX 端點命名不一致（187ap17 無 t、t187ap14 有 t），2026-06-12 實測為準。
-_FUND_MARGIN_OTC_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_187ap17_O"
-_FUND_EPS_OTC_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap14_O"
+_FUND_MARGIN_OTC_PATH = "/openapi/v1/mopsfin_187ap17_O"
+_FUND_EPS_OTC_PATH = "/openapi/v1/mopsfin_t187ap14_O"
 # D5 體質細項：簡式資產負債表（一般業）→ 負債比/流動比/每股淨值/單季ROE。
 # 上市 t187ap07_L_ci（OpenAPI base 下）+ 上櫃 mopsfin_t187ap07_O_ci，2026-06-27 實測為準。
 # ⚠ 上市欄名用「總額」、上櫃用「總計」；上櫃 key 用「年度/季別」（非 Year）。僅一般業（_ci）：
 # 金融業（金控/銀行/保險/證期）負債結構語意不同、不在此表 → 該股負債比/ROE 誠實 null。
 # OpenAPI 無現金流量表端點、簡式表無存貨/應收明細 → 營業現金流/週轉率不可得（D5 盤點結論）。
 _FUND_BS_LISTED_PATH = "/opendata/t187ap07_L_ci"
-_FUND_BS_OTC_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap07_O_ci"
+_FUND_BS_OTC_PATH = "/openapi/v1/mopsfin_t187ap07_O_ci"
 # 官方日估值比（trailing PE / PBR / 殖利率）：上市 TWSE BWIBBU_d（OpenAPI base 下）+ 上櫃 TPEX。
 # 取代 valuation.compute_pe 的單季 EPS×4 年化代理 → 官方真 trailing PE；PBR 補虧損股；逐日累積。
 _BWIBBU_PATH = "/exchangeReport/BWIBBU_d"
-_TPEX_PERATIO_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis"
+_TPEX_PERATIO_PATH = "/openapi/v1/tpex_mainboard_peratio_analysis"
 
 
 def _parse_tpex_daily_all(data: list[dict[str, Any]]) -> pl.DataFrame:
@@ -926,7 +925,7 @@ _OTC_INDUSTRY_MAP: dict[str, tuple[str, str]] = {
     "農業科技業":     ("46", "農業科技業"),
 }
 
-_ISIN_OTC_URL = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"
+_ISIN_OTC_PATH = "/isin/C_public.jsp?strMode=4"
 
 
 def _parse_otc_industry(html: str) -> pl.DataFrame:
@@ -1037,8 +1036,14 @@ class TWSEClient:
         ttl_hours: float,
         user_agent: str,
         interval_sec: float,
+        legacy_base_url: str = "https://www.twse.com.tw",
+        isin_base_url: str = "https://isin.twse.com.tw",
+        tpex_base_url: str = "https://www.tpex.org.tw",
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.legacy_base_url = legacy_base_url.rstrip("/")
+        self.isin_base_url = isin_base_url.rstrip("/")
+        self.tpex_base_url = tpex_base_url.rstrip("/")
         self.cache_dir = Path(cache_dir)
         self.ttl_hours = ttl_hours
         self.user_agent = user_agent
@@ -1056,7 +1061,7 @@ class TWSEClient:
         if self._otc_ids is None:
             try:
                 otc_df = self.fetch_otc_industry()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — OTC 清單抓不到降級為僅上市
                 logger.warning("_load_otc_ids 抓 OTC 清單失敗：{}", exc)
                 otc_df = pl.DataFrame()
             if otc_df.is_empty() or "stock_id" not in otc_df.columns:
@@ -1185,7 +1190,7 @@ class TWSEClient:
             return load_parquet(cache_file)
 
         url = (
-            f"https://www.twse.com.tw/fund/T86?response=json"
+            f"{self.legacy_base_url}/fund/T86?response=json"
             f"&date={date_str}&selectType=ALLBUT0999"
         )
         payload = self._get_legacy(url)
@@ -1231,7 +1236,7 @@ class TWSEClient:
                 cur -= timedelta(days=1)
                 continue
             url = (
-                f"https://www.twse.com.tw/fund/T86?response=json"
+                f"{self.legacy_base_url}/fund/T86?response=json"
                 f"&date={date_str}&selectType=ALLBUT0999"
             )
             df = _parse_institutional(self._get_legacy(url))
@@ -1248,7 +1253,7 @@ class TWSEClient:
         # 順帶補抓上櫃法人（TPEX 只有最新一日，逐次累積）
         try:
             self.fetch_otc_institutional()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — 上櫃法人失敗不擋上市回補
             logger.warning("fetch_institutional_history: 上櫃法人抓取失敗 — {}", e)
 
         if not frames:
@@ -1370,7 +1375,7 @@ class TWSEClient:
         self._throttle()
         try:
             resp = httpx.get(
-                _TPEX_INST_URL,
+                f"{self.tpex_base_url}{_TPEX_INST_PATH}",
                 headers={"User-Agent": self.user_agent},
                 timeout=30.0,
                 follow_redirects=True,
@@ -1378,7 +1383,7 @@ class TWSEClient:
             self._last_req = time.monotonic()
             resp.raise_for_status()
             data = resp.json()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — 網路失敗誠實回空表
             logger.warning("fetch_otc_institutional 網路錯誤：{}", e)
             return pl.DataFrame(schema=_INSTITUTIONAL_SCHEMA)
 
@@ -1435,7 +1440,7 @@ class TWSEClient:
             self._throttle()
             try:
                 resp = httpx.get(
-                    _TPEX_INST_HIST_URL,
+                    f"{self.tpex_base_url}{_TPEX_INST_HIST_PATH}",
                     params={"l": "zh-tw", "o": "json", "se": "EW", "t": "D", "d": roc},
                     headers={"User-Agent": self.user_agent},
                     timeout=30.0,
@@ -1488,7 +1493,9 @@ class TWSEClient:
             logger.info(f"命中快取 {latest_cache}")
             return load_parquet(latest_cache)
 
-        data = self._get_openapi_json(_TPEX_DAILY_URL, "fetch_otc_daily_all")
+        data = self._get_openapi_json(
+            f"{self.tpex_base_url}{_TPEX_DAILY_PATH}", "fetch_otc_daily_all"
+        )
         df = _parse_tpex_daily_all(data)
         if df.is_empty():
             logger.warning("TPEX 上櫃日線解析結果為空")
@@ -1513,11 +1520,15 @@ class TWSEClient:
 
         margin_listed = self._get("/opendata/t187ap17_L")
         eps_listed = self._get("/opendata/t187ap14_L")
-        margin_otc = self._get_openapi_json(_FUND_MARGIN_OTC_URL, "上櫃營益分析")
-        eps_otc = self._get_openapi_json(_FUND_EPS_OTC_URL, "上櫃損益表")
+        margin_otc = self._get_openapi_json(
+            f"{self.tpex_base_url}{_FUND_MARGIN_OTC_PATH}", "上櫃營益分析"
+        )
+        eps_otc = self._get_openapi_json(f"{self.tpex_base_url}{_FUND_EPS_OTC_PATH}", "上櫃損益表")
         # D5 體質：簡式資產負債表（一般業）→ 負債比/流動比/淨值/ROE；端點失敗回 [] 該批體質欄 null。
         bs_listed = self._get(_FUND_BS_LISTED_PATH)
-        bs_otc = self._get_openapi_json(_FUND_BS_OTC_URL, "上櫃資產負債表")
+        bs_otc = self._get_openapi_json(
+            f"{self.tpex_base_url}{_FUND_BS_OTC_PATH}", "上櫃資產負債表"
+        )
         df = _parse_quarterly_fundamentals(
             margin_listed, margin_otc, eps_listed, eps_otc, bs_listed, bs_otc
         )
@@ -1550,7 +1561,7 @@ class TWSEClient:
             return load_parquet(latest_cache)
 
         listed = self._get(_BWIBBU_PATH)
-        otc = self._get_openapi_json(_TPEX_PERATIO_URL, "上櫃本益比")
+        otc = self._get_openapi_json(f"{self.tpex_base_url}{_TPEX_PERATIO_PATH}", "上櫃本益比")
         df = _parse_valuation_ratios(listed, otc)
         if df.is_empty():
             logger.warning("官方日估值比解析結果為空")
@@ -1595,7 +1606,7 @@ class TWSEClient:
                     df = pl.read_parquet(f)
                     if {"stock_id", "date", "trade_volume"}.issubset(df.columns):
                         frames.append(df.select(["stock_id", "date", "trade_volume"]))
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — 單檔壞不擋整批
                     logger.warning("讀取 {} 失敗：{}", f, e)
 
         for f in sorted(self.cache_dir.glob("daily_*.parquet")):
@@ -1608,7 +1619,7 @@ class TWSEClient:
                 ).select(["stock_id", "date", "trade_volume"])
                 if not df.is_empty():
                     frames.append(df)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — 單檔壞不擋整批
                 logger.warning("讀取 {} 失敗：{}", f, e)
 
         if not frames:
@@ -1697,10 +1708,14 @@ class TWSEClient:
             elapsed = time.monotonic() - self._last_req
             if elapsed < self.interval_sec:
                 time.sleep(self.interval_sec - elapsed)
-            r = httpx.get(_ISIN_OTC_URL, headers={"User-Agent": self.user_agent}, timeout=20)
+            r = httpx.get(
+                f"{self.isin_base_url}{_ISIN_OTC_PATH}",
+                headers={"User-Agent": self.user_agent},
+                timeout=20,
+            )
             self._last_req = time.monotonic()
             html = r.content.decode("ms950", errors="replace")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — 網路失敗誠實回空表
             logger.warning(f"fetch_otc_industry 網路錯誤：{e}")
             _empty: dict[str, type[pl.DataType]] = {
                 "stock_id": pl.Utf8, "stock_name": pl.Utf8,
@@ -1776,7 +1791,7 @@ class TWSEClient:
                 continue
 
             url = (
-                f"https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json"
+                f"{self.legacy_base_url}/exchangeReport/STOCK_DAY?response=json"
                 f"&date={ym}01&stockNo={stock_id}"
             )
             payload = self._get_legacy(url)
@@ -1848,7 +1863,7 @@ class TWSEClient:
                 continue
 
             date_param = target.strftime("%Y/%m/01")
-            url = f"{_TPEX_BASE}{_TPEX_STOCK_DAY_PATH}?code={stock_id}&date={date_param}"
+            url = f"{self.tpex_base_url}{_TPEX_STOCK_DAY_PATH}?code={stock_id}&date={date_param}"
             payload = self._get_legacy(url)
             df = _parse_tpex_stock_day(payload, stock_id)
             if not df.is_empty():
@@ -1892,7 +1907,7 @@ class TWSEClient:
         for f in stock_day_files:
             try:
                 stock_day_frames.append(pl.read_parquet(f))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — 單檔壞不擋整批
                 logger.warning(f"讀取 {f} 失敗：{e}")
 
         # 補充：全市場日快取（包含 name 等欄位；otc_daily_* 為上櫃全市場）
@@ -1910,7 +1925,7 @@ class TWSEClient:
                         if "name" in filtered.columns:
                             filtered = filtered.drop("name")
                         daily_frames.append(filtered)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — 單檔壞不擋整批
                 logger.warning(f"讀取 {f} 失敗：{e}")
 
         all_frames = stock_day_frames + daily_frames
@@ -1966,7 +1981,7 @@ class TWSEClient:
                     df = pl.read_parquet(f)
                     if {"stock_id", "date", "close"}.issubset(df.columns):
                         frames.append(df.select(["stock_id", "date", "close"]))
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — 單檔壞不擋整批
                     logger.warning(f"讀取 {f} 失敗：{e}")
 
         # 2. daily caches (all stocks; filter to candidates)
@@ -1980,7 +1995,7 @@ class TWSEClient:
                 )
                 if not df.is_empty():
                     frames.append(df)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — 單檔壞不擋整批
                 logger.warning(f"讀取 {f} 失敗：{e}")
 
         if not frames:
@@ -2049,4 +2064,7 @@ def create_client(settings_path: Path = Path("config/settings.yaml")) -> TWSECli
         ttl_hours=float(twse["cache_ttl_hours"]),
         user_agent=twse["user_agent"],
         interval_sec=float(twse["request_interval_sec"]),
+        legacy_base_url=twse.get("legacy_base_url", "https://www.twse.com.tw"),
+        isin_base_url=twse.get("isin_base_url", "https://isin.twse.com.tw"),
+        tpex_base_url=settings.get("tpex", {}).get("base_url", "https://www.tpex.org.tw"),
     )

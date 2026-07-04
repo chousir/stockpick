@@ -106,9 +106,9 @@ def run_group_analysis(settings: Path) -> None:
         # 顯示資料覆蓋情況
         per_stock_days = price_history.group_by("stock_id").len().get_column("len")
         if len(per_stock_days) > 0:
+            cov_min, cov_med = str(per_stock_days.min()), str(per_stock_days.median())
             console.print(
-                f"  候選股 {candidate_ids and len(candidate_ids) or 0} 檔，"
-                f"歷史覆蓋 min={per_stock_days.min()}、median={per_stock_days.median()} 日"
+                f"  候選股 {len(candidate_ids)} 檔，歷史覆蓋 min={cov_min}、median={cov_med} 日"
             )
 
     institutional = client.load_institutional_history(n_days=20)

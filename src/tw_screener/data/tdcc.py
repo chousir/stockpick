@@ -55,7 +55,7 @@ def parse_distribution(csv_text: str) -> pl.DataFrame:
             new_columns=_COLUMNS,
             infer_schema_length=0,  # 全讀為 Utf8，型別由下方顯式 cast 決定
         )
-    except Exception as exc:  # 解析失敗誠實降級回空表，不炸呼叫端
+    except Exception as exc:  # noqa: BLE001 — 解析失敗誠實降級回空表，不炸呼叫端
         logger.warning("TDCC 集保分散表解析失敗：{}", exc)
         return pl.DataFrame(schema=_schema())
 
@@ -284,7 +284,7 @@ class TDCCClient:
         for f in recent:
             try:
                 frames.append(load_parquet(f))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — 單檔壞不擋整批
                 logger.warning("讀取 {} 失敗：{}", f, exc)
         if not frames:
             return latest_big_holders_with_wow(pl.DataFrame())

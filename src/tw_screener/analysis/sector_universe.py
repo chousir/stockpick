@@ -135,7 +135,7 @@ def load_industry_mapping(cache_dir: Path) -> pl.DataFrame:
             continue
         try:
             frames.append(pl.read_parquet(files[-1]).select(list(_INDUSTRY_SCHEMA)))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — 單檔壞不擋整批
             logger.warning("讀取 {} 失敗：{}", files[-1], e)
     if not frames:
         return pl.DataFrame(schema=_INDUSTRY_SCHEMA)

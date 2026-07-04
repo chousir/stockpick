@@ -158,7 +158,7 @@ def run_doctor(
         html = fetcher.get(data_url, force=force)
     except GoodinfoBlockedError:
         return DoctorResult(DoctorStatus.BLOCKED, "Goodinfo 回傳流量異常封鎖頁（您的瀏覽量異常）")
-    except Exception as exc:  # 連線層/重試耗盡：httpx 例外、逾時等
+    except Exception as exc:  # noqa: BLE001 — 連線層/重試耗盡：httpx 例外、逾時等
         logger.error("doctor 取數失敗：{}", exc)
         return DoctorResult(DoctorStatus.NETWORK_ERROR, f"取數失敗：{exc}")
 

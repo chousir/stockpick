@@ -85,7 +85,7 @@ def load_market_history(
             if not {"date", "stock_id", "close"}.issubset(df.columns):
                 continue
             frames.append(_normalize(df))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — 單檔壞不擋整批
             logger.warning("讀取 {} 失敗：{}", f, e)
     if not frames:
         return pl.DataFrame(schema=_MARKET_SCHEMA)
