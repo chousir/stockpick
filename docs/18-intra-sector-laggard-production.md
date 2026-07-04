@@ -1,4 +1,4 @@
-# 17 — 族群內落後濾鏡生產化（冠軍 S+ 內 rs_subind<0 進場加分上線 規劃書）
+# 18 — 族群內落後濾鏡生產化（冠軍 S+ 內 rs_subind<0 進場加分上線 規劃書）
 
 > 承接 [docs/16 M-Part C](16-intra-sector-laggard-research.md) 的**首個全勝研究軌**：在冠軍 CP
 > 補漲訊號（資金進＋貼低＝L1 埋伏）上，加「個股落後其次產業」（`rs_subind<0`）濾鏡，**起漲命中
@@ -59,7 +59,7 @@
 
 ## 4. 落點與形態（生產／一次一子項）
 
-### D-P0 規劃書（本檔 docs/17）
+### D-P0 規劃書（本檔 docs/18）
 
 ### D-P1 code＋settings＋測試（純加法）
 - `settings.cp_value.candidate.laggard`（**全門檻進 settings、不寫死**）：

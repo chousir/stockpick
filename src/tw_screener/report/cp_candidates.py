@@ -26,7 +26,7 @@ from loguru import logger
 
 # 多窗資金 z 欄名（M-MH：foreign_flow_5d_z / net_flow_20d_z…）
 _FLOW_Z_RE = re.compile(r"^(net_flow|foreign_flow|trust_flow)_(\d+)d_z$")
-# 族群內落後度欄（B1 隨 rs_window 命名，如 rs_subind_20d；docs/17 落後濾鏡生產化）
+# 族群內落後度欄（B1 隨 rs_window 命名，如 rs_subind_20d；docs/18 落後濾鏡生產化）
 _RS_SUBIND_RE = re.compile(r"^rs_subind_(\d+)d$")
 
 # label key → 報表顯示型態名
@@ -72,7 +72,7 @@ def _mom_col(z_col: str) -> str:
 
 
 def _rs_subind_col(df: pl.DataFrame) -> str | None:
-    """面板的個股相對次產業強度欄名（rs_subind_{rs_window}d；docs/17）。取首見。"""
+    """面板的個股相對次產業強度欄名（rs_subind_{rs_window}d；docs/18）。取首見。"""
     for c in df.columns:
         if _RS_SUBIND_RE.match(c):
             return c
@@ -142,7 +142,7 @@ def build_cp_candidates(
         cp_ceiling: cp_score 的位階剩餘空間 room 天花板（同 A1）
         max_candidates: **每個主型態**各取前 N（≤0 不截）——三型態各自獵場，避免
             貼低高分的埋伏把離低的反轉全擠掉
-        laggard_labels: 族群內落後濾鏡加權作用的型態（docs/17 C-P2；空＝停用）
+        laggard_labels: 族群內落後濾鏡加權作用的型態（docs/18 C-P2；空＝停用）
         laggard_boost: 落後股 cp_score ×(1+此值)＝輕加權（≤0＝停用）
         laggard_threshold: rs_subind < 此＝落後其次產業（C-P2 驗證切點）
 
@@ -217,7 +217,7 @@ def build_cp_candidates(
         zc = str(best["flow_z_col"])
         mom = rec.get("flow_momentum")
         zval = rec.get(zc)
-        # 族群內落後濾鏡（docs/17 C-P2）：落後且型態在作用範圍 → cp_score 輕加權浮上
+        # 族群內落後濾鏡（docs/18 C-P2）：落後且型態在作用範圍 → cp_score 輕加權浮上
         rs_val = rec.get(rs_col) if rs_col else None
         boosted = False
         if (
@@ -612,7 +612,7 @@ def render_cp_candidates_report(
         candidates.filter(pl.col("watch_status").str.contains("本週命中")).height if n_total else 0
     )
     has_val = "triple_filter" in candidates.columns
-    has_rs = "rs_subind" in candidates.columns  # 族群內落後濾鏡欄（docs/17）
+    has_rs = "rs_subind" in candidates.columns  # 族群內落後濾鏡欄（docs/18）
     n_triple = (
         candidates.filter(pl.col("triple_filter") == "✓三重").height if (n_total and has_val) else 0
     )
@@ -669,7 +669,7 @@ def render_cp_candidates_report(
         *(
             [
                 "> 族群內＝個股相對其次產業強度（pp，負＝落後其族群）；🔻＝落後且該型態加權"
-                "（docs/17 C-P2：冠軍 S+ 內落後者起漲 precision 高、賺賠轉正，"
+                "（docs/18 C-P2：冠軍 S+ 內落後者起漲 precision 高、賺賠轉正，"
                 "可作進場加碼/前重分批依據）。"
             ]
             if has_rs

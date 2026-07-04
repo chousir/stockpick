@@ -2,6 +2,9 @@
 
 > **這份是 Claude Code 的執行藍圖。**  
 > 一次只做一個 milestone，做完停下等使用者驗收，**不要連續執行**。
+>
+> ⚠️ **完成狀態以各 milestone 的「收官」敘事段為準**——checkbox（`[ ]`/`[x]`）未回頭維護，
+> 不可靠（例：M0-M7 成功標準全未勾但建置期早已完成）。M-Dash 0–4 在 docs/17-dashboard-spec.md。
 
 每個 milestone 都包含：
 - **目標**：這階段要達成什麼
