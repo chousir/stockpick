@@ -1515,8 +1515,8 @@ def test_fetch_otc_daily_all_cache_hit(tmp_path: Path):
                  ).write_parquet(tmp_path / "otc_daily_20260612.parquet")
     df = client.fetch_otc_daily_all()
     assert df["stock_id"].to_list() == ["8299"]
-    # fetch_daily_all 的 _latest_cache_file("daily_*.parquet") 不應撿到 otc_daily_*
-    assert client._latest_cache_file("daily_*.parquet") is None
+    # fetch_daily_all 的 find_latest("daily_*.parquet") 不應撿到 otc_daily_*
+    assert find_latest(client.cache_dir, "daily_*.parquet") is None
 
 
 def test_parse_quarterly_fundamentals_merges_four_endpoints():

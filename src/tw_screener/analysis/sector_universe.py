@@ -17,6 +17,7 @@ from loguru import logger
 
 from tw_screener.analysis.concepts import SUB_INDUSTRY_KIND, load_themes
 from tw_screener.analysis.grouping import is_etf_or_warrant
+from tw_screener.data.cache import find_latest
 
 _MEMBERSHIP_SCHEMA: dict[str, type[pl.DataType]] = {
     "sub_industry": pl.Utf8,
@@ -129,14 +130,14 @@ def load_industry_mapping(cache_dir: Path) -> pl.DataFrame:
     """
     frames: list[pl.DataFrame] = []
     for pattern in ("industry_[0-9]*.parquet", "otc_industry_[0-9]*.parquet"):
-        files = sorted(cache_dir.glob(pattern))
-        if not files:
+        latest = find_latest(cache_dir, pattern, by="name")
+        if latest is None:
             logger.warning("load_industry_mapping：找不到 {}（{}）", pattern, cache_dir)
             continue
         try:
-            frames.append(pl.read_parquet(files[-1]).select(list(_INDUSTRY_SCHEMA)))
+            frames.append(pl.read_parquet(latest).select(list(_INDUSTRY_SCHEMA)))
         except Exception as e:  # noqa: BLE001 — 單檔壞不擋整批
-            logger.warning("讀取 {} 失敗：{}", files[-1], e)
+            logger.warning("讀取 {} 失敗：{}", latest, e)
     if not frames:
         return pl.DataFrame(schema=_INDUSTRY_SCHEMA)
     # 上市排前（pattern 順序），同 stock_id 重複時 keep first

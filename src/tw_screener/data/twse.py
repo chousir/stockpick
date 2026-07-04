@@ -11,7 +11,7 @@ import polars as pl
 import yaml
 from loguru import logger
 
-from .cache import is_fresh, load_parquet, save_parquet, select_recent_cache_files
+from .cache import find_latest, is_fresh, load_parquet, save_parquet, select_recent_cache_files
 
 # ─── 字串轉換工具 ─────────────────────────────────────────────────────────────
 
@@ -1145,7 +1145,7 @@ class TWSEClient:
         週一收盤前跑也仍是上週五，避免疊出多個檔名不同但內容相同的 cache。
         """
         # 先用 mtime 找最新的 daily_*.parquet；TTL 內就用，不打網
-        latest_cache = self._latest_cache_file("daily_*.parquet")
+        latest_cache = find_latest(self.cache_dir, "daily_*.parquet")
         if latest_cache is not None and is_fresh(latest_cache, self.ttl_hours):
             logger.info(f"命中快取 {latest_cache}")
             return load_parquet(latest_cache)
@@ -1488,7 +1488,7 @@ class TWSEClient:
         檔名用 otc_ 前綴而非 daily_otc_：避免被 fetch_daily_all 的 daily_*
         TTL glob 誤撿成上市快取；讀取端（load_market_history）已含 otc_daily_* pattern。
         """
-        latest_cache = self._latest_cache_file("otc_daily_*.parquet")
+        latest_cache = find_latest(self.cache_dir, "otc_daily_*.parquet")
         if latest_cache is not None and is_fresh(latest_cache, self.ttl_hours):
             logger.info(f"命中快取 {latest_cache}")
             return load_parquet(latest_cache)
@@ -1513,7 +1513,7 @@ class TWSEClient:
         各端點只回最新一季全體公司。TTL 用 ttl_hours×24（季資料、約週級重查即可）。
         體質欄（D5）來自簡式資產負債表（_ci 一般業）→ 金融業/缺表者該欄 null。
         """
-        latest_cache = self._latest_cache_file("fundamentals_*.parquet")
+        latest_cache = find_latest(self.cache_dir, "fundamentals_*.parquet")
         if latest_cache is not None and is_fresh(latest_cache, self.ttl_hours * 24):
             logger.info(f"命中快取 {latest_cache}")
             return load_parquet(latest_cache)
@@ -1555,7 +1555,7 @@ class TWSEClient:
         百分位）。TTL 同日線（ttl_hours），同交易日重跑讀快取。
         取代 valuation.compute_pe 的 EPS×4 年化代理——官方 trailing PE、PBR 補虧損股。
         """
-        latest_cache = self._latest_cache_file("valuation_ratios_*.parquet")
+        latest_cache = find_latest(self.cache_dir, "valuation_ratios_*.parquet")
         if latest_cache is not None and is_fresh(latest_cache, self.ttl_hours):
             logger.info(f"命中快取 {latest_cache}")
             return load_parquet(latest_cache)
@@ -1644,15 +1644,6 @@ class TWSEClient:
         if df.is_empty() or "date" not in df.columns:
             return None
         return df["date"].max()
-
-    def _latest_cache_file(self, pattern: str) -> Path | None:
-        """回傳 cache_dir 內符合 pattern 的最新 mtime 檔案；無則 None。"""
-        files = sorted(
-            self.cache_dir.glob(pattern),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        return files[0] if files else None
 
     def fetch_revenue(self) -> pl.DataFrame:
         """抓月營收（全市場），快取到 revenue_YYYYMM.parquet。"""

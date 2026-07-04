@@ -6,6 +6,14 @@ from urllib.parse import urlencode
 import yaml
 from pydantic import BaseModel
 
+# CLAUDE.md §3.3 固定模板；全專案個股 Goodinfo 連結的單一來源
+_STOCK_DETAIL_TMPL = "https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={}"
+
+
+def stock_detail_url(stock_id: str) -> str:
+    """個股 Goodinfo 頁連結。"""
+    return _STOCK_DETAIL_TMPL.format(stock_id)
+
 
 class FilterCondition(BaseModel):
     item: str
