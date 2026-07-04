@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -114,6 +115,9 @@ def compute_trend_score(
     mas = {w: _latest_ma(idx, w) for w in windows}
     # 鏈：指數 → MA(短) → … → MA(長)（資料足夠時 mas 全非 None）
     chain: list[float] = [latest] + [m for w in windows if (m := mas[w]) is not None]
+    # NaN 毒化的指數會讓 Python 比較全 False → 趨勢假裝 −1.0——誠實回「未取得」
+    if not all(math.isfinite(v) for v in chain):
+        return None, {"reason": "non_finite_index"}
     pairs = [1 if a > b else -1 for a, b in zip(chain, chain[1:], strict=False)]
     score = sum(pairs) / len(pairs)
     return score, {
@@ -171,6 +175,8 @@ def compute_breadth_score(
             lo, hi = _num(window.min()), _num(window.max())
             latest = float(idx.tail(1).item())
             idx_pos = (latest - lo) / (hi - lo) if hi > lo else 0.5
+            if not math.isfinite(idx_pos):  # 指數含 NaN → 位階分項誠實缺席
+                idx_pos = None
 
     sub = [2 * frac_above_ma - 1]
     if idx_pos is not None:
@@ -258,6 +264,15 @@ def compute_regime(
         list(flow_cfg.get("windows", [5, 20])),
         float(flow_cfg.get("saturate_shares", 100_000_000)),
     )
+
+    # NaN 分項一律視為「未取得」：NaN 進 _label 兩邊比較皆 False 會靜默輸出「中性」，
+    # 壞掉的指標不得用正常口吻給倉位建議（W27 門面曾印「分數 +nan → 中性」）
+    def _finite_or_none(s: float | None) -> float | None:
+        return s if s is not None and math.isfinite(s) else None
+
+    trend_score = _finite_or_none(trend_score)
+    breadth_score = _finite_or_none(breadth_score)
+    flow_score = _finite_or_none(flow_score)
 
     weights = cfg.get("weights", {})
     components = {

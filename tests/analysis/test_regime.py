@@ -161,3 +161,40 @@ def test_describe_regime_shape() -> None:
     assert "大盤姿態" in desc["line"]
     assert desc["advice"]
     assert set(desc) >= {"regime", "score", "as_of", "advice", "line"}
+
+
+# ── NaN 誠實化（hotfix：壞指標不得假裝正常值）─────────────────────────────────
+
+
+def test_poisoned_zero_close_stock_does_not_nan_regime() -> None:
+    """cache 混入連續 0 收盤股（0/0=NaN 曾毒化等權指數→廣度 nan、NaN 靜默判中性）。"""
+    import math
+
+    dirty = pl.DataFrame(
+        {
+            "date": _dates(150),
+            "stock_id": ["9999"] * 150,
+            "close": [0.0] * 150,
+            "volume": [0] * 150,
+        }
+    )
+    price = pl.concat([_price_history(150, +0.01), dirty])
+    r = compute_regime(price, _institutional(150, +50_000), CFG)
+    assert r.score is not None and math.isfinite(r.score)
+    assert r.regime == ATTACK  # 與乾淨資料同判（多頭），髒股不改變結論
+    for s in (r.trend_score, r.breadth_score, r.flow_score):
+        assert s is None or math.isfinite(s)
+
+
+def test_trend_score_nan_index_returns_none() -> None:
+    """指數含 NaN → 趨勢分項誠實回 None（Python NaN 比較全 False 曾假裝 −1.0）。"""
+    idx = compute_market_index(_price_history(150, +0.01))
+    poisoned = idx.with_columns(
+        pl.when(pl.int_range(pl.len()) >= 140)
+        .then(float("nan"))
+        .otherwise(pl.col("market_index"))
+        .alias("market_index")
+    )
+    score, ev = compute_trend_score(poisoned, [20, 60, 120])
+    assert score is None
+    assert ev["reason"] == "non_finite_index"

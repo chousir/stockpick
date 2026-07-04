@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import polars as pl
@@ -53,19 +54,35 @@ def load_prev_rotation_snapshot(reports_dir: Path, week_tag: str) -> pl.DataFram
 def _basket_position(
     baskets: pl.DataFrame, position_window: int
 ) -> pl.DataFrame:
-    """每次產業最新位階：5 日籃子報酬、距 position_window 日低點 %。"""
+    """每次產業最新位階：5 日籃子報酬、距 position_window 日低點 %。
+
+    籃子指數含 NaN（歷史髒值毒化 cum_prod）時，位階/報酬誠實回 None——
+    NaN 一路傳染會讓象限誤標、cp_score=NaN 還排 CP 榜首（polars NaN>0 為 True）。
+    """
+
+    def _finite(v: float | None) -> bool:
+        return v is not None and math.isfinite(v)
+
     rows = []
     for sub_df in baskets.sort(["sub_industry", "date"]).partition_by(
         "sub_industry", maintain_order=True
     ):
         idx = sub_df["basket_index"].to_list()
-        ret_5d = (idx[-1] / idx[-6] - 1) * 100 if len(idx) >= 6 else None
-        low = min(idx[-position_window:])
+        last = idx[-1]
+        ret_5d = (
+            (last / idx[-6] - 1) * 100
+            if len(idx) >= 6 and _finite(last) and _finite(idx[-6])
+            else None
+        )
+        low_window = [v for v in idx[-position_window:] if _finite(v)]
+        above_low = (
+            (last / min(low_window) - 1) * 100 if _finite(last) and low_window else None
+        )
         rows.append(
             {
                 "sub_industry": sub_df["sub_industry"][0],
                 "basket_ret_5d_pct": ret_5d,
-                "above_low_pct": (idx[-1] / low - 1) * 100,
+                "above_low_pct": above_low,
                 "members_priced": sub_df["members_priced"][-1],
             }
         )
@@ -145,8 +162,13 @@ def build_rotation_table(
 
     inflow = pl.col(f"net_flow_{lw}d") > 0
     risen = pl.col("above_low_pct") > position_low_pct
+    # 位階未取得（null/NaN）→ 象限誠實留 null，不硬塞（NaN>門檻在 polars 為 True，
+    # 曾把位階未知的次產業誤標「出貨警訊」）
+    pos_unknown = pl.col("above_low_pct").is_null() | pl.col("above_low_pct").is_nan()
     table = table.with_columns(
-        pl.when(inflow & ~risen)
+        pl.when(pos_unknown)
+        .then(pl.lit(None, dtype=pl.Utf8))
+        .when(inflow & ~risen)
         .then(pl.lit(Q_NEXT))
         .when(inflow & risen)
         .then(pl.lit(Q_TREND))
@@ -212,7 +234,8 @@ def build_participation(
     flow_col = f"net_flow_{long_window}d"
     sub_info: dict[str, dict] = {
         r["sub_industry"]: {
-            "quadrant": r["quadrant"],
+            # 榜內但位階未取得 → 顯示「位階未取得」（None 留給真榜外＝成員數不足）
+            "quadrant": r["quadrant"] or "位階未取得",
             "inflow": (r[flow_col] or 0) > 0,
             "triggered": bool(r["entry_triggered"]),
         }
@@ -353,10 +376,13 @@ def render_rotation_report(
         for q in (Q_NEXT, Q_TREND, Q_DISTRIBUTE, Q_COOL)
     }
     # A1：CP 候選＝正分（資金流入 × 仍有位階空間）取前 top_n，跨象限排序
+    # is_finite：NaN 分數在 polars 過得了 >0 且降冪排最前，擋掉（位階未取得 → 不入榜）
     cp_rows = (
         list(
             _rows(
-                table.filter(pl.col("cp_score") > 0).sort("cp_score", descending=True).head(top_n)
+                table.filter(pl.col("cp_score").is_finite() & (pl.col("cp_score") > 0))
+                .sort("cp_score", descending=True)
+                .head(top_n)
             )
         )
         if "cp_score" in table.columns
