@@ -157,7 +157,7 @@ def fetch_stock_bundle(stock_id: str, settings_path: Path) -> dict:
 make report STOCK_ID=2330
 ```
 
-> 批次：依本週 `picks.md` 逐檔執行 `make report STOCK_ID=XXXX`（舊 `make report-batch` 已停用、`report-list` 自訂清單批次未實作）。
+> 批次：依本週 `pick.md` 逐檔執行 `make report STOCK_ID=XXXX`（舊 `make report-batch` 已停用、`report-list` 自訂清單批次未實作）。
 
 產出路徑：`reports/YYYY-Www/stocks/{stock_id}_{name}.md`
 

@@ -826,12 +826,12 @@ def report_batch(
 
     機械推薦清單已移除（docs/11 已 ⛔，挑股改由 Claude 在完整候選宇宙中精選）。
     新流程：make week → 把 group_analysis.md＋candidates_enriched.csv 貼給 Claude Opus →
-    存成本週 picks.md → 再依 picks.md 逐檔跑 `make report STOCK_ID=XXXX`。
+    存成本週 pick.md → 再依 pick.md 逐檔跑 `make report STOCK_ID=XXXX`。
     """
     console.print(
         "[yellow]report batch 已停用[/yellow]："
         "機械推薦清單（舊 group_analysis Section 5）已移除。\n"
-        "請依本週 [bold]picks.md[/bold]（Claude 精選）逐檔跑 "
+        "請依本週 [bold]pick.md[/bold]（Claude 精選）逐檔跑 "
         "[bold]make report STOCK_ID=XXXX[/bold]，流程見 docs/11-propicks-analysis.md。"
     )
 
@@ -947,6 +947,20 @@ def picks_record_cmd(
         settings, week, stock, layer, sub, entry, stop, thesis, ext_ma60,
         excluded, reason, detail, name, data_date,
     )
+
+
+@picks_app.command("sync")
+def picks_sync_cmd(
+    week: str = typer.Option(..., help="週次目錄名（如 2026-W27）"),
+    file: Path | None = typer.Option(
+        None, help="pick.md 路徑（預設 reports/<week>/pick.md）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """F1-PO1：解析 pick.md 尾端機器可讀區塊，整批 upsert 進底帳（全列驗證過才寫、冪等）。"""
+    from tw_screener.report.picks_runner import run_picks_sync
+
+    run_picks_sync(settings, week, file)
 
 
 @picks_app.command("outcome")

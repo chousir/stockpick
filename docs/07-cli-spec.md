@@ -14,6 +14,9 @@
 ## Makefile 指令總覽
 
 ```makefile
+# ─── 主要（每週真的在用的三個；其餘進階，help 不列）──
+help:            ## 列主要三指令（裸打 make 即顯示；week / pick-outcome / dash-dev）
+
 # ─── 環境 ───────────────────────────────────────
 init:            ## 初始化資料夾結構（首次 clone 後跑）
 sync:            ## uv sync 安裝/更新依賴
@@ -24,7 +27,6 @@ deep-clean:      ## ⚠️ 清掉所有 data/cache 和 data/raw（保留 reports
 # ─── 開發 ───────────────────────────────────────
 test:            ## 跑全部測試（離線，fixtures/合成資料）
 test-unit:       ## 排除 integration 標記
-test-integration: ## 跑整合測試（會打網，慢，注意 rate limit）
 lint:            ## ruff check
 typecheck:       ## mypy
 fmt:             ## ruff format
@@ -35,7 +37,6 @@ fetch-stock STOCK_ID=2330:        ## 抓單檔個股完整資料
 fetch-tdcc:      ## TDCC 集保戶股權分散表（大戶持股比，規劃書 02 D3）
 fetch-candidates-history:         ## 對本週入選股補抓 STOCK_DAY 歷史（MONTHS=13 預設）
 fetch-institutional-history:      ## 回補近 N 日上市＋上櫃三大法人（DAYS=20 預設）
-backfill-otc-history:             ## ⏳ 一次性回補上櫃次產業成員日線（可中斷續跑）
 backfill-universe-history:        ## ⏳ 一次性回補全部次產業成員日線（~1500 檔，8-12 小時）
 build-themes:    ## 爬 Yahoo 概念股 merge 進 config/concepts.yaml（DRY=1 預演）
 
@@ -47,7 +48,6 @@ doctor:          ## Goodinfo 健康檢查（被擋/改版→exit 1；規劃書 0
 
 # ─── 分析 ───────────────────────────────────────
 group:           ## 族群分析 → group_analysis.md ＋ candidates_enriched.csv
-leaders:         ## 只跑領頭羊判斷
 audit-concepts:  ## 清查 concepts.yaml 無價成員（只報告不改檔）
 
 # ─── 報告 ───────────────────────────────────────
@@ -130,7 +130,8 @@ tw-screener cp candidates / calibrate / valuation
 
 # backtest / picks — 驗證閉環（規劃書 03 V1、05 F1）
 tw-screener backtest strategies
-tw-screener picks record --week 2026-Www --stock XXXX --layer core
+tw-screener picks sync --week 2026-Www          # 解析 pick.md 尾端區塊整批落底帳（主流程）
+tw-screener picks record --week 2026-Www --stock XXXX --layer core   # 單檔補記
 tw-screener picks outcome [--diff]
 
 # market / portfolio — 大盤 regime 與組合體檢（規劃書 03 V2、V3）
@@ -148,9 +149,9 @@ tw-screener portfolio check [--include-candidates]
 make week GROUP=defg           # 十步一鍵跑完
 open reports/2026-Www/group_analysis.md
 
-# 把 6 類報告貼給 Claude（docs/11 prompt）→ picks.md
-# picks 定稿後寫底帳（餵 pick 閉環）：
-uv run tw-screener picks record --week 2026-Www --stock XXXX --layer core
+# 把 6 類報告貼給 Claude（docs/11 prompt）→ pick.md（含尾端機器可讀區塊）
+# pick.md 定稿後整批寫底帳（餵 pick 閉環；單檔補記用 picks record）：
+uv run tw-screener picks sync --week 2026-Www
 
 make report STOCK_ID=2330      # 對 picks 每檔產深度報告
 make weekend GROUP=defg        # 或：week ＋ commit/push（已含空 commit 守衛）

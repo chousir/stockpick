@@ -122,7 +122,12 @@ tw-stock-screener/
 - 解析 HTML 的測試用 `tests/fixtures/` 的離線 HTML，**不要每次跑測試都打 Goodinfo**。
 - 跑測試用 `make test`。
 
-### 2.6 不要做的事
+### 2.6 Git 分支與 merge 紀律
+- 一條 feature 分支＝一個 milestone 級的工作單位；分支上 commit 可多、可小。
+- 只在 milestone 完整（驗收指令跑過）後，才 `--no-ff` 併回 main——一顆 merge bubble，**不要每完成一小步就 merge**。
+- commit / push / merge 之前都先問使用者。
+
+### 2.7 不要做的事
 - 不要寫死路徑、stock_id、URL 在程式裡。
 - 不要在 commit 中包含 `data/`、`reports/` 下的個人持股相關內容。
 - 不要主動加入 pandas、requests-html、selenium、playwright（如果你覺得必要，先問）。
