@@ -247,3 +247,81 @@ def test_render_report_contains_sections():
     assert "## 建議名單" in md
     assert "entry_signal" in md  # 建議 settings 區塊
     assert "net_flow_5d" in md
+
+
+# ─── R3 四象限可信度實測（evaluate_quadrants）─────────────────────────────────
+
+
+def _quad_fixture() -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    """兩次產業 100 日：甲流入且貼低（下一棒→起漲）、乙流入且已漲（主升續勢）。"""
+    n = 100
+    ds = _dates(n)
+    # 甲：前 80 日走平（貼低），80 日後起漲 +30%
+    a_idx = [100.0] * 80 + [100.0 * (1.015 ** i) for i in range(1, 21)]
+    # 乙：全程緩漲（已漲、非貼低）
+    b_idx = [100.0 * (1.006 ** i) for i in range(n)]
+    baskets = pl.concat([_basket("甲", a_idx), _basket("乙", b_idx)])
+    flows = pl.DataFrame(
+        {
+            "sub_industry": ["甲"] * n + ["乙"] * n,
+            "date": ds + ds,
+            "members": [8] * (2 * n),
+            "net_flow_20d": [500.0] * n + [400.0] * n,  # 皆流入
+            "net_flow_20d_z": [1.0] * n + [1.0] * n,
+            "flow_momentum": [1.0] * (2 * n),  # scan_signals 的 +mom 變體需此欄
+        }
+    )
+    episodes = _episodes("甲", [ds[80]])  # 甲第 80 日起漲
+    return flows, baskets, episodes
+
+
+def test_evaluate_quadrants_forward_and_entry():
+    from tw_screener.backtest.rotation_calib import evaluate_quadrants
+
+    flows, baskets, episodes = _quad_fixture()
+    out = evaluate_quadrants(
+        flows, baskets, episodes,
+        long_window=20, position_window=60, position_low_pct=10.0,
+        next_precision_low_pct=5.0, min_members=5, lead_window=15, occupy_days=15,
+    )
+    fwd = out["forward"]
+    quads = set(fwd["quadrant"].to_list())
+    assert "下一棒" in quads and "主升續勢" in quads  # 象限值沿用 CSV 常數
+    # 甲貼低起漲 → 下一棒前瞻報酬為正
+    nxt = fwd.filter(pl.col("quadrant") == "下一棒").row(0, named=True)
+    assert nxt["fwd20_med_pct"] > 0
+    # entry：現行 + ⚡貼低兩變體，貼低命中率 ≥ 現行（precision 更高）
+    entry = out["entry"]
+    assert entry.height == 2
+    assert any("⚡貼低" in v for v in entry["variant"].to_list())
+
+
+def test_evaluate_quadrants_empty_inputs():
+    from tw_screener.backtest.rotation_calib import evaluate_quadrants
+
+    out = evaluate_quadrants(pl.DataFrame(), pl.DataFrame(), pl.DataFrame())
+    assert out["forward"].is_empty() and out["entry"].is_empty()
+
+
+def test_render_report_includes_quadrant_section():
+    from tw_screener.backtest.rotation_calib import evaluate_quadrants
+
+    flows, baskets, episodes = _quad_fixture()
+    scan = scan_signals(
+        flows, episodes, z_thresholds=(1.0,), breadth_thresholds=(0.5,),
+        z_window=60, z_min_periods=30, lead_window=15, occupy_days=15,
+    )
+    quad_stats = evaluate_quadrants(
+        flows, baskets, episodes, long_window=20, next_precision_low_pct=5.0,
+    )
+    params = {
+        "x_pct": 10.0, "n_days": 15, "m_days": 60, "low_base_tol_pct": 3.0,
+        "cooldown_days": 15, "lead_window": 15, "z_window": 60,
+    }
+    md = render_calibration_report(
+        scan, episodes, params, (D0, D0 + timedelta(days=99)),
+        min_triggers=1, min_lift=1.0, quadrant_stats=quad_stats,
+    )
+    assert "四象限可信度" in md
+    assert "狀態描述、不是多空判詞" in md
+    assert "⚡貼低" in md

@@ -34,6 +34,25 @@
 > **定位＝風險揭露，非硬約束；「合計%」為等權檔數佔比近似（持股無部位大小）。報酬相關簇與完整檢核見 `tw-screener portfolio check`。由人決策。**
 
 {% endif %}
+{% if rotation_axis %}
+## 0.3 本週族群主軸（全市場輪動 → 對應候選股・問題3 貫穿線）
+
+> 從 `sector_rotation.csv`（全次產業，含未入選）蒸餾，接回下方個股選股宇宙。**「候選 N 檔」= 本週候選股中屬該次產業的檔數**；標 **⚠ 0 檔** 者＝族群強／資金到位但無候選命中（選股宇宙未覆蓋，見 Section 5 補位塊、或掃 candidates 全宇宙）。象限＝資金×位階狀態切片、非多空判詞（校準見 `make rotation-calib`）。
+
+**趨勢分 top（價格證據最強）**：
+{% for it in rotation_axis.trend_top -%}
+- **{{ it.sub_industry }}**（趨勢分 {{ it.trend_score_str }}・{{ it.quadrant_label }}{% if it.radar_rank %}・雷達#{{ it.radar_rank }}{% endif %}{% if it.triggered %}・★{% endif %}）— 候選 {{ it.n_candidates }} 檔{% if it.n_candidates == 0 %} ⚠{% endif %}
+{% endfor %}
+{% if rotation_axis.next_up %}
+**流入×未漲（起漲攔截區）**：
+{% for it in rotation_axis.next_up -%}
+- **{{ it.sub_industry }}**{% if it.precision %} ⚡貼低{% endif %}（趨勢分 {{ it.trend_score_str }}{% if it.radar_rank %}・雷達#{{ it.radar_rank }}{% endif %}{% if it.triggered %}・★{% endif %}）— 候選 {{ it.n_candidates }} 檔{% if it.n_candidates == 0 %} ⚠{% endif %}
+{% endfor %}
+{% endif %}
+{% if rotation_axis.triggered %}
+**★ 校準訊號觸發**（trust_flow 20d・領先起漲中位 8-10 日）：{% for it in rotation_axis.triggered %}{{ it.sub_industry }}（候選 {{ it.n_candidates }} 檔）{% if not loop.last %}、{% endif %}{% endfor %}
+{% endif %}
+{% endif %}
 ## 0. 策略代號說明
 
 {% for s in strategy_legend -%}
@@ -187,6 +206,18 @@
 {% endfor %}
 
 {% endfor %}
+{% if rotation_axis and rotation_axis.uncovered %}
+### 輪動補位塊（趨勢強／流入未漲但雷達六塊未涵蓋・問題3）
+
+> 這些次產業在全市場輪動屬**趨勢分 top 或流入×未漲**，但未進上方雷達六塊（多因**本週候選股未命中該族群**）——正是選股宇宙的斷點（如族群強、資金到位卻無候選）。列其 **RS 領頭股**供人工補看：**別因榜外就當無趨勢**，請掃 candidates 全宇宙或該領頭股所屬次產業，判斷是否有「族群強、個股也到位」的漏網標的（守推論／待查證圍欄）。
+
+| 次產業 | 趨勢分 | 象限 | 候選命中 | RS 領頭股 | 領頭 RS |
+|---|---|---|---|---|---|
+{% for it in rotation_axis.uncovered -%}
+| {{ it.sub_industry }}{% if it.precision %} ⚡貼低{% endif %} | {{ it.trend_score_str }} | {{ it.quadrant_label }}{% if it.triggered %}★{% endif %} | {{ it.n_candidates }} 檔{% if it.n_candidates == 0 %} ⚠{% endif %} | {{ it.leader_stock_id or "—" }} | {{ it.leader_rs_str or "—" }} |
+{% endfor %}
+
+{% endif %}
 ## 6. Claude CP 補漲候選分析請求（個股層・讀同夾 cp_candidates.md）
 
 > Section 5 是**次產業層**（哪個族群錢在進）；這裡下沉到**個股層**——請 Claude 開啟本週報告夾下的

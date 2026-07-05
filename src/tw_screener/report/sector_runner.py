@@ -315,6 +315,11 @@ def run_sector_rotation(top: int | None, settings: Path) -> None:
         min_members=min_members,
         prev=prev,
         trend=trend,
+        next_precision_low_pct=(
+            float(quad["next_precision_low_pct"])
+            if quad.get("next_precision_low_pct") is not None
+            else None
+        ),
     )
     if table.is_empty():
         console.print("[red]輪動表為空（資料不足）[/red]")
@@ -375,6 +380,7 @@ def run_sector_rotation(top: int | None, settings: Path) -> None:
         regime=regime,
         leaders=leaders,
         names=names,
+        quadrant_note=str(quad.get("calib_note", "")),
     )
     if not leaders.is_empty():
         leaders.write_csv(reports_dir / week_tag / "trend_leaders.csv")
@@ -487,6 +493,29 @@ def run_sector_calibrate(
         occupy_days=p["cooldown_days"],
     )
 
+    # R3 四象限可信度實測（前瞻報酬×起漲攔截）——象限語意的每季裁判
+    from tw_screener.analysis.rotation import compute_market_index
+    from tw_screener.backtest.rotation_calib import evaluate_quadrants
+
+    quad = rot.get("quadrant", {})
+    console.print("[bold]四象限可信度實測...[/bold]")
+    precision = quad.get("next_precision_low_pct")
+    quadrant_stats = evaluate_quadrants(
+        flows,
+        baskets,
+        episodes,
+        market_index=compute_market_index(
+            market, clip_daily_return_pct=float(rot.get("clip_daily_return_pct", 10.0))
+        ),
+        long_window=long_w,
+        position_window=int(quad.get("position_window", 60)),
+        position_low_pct=float(quad.get("position_low_pct", 10.0)),
+        next_precision_low_pct=float(precision) if precision is not None else None,
+        min_members=min_members,
+        lead_window=p["lead_window"],
+        occupy_days=p["cooldown_days"],
+    )
+
     data_range = (cast(_date, market["date"].min()), cast(_date, market["date"].max()))
     report = render_calibration_report(
         scan,
@@ -495,6 +524,7 @@ def run_sector_calibrate(
         data_range,
         min_triggers=int(cal.get("min_triggers", 8)),
         min_lift=float(cal.get("min_lift", 1.5)),
+        quadrant_stats=quadrant_stats,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     tag = _date.today().strftime("%Y%m%d")

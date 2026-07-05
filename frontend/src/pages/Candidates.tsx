@@ -8,7 +8,7 @@ import { MomentumValueScatter } from "../charts/MomentumValueScatter";
 import { ValuationDist } from "../charts/ValuationDist";
 import { DataTable } from "../components/DataTable";
 import { NarrativePanel } from "../components/NarrativePanel";
-import { ApiError, getCandidates, type Row } from "../lib/api";
+import { ApiError, getCandidates, getSectors, type Row } from "../lib/api";
 import { flagClass, fmtNum, isBlank, signClass } from "../lib/format";
 
 type Kind = "id" | "text" | "num" | "signed" | "flags";
@@ -116,6 +116,7 @@ interface Props {
 
 export function Candidates({ week, onStock }: Props) {
   const [rows, setRows] = useState<Row[] | null>(null);
+  const [sectors, setSectors] = useState<Row[] | null>(null);
   const [error, setError] = useState<{ status: number; msg: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -132,6 +133,15 @@ export function Candidates({ week, onStock }: Props) {
     setLoading(true);
     setError(null);
     setRows(null);
+    setSectors(null);
+    // 族群輪動非必要——缺 sector_rotation（舊週）時散佈圖 tooltip 無族群行、其餘照常
+    getSectors(week)
+      .then((data) => {
+        if (!cancelled) setSectors(data);
+      })
+      .catch(() => {
+        if (!cancelled) setSectors(null);
+      });
     getCandidates(week)
       .then((data) => {
         if (!cancelled) setRows(data);
@@ -150,6 +160,16 @@ export function Candidates({ week, onStock }: Props) {
   }, [week]);
 
   const columns = useMemo(() => buildColumns(onPick), [onPick]);
+
+  // sub_industry → 輪動列（散佈圖 tooltip 用；首見保留，同名不重複）
+  const sectorByName = useMemo(() => {
+    const m = new Map<string, Row>();
+    for (const s of sectors ?? []) {
+      const sub = String(s.sub_industry ?? "").trim();
+      if (sub && !m.has(sub)) m.set(sub, s);
+    }
+    return m;
+  }, [sectors]);
 
   const filtered = useMemo(() => {
     if (!rows) return [];
@@ -231,7 +251,7 @@ export function Candidates({ week, onStock }: Props) {
         <div className="chart-grid">
           <div className="chart-card">
             <h3>動能 × 估值散佈</h3>
-            <MomentumValueScatter rows={filtered} onPick={onPick} />
+            <MomentumValueScatter rows={filtered} onPick={onPick} sectorByName={sectorByName} />
           </div>
           <div className="chart-card">
             <h3>估值 / 殖利分布</h3>

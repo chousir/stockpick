@@ -19,17 +19,18 @@
 ## 1. 輪動排名（前 {{ top_n }}・按{{ rank_label }}）
 
 {% if has_trend -%}
-| # | 次產業 | 檔數 | 趨勢分 | 價格證據（均線態・站季線比・領頭RS） | {{ lw }}日淨流(張) | {{ s }}日淨流(張) | breadth | 5日籃子 | 距低 | 象限 | 訊號 | ΔRank |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| # | 次產業 | 檔數 | 趨勢分 | 價格證據（均線態・站季線比・領頭RS） | {{ lw }}日淨流(張) | {{ s }}日淨流(張) | breadth | 5日籃子 | 距低 | 訊號 | ΔRank |
+|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for r in top_rows -%}
-| {{ r.radar_rank }} | {{ r.sub_industry }} | {{ r.members }} | {{ "%.1f"|format(r.trend_score) if r.trend_score is not none else "—" }} | {{ r.trend_ma_state or "—" }}・{{ pct(r.above_ma60_breadth * 100, 0) if r.above_ma60_breadth is not none else "—" }}・{{ r.leader_stock_id or "" }} {{ "%+.1f%%"|format(r.leader_rs_pct) if r.leader_rs_pct is not none else "—" }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ pct(r.above_low_pct) }} | {{ r.quadrant or "位階未取得" }}{{ turn(r) }} | {{ marks(r) }} | {{ delta(r) }} |
+| {{ r.radar_rank }} | {{ r.sub_industry }} | {{ r.members }} | {{ "%.1f"|format(r.trend_score) if r.trend_score is not none else "—" }} | {{ r.trend_ma_state or "—" }}・{{ pct(r.above_ma60_breadth * 100, 0) if r.above_ma60_breadth is not none else "—" }}・{{ r.leader_stock_id or "" }} {{ "%+.1f%%"|format(r.leader_rs_pct) if r.leader_rs_pct is not none else "—" }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ pct(r.above_low_pct) }} | {{ marks(r) }} | {{ delta(r) }} |
 {% endfor %}
 > **F3 主鍵＝價格趨勢分數**（籃子等權指數 vs 自身月/季線＋成員站上自身季線比例＋領頭股 RS 跨次產業百分位；權重 settings.rotation.trend_score）。**{{ lw }} 日流量降為確認欄**（§1.5#2：流量排序天然落後）。**仲裁**：本表（全市場）與 group_analysis 2.8 雷達（篩中股）矛盾時，以**價格趨勢分數**裁決（讀法見 docs/11）。
+> **分工：排序講強弱（趨勢分）、象限講資金×位階狀態（Section 3）、★講校準事件**——本表不再重複列象限欄（同表「{{ lw }}日淨流」「距低」兩欄即其原始資料，象限判讀見 Section 3 附校準註記）。
 {%- else -%}
-| # | 次產業 | 檔數 | {{ lw }}日淨流(張) | {{ s }}日淨流(張) | 動能(張) | breadth | 力度 | 5日籃子 | 距低 | 象限 | 訊號 | ΔRank |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| # | 次產業 | 檔數 | {{ lw }}日淨流(張) | {{ s }}日淨流(張) | 動能(張) | breadth | 力度 | 5日籃子 | 距低 | 訊號 | ΔRank |
+|---|---|---|---|---|---|---|---|---|---|---|---|
 {% for r in top_rows -%}
-| {{ r.radar_rank }} | {{ r.sub_industry }} | {{ r.members }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ lots(r.flow_momentum_lots) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ conc(r) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ pct(r.above_low_pct) }} | {{ r.quadrant or "位階未取得" }}{{ turn(r) }} | {{ marks(r) }} | {{ delta(r) }} |
+| {{ r.radar_rank }} | {{ r.sub_industry }} | {{ r.members }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ lots(r.flow_momentum_lots) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ conc(r) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ pct(r.above_low_pct) }} | {{ marks(r) }} | {{ delta(r) }} |
 {% endfor %}
 {%- endif %}
 {% if leader_rows %}
@@ -42,7 +43,7 @@
 {% endfor %}
 > **定位（F3）**：解「找不到趨勢標的」＋給 **F2 被擋的延伸股（距季線 >+15% 不得入核心）合法出口**。旗標**只標註、不剔除**（旗標命中率由 F1-PO4 偽陰性帳持續驗證）。**風險預算**：本板一律**部位減半、移動停損**（突破頸線/前波高失守，非 MA60）、走買強勢階梯；帶 `過熱`/`土洋對作` 再降一級。**這是參與管道、不是買進清單**——個股仍須過 docs/11 排雷＋精選判讀。
 {% endif %}
-## 2. 出貨警訊（資金流出 × 位階已高）
+## 2. 流出×已漲（背離・舊稱「出貨警訊」）
 
 {% if outflow_rows -%}
 | 次產業 | {{ lw }}日淨流(張) | {{ s }}日淨流(張) | 動能(張) | 距低 | breadth | 5日籃子 | 近{{ s }}日轉向 |
@@ -50,12 +51,14 @@
 {% for r in outflow_rows -%}
 | {{ r.sub_industry }} | {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} | {{ lots(r["net_flow_" ~ s ~ "d_lots"]) }} | {{ lots(r.flow_momentum_lots) }} | {{ pct(r.above_low_pct) }} | {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }} | {{ pct(r.basket_ret_5d_pct) }} | {{ "🔺資金回流（近 " ~ s ~ " 日轉買）" if r.flow_turn == "資金回流" else "—" }} |
 {% endfor %}
-> ⚠ **判讀**：「{{ lw }}日淨流」是累積值，會把「累積仍負、但近 {{ s }} 日已轉買」的次產業一律標出貨。看「{{ s }}日淨流／動能」與「近 {{ s }} 日轉向」欄——標 **🔺資金回流** 者代表 {{ lw }} 日逆風**可能已在緩解**，受惠標的不該一律打入觀察，須逐檔複核近端籌碼。
+> ⚠ **判讀**：本象限＝「價格動能強、{{ lw }} 日流量未確認」的**背離狀態描述，不是賣訊**（校準：歷史前瞻超額非負，見 Section 3 註記）——不得單憑此欄剔除或降級標的，仍以位階/趨勢主判。「{{ lw }}日淨流」是累積值，會把「累積仍負、但近 {{ s }} 日已轉買」的次產業一律標流出；「近 {{ s }} 日轉向」欄（🔺資金回流）為**事實揭露、非方向訊號**（校準：回流子集前瞻報酬未優於未回流），只免除人工拆窗、須逐檔複核近端籌碼。
 {%- else -%}
 本週無「流出 × 已漲」次產業。
 {%- endif %}
 
 ## 3. 輪動四象限與 CP 候選
+
+> **象限＝資金×位階的狀態切片，不是多空判詞**（排序強弱看 Section 1 趨勢分）。{% if quadrant_note %}{{ quadrant_note }}{% else %}象限對前瞻報酬的預測力見 `make rotation-calib` 產出的「四象限可信度」段（每季重跑）。{% endif %}
 
 ### 🎯 CP 候選排名（連續分數＝資金 z × 位階剩餘空間）
 
@@ -77,27 +80,28 @@ quadrantChart
     title 次產業資金流向 × 位階四象限
     x-axis 資金流出 --> 資金流入
     y-axis 位階低（未漲） --> 位階高（已漲）
-    quadrant-1 主升續勢
-    quadrant-2 出貨警訊
-    quadrant-3 冷卻觀望
-    quadrant-4 下一棒候選
+    quadrant-1 流入×已漲
+    quadrant-2 流出×已漲
+    quadrant-3 流出×未漲
+    quadrant-4 流入×未漲
 {% for p in chart_points %}    "{{ p.label }}": [{{ p.x }}, {{ p.y }}]
 {% endfor -%}
 ```
-> 點位＝各次產業在「資金流向(x)×位階(y)」的**相對**座標（同 Section 1 數據；x=0.5 為淨流轉正、y=0.5 為位階門檻 {{ position_low_pct }}%）。**右下「下一棒候選」象限為重點**——資金已流入但價格未漲。僅列資金流入前 {{ top_n }} ＋出貨警訊次產業，數值見下方各象限與 Section 1。
+> 點位＝各次產業在「資金流向(x)×位階(y)」的**相對**座標（同 Section 1 數據；x=0.5 為淨流轉正、y=0.5 為位階門檻 {{ position_low_pct }}%）。**右下「流入×未漲」為起漲攔截區**（資金已進、價格未漲；含 ⚡貼低精確變體）。僅列資金流入前 {{ top_n }} ＋流出×已漲次產業，數值見下方各象限與 Section 1。
 
 {% endif -%}
-### 🟢 下一棒候選（流入 × 未漲・重點觀察）
+### 🟢 流入 × 未漲（起漲攔截區・重點觀察）
 
 {% if q_next -%}
 {% for r in q_next -%}
-- **{{ r.sub_industry }}**：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}・breadth {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }}・力度 {{ conc(r) }}{{ turn(r) }} {{ marks(r) }}
+- **{{ r.sub_industry }}**{{ "　⚡貼低" if r.next_precision else "" }}：{{ lw }}日淨流 {{ lots(r["net_flow_" ~ lw ~ "d_lots"]) }} 張・距低 {{ pct(r.above_low_pct) }}・breadth {{ pct(r["flow_breadth_" ~ lw ~ "d"] * 100, 0) }}・力度 {{ conc(r) }}{{ turn(r) }} {{ marks(r) }}
 {% endfor %}
+> ⚡貼低＝距低 ≤ 精確攔截門檻（settings rotation.quadrant.next_precision_low_pct）；校準顯示 precision 顯著較高（代價：觸發少、領先短）——揭露非 gate。
 {%- else -%}
 本週無——資金流入的次產業位階皆已偏高（或無流入）。
 {%- endif %}
 
-### 🔵 主升續勢（流入 × 已漲）
+### 🔵 流入 × 已漲（舊稱「主升續勢」・歷史前瞻超額最強象限）
 
 {% if q_trend -%}
 {% for r in q_trend -%}
@@ -107,7 +111,7 @@ quadrantChart
 （無）
 {%- endif %}
 
-### 🔴 出貨警訊（流出 × 已漲）
+### 🔴 流出 × 已漲（背離・舊稱「出貨警訊」・非賣訊）
 
 {% if outflow_rows -%}
 {% for r in outflow_rows -%}

@@ -120,14 +120,15 @@ def test_render_report_and_csv(table: pl.DataFrame, tmp_path: Path):
     )
     md = md_path.read_text(encoding="utf-8")
     assert "# 2026-W24 次產業資金流向輪動" in md
-    assert "🟢 下一棒候選" in md and "甲流入未漲" in md
-    assert "出貨警訊" in md and "丙流出已漲" in md
+    assert "🟢 流入 × 未漲" in md and "甲流入未漲" in md  # 起漲攔截區（舊稱下一棒）
+    assert "流出 × 已漲" in md and "丙流出已漲" in md  # 背離（舊稱出貨警訊）
     assert "資料來源與時間" in md
     assert "首週正常" in md  # 無 prev 的誠實標註
     for banned in ("目標價", "強烈建議", "飆股", "保證"):
         assert banned not in md
     csv = pl.read_csv(md_path.parent / "sector_rotation.csv")
-    assert {"sub_industry", "radar_rank", "quadrant"}.issubset(csv.columns)
+    # 象限值仍寫進 CSV（schema 穩定、dashboard 相容），僅主表顯示欄移除
+    assert {"sub_industry", "radar_rank", "quadrant", "next_precision"}.issubset(csv.columns)
 
 
 def test_render_report_density_note(table: pl.DataFrame, tmp_path: Path):
@@ -572,6 +573,7 @@ def test_unknown_position_null_quadrant_and_render(tmp_path: Path):
         long_window=20,
         entry_signal={"signal": "trust_flow_20d", "mode": "z", "threshold": 1.0},
         position_low_pct=10.0,
+        participation=part,  # 位階未取得經參與度段渲染（主表已不列象限欄）
     )
     md = md_path.read_text(encoding="utf-8")
     assert "位階未取得" in md
