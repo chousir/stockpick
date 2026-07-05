@@ -1,11 +1,16 @@
 """tests/report/test_group_report.py — enriched CSV writer 行為（全離線）。"""
 
+import tempfile
 from datetime import date
+from pathlib import Path
 
 import polars as pl
 
 from tw_screener.analysis.grouping import group_stocks
-from tw_screener.report.group_report import write_candidates_enriched_csv
+from tw_screener.report.group_report import (
+    _build_rotation_axis,
+    write_candidates_enriched_csv,
+)
 
 _INDUSTRY_DF = pl.DataFrame(
     {
@@ -281,3 +286,60 @@ def test_valuation_map_official_primary_goodinfo_fallback(tmp_path):
     assert by_id["2454"]["dividend_yield_pct"] is None
     assert by_id["2454"]["val_pctile"] is None
     assert by_id["2454"]["cheap_flag"] in (None, "")
+
+
+# ── 0.3 本週族群主軸 / Section 5 補位塊（問題3・M3）─────────────────────────
+
+
+def _rotation_csv(tmp_path):
+    """小型 sector_rotation.csv：甲趨勢最強無候選（盲點）、乙有候選、丙流入未漲。"""
+    pl.DataFrame(
+        {
+            "sub_industry": ["甲", "乙", "丙"],
+            "trend_score": [95.0, 80.0, 40.0],
+            "quadrant": ["主升續勢", "主升續勢", "下一棒"],
+            "radar_rank": [1, 2, 30],
+            "entry_triggered": [False, True, False],
+            "next_precision": [False, False, True],
+            "leader_stock_id": ["1111", "2222", "3333"],
+            "leader_rs_pct": [58.0, 40.0, 9.0],
+        }
+    ).write_csv(tmp_path / "sector_rotation.csv")
+
+
+def test_build_rotation_axis_flags_blind_spots_and_counts():
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _rotation_csv(tmp)
+        themes = pl.DataFrame(
+            {  # 乙有兩檔候選、甲/丙無；混一列概念股確認 kind 過濾
+                "stock_id": ["2222", "9999", "8888"],
+                "theme": ["乙", "乙", "AI"],
+                "kind": ["次產業", "次產業", "概念股"],
+            }
+        )
+        axis = _build_rotation_axis(
+            tmp, themes, candidate_ids={"2222", "9999"},
+            covered_subs={"乙"},  # 乙已被雷達六塊涵蓋
+            axis_cfg={"trend_top_n": 3},
+        )
+    assert axis is not None
+    top = {it["sub_industry"]: it for it in axis["trend_top"]}
+    assert top["甲"]["n_candidates"] == 0  # 盲點
+    assert top["乙"]["n_candidates"] == 2  # 候選計數（概念股列不算）
+    assert top["甲"]["quadrant_label"] == "流入×已漲"  # 中性化顯示
+    # 流入×未漲 + ⚡貼低
+    assert axis["next_up"][0]["sub_industry"] == "丙" and axis["next_up"][0]["precision"]
+    # ★ 觸發
+    assert [it["sub_industry"] for it in axis["triggered"]] == ["乙"]
+    # uncovered：甲/丙未被雷達涵蓋、乙已涵蓋→排除
+    subs = {it["sub_industry"] for it in axis["uncovered"]}
+    assert "甲" in subs and "丙" in subs and "乙" not in subs
+
+
+def test_build_rotation_axis_none_without_csv():
+    with tempfile.TemporaryDirectory() as d:
+        axis = _build_rotation_axis(
+            Path(d), pl.DataFrame(), candidate_ids=set(), covered_subs=set(), axis_cfg=None
+        )
+    assert axis is None  # 無 sector_rotation.csv → 降級略段

@@ -171,6 +171,8 @@ group_analysis:
       foreign: 0.45
       vol_surge: 0.30
       momentum: 0.25
+    main_axis:                  # 0.3 本週族群主軸（問題3・M3）：全市場輪動→候選成員數→uncovered 補位
+      trend_top_n: 5            # 主軸「趨勢分 top」取前 N 強（價格證據）
 
 # 策略 G（成長拉回）的拉回 setup 門檻；G 有效命中 = 基本面命中 ∧ 三者全中
 g_pullback:

@@ -262,6 +262,105 @@ def _load_rotation_overlay(report_dir: Path | None) -> dict[str, dict]:
     }
 
 
+# CSV quadrant 值（狀態常數）→ 中性顯示名（與 M1 輪動報表語意一致）
+_QUAD_LABEL = {
+    "主升續勢": "流入×已漲",
+    "出貨警訊": "流出×已漲",
+    "下一棒": "流入×未漲",
+    "冷卻觀望": "流出×未漲",
+}
+
+
+def _build_rotation_axis(
+    report_dir: Path | None,
+    themes_long: pl.DataFrame,
+    candidate_ids: set[str],
+    covered_subs: set[str],
+    axis_cfg: dict | None,
+) -> dict | None:
+    """本週族群主軸（問題3・M3）：從 sector_rotation.csv 蒸餾趨勢分 top／流入×未漲／
+    ★觸發，並標各次產業「候選股中成員 N 檔」——把全市場輪動訊號接回個股選股宇宙。
+
+    uncovered＝趨勢 top∪流入×未漲 中未被 Section 5 雷達六塊涵蓋者（如安全監控型：
+    族群強但無候選命中），附 RS 領頭股供人工補看。無 sector_rotation.csv → None（降級略段）。
+    """
+    if report_dir is None:
+        return None
+    snap = report_dir / "sector_rotation.csv"
+    if not snap.exists():
+        return None
+    try:
+        df = pl.read_csv(snap)
+    except Exception as exc:  # noqa: BLE001 — 壞快照不擋報告
+        logger.warning("讀 sector_rotation.csv（主軸）失敗：{}", exc)
+        return None
+    if not {"sub_industry", "trend_score", "quadrant"}.issubset(df.columns):
+        return None
+
+    cfg = axis_cfg or {}
+    trend_top_n = int(cfg.get("trend_top_n", 5))
+    # 候選股中各次產業成員數（themes_long kind=次產業 ∩ 本週候選股；theme 欄＝次產業名）
+    from tw_screener.analysis.concepts import SUB_INDUSTRY_KIND
+
+    cand_count: dict[str, int] = {}
+    if not themes_long.is_empty() and candidate_ids and "theme" in themes_long.columns:
+        hit = themes_long.filter(
+            (pl.col("kind") == SUB_INDUSTRY_KIND)
+            & pl.col("stock_id").is_in(list(candidate_ids))
+        )
+        for r in hit.group_by("theme").len().iter_rows(named=True):
+            cand_count[str(r["theme"])] = int(r["len"])
+
+    def _item(r: dict) -> dict:
+        sub = str(r["sub_industry"])
+        quad = str(r["quadrant"]) if r.get("quadrant") is not None else None
+        n = cand_count.get(sub, 0)
+        return {
+            "sub_industry": sub,
+            "trend_score_str": (
+                f"{float(r['trend_score']):.0f}" if r.get("trend_score") is not None else "—"
+            ),
+            "quadrant_label": (
+                _QUAD_LABEL.get(quad, quad) if quad else "位階未取得"
+            ),
+            "radar_rank": int(r["radar_rank"]) if r.get("radar_rank") is not None else None,
+            "n_candidates": n,
+            "triggered": bool(r.get("entry_triggered", False)),
+            "precision": bool(r.get("next_precision", False)),
+            "leader_stock_id": str(r["leader_stock_id"]) if r.get("leader_stock_id") else "",
+            "leader_rs_str": (
+                f"{float(r['leader_rs_pct']):+.0f}%" if r.get("leader_rs_pct") is not None else ""
+            ),
+        }
+
+    rows = list(df.iter_rows(named=True))
+    by_trend = sorted(
+        rows, key=lambda r: (r.get("trend_score") is not None, r.get("trend_score") or 0),
+        reverse=True,
+    )
+    trend_top = [_item(r) for r in by_trend[:trend_top_n]]
+    next_up = [_item(r) for r in rows if str(r.get("quadrant") or "") == "下一棒"]
+    triggered = [_item(r) for r in rows if bool(r.get("entry_triggered", False))]
+
+    # uncovered：主軸關注（趨勢 top∪流入×未漲）但 Section 5 雷達未涵蓋者
+    axis_subs = {it["sub_industry"] for it in trend_top} | {it["sub_industry"] for it in next_up}
+    # 趨勢 top∪流入未漲 中未被雷達六塊涵蓋者，去重（兩清單可能重疊）保序
+    uncovered: list[dict] = []
+    seen: set[str] = set()
+    for it in trend_top + next_up:
+        sub = it["sub_industry"]
+        if sub not in covered_subs and sub in axis_subs and sub not in seen:
+            seen.add(sub)
+            uncovered.append(it)
+
+    return {
+        "trend_top": trend_top,
+        "next_up": next_up,
+        "triggered": triggered,
+        "uncovered": uncovered,
+    }
+
+
 def _build_radar(
     ranked: pl.DataFrame,
     members: pl.DataFrame,
@@ -429,6 +528,17 @@ def _build_context(
         week_tag,
         radar_cfg,
     )
+    # 本週族群主軸（問題3・M3）：sector_rotation 趨勢/流入未漲/★ → 候選成員數 → uncovered 補位
+    covered_subs = {d["theme"] for d in radar_deep_dive}
+    candidate_ids = set(members["stock_id"].to_list()) if not members.is_empty() else set()
+    rotation_axis = _build_rotation_axis(
+        report_dir,
+        themes_long,
+        candidate_ids,
+        covered_subs,
+        (radar_cfg or {}).get("main_axis"),
+    )
+
     sub_groups: list[dict] = []
     concept_groups: list[dict] = []
     for row in ranked.iter_rows(named=True):
@@ -577,6 +687,7 @@ def _build_context(
         "claude_groups": claude_groups,
         "radar_groups": radar_groups,
         "radar_deep_dive": radar_deep_dive,
+        "rotation_axis": rotation_axis,
         "dividend_rows": dividend_rows,
         "macro_rows": macro_rows,
     }
