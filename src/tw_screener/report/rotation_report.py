@@ -102,6 +102,7 @@ def build_rotation_table(
     min_members: int = 5,
     prev: pl.DataFrame | None = None,
     trend: pl.DataFrame | None = None,
+    next_precision_low_pct: float | None = None,
 ) -> pl.DataFrame:
     """組輪動主表：流向 × 位階 × 象限 × CP 分數 × 校準訊號 × ΔRank（每次產業一列）。
 
@@ -123,6 +124,11 @@ def build_rotation_table(
     trend（F3）＝compute_trend_scores 輸出（價格趨勢分數）；給了就併入表、
     rank_by 可指 trend_score（價格證據主鍵，流量降確認欄）。rank_by 欄不存在
     → 誠實退回 net_flow_{lw}d 並記 warning（不炸報表）。
+
+    next_precision（⚡貼低・2026-07 象限校準）＝流入×未漲且距低 ≤ next_precision_low_pct
+    （settings rotation.quadrant.next_precision_low_pct）：起漲攔截 precision 顯著高於
+    現行 10% 門檻（lift ~3 vs ~2）、代價是觸發減半＋領先縮短——揭露非 gate。
+    未設門檻時欄恆 False（CSV schema 穩定）。
     """
     if flows.is_empty() or baskets.is_empty():
         return pl.DataFrame()
@@ -181,6 +187,14 @@ def build_rotation_table(
         (pl.col(f"net_flow_{s}d") / 1000).round(0).alias(f"net_flow_{s}d_lots"),
         (pl.col("flow_momentum") / 1000).round(0).alias("flow_momentum_lots"),
     )
+    # ⚡貼低（精確攔截）：流入×未漲中距低 ≤ 門檻者（揭露非 gate；未設門檻恆 False）
+    next_precision = (
+        (pl.col("quadrant") == Q_NEXT)
+        & (pl.col("above_low_pct") <= next_precision_low_pct)
+        if next_precision_low_pct is not None
+        else pl.lit(False)
+    )
+    table = table.with_columns(next_precision.fill_null(False).alias("next_precision"))
     # A1：連續 CP 補漲分數＝資金 z（跨族群可比）× 位階剩餘空間 room
     z_col = f"net_flow_{lw}d_z"
     if z_col in table.columns:
@@ -347,6 +361,7 @@ def render_rotation_report(
     regime: dict | None = None,
     leaders: pl.DataFrame | None = None,
     names: dict[str, str] | None = None,
+    quadrant_note: str = "",
 ) -> Path:
     """渲染 sector_rotation.md + 寫 sector_rotation.csv，回傳 md 路徑。
 
@@ -354,6 +369,8 @@ def render_rotation_report(
     regime：regime.describe_regime() 顯示 dict（規劃書 03 V2）；None 則略過大盤姿態行。
     leaders：compute_trend_leaders 輸出（F3 趨勢領頭板）；None/空 → 略過該段。
     表含 trend_score 欄＝F3 價格趨勢主鍵生效（表頭與欄位隨之切換，流量降確認欄）。
+    quadrant_note：象限校準註記（settings rotation.quadrant.calib_note，每季
+    rotation-calib 重跑更新）；空字串則 Section 3 不印該行。
     """
     s, lw = short_window, long_window
     has_trend = "trend_score" in table.columns
@@ -426,6 +443,7 @@ def render_rotation_report(
             "價格趨勢分數（價格證據優先・流量＝確認欄）" if has_trend else f"{lw} 日法人淨流"
         ),
         leader_rows=leader_rows,
+        quadrant_note=quadrant_note,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     md_path = output_dir / "sector_rotation.md"

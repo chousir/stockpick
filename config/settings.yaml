@@ -210,6 +210,13 @@ rotation:
   quadrant:                  # R3 四象限：資金軸＝長窗淨流正負；價格軸＝籃子位階
     position_window: 60      # 位階回看（交易日）
     position_low_pct: 10.0   # 距 60 日低 ≤ 此值＝「未漲」（與 R2 起漲 X=10% 對齊）
+    next_precision_low_pct: 5.0  # ⚡貼低精確攔截：流入×未漲中距低 ≤ 此值（2026-07 象限校準：
+                             # 起漲攔截 lift ~3.0 vs 10% 門檻 ~2.0，代價觸發減半、領先縮短）；null 停用
+    # calib_note：象限可信度校準結論（每季 make rotation-calib 重跑後人工更新；報表 Section 3 印出）
+    calib_note: >-
+      2026-07 校準（~250 交易日）：流入×已漲前瞻超額最強（+3.6%/20d），流出×已漲前瞻超額仍為正
+      （非賣訊），流入×未漲前瞻超額偏弱但對起漲事件有攔截 lift ~2（⚡貼低 ~3）；象限＝狀態切片、
+      非多空判詞。統計力有限、每季重跑覆核（詳 research/rotation/）。
   cp_score:                  # A1 連續 CP 補漲分數＝資金 z × 位階剩餘空間 room
     position_ceiling: 60.0   # room = max(0, 1 − 距低% / 此值)；距低 ≥ 此值 → 補漲空間視為 0
   entry_signal:              # ★ R2 校準結果（2026-06-11・資料 2025-05-28~2026-06-10・34 起漲點）

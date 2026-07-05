@@ -305,6 +305,146 @@ def scan_signals(
     ).sort("f1", descending=True)
 
 
+def evaluate_quadrants(
+    flows: pl.DataFrame,
+    baskets: pl.DataFrame,
+    episodes: pl.DataFrame,
+    market_index: pl.DataFrame | None = None,
+    long_window: int = 20,
+    position_window: int = 60,
+    position_low_pct: float = 10.0,
+    next_precision_low_pct: float | None = 5.0,
+    min_members: int = 5,
+    fwd_days: tuple[int, ...] = (10, 20),
+    lead_window: int = 15,
+    occupy_days: int = 15,
+) -> dict[str, pl.DataFrame]:
+    """R3 四象限可信度實測：逐日重建象限 → 前瞻籃子報酬分布＋起漲攔截命中/lift。
+
+    動機（2026-07 診斷）：象限門檻（淨流 0 × 距低 10%）原是設計對齊值、從未回測；
+    實測「出貨警訊」前瞻超額為正（非賣訊）、「下一棒」前瞻超額為負但對起漲事件
+    lift ~2——象限是「狀態描述」不是「多空判詞」，本函式把數字擺上桌供每季覆核。
+
+    誠實界線（報告照登）：逐日重疊樣本有序列相關、約一年單一情境；「流入×未漲」
+    的位階條件與起漲點定義（低基期）機械重疊，lift 含位階白送成分。
+
+    Returns:
+        {"forward": 每象限前瞻報酬統計, "entry": 進入「流入×未漲」觸發命中統計
+        （現行門檻＋⚡貼低精確變體）}；輸入不足回兩張空表。
+    """
+    import math  # noqa: F401 — is_finite 由 polars 提供，math 留給未來擴充
+
+    from tw_screener.report.rotation_report import Q_COOL, Q_DISTRIBUTE, Q_NEXT, Q_TREND
+
+    flow_col = f"net_flow_{long_window}d"
+    empty = {"forward": pl.DataFrame(), "entry": pl.DataFrame()}
+    if flows.is_empty() or baskets.is_empty() or flow_col not in flows.columns:
+        return empty
+
+    panel = (
+        baskets.sort(["sub_industry", "date"])
+        .with_columns(
+            pl.col("basket_index")
+            .rolling_min(position_window, min_samples=position_window)
+            .over("sub_industry")
+            .alias("_low")
+        )
+        .with_columns(
+            ((pl.col("basket_index") / pl.col("_low") - 1) * 100).alias("above_low_pct")
+        )
+        .join(
+            flows.select(["sub_industry", "date", "members", flow_col]),
+            on=["sub_industry", "date"],
+            how="inner",
+        )
+        .filter(pl.col("members") >= min_members)
+        .filter(pl.col("above_low_pct").is_finite())
+        .sort(["sub_industry", "date"])
+    )
+    if panel.is_empty():
+        return empty
+
+    for f in fwd_days:
+        panel = panel.with_columns(
+            (
+                pl.col("basket_index").shift(-f).over("sub_industry")
+                / pl.col("basket_index")
+                - 1
+            ).alias(f"fwd{f}")
+        )
+    if market_index is not None and not market_index.is_empty():
+        mkt = market_index.sort("date")
+        mkt = mkt.with_columns(
+            [
+                (pl.col("market_index").shift(-f) / pl.col("market_index") - 1).alias(
+                    f"_mkt{f}"
+                )
+                for f in fwd_days
+            ]
+        )
+        panel = panel.join(
+            mkt.select(["date", *[f"_mkt{f}" for f in fwd_days]]), on="date", how="left"
+        )
+
+    inflow = pl.col(flow_col) > 0
+    risen = pl.col("above_low_pct") > position_low_pct
+    panel = panel.with_columns(
+        pl.when(inflow & ~risen)
+        .then(pl.lit(Q_NEXT))
+        .when(inflow & risen)
+        .then(pl.lit(Q_TREND))
+        .when(~inflow & risen)
+        .then(pl.lit(Q_DISTRIBUTE))
+        .otherwise(pl.lit(Q_COOL))
+        .alias("quadrant")
+    )
+
+    fmax = max(fwd_days)
+    scored = panel.filter(pl.col(f"fwd{fmax}").is_not_null())
+    aggs: list[pl.Expr] = [pl.len().alias("n")]
+    for f in fwd_days:
+        aggs.append((pl.col(f"fwd{f}").median() * 100).round(2).alias(f"fwd{f}_med_pct"))
+    aggs += [
+        ((pl.col(f"fwd{fmax}") > 0).mean() * 100).round(1).alias(f"win{fmax}_pct"),
+        ((pl.col(f"fwd{fmax}") >= 0.10).mean() * 100).round(1).alias(f"hit10_{fmax}d_pct"),
+    ]
+    if f"_mkt{fmax}" in scored.columns:
+        aggs += [
+            ((pl.col(f"fwd{fmax}") - pl.col(f"_mkt{fmax}")).median() * 100)
+            .round(2)
+            .alias(f"excess{fmax}_med_pct"),
+            ((pl.col(f"fwd{fmax}") > pl.col(f"_mkt{fmax}")).mean() * 100)
+            .round(1)
+            .alias(f"beat_mkt{fmax}_pct"),
+        ]
+    forward = scored.group_by("quadrant").agg(aggs).sort("quadrant")
+
+    entry_rows: list[dict] = []
+    if not episodes.is_empty():
+        calendar = sorted(
+            set(flows["date"].unique().to_list()) | set(episodes["start_date"].to_list())
+        )
+        variants = [(f"流入×未漲（距低≤{position_low_pct:g}%・現行）", position_low_pct)]
+        if next_precision_low_pct is not None:
+            variants.append(
+                (f"⚡貼低（距低≤{next_precision_low_pct:g}%）", next_precision_low_pct)
+            )
+        for label, low in variants:
+            q = panel.with_columns(
+                (inflow & (pl.col("above_low_pct") <= low)).alias("_in_next")
+            ).with_columns(
+                (
+                    pl.col("_in_next")
+                    & ~pl.col("_in_next").shift(1, fill_value=False).over("sub_industry")
+                ).alias("_enter")
+            )
+            trig = q.filter(pl.col("_enter")).select(["sub_industry", "date"])
+            stats = evaluate_triggers(trig, episodes, calendar, lead_window, occupy_days)
+            entry_rows.append({"variant": label, **stats})
+    entry = pl.DataFrame(entry_rows) if entry_rows else pl.DataFrame()
+    return {"forward": forward, "entry": entry}
+
+
 def render_calibration_report(
     scan: pl.DataFrame,
     episodes: pl.DataFrame,
@@ -313,6 +453,7 @@ def render_calibration_report(
     min_triggers: int = 8,
     min_lift: float = 1.5,
     top_n: int = 10,
+    quadrant_stats: dict[str, pl.DataFrame] | None = None,
 ) -> str:
     """校準報告 markdown（含建議寫入 settings.yaml.rotation 的數值）。"""
     lines = [
@@ -384,6 +525,63 @@ def render_calibration_report(
             f"    lead_window: {params['lead_window']}",
             "```",
         ]
+    if quadrant_stats is not None and not quadrant_stats["forward"].is_empty():
+        fwd = quadrant_stats["forward"]
+        fwd_wins = sorted(
+            int(c[3:].split("_")[0]) for c in fwd.columns if c.startswith("fwd")
+        )
+        fmax = max(fwd_wins)
+        has_excess = f"excess{fmax}_med_pct" in fwd.columns
+        header = (
+            "| 象限 | n | "
+            + " | ".join(f"前瞻{f}日中位" for f in fwd_wins)
+            + f" | 勝率{fmax}日 |"
+            + (f" 超額{fmax}日中位 | 贏大盤% |" if has_excess else "")
+            + f" {fmax}日內+10% |"
+        )
+        lines += [
+            "",
+            "## 四象限可信度（R3 象限 vs 前瞻報酬／起漲攔截）",
+            "",
+            header,
+            "|" + "---|" * (header.count("|") - 1),
+        ]
+        for r in fwd.iter_rows(named=True):
+            cells = [r["quadrant"], str(r["n"])]
+            cells += [f"{r[f'fwd{f}_med_pct']:+.2f}%" for f in fwd_wins]
+            cells.append(f"{r[f'win{fmax}_pct']:.1f}%")
+            if has_excess:
+                cells.append(f"{r[f'excess{fmax}_med_pct']:+.2f}%")
+                cells.append(f"{r[f'beat_mkt{fmax}_pct']:.1f}%")
+            cells.append(f"{r[f'hit10_{fmax}d_pct']:.1f}%")
+            lines.append("| " + " | ".join(cells) + " |")
+        entry = quadrant_stats["entry"]
+        if not entry.is_empty():
+            lines += [
+                "",
+                "### 進入「流入×未漲」→ 起漲攔截（episode 裁判，與上方訊號掃描同口徑）",
+                "",
+                "| 變體 | 觸發 | 命中 | 命中率 | recall | lift | 中位領先(日) |",
+                "|---|---|---|---|---|---|---|",
+            ]
+            for r in entry.iter_rows(named=True):
+                lift = f"{r['lift']:.2f}" if r["lift"] is not None else "—"
+                lead = (
+                    str(r["median_lead_days"]) if r["median_lead_days"] is not None else "—"
+                )
+                lines.append(
+                    f"| {r['variant']} | {r['n_triggers']} | {r['hits']} "
+                    f"| {r['hit_rate']:.1%} | {r['recall']:.1%} | {lift} | {lead} |"
+                )
+        lines += [
+            "",
+            "> 讀法：**象限是狀態描述、不是多空判詞**——「流出×已漲」歷史前瞻超額非負"
+            "（不是賣訊）、「流入×未漲」前瞻超額偏弱但對起漲事件有攔截 lift。",
+            "> 統計但書：逐日重疊樣本有序列相關、約 1 年單一情境；「流入×未漲」位階條件與"
+            "起漲點定義（低基期）機械重疊，lift 含位階白送成分。每季重跑覆核、更新"
+            " settings.rotation.quadrant.calib_note。",
+        ]
+
     lines += [
         "",
         "---",
