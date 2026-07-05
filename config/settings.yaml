@@ -54,6 +54,13 @@ propicks_flags:
   cross_trade_lots: 5000       # 外資、投信反向且兩者皆 > 此張數 → 土洋對作（絕對門檻）
   cross_trade_rel_pct: 4       # 修法4：弱邊張數須達近 20 日總量此% 才算對作（濾權值股小量反向誤判，如台積電）
   strong_rally_pct: 15         # 5日漲幅 > 此% 且法人淨賣 → 強漲法人賣（假突破警訊）
+  # M-WS5a（WS5-①）貼底揭露：距季線 ≤ 此% → base_zone="貼底"（起漲 base 位階，過熱旗標的對稱面）。
+  # 純揭露非 gate；金控 base +6% 命中，對齊回檔帶語意（ma60_band_high=10）。docs/20 §WS5-①。
+  base_zone_ma60_max_pct: 10.0
+  # M-WS5a（WS5-②）sector-wide 旗標降輪動：同旗標在該次產業掛旗佔比 ≥ 此% 且成員 ≥ min → 標
+  # sector_flag_note「族群共振」（＝輪動足跡，不當個股排除理由）。金融 W21 土洋對作 8/17 掛旗實例。
+  sector_coverage_pct: 60.0
+  sector_coverage_min_members: 5   # 次產業候選數 < 此 → 不算覆蓋度（小族群/庫存觀察無意義，同 rotation min_members）
 
 themes_build:
   category_labels: ["概念股"]   # 只抓概念股；集團股 / 電子產業不抓

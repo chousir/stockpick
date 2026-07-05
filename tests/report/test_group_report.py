@@ -250,6 +250,76 @@ def test_cross_trade_relative_liquidity_gate(tmp_path):
     assert "土洋對作" in (by_id["NOVOL"]["flags"] or "")
 
 
+def test_base_zone_disclosure_flag(tmp_path):
+    """M-WS5a（WS5-①）：距季線 ≤ 門檻 → base_zone='貼底'（起漲 base 位階，過熱旗標對稱面）。
+    純揭露、獨立於 flags 排雷欄；延伸/過熱股 base_zone 空。"""
+    members = pl.DataFrame(
+        {
+            "stock_id": ["BASE", "MID", "HOT"],
+            "name": ["貼底", "中段", "過熱"],
+            "industry_name": ["金融保險"] * 3,
+            "momentum_5d": [1.0, 1.0, 1.0],
+            "ma60_dist_pct": [5.0, 25.0, 45.0],  # ≤10 貼底／中段／>40 過熱
+            "ma20_dist_pct": [1.0, 1.0, 1.0],
+            "vol_ratio": [1.0, 1.0, 1.0],
+            "foreign_net": [0, 0, 0],
+            "trust_net": [0, 0, 0],
+            "inst_net": [0, 0, 0],
+        }
+    )
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), {}, out)
+    by_id = {str(r["stock_id"]): r for r in pl.read_csv(out).iter_rows(named=True)}
+
+    assert by_id["BASE"]["base_zone"] == "貼底"
+    assert (by_id["MID"]["base_zone"] or "") == ""
+    assert (by_id["HOT"]["base_zone"] or "") == ""
+    # 獨立於 flags：過熱股仍走 flags 排雷、base_zone 不因此被污染
+    assert "過熱" in (by_id["HOT"]["flags"] or "")
+    assert "貼底" not in (by_id["HOT"]["flags"] or "")
+
+
+def test_sector_flag_coverage_note(tmp_path):
+    """M-WS5a（WS5-②）：同旗標掛滿整族（覆蓋度 ≥ 門檻且族群 ≥ min）→ sector_flag_note 標
+    『族群共振』（＝輪動足跡，別當個股排除理由）；小族群（<min）不標。金融 W21 型。"""
+    # 金控 6 檔：5 檔外資投信反向（土洋對作）、1 檔同向；小族群 1 檔對作但落單
+    ids = ["FIN1", "FIN2", "FIN3", "FIN4", "FIN5", "FIN6", "SM1"]
+    members = pl.DataFrame(
+        {
+            "stock_id": ids,
+            "name": ids,
+            "industry_name": ["金融保險"] * 6 + ["其他"],
+            "momentum_5d": [2.0] * 7,
+            "ma60_dist_pct": [6.0] * 7,  # 金控 base 齊漲貼底型
+            "ma20_dist_pct": [2.0] * 7,
+            "vol_ratio": [1.0] * 7,
+            # FIN1-5 + SM1：外資 +、投信 −（反向、雙邊 >5000 張＝5M 股）；FIN6 同向不對作
+            "foreign_net": [10_000_000] * 5 + [10_000_000] + [10_000_000],
+            "trust_net": [-8_000_000] * 5 + [2_000_000] + [-8_000_000],
+            "inst_net": [2_000_000] * 7,
+        }
+    )
+    themes_long = pl.DataFrame(
+        {
+            "stock_id": ids,
+            "theme": ["金控"] * 6 + ["迷你族群"],
+            "kind": ["次產業"] * 7,
+        }
+    )
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, themes_long, {}, out)
+    by_id = {str(r["stock_id"]): r for r in pl.read_csv(out).iter_rows(named=True)}
+
+    # 金控土洋對作覆蓋 5/6=83% ≥60% → 5 檔掛旗者皆標族群共振
+    assert "土洋對作" in (by_id["FIN1"]["flags"] or "")
+    assert "族群共振" in (by_id["FIN1"]["sector_flag_note"] or "")
+    # FIN6 未掛土洋對作 → 無註記
+    assert (by_id["FIN6"]["sector_flag_note"] or "") == ""
+    # SM1 掛旗但族群僅 1 檔 < min_members=5 → 覆蓋度不成立、不標（避免小族群假共振）
+    assert "土洋對作" in (by_id["SM1"]["flags"] or "")
+    assert (by_id["SM1"]["sector_flag_note"] or "") == ""
+
+
 def test_valuation_map_official_primary_goodinfo_fallback(tmp_path):
     """估值欄：官方 BWIBBU 為主、Goodinfo 兜底；殖利率僅官方有。"""
     # Goodinfo screener 帶 pe_ratio/pb_ratio（兩檔都有）

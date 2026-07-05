@@ -748,6 +748,62 @@ def render_group_report(
     logger.info("group_analysis.md 輸出 → {}", output_path)
 
 
+def _annotate_sector_flag_coverage(
+    rows: list[dict],
+    themes_long: pl.DataFrame | None,
+    coverage_pct: float,
+    min_members: int,
+    flags_watched: tuple[str, ...] = ("土洋對作", "過熱"),
+) -> None:
+    """M-WS5a（WS5-②）：把 sector-wide 旗標降為輪動訊號（in-place 填 rows 的 sector_flag_note）。
+
+    同一旗標若在某次產業的候選股裡掛旗佔比 ≥ coverage_pct（且該族群候選 ≥ min_members），
+    ＝機械/輪動足跡（全族群同掛，非個股利空）——標「族群共振」提醒別當個股排除理由（診斷 §5
+    金融 W21 土洋對作 8/17、起漲 4 檔 100% 掛旗的假誤殺實例）。次產業身分取自 themes_long
+    kind=次產業；無 themes_long／該股無次產業／族群過小 → 不標（如實留空）。純揭露非 gate。
+    """
+    from tw_screener.analysis.concepts import SUB_INDUSTRY_KIND
+
+    if not rows or themes_long is None or themes_long.is_empty():
+        return
+    member_ids = {row["stock_id"] for row in rows}
+    # 每檔的次產業身分（一檔多次產業取第一筆；多為單一身分）
+    sub_of: dict[str, str] = {}
+    for tr in themes_long.filter(pl.col("kind") == SUB_INDUSTRY_KIND).iter_rows(named=True):
+        sid = str(tr["stock_id"])
+        if sid in member_ids and sid not in sub_of:
+            sub_of[sid] = tr["theme"]
+    if not sub_of:
+        return
+    # 各次產業候選數與各旗標掛旗數
+    members_in_sub: dict[str, int] = {}
+    flagged_in_sub: dict[tuple[str, str], int] = {}
+    for row in rows:
+        sub = sub_of.get(row["stock_id"])
+        if sub is None:
+            continue
+        members_in_sub[sub] = members_in_sub.get(sub, 0) + 1
+        row_flags = set((row.get("flags") or "").split(";"))
+        for flag in flags_watched:
+            if flag in row_flags:
+                flagged_in_sub[(sub, flag)] = flagged_in_sub.get((sub, flag), 0) + 1
+    # 回填：該股掛的旗標若在其族群覆蓋度達標 → 註記「族群共振」＋覆蓋%
+    for row in rows:
+        sub = sub_of.get(row["stock_id"])
+        if sub is None or members_in_sub.get(sub, 0) < min_members:
+            continue
+        row_flags = set((row.get("flags") or "").split(";"))
+        notes: list[str] = []
+        for flag in flags_watched:
+            if flag not in row_flags:
+                continue
+            cov = flagged_in_sub.get((sub, flag), 0) / members_in_sub[sub] * 100
+            if cov >= coverage_pct:
+                notes.append(f"{flag}(族群共振{cov:.0f}%)")
+        if notes:
+            row["sector_flag_note"] = ";".join(notes)
+
+
 def _build_enriched_rows(
     members: pl.DataFrame,
     themes_long: pl.DataFrame | None,
@@ -803,6 +859,10 @@ def _build_enriched_rows(
     cross_rel_pct = float(fc.get("cross_trade_rel_pct", 4))  # 弱邊張數須達近 20 日總量此% 才算對作
     rally = float(fc.get("strong_rally_pct", 15))
     strong_leader_yoy = float(fc.get("strong_leader_yoy_pct", 20))
+    # M-WS5a 揭露欄門檻（WS5-① 貼底、WS5-② sector-wide 旗標覆蓋度）；純揭露非 gate。
+    base_zone_max = float(fc.get("base_zone_ma60_max_pct", 10))
+    sector_cov_pct = float(fc.get("sector_coverage_pct", 60))
+    sector_cov_min = int(fc.get("sector_coverage_min_members", 5))
     nf = near_flow_cfg or {}
     nf_min_shares = float(nf.get("min_lots", 1000)) * 1000.0  # 張 → 股
     nf_stall = float(nf.get("stall_share_pct", 5))
@@ -950,6 +1010,11 @@ def _build_enriched_rows(
             flags.append("強漲法人賣")
         if inst_missing:
             flags.append("法人缺漏")
+        # M-WS5a（WS5-①）貼底揭露：距季線 ≤ 門檻＝起漲 base 位階（過熱旗標的對稱面，
+        # 別被延伸股埋掉）。純揭露非 gate、非 flags（flags 是排雷／PO4 偽陰性帳，貼底是
+        # 正向訊號故獨立欄）；深破線由 risk_kind/pullback_quality 另揭露。docs/20 §WS5-①。
+        base_zone = "貼底" if (m60 is not None and m60 <= base_zone_max) else ""
+
         # 除息還原：5 日視窗內現金股利已加回 momentum_5d（修假負）；標旗供人工查證
         ex_div_cash = _num(r.get("ex_div_cash"), 2)
         div_addback_pct = _num(r.get("div_addback_pct"), 2)
@@ -1025,9 +1090,18 @@ def _build_enriched_rows(
                 "above_ma20_days": r.get("above_ma20_days"),
                 "pullback_quality": r.get("pullback_quality"),  # 止穩/觀察/破線（啟發式輔助）
                 "flags": ";".join(flags),
+                # M-WS5a 揭露欄（純揭露非 gate、獨立於 flags 排雷欄）
+                "base_zone": base_zone,          # WS5-①：貼底（距季線 ≤ 門檻＝起漲 base 位階）／空
+                "sector_flag_note": "",          # WS5-②：sector-wide 旗標覆蓋度註記（post-pass 填）
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
             }
         )
+
+    # M-WS5a（WS5-②）sector-wide 旗標降輪動：同旗標覆蓋整族＝機械/輪動足跡（金融 W21 土洋對作
+    # 8/17 掛旗、起漲 4 檔 100% 掛＝假土洋對作誤殺）。標「族群共振」提醒分析師別當個股排除理由。
+    _annotate_sector_flag_coverage(
+        rows, themes_long, coverage_pct=sector_cov_pct, min_members=sector_cov_min
+    )
     return rows
 
 
@@ -1117,6 +1191,8 @@ _CANONICAL_REUSE_FIELDS = (
     "short_chg_lots",
     "margin_to_vol",
     "flags",
+    "base_zone",         # M-WS5a：跟隨 canonical 的 ma60_dist，重疊股一致
+    "sector_flag_note",  # M-WS5a：覆蓋度屬候選宇宙口徑，庫存/觀察重疊股沿用 candidates
 )
 
 
