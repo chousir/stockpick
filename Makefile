@@ -1,6 +1,6 @@
 .PHONY: help init sync test test-unit lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry doctor \
-        group report week weekend backtest-strategies pick-outcome rotation-calib rotation backfill-universe-history \
+        group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check
 
@@ -117,6 +117,9 @@ backfill-universe-history:  ## ⏳ 一次性回補全部次產業成員日線（
 
 backtest-strategies:  ## 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤（規劃書 03 V1，產 research/strategy_backtest/）
 	uv run tw-screener backtest strategies
+
+diagnose:  ## M-Diag1「抓太晚」診斷：進場延伸度曲線＋排序訊號 IC（研究軌，產 research/diagnostic/）
+	uv run tw-screener backtest diagnose
 
 rotation-calib:  ## R2 起漲點回測校準（研究軌，產 research/rotation/ 校準報告；docs/12）
 	uv run tw-screener sector calibrate

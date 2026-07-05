@@ -315,6 +315,21 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     min_sample_warn: 20          # 樣本低於此 → 報表標「僅供方向性、未達顯著」
     min_subind_members: 3        # 次產業同窗有價成員低於此 → 族群超額標 null（樣本太小）
     output_dir: research/pick_outcome
+  diagnostic:                # M-Diag1「抓太晚」診斷（make diagnose）：候選宇宙延伸度曲線＋排序訊號 IC
+    history_days: 250            # 載入日線快取的回看交易日數
+    horizons_td: [5, 10, 20]    # 前瞻窗（交易日；須可被 trading_days_per_week 整除）
+    trading_days_per_week: 5
+    clip_daily_return_pct: 10.0  # 大盤等權指數日報酬夾限（複用 V1 機制）
+    target: excess_return_pct    # IC/曲線的 target（excess_return_pct 或 return_pct）
+    ext_gate_pct: 15.0           # 現行 F2 距季線硬擋門檻（曲線用來對照實證轉負點）
+    min_sample_warn: 20          # 桶樣本低於 3×此 → 標「薄」
+    output_dir: research/diagnostic
+    missed_launch:             # WS2 漏抓目錄（A 純無偏路；daily_all 全市場乾淨底料 ≤06-09）
+      grid: [[10, 20], [10, 15], [5, 15]]  # [forward_td, launch_pct]：敏感度格
+      primary: [10, 15]         # 主設定（具名漏抓清單用；10 日漲 15%＝穩健起漲、名單較厚）
+      pullback_max_pct: 0.0     # 回檔判定：data_date 近 10 日報酬 ≤ 此（回檔中）
+      ma_dist_ceiling_pct: 10.0 # 未延伸判定：距 MA60 ≤ 此（剔高位小回的延伸股）
+      min_amount_m: 100.0       # never_surfaced 依當日成交額 ≥ 此(百萬)拆 liquid/illiquid
 
 regime:                        # 規劃書 03 V2 大盤 regime 總控閘門（market regime）
                                # 用等權全市場指數＋全市場法人快取算 趨勢/廣度/資金 三分項，

@@ -909,6 +909,19 @@ def backtest_strategies_cmd(
     run_backtest_strategies(hold_weeks, out_dir, settings)
 
 
+@backtest_app.command("diagnose")
+def backtest_diagnose_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="診斷報告輸出目錄（預設讀 settings，research/diagnostic）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """M-Diag1「抓太晚」診斷：進場延伸度分桶曲線＋排序訊號 IC＋組內名次 skill（研究軌）。"""
+    from tw_screener.backtest.diagnostic_runner import run_diagnostic
+
+    run_diagnostic(settings, out_dir)
+
+
 @report_app.command("check")
 def report_check_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),

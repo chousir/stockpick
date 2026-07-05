@@ -176,6 +176,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `uv run tw-screener picks sync --week …`              | 解析 pick.md 尾端區塊，整批寫 picks.csv／excluded.csv 底帳（單檔補記用 `picks record`） | 每週 pick.md 定稿後                  |
 | `uv run tw-screener picks outcome --diff`              | pick-outcome ＋翻轉解剖（週對週降級＋翻轉前訊號）    | 個案覆盤                             |
 | `make backtest-strategies`                             | 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤            | 每季（規劃書 03 V1）                 |
+| `make diagnose`                                        | 抓太晚＋漏起漲診斷（研究軌）：延伸度曲線/漏抓五態雷達（docs/19） | 每季／窗變厚後重跑                   |
 | `uv run tw-screener market regime`                     | 大盤 regime 姿態：進攻/中性/防禦（規劃書 03 V2）     | 盤後看大盤閘門                       |
 | `uv run tw-screener portfolio check`                   | 組合層風控體檢：標籤/因子簇集中度（規劃書 03 V3）    | 持股變動後                           |
 | `make week-check`                                      | 產物完整性檢查（week 已內含，可單獨重跑）            | 懷疑某步無聲失敗時                   |
@@ -495,6 +496,7 @@ make typecheck   # mypy
 | [`docs/16-intra-sector-laggard-research.md`](./docs/16-intra-sector-laggard-research.md)     | 族群內落後度補漲因子研究（rs_subind 落後度 × 位階 × S+ 濾鏡）                                                     |
 | [`docs/18-intra-sector-laggard-production.md`](./docs/18-intra-sector-laggard-production.md) | 族群內落後濾鏡生產化（冠軍 S+ 內 rs_subind<0 進場加分上線）                                                         |
 | [`docs/17-dashboard-spec.md`](./docs/17-dashboard-spec.md)                                   | **投資戰情室 Dashboard** 規劃書（讀 reports/ 的本機 HUD、M-Dash 拆解、API/頁面/Privacy 遮罩）                 |
+| [`docs/19-late-entry-launch-diagnosis.md`](./docs/19-late-entry-launch-diagnosis.md)         | 抓太晚＋漏起漲診斷（M-Diag1；`make diagnose`→延伸度曲線/漏抓五態雷達/金融斷點；根＝排序追高）                 |
 | [`docs/proposals/`](./docs/proposals/00-index.md)                                            | 審查改善規劃書 01–05（效能技債/資料韌性/量化驗證閉環/架構瘦身/**選股有效性總改造 F1–F5**，皆已收官）        |
 | [`docs/99-troubleshooting.md`](./docs/99-troubleshooting.md)                                 | 常見問題與解法                                                                                                      |
 
