@@ -128,11 +128,12 @@
 
 > 把半導體、金融、航運等大分類拆成次產業各自排名，避免「少數龍頭領漲、多數拉回」被整桶中位數埋掉（如記憶體 vs IC設計 vs 封測 vs 設備、證券 vs 壽險 vs 銀行、貨櫃 vs 散裝 vs 航空，強弱天差地遠）。次產業＝手標 `config/concepts.yaml`（電子完整成分；金融/航運主要成分）。
 > 強度分數 = 70 × sigmoid(5 日中位/5) + 15 × 法人買超家數比 + 15 × log 規模（**無入選率**，因缺次產業全市場母體數；故與 Section 2 大分類分數不可直接比較）。
+> **末兩欄＝rotation 價格趨勢並列對照（M-WS5b・WS5-③，全次產業無偏宇宙、`sector_rotation.csv`）**：**趨勢分**＝F3 價格趨勢分數（籃子等權指數 vs 自身月/季線＋成員站上季線比例＋領頭股 RS），**輪動Rank**＝依趨勢分的全次產業排名。**強度分數（動能・追漲鏡頭）低但趨勢分/輪動Rank 靠前＝base 齊漲、價格趨勢已浮出但近端動能未延伸的輪入族群**（如金融斷點：動能沉底、趨勢分卻高）——此為**純並列揭露、不重排、不改強度分數**（規劃書 20 §2 WS5-③）。概念股題材不在輪動宇宙、沒先跑 `make rotation` 皆顯示 —。
 
-| Rank | 次產業 | 入選 | 5 日中位 | 上漲家數 | 法人買超 | 強度分數 |
-|---|---|---|---|---|---|---|
+| Rank | 次產業 | 入選 | 5 日中位 | 上漲家數 | 法人買超 | 強度分數 | 趨勢分 | 輪動Rank |
+|---|---|---|---|---|---|---|---|---|
 {% for sg in sub_groups -%}
-| {{ loop.index }} | {{ sg.sub_industry }} | {{ sg.members_count }} | {{ sg.momentum_5d_str }} | {{ sg.breadth_str }} | {{ sg.inst_breadth_str }} | {{ sg.score_str }} |
+| {{ loop.index }} | {{ sg.sub_industry }} | {{ sg.members_count }} | {{ sg.momentum_5d_str }} | {{ sg.breadth_str }} | {{ sg.inst_breadth_str }} | {{ sg.score_str }} | {{ sg.trend_score_str }} | {{ sg.rotation_rank_str }} |
 {% endfor %}
 
 {% endif %}

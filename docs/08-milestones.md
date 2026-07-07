@@ -808,3 +808,28 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **docs/11 讀法**：排雷段加 M-WS5a 揭露欄鐵律——① `base_zone=貼底`＋族群主升＝核心該保留的「起漲（貼季線）」型（族群內落後×貼低埋伏加碼另看 cp_candidates 🔻・docs/18）；② **帶 `sector_flag_note` 者該旗標降為輪動訊號、不得當個股排除理由**，回到族群/rotation 判輪入。CSV 欄列同步補兩欄。
 - **未做（誠實）**：族群內落後（`rs_subind<0`）×貼低的 ambush 族群相對維度**留 cp_candidates 🔻**（rs_subind 只在 stock_panel 路徑、group 路徑無；WS5-① 只做單維貼底、不疊門檻）；兩欄是否有 edge 交 F1 閉環（`make pick-outcome`）W28+ 樣本變厚後裁決；WS5-③④ 另立 M-WS5b/c（見規劃書 §4）。**既有 reports/ 不回溯——W28+ 重跑報告才產出新欄。**
 - 驗收：`make test` 綠（+2：base_zone 揭露、sector 覆蓋度）；ruff/mypy 零淨增；既有 candidates_enriched 欄值不變（只加兩欄）。
+
+---
+
+## M-WS5b：rotation 趨勢分並列揭露於次產業表（規劃書 20 WS5-③・排序改革第二批）
+
+> 對應規劃書 [docs/20-ranking-reform-ws5.md](20-ranking-reform-ws5.md) WS5-③（M-Diag1 根結論＝**排序系統性追高**的第二批處方）。裁決 4 已於 2026-07-05 拍板：**首版純並列揭露、不併族群加權、不重排**（薄樣本不釘權重，是否升次權重延 W28+ F1 閉環裁決）。
+> 動機：rotation 的 F3 價格趨勢分數（`trend_score`，價格證據早浮出）與族群排名（grouping.py momentum 主導）**中間斷開**——金融 base 齊漲 +16~24%、trend_score 抓得到，但次產業/大分類強度用近端動能→金融沉底、名額吃不到。兩張表各自對、讀者須跨表比對才看得出「動能沉底但趨勢已浮出」的輪入族群。
+- **接哪張表（裁決 2026-07-07 拍板）**：接 **Section 2.6 次產業強度排名**（sub_groups）——與 `trend_score` 同 `sub_industry` key、**零聚合零臆造**；不接 Section 2 大分類（trend_score 為次產業級，接大分類需自訂「次產業→大分類」聚合口徑，非 surgical）。
+- **並列欄**：Section 2.6 末加兩欄——**趨勢分**（`trend_score`，F3 價格趨勢分數）＋**輪動Rank**（`radar_rank`，依趨勢分的全次產業排名），兩值皆取自本週 `sector_rotation.csv`（全次產業無偏宇宙）。**不重排、不改強度分數**（仍按 rank_themes 動能 score 排序）——純並列揭露。
+- **surface**：`_load_rotation_overlay` 擴回傳 `trend_score`（舊快照缺欄→降級 None・向後相容）；`_build_context` 建 sub_groups 時 join overlay（`rotation_overlay.get(theme)`），無對照/概念股題材/沒先跑 `make rotation` → 兩欄顯示 `—`（優雅降級）。**零 gate、零權重變動、零聚合**。overlay 由 `_build_context` 載一次、傳入 `_build_radar` 共用（Section 2.8 雷達＋2.6 表同源，單讀不重讀）。
+- **docs/11 讀法**：Section 2.6 描述補「末兩欄＝rotation 價格趨勢並列對照」＋鐵律——**強度分數低但趨勢分/輪動Rank 靠前＝base 齊漲輪入族群，別因動能排名沉底就略過**（金融斷點實例）。
+- **未做（誠實）**：是否把 trend_score 併入次產業/族群主分數（次權重）＝**不做**，延 W28+ F1 閉環（`make pick-outcome`）樣本變厚後由數字裁決（規劃書 §5 裁決 4）；WS5-④ F2 +15% 校準協議另立 M-WS5c（純協議、不改門檻值）。**既有 reports/ 不回溯——W28+ 重跑報告才產出新欄。**
+- 驗收：`make test` 綠（+1 Section 2.6 並列揭露 e2e；+updated overlay trend_score 測試）；ruff/mypy 零淨增；既有 Section 2/2.6 排序與強度分數值不變（只加兩欄）。
+
+---
+
+## M-WS5c：F2 +15% 硬擋校準協議（規劃書 20 WS5-④・排序改革第三批・純協議不改門檻值）
+
+> 對應規劃書 [docs/20-ranking-reform-ws5.md](20-ranking-reform-ws5.md) WS5-④＋新增 §7 校準協議（M-Diag1 根結論＝**排序系統性追高**的第四支處方）。裁決 5（是否現在改 15→12）＝**不改**（診斷 §6 鐵律：事件 <30、單一 regime、`daily_all` 06-09 窗牆，撐不起釘尖銳門檻）。
+> 動機：診斷 §1.3 實證 r+20 分桶正期望值在 10–15% 就流失（5–10% 中位 +3.6% → 15–20% −10.1%、勝率 25%）＝F2 門檻方向對、偏鬆；但薄樣本不能現在硬收，先把「該不該收、收多緊」寫成季度校準程序、掛既有 F1 閉環。
+- **零碼改動（含不改 `picks_outcome.py`）**：本 milestone **不改任何門檻值、不新建裁決台**——只落三份文字＋一條設定註解指標。維持 `core_ext_ma60_max_pct: 15.0` 試行。
+- **校準協議寫入 [docs/20 §7](20-ranking-reform-ws5.md)**：候選檔位 **10/12/15（%）三檔**；每季（W28+ 起）跑 `make diagnose`（距季線分桶×前瞻報酬曲線）＋`make pick-outcome`（各門檻核心層 α＋`layer_summary`＋`counterfactual_summary` 反事實誤殺帳）＋`week_over_week_diff`（確認非重疊事件）；**裁決規則**＝收緊僅當該檔核心層 α 顯著高於 15、桶內非重疊事件 ≥30、跨 ≥2 regime 一致，三缺一維持 15.0，反事實誤殺真領頭則否決。
+- **settings.yaml 指標**：`core_ext_ma60_max_pct` 註解加一行指向 docs/20 §7 協議（純註解、非值變動）。
+- **現況（2026-07-07）**：樣本未達（r+20 僅 W21–W22、事件 <30、單 regime）→ **維持 15.0、不裁決**；首個有資格季度重跑＝W28+。**WS5 三批（a 揭露欄／b 並列揭露／c 校準協議）至此全數落地為可逆/純協議形態，硬收緊全掛 W28+ 由數字裁決。**
+- 驗收：無碼改動＝`make test` 綠不變（709）、ruff/mypy 零淨增；docs/20 §7＋docs/08 M-WS5c＋settings.yaml 註解三處一致，門檻值仍 15.0。
