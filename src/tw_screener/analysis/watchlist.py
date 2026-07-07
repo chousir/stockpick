@@ -20,6 +20,11 @@ if TYPE_CHECKING:
 
 console = Console()
 
+# enrich 需要 MA60 → 快取列數低於此就回補單檔歷史（不只全空才補）。
+# 全市場 daily_* 只能向未來累積：純觀察股（從未當過候選）沒有單檔快取，
+# 只靠 daily_* 短窗會算不出 MA20/MA60（W28 曾 19/40 檔均線盲區、F2 無法查核）。
+_MIN_HISTORY_ROWS = 60
+
 
 def load_latest_screener_results(settings: Path) -> tuple[str, dict]:
     """找最新一週的 screen_result_*.csv，回傳 (week_tag, {strategy_id: DataFrame})。"""
@@ -136,8 +141,9 @@ def enrich_named_list(
     frames, rows = [], []
     for sid in ids:
         oh = client.fetch_stock_ohlcv(sid, n_days=100)
-        if oh.is_empty():
-            # 快取沒有 → 主動抓歷史（上櫃股自動走 TPEX），再讀一次
+        if oh.height < _MIN_HISTORY_ROWS:
+            # 快取不足 MA60 視窗（含全空）→ 主動抓歷史（上櫃股自動走 TPEX），再讀一次。
+            # 過去月份永久快取、當月吃 TTL，重複呼叫近零成本（上市未滿 60 日者亦安全）。
             client.fetch_stock_history(sid, months=6)
             oh = client.fetch_stock_ohlcv(sid, n_days=100)
         if oh.is_empty():

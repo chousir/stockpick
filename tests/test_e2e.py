@@ -336,24 +336,28 @@ def test_e2e_named_list_csv_holdings(tmp_path: Path):
     assert "buy_price" not in pl.read_csv(out_w).columns
 
 
-def _fake_ohlcv(sid: str) -> pl.DataFrame:
-    """造 12 個交易日的最小 OHLCV（_enrich_named_list / group_stocks 需要的欄）。"""
+def _fake_ohlcv(sid: str, n_days: int = 60) -> pl.DataFrame:
+    """造 n_days 個交易日的最小 OHLCV（_enrich_named_list / group_stocks 需要的欄）。
+
+    預設 60 根＝enrich 回補門檻（快取 < 60 根會觸發 fetch_stock_history）——
+    「已有足夠快取」的股要給滿 60，才不會被回補邏輯誤觸發。
+    """
     from datetime import date, timedelta
 
-    days = [date(2026, 5, 1) + timedelta(days=i) for i in range(12)]
-    closes = [100.0 + i for i in range(12)]
+    days = [date(2026, 3, 1) + timedelta(days=i) for i in range(n_days)]
+    closes = [100.0 + i for i in range(n_days)]
     return pl.DataFrame(
         {
-            "stock_id": [sid] * 12,
+            "stock_id": [sid] * n_days,
             "date": days,
             "open": closes,
             "high": [c + 1 for c in closes],
             "low": [c - 1 for c in closes],
             "close": closes,
-            "change": [1.0] * 12,
-            "trade_volume": [1_000_000] * 12,
-            "trade_value": [100_000_000] * 12,
-            "transaction": [500] * 12,
+            "change": [1.0] * n_days,
+            "trade_volume": [1_000_000] * n_days,
+            "trade_value": [100_000_000] * n_days,
+            "transaction": [500] * n_days,
         }
     )
 
@@ -399,6 +403,6 @@ def test_enrich_named_list_fetches_uncached_and_names_from_industry():
 
     got = set(members["stock_id"].cast(pl.Utf8).to_list())
     assert {cached, otc} <= got, "無快取的上櫃股不應被丟掉"
-    assert client.history_calls == [otc], "只有無快取的股應觸發 fetch_stock_history"
+    assert client.history_calls == [otc], "只有快取不足 MA60 視窗的股應觸發 fetch_stock_history"
     name_by_id = dict(zip(members["stock_id"].cast(pl.Utf8), members["name"], strict=False))
     assert name_by_id[otc] == "系微", "name_map 缺名時應由 industry_df.stock_name 補"

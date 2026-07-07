@@ -146,9 +146,29 @@ reports/YYYY-Www/pick.md
 
 ### 第二層：附錄（決策卡之後・資訊零遺失）
 
-依序：**附錄 A 乾淨補充池（任務 2 第三級）→ 附錄 B 訊號交集（任務 3）→ 附錄 C 市場節奏（任務 4）→ 附錄 D 觀察名單觸發表（任務 5・每檔一行）→ 附錄 E 觀察清單 watchlist 逐檔（任務 0-B）→ 附錄 F 族群深度解讀（任務 1・推理底稿）**。
+依序：**附錄 A 乾淨補充池（任務 2 第三級）→ 附錄 B 訊號交集（任務 3）→ 附錄 C 市場節奏（任務 4）→ 附錄 D 觀察名單觸發表（任務 5・每檔一行・不含 watchlist 股）→ 附錄 E 觀察清單 watchlist 逐檔（任務 0-B・watchlist 股的觸發條件只寫這裡）→ 附錄 F 族群深度解讀（任務 1・推理底稿）**。
 
 > ⚠️ **底稿是推理義務、不是版面**：任務 0/1/2 的完整推理照做（決策卡從中蒸餾），但輸出時**只有蒸餾結果進決策卡**；watchlist 40 檔逐檔判讀、族群深度解讀一律留在附錄。舊版報告把底稿擺最前最大、200 行讀不完＝決策密度過低（規劃書 05 §1.6），是本結構要修掉的問題。
+
+### 資料品質披露區塊（附錄之後、第三層之前・機器可讀）
+
+附錄結束後、picks 區塊之前，固定放一段 `## 資料品質披露（機器可讀）`＋yaml 圍欄，把**本週輸入資料的已知限制**固化存檔。**內容只能來自輸入檔自身的揭露**（各報告頭尾的暖機/快取/口徑警語），不可自行發明：
+
+````markdown
+## 資料品質披露（機器可讀）
+
+```yaml
+data_quality:
+  cp_candidates: {status: ok|warmup_zero|missing, detail: "…"}   # C 路狀態
+  ma_cache_missing: ["2449"]        # 均線快取缺的股號（F2 無法機械查核者；無 → []）
+  ex_div_distortion: {note: "距月線/距季線/當日未除息還原", affected_window: "YYYY-MM-DD~MM-DD"}
+  history_window: {group_analysis_days: N, recommended: 250, z_confidence: low|medium|high}
+  otc_coverage: {note: "上櫃法人回補狀態"}
+  misclassification: []             # 發現的次產業誤標（回饋 concepts.yaml 修標）
+```
+````
+
+鍵名固定、值如實填，當週不適用的鍵可省略。目前無程式消費（`picks sync` 只認 picks 區塊，此段不影響 sync）；目的是讓「F2 位階未知」「C 路缺席」等當週限制**跟著 pick.md 永久存檔**——未來 pick-outcome 可據此把「位階未知的 pick」單獨分層評估，季度覆盤時不遺忘當週的資料缺口。
 
 ### 第三層：機器可讀底帳區塊（檔案最末・`picks sync` 消費・F1-PO1）
 
@@ -166,7 +186,8 @@ excluded:
 <!-- picks:end -->
 ````
 
-- **欄位**：picks 必填 `stock`／`layer`，選填 `sub`（次產業）、`entry`、`stop`、`thesis`；excluded 必填 `stock`／`reason`，選填 `detail`。`name`／`ext_ma60_pct` 由 sync 自動從 candidates_enriched.csv 補、`data_date` 自動取 screen_result 的 screened_at（三者皆可用 `name:`／`ext_ma60:`／頂層 `data_date:` 覆寫，僅 enriched 查無時才需要）。
+- **欄位**：picks 必填 `stock`／`layer`，選填 `sub`（次產業）、`entry`、`stop`、`thesis`；excluded 必填 `stock`／`reason`，選填 `detail`。
+- **excluded 的 `reason` 用受控詞彙（單選最主要一個）**：`過熱`／`土洋對作`／`強漲法人賣`／`低流動`／`高PE`／`法人缺漏`／`籌碼熄火`／`價格已跌`／`位階延伸`／`基本面轉差`。PO4 偽陰性帳按 reason 分組統計，詞彙自由發揮＝每桶樣本 1–2 筆、統計碎裂（W28 曾 13 筆用出 10 種）。同義請自併：近端熄火・籌碼轉向→`籌碼熄火`；投信對作→`土洋對作`；破線・下跌反彈→`價格已跌`；個案細節寫進 `detail`、不要發明新 reason。`name`／`ext_ma60_pct` 由 sync 自動從 candidates_enriched.csv 補、`data_date` 自動取 screen_result 的 screened_at（三者皆可用 `name:`／`ext_ma60:`／頂層 `data_date:` 覆寫，僅 enriched 查無時才需要）。
 - **F2 位階紀律照擋**：core 距季線 > +15% 任一筆違規＝**整批拒寫**（與 `picks record` 同一套 `core_extension_violation`）。
 - **全列驗證過才寫**（錯一筆全不寫）；以 (week, stock_id) upsert **冪等**，改完區塊重跑安全。單檔事後補記仍可用 `picks record`。
 
@@ -294,6 +315,9 @@ excluded:
 （如「等突破 MA60」「等回測月線止穩」「等 Q3 財報」「等族群輪動到此」「等法人由賣轉買」）。
 **清單請按族群／次產業歸組**（同族群的觀察標的聚在一起，方便對照 Section 2.6/2.8 看「整個次產業要不要輪動到」、避免散落難讀）；族群下再逐檔列。
 **這裡只列觸發條件、不重述理由**（理由已在任務 1 該檔解讀），避免變成第二份分析。
+**你 watchlist 上的股不列本表**——其觸發條件寫在附錄 E 該檔行內（任務 0-B 的「再等（等什麼條件）」
+本身就是觸發），一檔一處、防兩處不同步（W28 曾 31/40 檔在附錄 D/E 各寫一次）；本表只收
+watchlist 之外的候選觀察股。
 與任務 2「機會」的差別：**機會＝近期可能進場（已有價位、瑕疵可控）；觀察＝還在等明確事件或訊號**。
 
 ## 規則
