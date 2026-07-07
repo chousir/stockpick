@@ -109,7 +109,7 @@ make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退�
 **⚙️ 不必貼**：`theme_strength.csv`（內容已在 Section 2.8）、`screen_log.md`（檔數統計）。
 
 **送給 Claude 的流程**：把上表 6 類貼進 Claude 網頁對話 → 套 [docs/11](./docs/11-propicks-analysis.md) 範本 prompt → Claude
-產出 `pick.md`（精選進場清單，三路匯流：族群深度＋全宇宙掃描＋CP 補漲候選）→ 對 picks 內每檔
+產出 `pick.md`（精選進場清單，四路匯流：族群深度＋全宇宙掃描＋CP 補漲候選＋觀察清單升格）→ 對 picks 內每檔
 `make report STOCK_ID=XXXX` 產個股深度報告。
 
 ## 每週指令速查
@@ -261,7 +261,7 @@ YAML 驅動的 Goodinfo 條件篩選：`config/strategies/*.yaml` 定義條件 �
 讀本週篩選 CSV ＋價量/法人快取，產 `group_analysis.md`：
 Section 0 策略代號/除權息/總經事件、1 入選分布、2 族群強度排名（2.5 跨族群強勢股、
 2.6 次產業強度、2.7 概念股題材、**2.8 輪動雷達＋全宇宙輪動並列**）、3 各族群前 3 名、
-4 觀察、5 Claude 次產業深度分析請求（輪動雷達驅動）、6 Claude CP 補漲候選分析請求
+5 Claude 次產業深度分析請求（輪動雷達驅動）、6 Claude CP 補漲候選分析請求
 （個股層・讀同夾 cp_candidates.md）、7 持有/觀察清單健檢請求（你的部位・與命中策略同等深度）；
 同時產 `candidates_enriched.csv`
 （全候選股 × 技術/籌碼/估值/flags 排雷欄，**AI 挑股的主要宇宙**）。
@@ -304,7 +304,8 @@ F1 每季校準）**硬擋入核心**，改列趨勢領頭板（部位減半＋�
 
 - enrich 成 `holdings_enriched.csv`（＋報酬率/現值/MA60 停損價）、`watchlist_enriched.csv`
 - 在 `sector_rotation.md`「我的參與度」逐檔標象限與資金方向
-- Step 3 貼給 Claude 時走 prompt 任務 0：庫存給續抱/加碼/減碼/停利/停損、觀察給進場時機
+- Step 3 貼給 Claude 時走 prompt 任務 0：庫存給續抱/加碼/減碼/停利/停損、觀察給進場時機；
+  **觀察清單判「可進場」者升格入挑股四路匯流（docs/11 任務 2 來源 D），與策略命中同權競爭核心/機會層**
 
 ### 9. 總經行事曆（`config/macro_calendar.yaml`）
 
@@ -409,7 +410,7 @@ make dash                # uv run tw-screener serve：單一 FastAPI 同時服�
 | `screen_log.md`                                      | ⑤ screen-all          | 各策略檔數＋交集統計                                                                                                                          |
 | `sector_rotation.md` / `.csv`                      | ⑦ rotation            | **輪動地圖**：價格趨勢分數主鍵排序＋流量確認欄/四象限/★訊號/趨勢領頭板/我的參與度；CSV 供下週 ΔRank                                   |
 | `cp_candidates.md` / `.csv`                        | ⑧ cp-value-candidates | 個股 CP 補漲候選＋C2 三重濾網（官方 trailing PE/PB；group Section 6 要讀）＋短窗早訊號／過熱-退潮警示（限庫存/觀察・低信心觀察，非進場/賣訊） |
-| `group_analysis.md`                                  | ⑨ group               | 族群分析主報告（Section 0-6）                                                                                                                 |
+| `group_analysis.md`                                  | ⑨ group               | 族群分析主報告（Section 0–7）                                                                                                                 |
 | `candidates_enriched.csv`                            | ⑨ group               | 全候選股 × 完整欄位（含 flow_state/risk_kind/pullback_quality 揭露欄）＝**AI 挑股主宇宙**                                              |
 | `holdings_enriched.csv` / `watchlist_enriched.csv` | ⑨ group               | 庫存/觀察 enrich（有維護才產）                                                                                                                |
 | `theme_strength.csv`                                 | ⑨ group               | 2.8 雷達快照（供下週 ΔRank，不必貼給 Claude）                                                                                                |

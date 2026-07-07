@@ -154,6 +154,63 @@ def test_sync_unknown_field_rejected_nothing_written(tmp_path, capsys):
     assert not (week_dir / "picks.csv").exists()
 
 
+def test_sync_watchlist_stock_autofills_from_watchlist_enriched(tmp_path):
+    """觀察清單股未命中策略（不在 candidates）→ name/ext 兜底自 watchlist_enriched。"""
+    settings, week_dir = _setup_week(tmp_path)
+    pl.DataFrame(
+        {"stock_id": ["8299"], "name": ["群聯"], "ma60_dist_pct": [3.2]}
+    ).write_csv(week_dir / "watchlist_enriched.csv")
+    _write_pick_md(
+        week_dir,
+        "<!-- picks:begin -->\n"
+        "picks:\n"
+        '  - {stock: "8299", layer: core, thesis: 觀察清單升格}\n'
+        "<!-- picks:end -->\n",
+    )
+    run_picks_sync(settings, WEEK)
+    row = load_week_picks(week_dir).row(0, named=True)
+    assert row["name"] == "群聯"
+    assert abs(row["ext_ma60_pct"] - 3.2) < 1e-9
+
+
+def test_sync_watchlist_stock_f2_still_enforced(tmp_path, capsys):
+    """觀察清單股的距季線乖離兜底可查後，F2 位階紀律照擋（不再放行未知）。"""
+    settings, week_dir = _setup_week(tmp_path)
+    pl.DataFrame(
+        {"stock_id": ["2327"], "name": ["國巨"], "ma60_dist_pct": [42.0]}
+    ).write_csv(week_dir / "watchlist_enriched.csv")
+    _write_pick_md(
+        week_dir,
+        "<!-- picks:begin -->\n"
+        "picks:\n"
+        '  - {stock: "2327", layer: core}\n'
+        "<!-- picks:end -->\n",
+    )
+    with pytest.raises(typer.Exit):
+        run_picks_sync(settings, WEEK)
+    assert "位階紀律" in capsys.readouterr().out
+    assert not (week_dir / "picks.csv").exists()
+
+
+def test_sync_candidates_takes_precedence_over_watchlist(tmp_path):
+    """同股同時在 candidates 與 watchlist enriched → 以 candidates（主宇宙）為準。"""
+    settings, week_dir = _setup_week(tmp_path)
+    pl.DataFrame(
+        {"stock_id": ["3006"], "name": ["晶豪科(舊)"], "ma60_dist_pct": [99.0]}
+    ).write_csv(week_dir / "watchlist_enriched.csv")
+    _write_pick_md(
+        week_dir,
+        "<!-- picks:begin -->\n"
+        "picks:\n"
+        '  - {stock: "3006", layer: core}\n'
+        "<!-- picks:end -->\n",
+    )
+    run_picks_sync(settings, WEEK)
+    row = load_week_picks(week_dir).row(0, named=True)
+    assert row["name"] == "晶豪科"  # candidates 那筆，非 watchlist
+    assert abs(row["ext_ma60_pct"] - 8.4) < 1e-9
+
+
 def test_sync_core_without_ext_warns_but_records(tmp_path, capsys):
     settings, week_dir = _setup_week(tmp_path)
     _write_pick_md(

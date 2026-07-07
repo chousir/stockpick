@@ -5,7 +5,8 @@
 - sync：解析 pick.md 尾端機器可讀區塊（docs/11「第三層」），全列驗證通過才整批 upsert
 
 data_date 自動取該週 screen_result 的 screened_at；name／ext_ma60_pct 自動從
-candidates_enriched.csv 補（皆可覆寫）。純本地檔案、不打網。
+candidates_enriched.csv 補、查無再兜 watchlist／holdings_enriched.csv（觀察清單股
+未命中策略時不在 candidates，兜底讓 F2 位階紀律仍可查核；皆可覆寫）。純本地檔案、不打網。
 """
 
 from __future__ import annotations
@@ -56,18 +57,49 @@ def _resolve_data_date(week_dir: Path) -> date | None:
     return None
 
 
+# name/ext 查找順序：candidates 為主（挑股主宇宙），watchlist/holdings 兜底——
+# 觀察清單股與策略命中同權入 picks，未命中策略時只存在後兩檔（欄位同口徑）
+_ENRICHED_FILENAMES = (
+    "candidates_enriched.csv",
+    "watchlist_enriched.csv",
+    "holdings_enriched.csv",
+)
+
+
 def _load_enriched(week_dir: Path) -> pl.DataFrame | None:
-    """讀 candidates_enriched.csv 供 name/ext 自動補（缺檔或壞掉 → None）。"""
+    """讀 enriched CSV 供 name/ext 自動補（全缺或全壞 → None）；同股以先讀到者為準。"""
     import polars as pl
 
-    enriched_path = week_dir / "candidates_enriched.csv"
-    if not enriched_path.exists():
+    frames = []
+    for fname in _ENRICHED_FILENAMES:
+        path = week_dir / fname
+        if not path.exists():
+            continue
+        try:
+            df = pl.read_csv(path, schema_overrides={"stock_id": pl.Utf8})
+        except Exception as e:  # noqa: BLE001 — 單檔壞掉不擋記錄，換下一個來源
+            console.print(f"[yellow]讀 {path} 失敗（{e}），改查其他 enriched／需手動給[/yellow]")
+            continue
+        if "stock_id" not in df.columns:
+            continue
+        frames.append(
+            df.select(
+                pl.col("stock_id"),
+                (
+                    pl.col("name").cast(pl.Utf8, strict=False)
+                    if "name" in df.columns
+                    else pl.lit(None, dtype=pl.Utf8).alias("name")
+                ),
+                (
+                    pl.col("ma60_dist_pct").cast(pl.Float64, strict=False)
+                    if "ma60_dist_pct" in df.columns
+                    else pl.lit(None, dtype=pl.Float64).alias("ma60_dist_pct")
+                ),
+            )
+        )
+    if not frames:
         return None
-    try:
-        return pl.read_csv(enriched_path, schema_overrides={"stock_id": pl.Utf8})
-    except Exception as e:  # noqa: BLE001 — enriched 壞掉不擋記錄，欄位留空
-        console.print(f"[yellow]讀 {enriched_path} 失敗（{e}），name/ext 需手動給[/yellow]")
-        return None
+    return pl.concat(frames).unique(subset=["stock_id"], keep="first", maintain_order=True)
 
 
 def _lookup_enriched(
@@ -162,8 +194,8 @@ def run_pick_record(
                 raise typer.Exit(1)
             if layer == "core" and resolved_ext is None and max_ext is not None:
                 console.print(
-                    "[yellow]⚠️ 距季線乖離未知（candidates_enriched 無此檔且未給 "
-                    "--ext-ma60）——F2 位階紀律無法查核，如實記錄[/yellow]"
+                    "[yellow]⚠️ 距季線乖離未知（candidates/watchlist/holdings_enriched "
+                    "皆無此檔且未給 --ext-ma60）——F2 位階紀律無法查核，如實記錄[/yellow]"
                 )
             upsert_pick(
                 week_dir,
@@ -336,8 +368,8 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
             continue
         if layer == "core" and row_ext is None and max_ext is not None:
             warnings.append(
-                f"⚠️ {stock_id} {row_name or ''}：距季線乖離未知（candidates_enriched "
-                f"無此檔且未給 ext_ma60）——F2 位階紀律無法查核，如實記錄"
+                f"⚠️ {stock_id} {row_name or ''}：距季線乖離未知（candidates/watchlist/"
+                f"holdings_enriched 皆無此檔且未給 ext_ma60）——F2 位階紀律無法查核，如實記錄"
             )
         prepared_picks.append(
             {

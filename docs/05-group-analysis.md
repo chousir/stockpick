@@ -51,9 +51,6 @@
 
 其他入選股：8069 元太、3596 智易...
 
-## 4. 觀察
-（<!-- TODO: Claude 補寫 -->）
-
 ## 5. Claude 次產業深度分析請求（雷達驅動）
 （由 Section 2.8 輪動雷達挑 top-N 領先次產業、逐塊列成員候選股，請 Claude 檢查籌碼/趨勢/訂單外溢）
 
@@ -212,17 +209,11 @@ def render_group_report(
     """用 jinja2 模板產出 group_analysis.md（含 Section 0 策略代號說明）。"""
 ```
 
-## 觀察段由誰寫
+## 觀察段（Section 4）已移除
 
-「## 4. 觀察」這段是**自由文**，留 `<!-- TODO: Claude 補寫 -->` 標記：
-
-```
-你執行: make group
-程式: 產出 group_analysis.md（Section 1-3、5-7 都填好）
-程式: Section 4 留空，附上「待 Claude 補寫」標記
-你開 Claude Code: 「補寫 reports/2026-W21/group_analysis.md 的觀察段」
-Claude: 讀資料、補寫
-```
+早期設計留「## 4. 觀察」自由文段給 Claude Code 事後補寫，但實務上解讀全走
+docs/11 的 pick.md 流程、7 週從未補寫過——2026-07 起模板移除此段（死佔位）。
+Section 5-7 編號保留不變（docs/11 prompt 以編號交叉引用）。
 
 ## 已知限制
 
