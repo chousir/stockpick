@@ -252,11 +252,17 @@ def _load_rotation_overlay(report_dir: Path | None) -> dict[str, dict]:
         return {}
     if not {"sub_industry", "radar_rank", "quadrant"}.issubset(df.columns):
         return {}
+    has_trend = "trend_score" in df.columns  # 舊快照可能缺 → trend_score 降級 None
     return {
         r["sub_industry"]: {
             "rank": int(r["radar_rank"]),
             "quadrant": str(r["quadrant"]),
             "triggered": bool(r.get("entry_triggered", False)),
+            "trend_score": (
+                float(r["trend_score"])
+                if has_trend and r.get("trend_score") is not None
+                else None
+            ),
         }
         for r in df.iter_rows(named=True)
     }
@@ -370,9 +376,12 @@ def _build_radar(
     report_dir: Path | None,
     week_tag: str,
     radar_cfg: dict | None,
+    rotation_map: dict[str, dict],
 ) -> tuple[list[dict], list[dict]]:
     """輪動雷達：以 lead_score 重排（領先鏡頭）＋週對週 ΔRank，並寫本週快照。
 
+    rotation_map＝_load_rotation_overlay 結果（R5 全宇宙資金輪動並列對照），
+    由 _build_context 載一次共用（Section 2.8 雷達＋2.6 次產業表 M-WS5b 同源，避免重讀）。
     回傳 (radar_groups〔Section 2.8〕, radar_deep_dive〔Section 6・top-N 次產業含成員股〕)。
     """
     from tw_screener.analysis.concepts import SUB_INDUSTRY_KIND
@@ -385,7 +394,6 @@ def _build_radar(
     radar = attach_rank_delta(radar, prev)
     if report_dir is not None:
         _write_theme_snapshot(radar, report_dir)
-    rotation_map = _load_rotation_overlay(report_dir)  # R5：全宇宙資金輪動並列對照
 
     def _row_common(row: dict) -> dict:
         cnt = int(row["members_count"])
@@ -518,6 +526,9 @@ def _build_context(
         lead_weights=rc.get("lead_weights"),
     )
     theme_str_map = _build_theme_str_map(members, themes_long, ranked)
+    # R5 全宇宙資金輪動並列對照：載一次，供 Section 2.8 雷達與 2.6 次產業表（M-WS5b）共用，
+    # 避免同一 sector_rotation.csv 重讀。無檔（沒先跑 make rotation）→ 空 dict、兩處皆優雅降級。
+    rotation_overlay = _load_rotation_overlay(report_dir)
     radar_groups, radar_deep_dive = _build_radar(
         ranked,
         members,
@@ -527,6 +538,7 @@ def _build_context(
         report_dir,
         week_tag,
         radar_cfg,
+        rotation_overlay,
     )
     # 本週族群主軸（問題3・M3）：sector_rotation 趨勢/流入未漲/★ → 候選成員數 → uncovered 補位
     covered_subs = {d["theme"] for d in radar_deep_dive}
@@ -538,6 +550,11 @@ def _build_context(
         covered_subs,
         (radar_cfg or {}).get("main_axis"),
     )
+
+    # M-WS5b（WS5-③）：rotation 趨勢分＋輪動位階並列揭露於次產業表（同 sub_industry key）。
+    # 純揭露、不重排、不改強度分數——讓「動能沉底但價格趨勢已浮出」的 base 齊漲輪入族群
+    # 在次產業排名旁被看見（規劃書 20 §2 WS5-③；裁決 4 純並列不併權重）。概念股題材不在
+    # 輪動宇宙 → 無對照、顯示 —（rotation_overlay 已於上方載一次共用）。
 
     sub_groups: list[dict] = []
     concept_groups: list[dict] = []
@@ -554,7 +571,19 @@ def _build_context(
             "score_str": f"{float(row['score']):.1f}",
         }
         if row["kind"] == SUB_INDUSTRY_KIND:
-            sub_groups.append({"sub_industry": row["theme"], **entry})
+            rot = rotation_overlay.get(row["theme"])
+            sub_groups.append(
+                {
+                    "sub_industry": row["theme"],
+                    **entry,
+                    "trend_score_str": (
+                        f"{rot['trend_score']:.0f}"
+                        if rot and rot.get("trend_score") is not None
+                        else "—"
+                    ),
+                    "rotation_rank_str": f"#{rot['rank']}" if rot else "—",
+                }
+            )
         else:
             concept_groups.append({"theme": row["theme"], **entry})
 

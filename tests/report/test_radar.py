@@ -71,11 +71,36 @@ def test_rotation_overlay_load_and_graceful_missing(tmp_path: Path):
             "radar_rank": [2, 9],
             "quadrant": ["主升續勢", "出貨警訊"],
             "entry_triggered": [True, False],
+            "trend_score": [88.0, 41.0],
         }
     ).write_csv(tmp_path / "sector_rotation.csv")
     out = _load_rotation_overlay(tmp_path)
-    assert out["記憶體"] == {"rank": 2, "quadrant": "主升續勢", "triggered": True}
+    assert out["記憶體"] == {
+        "rank": 2,
+        "quadrant": "主升續勢",
+        "triggered": True,
+        "trend_score": 88.0,
+    }
     assert out["PCB"]["triggered"] is False
+    assert out["PCB"]["trend_score"] == 41.0
+
+    # 舊快照缺 trend_score 欄（M-WS5b 前）→ trend_score 降級 None，其餘欄不受影響
+    (tmp_path / "old").mkdir()
+    pl.DataFrame(
+        {
+            "sub_industry": ["航運"],
+            "radar_rank": [1],
+            "quadrant": ["下一棒"],
+            "entry_triggered": [False],
+        }
+    ).write_csv(tmp_path / "old" / "sector_rotation.csv")
+    old = _load_rotation_overlay(tmp_path / "old")
+    assert old["航運"] == {
+        "rank": 1,
+        "quadrant": "下一棒",
+        "triggered": False,
+        "trend_score": None,
+    }
 
     # 欄位不齊的壞快照 → 空 dict
     (tmp_path / "bad").mkdir()

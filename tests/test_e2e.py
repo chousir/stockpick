@@ -200,6 +200,48 @@ def test_e2e_render_report_contains_required_sections(tmp_path: Path):
     assert "深度分析" in content
 
 
+def test_e2e_render_report_section26_rotation_disclosure(tmp_path: Path):
+    """M-WS5b（WS5-③）：次產業表末兩欄並列揭露 rotation 趨勢分＋輪動Rank（同 sub_industry key）。
+
+    純揭露不重排——強度分數排序不變、只多兩欄。有 sector_rotation.csv 對照者顯示趨勢分/位階。
+    """
+    results = {"a_breakout": _SCREENER_A, "b_growth_institutional": _SCREENER_B}
+    groups, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    ranked = rank_within_groups(members, pl.DataFrame(), pl.DataFrame())
+    # 兩檔候選標同一次產業（≥ min_members 2 才入次產業表）
+    themes_long = pl.DataFrame(
+        {
+            "stock_id": ["2330", "2454"],
+            "theme": ["晶圓代工", "晶圓代工"],
+            "kind": ["次產業", "次產業"],
+        }
+    )
+    # 全次產業無偏輪動快照：晶圓代工趨勢分 88、輪動位階 #3
+    pl.DataFrame(
+        {
+            "sub_industry": ["晶圓代工"],
+            "trend_score": [88.0],
+            "quadrant": ["主升續勢"],
+            "radar_rank": [3],
+            "entry_triggered": [False],
+        }
+    ).write_csv(tmp_path / "sector_rotation.csv")
+    output = tmp_path / "group_analysis.md"
+    render_group_report(groups, ranked, results, "2026-W21", output, themes_long=themes_long)
+    content = output.read_text(encoding="utf-8")
+    assert "| 趨勢分 | 輪動Rank |" in content  # 次產業表新增兩欄表頭
+    # 晶圓代工列並列揭露趨勢分 88、輪動位階 #3（Section 2.6 表列＝以 | 起首＋含趨勢分 88 定位；
+    # 2.8 雷達雖亦有 #3 但無趨勢分欄，且 2.6 在前，next 命中 2.6 列）
+    row = next(
+        ln for ln in content.splitlines()
+        if ln.startswith("| ") and "晶圓代工" in ln and "| 88 |" in ln
+    )
+    assert "| #3 |" in row
+
+
 def test_e2e_render_report_has_cross_group_strong_section(tmp_path: Path):
     """報告應含「跨族群強勢領漲股」區段，且個股按 5 日漲幅降序。"""
     results = {"a_breakout": _SCREENER_A, "b_growth_institutional": _SCREENER_B}
