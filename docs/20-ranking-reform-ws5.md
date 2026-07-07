@@ -1,0 +1,147 @@
+# 20 — 排序改革 WS5（規劃書）
+
+> 承 M-Diag1 診斷（[docs/19](19-late-entry-launch-diagnosis.md)）。根結論＝**排序系統性追高**
+> （買已延伸、棄回檔 base）。本規劃書把診斷 §7 列的四支處方落成生產計畫。
+>
+> **核心張力（決定整份規劃書的形態）**：診斷是**方向性**的——事件 <30、單一 regime、
+> `daily_all` 全市場底料**永久停 2026-06-09**、`candidates_enriched` 的 r+20 只到 W21–W22。
+> 它足以指出「追高」這個方向、不足以釘尖銳門檻。因此 WS5 **不能一次改成硬 gate**，必須沿
+> [docs/18](18-intra-sector-laggard-production.md) 落後濾鏡的先例：**可逆的揭露＋輕加權先行、
+> 硬 gate／門檻收緊延到 W28+ 樣本變厚後由 F1 閉環（`make pick-outcome`）裁決**。
+
+---
+
+## 0. 一句話目標
+
+把「排序追延伸、棄回檔 base」這個系統性偏誤，在既有排序面上**校正方向**——貼底族群內
+領頭羊上浮、rotation 訊號接進排序、sector-wide 旗標不再誤殺整族——而**不引入尖銳門檻或
+不可逆硬 gate**，並同步搭好 WS5 專用的 walk-forward 裁決台，讓每支處方的「該不該收緊、
+收多緊」在 W28+ 由數字決定。
+
+## 1. 追高在哪幾個排序面（生產 surface 盤點）
+
+診斷說的「排序」不是單一函式，是一條鏈。先攤開現況、標出哪些在追高、哪些已在抗追高：
+
+| 排序面 | 檔案 | 現況排序邏輯 | 方向 |
+|---|---|---|---|
+| **族群排名** | [analysis/grouping.py](../src/tw_screener/analysis/grouping.py) | `score = 50·sigmoid(momentum_5d/5)`，動能權重 **0.50** 主導 | **追高**（近端漲多的族群浮上；base 齊漲未延伸的沉底＝金融 group #7 之因） |
+| **族群趨勢**（rotation） | [analysis/rotation.py](../src/tw_screener/analysis/rotation.py) | `rank_by=trend_score`（F3 已把價格趨勢當主鍵、20 日流量降確認欄） | 中性偏抗高（價格證據比流量早浮出，但未接進族群/個股排名） |
+| **CP 候選排名** | [report/cp_candidates.py](../src/tw_screener/report/cp_candidates.py) | `cp_score = 資金 z × 位階剩餘空間`＋docs/18 落後 boost | **已抗追高**（貼低才有分；但只在 cp_candidates 這張副表，非主排序） |
+| **核心層位階閘門** | [report/pick_store.py](../src/tw_screener/report/pick_store.py)：`core_extension_violation` | 距季線 > **15%** 拒入 core（F2） | 抗追高（但診斷測出 +10~15% 已流失正期望值＝**偏鬆**） |
+| **旗標排雷** | `propicks_flags`（settings.yaml:48） | 過熱／土洋對作＝**軟警示、非硬刪** | 中性（誤殺發生在**分析師讀 pick.md 時**，非程式） |
+| **名額分配** | 分析師（pick.md 綜合） | 族群排名前段吃滿核心名額 | **追高**（金融 group #7、名額被前面科技群吃光＝0 入 picks） |
+
+**關鍵洞察**：抗追高的工具（cp_score、F2、docs/18 落後濾鏡）**都已存在，但都是副線**；
+主排序（族群動能 0.50）＋名額分配仍系統性偏向近端強勢。WS5 不是「發明抗追高」，是**把已
+驗證的抗追高訊號從副線接上主排序**，並鬆綁被 sector-wide 旗標誤殺的整族。
+
+## 2. 四支處方 × 生產 surface × 證據 × 落地形態
+
+每支標明：改哪裡、診斷哪條證據撐它、落地形態（可逆度）、能不能現在驗。
+
+### WS5-① 貼底位階揭露（排序別追高）
+
+- **surface**：`candidates_enriched` 的 `_build_enriched_rows`（[group_report.py](../src/tw_screener/report/group_report.py)）——**加欄，不改排序權重**。
+- **證據**：`ma60_dist` IC 跨三窗全顯著負（r+20 **−0.25**，最強單一訊號）＝貼底進場前瞻最佳。
+- **落地形態（可逆・純揭露・M-WS5a 已實作）**：**不動 momentum 0.50 主權重、不重排**（避免大改
+  主排序、不可逆——裁決 2）。改為新增 **`base_zone`（貼底）欄**＝距季線 ≤ `base_zone_ma60_max_pct`
+  （10%）＝起漲 base 位階，是既有 **`過熱` 旗標（延伸端）的對稱面**——過去 flags 只警示延伸、從不
+  正面標貼底，導致 CSV 頂端延伸動能股把貼底名字埋掉。**獨立欄非 flags**（flags 是排雷／PO4 偽陰性
+  帳，貼底是正向訊號，混入會污染反事實帳）。
+  > **與 docs/18 的分工**：族群內落後（`rs_subind<0`）×貼低的 **ambush 加碼**（lift 2.77）已在
+  > cp_candidates 🔻 欄實作、且 `rs_subind` 只在 stock_panel 路徑（group 路徑無）。故 WS5-① 只在
+  > 族群主表加**單維貼底揭露**（無 rs_subind、無門檻疊門檻）；落後×貼低的族群相對維度留 cp_candidates。
+- **現在能驗？** 方向已站穩（`ma60_dist` 負 IC，W21–W25）；貼底揭露的選股**賺賠**要 W28+ F1 閉環才裁決。
+
+### WS5-② sector-wide 旗標降為輪動訊號（別誤殺整族）
+
+- **surface**：**不是**程式 gate（旗標已軟警示）——是**分析師讀法**。新增一個「旗標覆蓋度」
+  屬性餵給 pick.md。
+- **證據**：金融斷點——W21 土洋對作 8/17 掛旗、**起漲 4 檔 100% 掛旗**＝全族群同掛＝機械/輪動
+  足跡（診斷假設 (b)「假土洋對作誤殺」實例）；PO4 反事實：土洋對作剔除的其實是真領頭
+  （n=15、α +2.5pp、67% 贏大盤）。
+- **落地形態（可逆・純揭露・M-WS5a 已實作）**：新增 `sector_flag_note`——同旗標（土洋對作/過熱）
+  在該次產業候選的掛旗**佔比** ≥ `sector_coverage_pct`（60%，且族群候選 ≥ `sector_coverage_min_members`
+  5）→ 標「**族群共振X%**」＝輪動足跡而非個股利空。docs/11 讀法明寫：sector-wide 旗標**降為輪動訊號、
+  不得當個股排除理由**。**零 gate 變動、只加一欄＋一條讀法**（次產業身分取自 themes_long kind=次產業）。
+- **現在能驗？** 概念已有 worked example（金融）；統計裁決待 W28+ 多族群事件。
+
+### WS5-③ rotation × 排序接縫（讓輪入族群在排序浮出）
+
+- **surface**：rotation 表（trend_score，已 F3）↔ 族群排名（grouping.py momentum）之間**沒有接線**。
+- **證據**：金融 base 齊漲 +16~24%、rotation 的 trend_score 會抓到（價格證據早浮出），但族群排名
+  用近端動能→金融沉在 group #7→名額吃不到。兩張表各自對、**中間斷開**。
+- **落地形態（輕加權，較不可逆、需最謹慎）**：在族群排名引入 rotation `trend_score` 為**次權
+  重或並列揭露**（輪入且貼底的族群，順位上調）。**這是四支裡最動主排序的一支**——建議**先只
+  做並列揭露欄（rotation 位階 + 趨勢分並排於族群表），不改分數**，把「是否併入加權」當 W28+
+  裁決點，避免現在用薄樣本釘權重。
+- **現在能驗？** 否——併權重的效果純靠 W28+。故本支**首版只揭露不加權**。
+
+### WS5-④ F2 +15% 硬擋校準（偏鬆）
+
+- **surface**：`settings.picks.core_ext_ma60_max_pct`（現 15.0）＋ `core_extension_violation`。
+- **證據**：r+20 分桶，5–10% 中位 +3.6% → 15–20% **−10.1%**（勝率 25%）；**正期望值在 10–15%
+  就流失**。方向對、門檻偏鬆。
+- **落地形態（純設定，最可逆）**：**不在本規劃書拍新門檻**——診斷明令「不釘尖銳門檻（粗桶、
+  單一 regime）」。做法：把 15.0 標為**試行**（已是），並把「10 / 12 / 15 三檔的核心 α 對照」
+  排進 F1 閉環季度校準（`make pick-outcome`）。**現在唯一動作＝在 docs 記錄校準協議、不改值。**
+- **現在能驗？** 否——收緊到 10~12% 的淨效果要 W28+ 才有非重疊事件。
+
+## 3. 資料天花板與驗證台（walk-forward）
+
+**這是全案最該誠實的一段。** WS5 要「走 walk-forward」，但母體現況：
+
+- `candidates_enriched`：r+10 到 W21–W25、**r+20 只 W21–W22**（薄）。
+- `daily_all` 全市場乾淨底料：**永久停 2026-06-09**，無偏掃描僅 W21–W23、事件 <30。
+- 早週（W21–W23）舊 schema 無近端法人窗、無 rotation 報表。
+
+⇒ **現在無法對任何硬門檻做可信 walk-forward**。因此驗證策略分兩段：
+
+1. **現在（M-WS5 落地時）**：只驗「方向」已站得住的部分（`ma60_dist` 負 IC、docs/18 落後 lift、
+   金融 worked example），落地**可逆的揭露＋輕加權**，回歸測試保證不破既有數字。
+2. **W28+（樣本變厚）**：用**既有** F1 閉環裁決台自動累積——
+   - [backtest/picks_outcome.py](../src/tw_screener/backtest/picks_outcome.py)：`compute_todate_returns` /
+     `layer_summary`（命中率×α）/ `counterfactual_summary`（旗標偽陰性）/ `week_over_week_diff`。
+   - [backtest/strategies.py](../src/tw_screener/backtest/strategies.py)：`compute_forward_returns`（固定持有窗）。
+   - [backtest/diagnostic.py](../src/tw_screener/backtest/diagnostic.py)：`make diagnose` 每季重跑，IC/延伸度
+     曲線隨窗變厚更新。
+   - **不新建裁決台**——WS5 每支處方的成功標準都掛在上述既有工具，季度重跑即裁決。
+
+## 4. Milestone 拆解（sequencing）
+
+依「可逆度 × 現在可驗度」排序，可逆且方向已站穩的先做：
+
+- **M-WS5a（先做・低風險・可逆・✅ 已實作 2026-07-05）**：WS5-① `base_zone` 貼底揭露欄 ＋ WS5-②
+  `sector_flag_note` 旗標覆蓋度欄＋讀法。兩者皆**加欄＋改 docs/11 讀法、零硬 gate**，既有 CSV 值不變
+  （見 [docs/08](08-milestones.md) M-WS5a）。**W28+ 重跑報告才反映新欄**。
+- **M-WS5b（次做・需謹慎）**：WS5-③ rotation×排序**並列揭露**（不併權重）。
+- **M-WS5c（純協議・不改碼值）**：WS5-④ F2 校準協議寫入 docs、掛 F1 季度校準；**不改門檻值**。
+- **W28+ 裁決批**：三支的「揭露 → 輕加權 → 是否升 gate/收門檻」全部等 `make pick-outcome` /
+  `make diagnose` 樣本變厚後，逐支由數字決定，各自可能升級或退回。
+
+## 5. 裁決點（動碼前需你拍板）
+
+1. **拆法**：照 §4 的 M-WS5a → b → c 三顆 milestone 分批，還是併一顆大 milestone？
+   （建議分批：a 可逆可先享用，b/c 風險/成熟度不同。）
+2. **WS5-① 主權重動不動**：建議**不動** momentum 0.50、只在族群內排序加貼底揭露。若你要更
+   激進（把貼底併入族群主分數），屬不可逆改動、需 W28+ 才敢，我傾向不現在做。
+3. **WS5-② 覆蓋度門檻**：sector-wide 判定佔比（初擬 > 60%）——這是揭露閾值不是 gate，錯了
+   只是標註偏鬆/偏嚴，可先給保守值、W28+ 校準。
+4. **WS5-③ 併權重 vs 純並列**：建議首版**純並列揭露**、不併族群加權（薄樣本不釘權重）。
+5. **WS5-④ 是否現在就改 15→12**：建議**不改**、只寫校準協議。若你有場外理由要先收緊，需明說
+   並接受它是試行值。
+
+## 6. 誠實限制／不做的事
+
+- **不釘尖銳門檻**：診斷 §6 鐵律——事件 <30、單一 regime、`daily_all` 06-09 窗牆；WS5 首版
+  一律揭露/輕加權，硬門檻等窗變厚。
+- **不動 momentum 0.50 主權重**（除非你在裁決點 2 明確要）——大改主排序不可逆、現無樣本背書。
+- **不新建回測引擎**——復用 F1 閉環＋strategies＋diagnostic，避免重造裁決台。
+- **不碰 WS2 的另兩機制**（AI 趨勢股進場紀律／價值循環回檔掃描）——診斷 §7 標「另議」，不在
+  WS5 排序改革範圍。
+- **不回溯既有 reports/**——新排序欄／讀法 W28+ 新產出才生效，舊週報告不重排。
+- **每支處方保留退回路徑**：揭露欄可停用、輕加權可歸零（承 docs/18 「純加法停用回退向後相容」
+  形態），確保任何一支被 W28+ 數字否證都能無痛下架。
+
+> 本規劃書交付＝**把 M-Diag1 的四支處方對齊真實生產 surface＋定可逆落地形態＋掛既有裁決台**。
+> 不含任何生產碼改動；動碼從 §5 裁決點拍板後、逐 milestone（M-WS5a 起）開始。

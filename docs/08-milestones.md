@@ -794,3 +794,17 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **docs/11**：F5 揭露欄讀法＋**鐵律明寫「近端佔比單獨無判別力（2026-07-02 實證）——不得當排序主判或硬 gate」**；健康回踩判定改讀 `pullback_quality`。
 - **未做（誠實）**：各欄是否有 edge 交 F1 分桶回測（樣本變厚後跑，屆時才有資格談升主判）；watchlist/holdings 管線的軌跡欄（需該管線也載歷史，另案）；舊 08 被動 proxy 確認棄案。
 - 驗收：`make group` 產出含 7 揭露欄的三份 enriched；`make test` 綠（+9 trajectory/near_flow）；lint/typecheck 零淨增。**規劃書 05（F1–F5）全數收官。**
+
+---
+
+## M-WS5a：貼底揭露欄＋sector-wide 旗標降輪動（規劃書 20 WS5-①②・排序改革第一批）
+
+> 對應規劃書 [docs/20-ranking-reform-ws5.md](20-ranking-reform-ws5.md) WS5-①②（M-Diag1 [docs/19](19-late-entry-launch-diagnosis.md) 根結論＝**排序系統性追高**的第一批可逆處方）。裁決 2/3/4 已於 2026-07-05 拍板（不動 momentum 0.50 主權重、覆蓋度 60% 試行、純並列不併權重延後）。
+> 動機：診斷實證距季線 IC 跨三窗全顯著負（r+20 −0.25＝最強單一訊號），管線卻只用 `過熱` 警示延伸端、從不正面標貼底；金融 W21 斷點——起漲金控 base 齊漲 +16~24%，土洋對作 8/17 掛旗（起漲 4 檔 100% 掛）＝全族群機械同掛，管線把整族誤殺、0 檔入 picks。兩者皆**可逆揭露**先行（診斷樣本 <30、單 regime，撐不起硬門檻——見規劃書 §3）。
+
+- **WS5-① `base_zone` 貼底欄**：[group_report.py `_build_enriched_rows`](../src/tw_screener/report/group_report.py) 主迴圈——距季線 ≤ `propicks_flags.base_zone_ma60_max_pct`（10.0 試行）→ `base_zone="貼底"`（起漲 base 位階，`過熱` 旗標的對稱面）。**獨立欄非 flags**（flags 是排雷／PO4 偽陰性帳，貼底是正向訊號、混入會污染反事實帳）；深破線由 `risk_kind`/`pullback_quality` 另揭露、不在此門檻判。**不動 momentum 0.50 主權重、不重排**（裁決 2）。
+- **WS5-② `sector_flag_note` 覆蓋度欄**：新 `_annotate_sector_flag_coverage` post-pass——同旗標（土洋對作/過熱）在該次產業候選掛旗佔比 ≥ `sector_coverage_pct`（60）且族群候選 ≥ `sector_coverage_min_members`（5）→ 標「族群共振X%」＝輪動足跡。次產業身分取自 `themes_long` kind=次產業（一檔多次產業取第一）；無 themes_long／族群過小 → 不標（如實留空）。**零 gate、旗標本已軟警示**（誤殺在分析師讀法層，此欄修讀法）。
+- **canonical 一致**：兩欄併入 `_CANONICAL_REUSE_FIELDS`——庫存/觀察重疊股沿用 candidates 那筆（覆蓋度屬候選宇宙口徑；base_zone 跟隨 canonical ma60_dist）。非重疊庫存/觀察股的覆蓋度受 min_members=5 保護、不假共振。
+- **docs/11 讀法**：排雷段加 M-WS5a 揭露欄鐵律——① `base_zone=貼底`＋族群主升＝核心該保留的「起漲（貼季線）」型（族群內落後×貼低埋伏加碼另看 cp_candidates 🔻・docs/18）；② **帶 `sector_flag_note` 者該旗標降為輪動訊號、不得當個股排除理由**，回到族群/rotation 判輪入。CSV 欄列同步補兩欄。
+- **未做（誠實）**：族群內落後（`rs_subind<0`）×貼低的 ambush 族群相對維度**留 cp_candidates 🔻**（rs_subind 只在 stock_panel 路徑、group 路徑無；WS5-① 只做單維貼底、不疊門檻）；兩欄是否有 edge 交 F1 閉環（`make pick-outcome`）W28+ 樣本變厚後裁決；WS5-③④ 另立 M-WS5b/c（見規劃書 §4）。**既有 reports/ 不回溯——W28+ 重跑報告才產出新欄。**
+- 驗收：`make test` 綠（+2：base_zone 揭露、sector 覆蓋度）；ruff/mypy 零淨增；既有 candidates_enriched 欄值不變（只加兩欄）。
