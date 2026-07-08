@@ -31,7 +31,7 @@
 
 ## 鐵律（違反＝事故，無例外）
 1. **Goodinfo 爬蟲合規**：請求間隔 ≥3 秒＋隨機抖動、同 URL 24h 快取、concurrency=1、連錯 3 次停、真實瀏覽器 UA 且可設定。動 goodinfo 模組前先讀 docs/02。
-2. **報告紅線**：多空並陳（空方論點不得少於多方）、不下買/不買結論、不給目標價、不用「強烈建議／保證／飆股」；每個數字附日期與來源；資料沒有就寫「未取得」，不從記憶編。
+2. **報告紅線**：多空並陳（空方論點不得少於多方）、不下買/不買結論、不給目標價、不用「強烈建議／絕對／保證／飆股」（全清單見 playbook/60 禁止事項）；每個數字附日期與來源；資料沒有就寫「未取得」，不從記憶編。
 3. **git**：commit 前 diff 自查，每個 hunk 要能追溯到使用者請求；merge 進 main 前必問使用者；不 commit data/、reports/ 下個人持股內容。
 4. **依賴**：加任何新依賴先問；pandas／requests-html／selenium／playwright 預設禁止。
 5. **參數**：路徑、limit、URL、UA、門檻一律進 config/settings.yaml，不寫死在程式裡。
@@ -39,7 +39,7 @@
 ## Milestone 紀律
 - 一次只做一個 milestone。做完＝驗收指令跑過＋完成清單給使用者＋停下等指示，不主動跳下一個。
 - 一 milestone＝一條 feature 分支＝一顆 `--no-ff` merge bubble（分支上 commit 可多可小）。
-- 收尾 ritual：commit → push → 提醒使用者 /clear。
+- 收尾 ritual（驗收跑過之後）：commit → push → 提醒使用者 /clear。此二步依使用者既往指示不必再問；**merge 進 main 仍必問**（鐵律 3），依據見 playbook/90 的 2026-07-08 條。
 - 「做完」包含文件同步：改了行為/欄位/章節，同 commit 內把 README、docs/、src/**/prompts/ 的舊引用一次改完（本 repo 歷史最高頻錯誤，見 playbook/90）。
 
 ## 工程速查

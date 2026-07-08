@@ -10,14 +10,15 @@
 - 批次機械修改超過 3 個檔案。
 - 跑研究/掃描指令後自己讀全量輸出。
 
-例外（自己做反而省）：已知路徑的單檔小改、<200 行的單檔閱讀、單一指令驗證、一兩分鐘內能完成的事（subagent 冷啟動成本高於任務本身）。
+例外（自己做反而省）：已知路徑的單檔小改、<200 行的單檔閱讀、單一指令驗證、預估 ≤2 個工具呼叫能完成的事（subagent 冷啟動成本高於任務本身）。
 
 記住：subagent 看不到你的對話。派工 prompt 必須自帶全部背景——檔案絕對路徑、術語定義、要什麼不要什麼。
 
 ## §1 環境事實（2026-07-08 查證；來源＝當日 Agent 工具 schema＋code.claude.com/docs/en/sub-agents.md）
 **過期警告**：模型陣容會變。指定 model 報錯或行為不符時，以當下 Agent 工具 schema 的 enum 為準，改完把新事實更新回本段（並記 playbook/90）。
 
-- 內建 agent types：`general-purpose`（全工具，預設）、`Explore`（唯讀搜索，指定 breadth："medium" 或 "very thorough"）、`Plan`（規劃）、`claude-code-guide`（查 Claude Code / Claude API 官方文件用）。本 repo 自建：`verifier`（.claude/agents/verifier.md，sonnet + effort high，驗收專用）。
+- 內建 agent types：`general-purpose`（全工具；Agent 呼叫未指定 type 時的預設）、`Explore`（唯讀搜索，指定 breadth，常見檔位 "quick"/"medium"/"very thorough"，以當下工具描述為準）、`Plan`（規劃）、`claude-code-guide`（查 Claude Code / Claude API 官方文件用）、`claude`（泛用 catch-all）。本 repo 自建：`verifier`（.claude/agents/verifier.md，sonnet + effort high，驗收專用）。
+- **注意（2026-07-08 實測）**：session 開始後才新增/修改的 .claude/agents 定義，當前 session 的 Agent 工具看不到（報 not found），下個 session 才註冊。fallback＝改派 general-purpose 並把該定義的內文整段貼進 prompt。
 - Agent 工具 per-call 參數 `model`：2026-07-08 的 enum 為 sonnet / opus / haiku / fable。**fable 是當日特例，之後不可假設存在**。指定的 model 若不在組織允許清單，會**靜默退回**繼承主對話模型（不報錯）——結果品質異常時先懷疑這點。
 - **effort 沒有 per-call 參數**。控制方式：(a) 自訂 agent 定義的 frontmatter `effort: low|medium|high|xhigh|max`（如 verifier）；(b) 不控則繼承 session 設定（settings.json，本機實測鍵名 `effortLevel`，官方文件亦作 `effort`）。
 - 模型解析優先序：環境變數 `CLAUDE_CODE_SUBAGENT_MODEL` > per-call `model` > agent 定義 frontmatter > 繼承主對話。

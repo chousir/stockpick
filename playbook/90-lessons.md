@@ -26,6 +26,12 @@
 修正：改輸出格式/章節/欄位的同一個 commit 內，grep 舊名在 README、docs/、src/**/prompts/ 的所有出現處一次改完。
 落點：playbook/20 §2 完成定義、playbook/00 三-1。
 
+## 2026-07-08 commit/push 問人義務收窄的依據（審查留痕）
+現象：舊 CLAUDE.md §2.6 要求 commit/push/merge 前都先問；2026-07-08 重寫後只保留「merge 進 main 必問」。對抗審查指出此收窄缺落點紀錄。
+錯誤信念：規則改動可以只改結果、不留依據。
+修正：收窄依據＝使用者 feedback memory（feedback_commit_push）：milestone 驗收後收尾 ritual 即 commit→push→提醒 /clear，是使用者建立的慣例。merge 進 main 必問維持不變。
+落點：CLAUDE.md milestone 紀律段＋鐵律 3。
+
 ## 2026-07-08 MEMORY.md 索引肥大＝每 session 固定漏 token
 現象：索引長到 12.7KB（單行塞整段專案史），每個 session 開場先燒數千 tokens。
 錯誤信念：索引行寫越詳細，未來 session 越省事。

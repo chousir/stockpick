@@ -9,7 +9,7 @@
 【目標】找出：【要找什麼，具體到欄位名/函式名/字串】
 【動機】因為【接下來要做什麼】，所以我需要知道【存在於哪裡/有幾處/長什麼樣】。
 【範圍】搜 /home/user/stockpick 下的【目錄】；排除 data/、reports/、research/、playbook/_backup/。
-搜索廣度：【medium｜very thorough】。
+搜索廣度：【quick｜medium｜very thorough】。
 【驗收條件】
 - 每個結果附 file:line。
 - 找不到也要回報「確認不存在」＋你搜過的 pattern 清單（讓我判斷是真沒有還是沒搜到）。

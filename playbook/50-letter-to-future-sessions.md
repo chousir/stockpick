@@ -40,7 +40,7 @@
 3. 永遠不要用自信的語氣掩蓋低信心的判斷——這是本制度唯一無法自動偵測的失敗模式。
 
 ## 四、本次 session 未做／未驗證（接手前先知道）
-- Agent 工具 per-call model 指定只查證了文件與當日 schema，**沒有實測** haiku/opus 派工各一次（首次使用時若行為異常，先讀 10 §1 過期警告）。
+- Agent 工具 per-call model 指定：sonnet 已於 2026-07-08 實測 OK（對抗審查即用它跑的）；haiku/opus **未實測**（首次使用若行為異常，先讀 10 §1 過期警告）。
 - docs/09-coding-conventions.md 與 CLAUDE.md 工程速查的重疊度未逐條核對（CLAUDE.md 以精簡優先，細節以 docs/09 為準）。
 - MCP「claude.ai Google Drive」未授權，相關能力不可用；需要時請使用者在 claude.ai connector 設定授權。
 - 本地分支 feat/ws5a、feat/ws5b（已併 main）與 research/* 兩支未清，屬倉庫衛生，未在本次範圍。
