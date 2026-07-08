@@ -74,7 +74,7 @@ docs/15 B-P3「資金進+貼低(S) × 個股相對次產業(G)」2×2 實跑（1
 
 ---
 
-## 6. 待拍板（D-F1～；執行 session 先停下問、不自己選，守 CLAUDE.md Part 1.1）
+## 6. 待拍板（D-F1～；執行 session 先停下問、不自己選，守 playbook/20-judgment-rubrics.md §3）
 
 > **D-F1（待拍板）因子方向定義**——推薦直接用面板 `rs_subind_{rs_window}d` 分位（**低分位＝落後**），
 > 不另造 `lag = −rs_subind`（等價、少一層）。窗用 `rs_window`（20）。

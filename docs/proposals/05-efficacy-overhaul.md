@@ -227,7 +227,7 @@ W27 三份主產物合計 **1,095 行**（pick.md 330＋group_analysis 505＋sec
 ```
 
 沿用 `M-F*` 前綴：M-F1（PO1–PO4）、M-F2、M-F3、M-F4、M-F5。
-每個 milestone 完成後跑驗收、列清單、**停下等使用者說「下一個」**（CLAUDE.md 2.1）。
+每個 milestone 完成後跑驗收、列清單、**停下等使用者說「下一個」**（CLAUDE.md「Milestone 紀律」）。
 
 ## §5 裁決點（拍板紀錄）
 
@@ -245,7 +245,7 @@ W27 三份主產物合計 **1,095 行**（pick.md 330＋group_analysis 505＋sec
 
 ## §6 共通約束與驗收
 
-- Polars／httpx／loguru／type hints／參數進 settings（CLAUDE.md 2.3）；每改動可追溯到 §1 某條證據。
+- Polars／httpx／loguru／type hints／參數進 settings（CLAUDE.md「工程速查」）；每改動可追溯到 §1 某條證據。
 - 不破壞 `make week GROUP=defg` 主流程與既有全部測試；新功能至少一個 happy-path test。
 
 ```bash

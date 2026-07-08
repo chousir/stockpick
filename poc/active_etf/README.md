@@ -45,7 +45,7 @@
 ## 合規
 
 公開、法規強制全透明揭露，非破解。但：瀏覽器 UA、單線、限速、退避（同
-CLAUDE.md 2.4 Goodinfo 紀律）；後端為**未公開文件的內部 endpoint，隨時可能變**，
+CLAUDE.md 鐵律 1 Goodinfo 紀律）；後端為**未公開文件的內部 endpoint，隨時可能變**，
 production 要有「公開頁 top10」當降級備援 + 改版告警。
 
 ## 怎麼跑
@@ -73,6 +73,6 @@ snapshot 輸出在 `poc/active_etf/snapshots/`。
 | TWSE OpenAPI / e添富 / TDCC 開放資料 / FinMind | **皆無 ETF 持股/成分 資料集** |
 
 **結論**：完整持股程式化取得 = 只剩兩條重路 —— (1) **headless browser(Playwright) 逐家 render**
-（CLAUDE.md 2.6 需先問才可加依賴），或 (2) **付費資料商**（TEJ/CMoney）。
+（CLAUDE.md 鐵律 4 需先問才可加依賴），或 (2) **付費資料商**（TEJ/CMoney）。
 公開頁 SSR 只有 top10、且非每家都給。⇒ 此功能 friction 高，建議降級待決，
 或確認願上 Playwright 再做。

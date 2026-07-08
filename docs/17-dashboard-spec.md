@@ -16,7 +16,7 @@
 
 讓我每週一打開 `localhost`，就能在一個 War-Room HUD 介面裡，把當週的候選股、族群資金輪動、個股鑽取、
 庫存損益**用可排序篩選的表格＋衍生圖表**看完，並能切回任一已產出週次（目前 W21/W22/W24/W25）的快照；下單決策仍由人做，
-dashboard 不下結論、不報目標價（守 [CLAUDE.md](../CLAUDE.md) Part 3）。
+dashboard 不下結論、不報目標價（守 [playbook/60-analyst-persona.md](../playbook/60-analyst-persona.md)）。
 
 ---
 
@@ -71,7 +71,7 @@ API 一律容忍缺檔（缺檔回 404、缺欄回 null，**絕不丟 500**）�
 dividend_yield_pct, val_metric, val_pctile, cheap_flag, gross_margin_pct, eps_q,
 foreign_net_5d_lots, foreign_net_10d_lots`；W21 無 enriched 檔。後端 Pydantic 模型以
 **W25 為超集、所有欄位 `Optional`**，舊週缺欄回 `null`、前端顯示 `—`。分組對應報告框架
-（[docs/06](06-report-spec.md)、CLAUDE.md Part 3.2）：
+（[docs/06](06-report-spec.md)、playbook/60-analyst-persona.md 個股報告框架）：
 
 - **識別**：`stock_id, name, industry, theme, strategy, rank_in_group, flags, goodinfo_url`
 - **動能/報酬**：`momentum_5d_pct, ret_10d_pct, change_pct`
@@ -225,7 +225,7 @@ holdings > candidates > watchlist**）、命中哪些 screen（掃 d/e/f/g 四�
 
 ### 5.4 個股 detail 頁（Stock Drill-down）
 
-按 CLAUDE.md Part 3.2 報告框架排版（HUD 卡片化）：
+按 playbook/60-analyst-persona.md 個股報告框架排版（HUD 卡片化）：
 
 1. 頭部卡：股號/名稱/產業/主題、close、change（紅綠）、Goodinfo 連結。
 2. 基本面卡：rev_yoy / gross_margin / eps_q / pe / pb / 殖利率 / val_pctile / cheap_flag。
@@ -234,7 +234,7 @@ holdings > candidates > watchlist**）、命中哪些 screen（掃 d/e/f/g 四�
    **`low/high_20d/60d` 僅 W25 有**，舊週此卡降級為僅顯均線距離。
 5. 族群相對位置：所屬族群 radar_rank / quadrant、本檔 `rank_in_group`。
 6. 命中策略徽章（D/E/F/G）＋ `flags`。
-> **不做**多空結論、目標價（守 Part 3.5）。
+> **不做**多空結論、目標價（守 playbook/60-analyst-persona.md 禁止事項）。
 
 ### 5.5 持股損益頁（Holdings）
 
@@ -289,7 +289,7 @@ holdings > candidates > watchlist**）、命中哪些 screen（掃 d/e/f/g 四�
 - **沒有逐日 K 線**：reports 是每週快照，只有 MA20/MA60、20/60 日高低、法人張數。技術面用
   **區間條＋均線距離**呈現，**不畫 candlestick**。要 K 線＝另開「擴充逐日資料源」的研究軌（本規劃書不含）。
 - **跨週比較**先只用 CSV 既有的 `rank_delta`（族群/主題排名變化）；完整跨週 join 趨勢列為 stretch。
-- **不下單一結論、不報目標價、不省略風險**（守 CLAUDE.md Part 3）。dashboard 只呈現事實與既有敘事。
+- **不下單一結論、不報目標價、不省略風險**（守 playbook/60-analyst-persona.md）。dashboard 只呈現事實與既有敘事。
 - **不寫回 reports**、不改分析程式、不引入 DB / pandas / 重前端狀態庫。
 - **持股資料只在本機**，可一鍵**前端遮罩**（防截圖；API 仍回明文，非機密級防護），永不進 git
   （`reports/*` 已在 .gitignore；`frontend/dist`、`node_modules` 需加入 .gitignore）。
@@ -367,4 +367,4 @@ make dash-test      # 後端 pytest（webapp 路由 happy path）
 
 > 本規劃書依 2026-06-22 三輪規格討論定案，並於同日依實地核對 `reports/` 資料修訂（週次校正、
 > schema 演進、缺檔矩陣，及缺資料呈現/策略代號/遮罩深度三項定案）。實作仍 milestone-driven，先做
-> M-Dash 0，完成後停下驗收。修改範圍/新增依賴前先與使用者確認（守 CLAUDE.md Part 4）。
+> M-Dash 0，完成後停下驗收。修改範圍/新增依賴前先與使用者確認（守 CLAUDE.md 鐵律 3/4）。

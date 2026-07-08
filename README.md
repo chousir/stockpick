@@ -279,7 +279,7 @@ F1 每季校準）**硬擋入核心**，改列趨勢領頭板（部位減半＋�
 ### 6. 個股深度報告（`make report STOCK_ID=…`）
 
 10 段固定框架（基本面/籌碼/技術/多方/空方/進場條件/不進場情境/族群定位/資料來源），
-空方論點不得少於多方、禁目標價（CLAUDE.md Part 3）。有 `ANTHROPIC_API_KEY` 全自動；
+空方論點不得少於多方、禁目標價（playbook/60-analyst-persona.md）。有 `ANTHROPIC_API_KEY` 全自動；
 沒有則產資料草稿、貼 Claude 對話補寫。
 
 ### 7. 主題模型維護（`config/concepts.yaml`）

@@ -246,5 +246,5 @@ make test && make lint && make typecheck
 
 ## 共通原則
 - 任何新來源都要：離線 fixture 測試、缺值標 null 不補零、meta 標資料日與來源、限速合規。
-- **不為了補欄而編數字**（CLAUDE.md 3.3 / docs/13 §3.3）。
+- **不為了補欄而編數字**（playbook/60-analyst-persona.md 資料來源原則 / docs/13 §3.3）。
 </content>

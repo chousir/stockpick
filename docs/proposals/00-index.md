@@ -60,14 +60,14 @@
 - 第二波（實戰回饋）以 `M-F*` 前綴（F＝Field-feedback）：
   `M-F1`（閉環＋反事實）、`M-F2`（位階紀律）、`M-F3`（趨勢辨識）、`M-F4`（決策卡）、`M-F5`（揭露欄位包），皆在 05。
 
-每個 milestone 完成後跑驗收指令、列完成清單、停下等使用者說「下一個」（CLAUDE.md Part 2.1）。
+每個 milestone 完成後跑驗收指令、列完成清單、停下等使用者說「下一個」（CLAUDE.md「Milestone 紀律」）。
 
 ## 共通工程約束（所有規劃書都遵守）
 
 - Polars（不用 pandas）、httpx、loguru、type hints、參數進 `config/settings.yaml` 不寫死。
 - 每個改動都要能追溯到某條審查發現（Surgical Changes）。
 - 新功能至少一個 happy-path test；解析類用 `tests/fixtures/` 離線檔、不打網。
-- 觸及 `goodinfo` 模組者，先回 `docs/02-data-sources.md` 確認合規規則沒變（CLAUDE.md 2.4）。
+- 觸及 `goodinfo` 模組者，先回 `docs/02-data-sources.md` 確認合規規則沒變（CLAUDE.md 鐵律 1）。
 - 不破壞既有 `make week GROUP=defg` 主流程與 509 個現存測試。
 </content>
 </invoke>

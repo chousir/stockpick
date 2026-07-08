@@ -1,7 +1,7 @@
 # 12 — 次產業資金流向輪動圖（規劃書 / Fable 5 大開發藍圖）
 
 > **這份文件的定位**：給 Claude **Fable 5** 執行的「次產業資金流向輪動」開發藍圖。
-> 沿用 `CLAUDE.md` Part 2.1 的 milestone 紀律——**一次只做一個 milestone，做完跑驗收、
+> 沿用 `CLAUDE.md`「Milestone 紀律」——**一次只做一個 milestone，做完跑驗收、
 > 停下等使用者說「下一個」，不要連續執行**。
 >
 > 本檔由 Opus 在 `feature/sector-rotation` 分支撰寫；Fable 5 接手逐 milestone 實作。
@@ -211,7 +211,7 @@
 - **成功標準**：
   - [ ] `make rotation` 產出 `sector_rotation.md` + `.csv`，象限分類正確。
   - [ ] 所有數字來自快取資料（改 cache 重跑、數字應變動）。
-  - [ ] 報告**不下單一結論、不給目標價、不用禁用字眼**（沿用 CLAUDE.md Part 3.5）。
+  - [ ] 報告**不下單一結論、不給目標價、不用禁用字眼**（沿用 playbook/60-analyst-persona.md 禁止事項）。
   - [ ] ΔRank 需上週 `sector_rotation.csv`，首週 null（誠實標 `*`）。
 - **驗收指令**：`make rotation` + `cat reports/$(date +%Y-W%V)/sector_rotation.md`
 - **產物**：可每週重跑的輪動地圖（文字/CSV）。

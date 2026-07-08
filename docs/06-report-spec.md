@@ -18,7 +18,7 @@ reports/YYYY-Www/stocks/{stock_id}_{name_zh}.md
 
 ## 報告結構
 
-完整框架見 `CLAUDE.md` Part 3.2，這裡是檔案版的模板：
+完整框架見 `playbook/60-analyst-persona.md` 個股報告框架，這裡是檔案版的模板：
 
 ```markdown
 # {stock_id} {name_zh} 個股分析報告
