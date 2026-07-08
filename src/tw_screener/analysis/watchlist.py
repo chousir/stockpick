@@ -184,5 +184,18 @@ def enrich_named_list(
         g_pullback=g_pullback,
         vol_lookback=vol_lookback,
         dividends=dividends,
+        skip_etf=False,  # 持股/觀察清單的 ETF 產輕量列（docs/21）；選股宇宙仍排除
     )
+    # ETF 列 industry 標「ETF」（不混入「未分類」）；基本面/族群欄由後段誠實留 null
+    if members.height and "industry_name" in members.columns:
+        from tw_screener.analysis.grouping import is_etf_or_warrant
+
+        etf_ids = [s for s in ids if is_etf_or_warrant(s)]
+        if etf_ids:
+            members = members.with_columns(
+                _pl.when(_pl.col("stock_id").is_in(etf_ids))
+                .then(_pl.lit("ETF"))
+                .otherwise(_pl.col("industry_name"))
+                .alias("industry_name")
+            )
     return members, {"_list": synth}

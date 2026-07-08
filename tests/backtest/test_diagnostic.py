@@ -166,20 +166,21 @@ def test_detect_missed_launches_filters_extended_and_flat() -> None:
     extended = [100.0] * 63 + [138, 139, 140.0] + [140, 145, 150, 158, 168, 178] + [178.0] * 8
     # 回檔但沒起漲：末段回檔，forward 平 → 不達 launch 門檻
     flat = [100.0] * 60 + [99, 98, 98, 97, 97, 97.0] + [97, 98, 97, 98, 99, 98.0] + [98.0] * 8
+    # 股號用純數字：M-ETF1 後雷達宇宙濾 ETF/權證（字母代號＝權證會被剔）
     market = pl.concat([
-        _mkt_stock("AAA", dates, launcher, 2_000_000),
-        _mkt_stock("EXT", dates, extended, 2_000_000),
-        _mkt_stock("FLAT", dates, flat, 2_000_000),
+        _mkt_stock("1101", dates, launcher, 2_000_000),
+        _mkt_stock("2202", dates, extended, 2_000_000),
+        _mkt_stock("3303", dates, flat, 2_000_000),
     ])
     got = detect_missed_launches(
         market, week_to_date, ["2026-W21"],
         forward_td=5, launch_pct=20.0, pullback_max_pct=0.0, ma_dist_ceiling_pct=10.0,
     )
     ids = got["stock_id"].to_list()
-    assert "AAA" in ids  # 回檔起漲被抓到
-    assert "EXT" not in ids  # 延伸股被剔
-    assert "FLAT" not in ids  # 沒起漲被剔
-    assert got.filter(pl.col("stock_id") == "AAA")["amount_m"][0] > 100  # 成交額(百萬)
+    assert "1101" in ids  # 回檔起漲被抓到
+    assert "2202" not in ids  # 延伸股被剔
+    assert "3303" not in ids  # 沒起漲被剔
+    assert got.filter(pl.col("stock_id") == "1101")["amount_m"][0] > 100  # 成交額(百萬)
 
 
 def test_crossref_three_way_and_liquidity() -> None:
@@ -231,3 +232,14 @@ def test_crossref_three_way_and_liquidity() -> None:
         liq, "≥20%/10d", 100.0, "2025-05-29 ~ 2026-06-09",
     )
     assert "漏掉起漲股" in md and "測CCC" in md
+
+
+def test_build_market_screens_filters_etf_and_warrant() -> None:
+    """雷達宇宙鏡射 screener 宇宙：ETF/權證不進全市場 screens（docs/21 M-ETF1）。"""
+    from tw_screener.backtest.diagnostic import build_market_screens
+
+    start = date(2026, 5, 1)
+    market = _market({"1001": 0.05, "0050": 0.05, "2330Y": 0.05}, start)
+    d0 = _weekday_dates(start, 1)[0]
+    screens = build_market_screens(market, {"2026-W21": d0}, ["2026-W21"])
+    assert screens["stock_id"].to_list() == ["1001"]

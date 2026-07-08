@@ -247,16 +247,53 @@ def compute_factor_cluster_exposure(
     return out
 
 
+def _merge_etf_exposure(members: pl.DataFrame, exposure_cfg: dict) -> pl.DataFrame:
+    """把 ETF 手標曝險 labels（settings.portfolio.etf_exposure）併入該檔 theme 欄。
+
+    ETF 無 industry/theme 標籤 → 集中度/因子簇看不到其曝險（docs/21 §1.2 稀釋失真）。
+    手標 labels 以「、」併入 theme，下游 _labels_of 原樣拆解；非 ETF 或無設定者不動。
+    """
+    if members.is_empty() or not exposure_cfg or "stock_id" not in members.columns:
+        return members
+    if "theme" not in members.columns:
+        members = members.with_columns(pl.lit(None, dtype=pl.Utf8).alias("theme"))
+    label_map = {
+        str(sid): _LABEL_SEP.join(str(x) for x in (spec.get("labels") or []))
+        for sid, spec in exposure_cfg.items()
+        if isinstance(spec, dict) and spec.get("labels")
+    }
+    if not label_map:
+        return members
+    extra = pl.col("stock_id").cast(pl.Utf8).replace_strict(label_map, default=None)
+    theme = pl.col("theme").cast(pl.Utf8)
+    return members.with_columns(
+        pl.when(extra.is_null())
+        .then(theme)
+        .when(theme.is_null() | (theme.str.strip_chars() == ""))
+        .then(extra)
+        .otherwise(theme + pl.lit(_LABEL_SEP) + extra)
+        .alias("theme")
+    )
+
+
 def compute_portfolio_check(
     members: pl.DataFrame, price_history: pl.DataFrame, cfg: dict
 ) -> PortfolioCheckResult:
     """合成組合體檢（標籤集中度＋報酬相關簇＋因子簇曝險）。
 
-    cfg＝settings.portfolio（corr / label_concentration / factor_clusters）。
+    cfg＝settings.portfolio（corr / label_concentration / factor_clusters / etf_exposure）。
     members＝持股（holdings_enriched，可含併入候選），須有 stock_id；industry/theme 缺則容錯。
     純函式，IO 由呼叫端載入。
     """
     notes: list[str] = []
+    exposure_cfg = cfg.get("etf_exposure") or {}
+    if exposure_cfg and not members.is_empty() and "stock_id" in members.columns:
+        hit = sorted(
+            {str(s) for s in members["stock_id"].to_list()} & set(exposure_cfg)
+        )
+        if hit:
+            members = _merge_etf_exposure(members, exposure_cfg)
+            notes.append(f"ETF 曝險為手標估計（{'、'.join(hit)}；主動 ETF 依公開月報）")
     stock_ids = (
         [str(x) for x in members["stock_id"].to_list()]
         if not members.is_empty() and "stock_id" in members.columns

@@ -10,6 +10,8 @@ import polars as pl
 from jinja2 import Environment, FileSystemLoader
 from loguru import logger
 
+from tw_screener.analysis.grouping import is_etf_or_warrant
+
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 _STRATEGY_LABEL: dict[str, str] = {
@@ -1054,6 +1056,9 @@ def _build_enriched_rows(
             {
                 "stock_id": sid,
                 "name": r.get("name", ""),
+                # ETF 輕量列（docs/21）：只有 holdings/watchlist enrich 會出現 etf；
+                # 候選端宇宙已在 group_stocks 排除，恆為 stock
+                "asset_type": "etf" if is_etf_or_warrant(sid) else "stock",
                 "industry": r.get("industry_name", ""),
                 "theme": theme_map.get(sid, ""),
                 "strategy": _strategy_str(r, strategy_ids),

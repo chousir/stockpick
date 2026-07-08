@@ -423,7 +423,13 @@ def build_market_screens(
     week_to_date: dict[str, object],
     weeks: list[str],
 ) -> pl.DataFrame:
-    """全市場 screens：每個目標週 data_date × 當日在市個股 → compute_forward_returns 輸入。"""
+    """全市場 screens：每個目標週 data_date × 當日在市個股 → compute_forward_returns 輸入。
+
+    宇宙濾 ETF/權證（docs/21 §3.3）：雷達鏡射 screener 宇宙（本就不選 ETF），
+    否則持股 ETF 會以「held」身分進五態雷達、漏抓帳被非選股標的污染。
+    """
+    from tw_screener.analysis.grouping import is_etf_or_warrant
+
     rows: list[pl.DataFrame] = []
     for w in weeks:
         d = week_to_date.get(w)
@@ -434,6 +440,8 @@ def build_market_screens(
             .select(pl.col("stock_id").cast(pl.Utf8))
             .unique()
         )
+        keep = [s for s in present["stock_id"].to_list() if not is_etf_or_warrant(str(s))]
+        present = present.filter(pl.col("stock_id").is_in(keep))
         rows.append(
             present.select(
                 pl.lit(w).alias("week_tag"),

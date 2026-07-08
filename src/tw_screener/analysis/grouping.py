@@ -263,9 +263,13 @@ def group_stocks(
     vol_lookback: int = 20,
     dividends: pl.DataFrame | None = None,
     trajectory_cfg: dict | None = None,
+    skip_etf: bool = True,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
     Group screened stocks by industry and compute group strength scores (動能主導).
+
+    skip_etf: True（預設）＝跳過 ETF/權證（選股宇宙現行為）；False＝保留 ETF 列
+        （僅 holdings/watchlist enrich 用，讓持股 ETF 產出價格/報酬輕量列，docs/21）。
 
     institutional: 近 N 日三大法人（含 stock_id / total_net）；提供時計入族群法人強度。
         個股層聚合為 inst_net（近 N 日合計淨買超股數），族群層 inst_score =
@@ -303,7 +307,7 @@ def group_stocks(
             continue
         for row in df.iter_rows(named=True):
             stock_id = str(row["stock_id"])
-            if is_etf_or_warrant(stock_id):
+            if skip_etf and is_etf_or_warrant(stock_id):
                 skipped_etf += 1
                 continue
             if stock_id not in stock_rows:

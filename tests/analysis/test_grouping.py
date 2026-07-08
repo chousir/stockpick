@@ -968,3 +968,31 @@ def test_rank_themes_empty_without_themes():
     from tw_screener.analysis.grouping import rank_themes
     members = pl.DataFrame({"stock_id": ["A"], "momentum_5d": [1.0]})
     assert rank_themes(members, pl.DataFrame()).is_empty()
+
+
+# ─── skip_etf（docs/21 M-ETF1）────────────────────────────────────────────────
+
+
+def test_group_stocks_skip_etf_default_excludes_etf():
+    """預設 skip_etf=True＝現行為：00 開頭 ETF 不進選股宇宙（迴歸保護）。"""
+    results = {
+        "a_breakout": _make_screener_df(["2330", "0050", "00981A"], [1.0, 1.0, 1.0], "a_breakout")
+    }
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=1
+    )
+    assert members["stock_id"].to_list() == ["2330"]
+
+
+def test_group_stocks_skip_etf_false_keeps_etf_rows():
+    """skip_etf=False（holdings/watchlist enrich 專用）：ETF 產列、industry 落未分類。"""
+    results = {
+        "a_breakout": _make_screener_df(["2330", "0050", "00981A"], [1.0, 1.0, 1.0], "a_breakout")
+    }
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=1, skip_etf=False,
+    )
+    assert set(members["stock_id"].to_list()) == {"2330", "0050", "00981A"}
+    ind = dict(zip(members["stock_id"].to_list(), members["industry_name"].to_list()))
+    assert ind["0050"] == "未分類"  # industry=ETF 標籤在 enrich_named_list 層蓋

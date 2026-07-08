@@ -30,6 +30,8 @@
 {% if not portfolio.flagged_factors and not portfolio.flagged_labels %}
 - 持股集中度未達門檻。
 {% endif %}
+{% for n in portfolio.notes %}- 註：{{ n }}
+{% endfor %}
 > 因子簇＝同向共動鏈（如利率敏感＝銀行＋建材營造＋產險＋壽險），同簇多檔＝押同一事件、分批時當「一個部位」控管。
 > **定位＝風險揭露，非硬約束；「合計%」為等權檔數佔比近似（持股無部位大小）。報酬相關簇與完整檢核見 `tw-screener portfolio check`。由人決策。**
 

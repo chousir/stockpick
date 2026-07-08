@@ -833,3 +833,16 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **settings.yaml 指標**：`core_ext_ma60_max_pct` 註解加一行指向 docs/20 §7 協議（純註解、非值變動）。
 - **現況（2026-07-07）**：樣本未達（r+20 僅 W21–W22、事件 <30、單 regime）→ **維持 15.0、不裁決**；首個有資格季度重跑＝W28+。**WS5 三批（a 揭露欄／b 並列揭露／c 校準協議）至此全數落地為可逆/純協議形態，硬收緊全掛 W28+ 由數字裁決。**
 - 驗收：無碼改動＝`make test` 綠不變（709）、ruff/mypy 零淨增；docs/20 §7＋docs/08 M-WS5c＋settings.yaml 註解三處一致，門檻值仍 15.0。
+
+---
+
+## M-ETF1：ETF 持股整合（規劃書 21・持股輕量列＋組合曝險手標）
+
+> 對應規劃書 [docs/21-etf-holdings-integration.md](21-etf-holdings-integration.md)。起因＝使用者將 4 檔 ETF 加入 `holdings.csv`，W28 實證兩個真問題：**持股 ETF 無聲消失**（`is_etf_or_warrant` 一律排除，連報酬率追蹤都沒有）＋**組合體檢稀釋失真**（無標籤 ETF 進分母、半導體 50% vs 個股層 83%，0050/00981A 實為加碼半導體 β 卻顯示變分散）。
+- **誠實劃界（規劃書 §2）**：ETF **不進**個股 alpha 框架——不做 ETF 個股報告、不做海外資產（00988A 全球股/00687B 美債）標的層分析、00981A 持股爬蟲留 PoC 另軌、組合體檢維持等權。
+- **ETF 輕量列**：`group_stocks(..., skip_etf=True)` 新參數（預設＝現行為、選股宇宙零變化）；僅 `enrich_named_list`（holdings/watchlist）傳 False → ETF 列產 價格/MA/報酬率/現值 欄＋`asset_type=etf`＋`industry=ETF`，基本面/估值/族群欄誠實 null。
+- **組合曝險手標**：`settings.portfolio.etf_exposure`（手標 labels 併入 theme、單點注入 `compute_portfolio_check`，報告段＋CLI 兩路生效）；半導體 label 與 industry 字串一致自動合併計數；**不**把債券 ETF 塞「利率敏感」股權簇（方向相反），美元資產以 label 揭露。
+- **雷達宇宙對齊**：`build_market_screens` 濾 ETF/權證——五態雷達鏡射 screener 宇宙，held ETF 不再污染漏抓帳。
+- **docs/11 讀法**：任務 0 加 ETF 列三原則（只看報酬/位階/組合曝險；法人欄含申贖/造市機制性流量僅參考；不套個股多空/基本面框架）。
+- **既有 reports/ 不回溯**——本次僅重生 W28 `holdings_enriched.csv` 驗收；報表正文 W29 重跑生效。
+- 驗收：`make test` 綠（+4：skip_etf 迴歸/ETF 收列、etf_exposure 併標籤、asset_type 欄、雷達濾 ETF）；重生 W28 holdings_enriched=10 列（6 股+4 ETF）；`portfolio check` n=10 且半導體計入 0050/00981A。

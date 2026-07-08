@@ -413,3 +413,32 @@ def test_build_rotation_axis_none_without_csv():
             Path(d), pl.DataFrame(), candidate_ids=set(), covered_subs=set(), axis_cfg=None
         )
     assert axis is None  # 無 sector_rotation.csv → 降級略段
+
+
+def test_named_list_csv_asset_type_and_etf_lightweight_row(tmp_path):
+    """holdings enrich ETF 輕量列（docs/21 M-ETF1）：asset_type 標 etf/stock、
+    ETF 有 close/return_pct/market_value_k（持股報酬追蹤），列不再無聲消失。"""
+    from tw_screener.report.group_report import write_named_list_csv
+
+    results = {"_list": _screener_df(["2330", "0050"], [1.0, 0.5])}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=1, skip_etf=False,
+    )
+    out = tmp_path / "holdings_enriched.csv"
+    n = write_named_list_csv(
+        members, None, results, out,
+        holdings_map={
+            "2330": {"buy_price": 90.0, "shares": 1000.0},
+            "0050": {"buy_price": 107.0, "shares": 10000.0},
+        },
+    )
+    assert n == 2
+    df = pl.read_csv(out, infer_schema_length=0)
+    rows = {r["stock_id"]: r for r in df.iter_rows(named=True)}
+    assert rows["0050"]["asset_type"] == "etf"
+    assert rows["2330"]["asset_type"] == "stock"
+    # 輕量列仍有報酬追蹤欄（close=100、買 107 → 負報酬），不因 ETF 而空
+    assert rows["0050"]["return_pct"] not in (None, "")
+    assert float(rows["0050"]["return_pct"]) < 0
+    assert rows["0050"]["market_value_k"] not in (None, "")

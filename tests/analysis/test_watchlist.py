@@ -124,3 +124,17 @@ def test_load_latest_screener_results_no_reports_dir(tmp_path: Path) -> None:
     settings = tmp_path / "settings.yaml"
     settings.write_text(f"paths:\n  reports_dir: {tmp_path / 'missing'}\n", encoding="utf-8")
     assert load_latest_screener_results(settings) == ("", {})
+
+
+def test_enrich_keeps_etf_rows_with_industry_etf() -> None:
+    """持股 ETF（00 開頭）產輕量列：不再被無聲丟棄、industry 標 ETF（docs/21 M-ETF1）。"""
+    client = _FakeClient(short_rows=100)
+    members, synth = enrich_named_list(
+        client, ["2330", "0050", "00981A"], None, pl.DataFrame(), None
+    )
+    assert set(members["stock_id"].to_list()) == {"2330", "0050", "00981A"}
+    ind = dict(zip(members["stock_id"].to_list(), members["industry_name"].to_list()))
+    assert ind["0050"] == "ETF"
+    assert ind["00981A"] == "ETF"
+    assert ind["2330"] != "ETF"
+    assert synth["_list"].height == 3
