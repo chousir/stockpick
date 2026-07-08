@@ -182,3 +182,35 @@ def test_describe_portfolio_check_line_and_alerts() -> None:
     # 集中標籤(銀行/金融保險=2) + 相關簇(0) + 因子簇超限(1) = 3
     assert desc["n_alerts"] == len(desc["flagged_labels"]) + len(desc["flagged_factors"])
     assert len(desc["flagged_factors"]) == 1
+
+
+# ── ETF 手標曝險（docs/21 M-ETF1）────────────────────────────────────────────
+def test_compute_portfolio_check_merges_etf_exposure_labels() -> None:
+    """etf_exposure 手標 labels 併入 theme → 集中度計數含 ETF、notes 揭露手標估計。"""
+    members = pl.concat(
+        [
+            MEMBERS,
+            pl.DataFrame(
+                {"stock_id": ["0050"], "industry": ["ETF"], "theme": [""]}
+            ),
+        ],
+        how="vertical",
+    )
+    cfg = {
+        **PCFG,
+        "etf_exposure": {"0050": {"labels": ["半導體業", "台股大盤β"], "note": "台積電權重過半"}},
+    }
+    result = compute_portfolio_check(members, pl.DataFrame(), cfg)
+    labels = {d["label"]: d for d in result.label_concentration}
+    assert labels["半導體業"]["count"] == 3  # 2330 + 2454 + 0050（手標）
+    assert "0050" in labels["半導體業"]["stock_ids"]
+    assert labels["台股大盤β"]["count"] == 1
+    assert any("手標" in str(n) for n in result.notes)
+
+
+def test_compute_portfolio_check_etf_exposure_no_hit_noop() -> None:
+    """etf_exposure 設定的 id 不在持股 → 標籤/notes 皆不變（純查表、不虛增）。"""
+    cfg = {**PCFG, "etf_exposure": {"9999": {"labels": ["不存在標籤"]}}}
+    result = compute_portfolio_check(MEMBERS, pl.DataFrame(), cfg)
+    assert "不存在標籤" not in {d["label"] for d in result.label_concentration}
+    assert all("手標" not in str(n) for n in result.notes)
