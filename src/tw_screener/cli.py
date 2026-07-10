@@ -948,6 +948,19 @@ def backtest_rotation_efficacy_cmd(
     run_rotation_efficacy(settings, out_dir)
 
 
+@backtest_app.command("laggard-grid")
+def backtest_laggard_grid_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/laggard_grid）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """WS-D 族群內強弱：族群強弱×個股領先落後×位階 forward 報酬格（WS5-② 正式驗證）。"""
+    from tw_screener.backtest.laggard_grid_runner import run_laggard_grid
+
+    run_laggard_grid(settings, out_dir)
+
+
 @backtest_app.command("diagnose")
 def backtest_diagnose_cmd(
     out_dir: Path | None = typer.Option(
