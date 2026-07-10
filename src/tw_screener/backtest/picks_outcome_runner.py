@@ -163,3 +163,90 @@ def run_picks_outcome(
         )
     if diff_df is not None:
         console.print(f"  翻轉解剖：{diff_df.height} 筆降級（詳報告 §5）")
+
+
+def run_picks_brief(settings: Path) -> None:
+    """WS-A3：上週 picks r+5 brief 一頁 md → 最新週報目錄（輸入包）。
+
+    評估週＝底帳中「r+5 已到期」的最近一週；無到期週 → 佔位頁（誠實標註）。
+    掛 make week 末段（容錯：底帳/快取缺不擋主流程，exit 0）。
+    """
+    import polars as pl
+    import yaml
+
+    from tw_screener.analysis.rotation import load_market_history
+    from tw_screener.backtest.picks_outcome import render_weekly_brief
+    from tw_screener.backtest.strategies import compute_forward_returns
+    from tw_screener.data.twse import load_recent_dividends
+    from tw_screener.report.pick_store import load_all_excluded, load_all_picks, week_dirs
+
+    with open(settings) as f:
+        cfg = yaml.safe_load(f)
+    pk = cfg.get("backtest", {}).get("picks", {})
+    history_days = int(pk.get("history_days", 250))
+    tdpw = int(pk.get("trading_days_per_week", 5))
+    clip = float(pk.get("clip_daily_return_pct", 10.0))
+    brief_name = str(pk.get("brief_filename", "pick_outcome_brief.md"))
+    reports_dir = Path(cfg["paths"]["reports_dir"])
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+
+    dirs = week_dirs(reports_dir)
+    if not dirs:
+        console.print("[yellow]無週報目錄——brief 跳過[/yellow]")
+        return
+    out_path = dirs[-1] / brief_name
+
+    picks = load_all_picks(reports_dir)
+    if picks.is_empty():
+        console.print("[yellow]無 picks 底帳——brief 跳過[/yellow]")
+        return
+    market = load_market_history(cache_dir, n_days=history_days)
+    if market.is_empty():
+        console.print("[yellow]無日線快取——brief 跳過[/yellow]")
+        return
+    since = picks["data_date"].min()
+    dividends = (
+        load_recent_dividends(cache_dir, since) if isinstance(since, date) else pl.DataFrame()
+    )
+
+    def _returns(rows: pl.DataFrame, tag_col: str) -> pl.DataFrame:
+        if rows.is_empty():
+            return pl.DataFrame()
+        screens_like = rows.select(
+            pl.col("week").alias("week_tag"),
+            pl.col("data_date").alias("screened_at"),
+            "stock_id",
+            "name",
+            pl.col(tag_col).alias("strategy_id"),
+        )
+        return compute_forward_returns(
+            screens_like, market, hold_weeks=1, dividends=dividends,
+            trading_days_per_week=tdpw, clip_daily_return_pct=clip,
+        )
+
+    all_r = _returns(picks, "layer")
+    matured = (
+        all_r.filter((pl.col("status") == "matured") & pl.col("return_pct").is_not_null())
+        if not all_r.is_empty()
+        else pl.DataFrame()
+    )
+    if matured.is_empty():
+        target_week = str(picks["week"].max())
+        picks_r = pl.DataFrame()
+        excl_r = pl.DataFrame()
+    else:
+        target_week = str(matured["week_tag"].max())
+        picks_r = matured.filter(pl.col("week_tag") == target_week)
+        excluded = load_all_excluded(reports_dir)
+        excl_week = (
+            excluded.filter(pl.col("week") == target_week)
+            if not excluded.is_empty()
+            else pl.DataFrame()
+        )
+        excl_r = _returns(excl_week, "reason")
+
+    dd = picks.filter(pl.col("week") == target_week)["data_date"]
+    data_date = dd[0] if dd.len() else None
+    report = render_weekly_brief(picks_r, excl_r, target_week, data_date, horizon_td=tdpw)
+    out_path.write_text(report, encoding="utf-8")
+    console.print(f"[green]pick brief（{target_week}）→ {out_path}[/green]")

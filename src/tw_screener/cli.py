@@ -909,6 +909,19 @@ def backtest_strategies_cmd(
     run_backtest_strategies(hold_weeks, out_dir, settings)
 
 
+@backtest_app.command("build-panel")
+def backtest_build_panel_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="面板輸出目錄（預設讀 settings，research/panel）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """WS-A2 ground-truth 面板：date×stock_id 前瞻報酬/位階/法人/量比 parquet＋核價抽查。"""
+    from tw_screener.backtest.panel_runner import run_build_panel
+
+    run_build_panel(settings, out_dir)
+
+
 @backtest_app.command("diagnose")
 def backtest_diagnose_cmd(
     out_dir: Path | None = typer.Option(
@@ -985,11 +998,17 @@ def picks_outcome_cmd(
     hold_weeks: str | None = typer.Option(
         None, help="固定持有窗清單（逗號分隔，預設讀 settings，如 2,4,8,12）"
     ),
+    brief: bool = typer.Option(
+        False, "--brief", help="WS-A3：只產上週 picks r+5 一頁 brief 進最新週報目錄（輸入包）"
+    ),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
     """F1 PO2–PO4：分層命中率×α（vs 大盤＋vs 族群）＋偽陰性帳，產 research/pick_outcome/。"""
-    from tw_screener.backtest.picks_outcome_runner import run_picks_outcome
+    from tw_screener.backtest.picks_outcome_runner import run_picks_brief, run_picks_outcome
 
+    if brief:
+        run_picks_brief(settings)
+        return
     run_picks_outcome(settings, exit_date, diff, hold_weeks)
 
 

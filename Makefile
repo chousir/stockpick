@@ -1,6 +1,7 @@
 .PHONY: help init sync test test-unit lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry doctor \
         group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
+        build-panel factor-lab pick-outcome-brief \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check
 
@@ -31,6 +32,10 @@ endif
 	-$(MAKE) cp-value-candidates   # 個股 CP 補漲候選＋三重濾網（group 的 7. 分析請求要讀 cp_candidates.md；失敗不擋）
 	$(MAKE) group
 	$(MAKE) week-check   # 尾段產物完整性檢查（規劃書 05 F4）：上面容錯步驟若無聲失敗，這裡點名
+	-$(MAKE) pick-outcome-brief   # WS-A3 上週 picks r+5 回饋一頁（輸入包；失敗不擋主流程）
+
+pick-outcome-brief:  ## WS-A3 上週 picks r+5/α/勝率＋偽陰性一頁（寫進最新週報目錄；week 末段自動跑）
+	uv run tw-screener picks outcome --brief
 
 pick-outcome:  ## pick 閉環：分層命中率×α（vs 大盤＋vs 族群）＋偽陰性帳（規劃書 05 F1，產 research/pick_outcome/）
 	uv run tw-screener picks outcome
@@ -114,6 +119,9 @@ backfill-universe-history:  ## ⏳ 一次性回補全部次產業成員日線（
 	uv run tw-screener data backfill-universe-history --months $(or $(MONTHS),13)
 
 # ─── 進階：研究軌／季度校準 ──────────────────────────────────────────────────
+
+build-panel:  ## WS-A2 ground-truth 面板：date×stock_id 前瞻報酬/位階/法人/量比 parquet（產 research/panel/）
+	uv run tw-screener backtest build-panel
 
 backtest-strategies:  ## 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤（規劃書 03 V1，產 research/strategy_backtest/）
 	uv run tw-screener backtest strategies

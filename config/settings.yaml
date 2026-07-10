@@ -322,7 +322,17 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     clip_daily_return_pct: 10.0  # 持有窗大盤等權指數日報酬夾限（複用 V1 機制）
     min_sample_warn: 20          # 樣本低於此 → 報表標「僅供方向性、未達顯著」
     min_subind_members: 3        # 次產業同窗有價成員低於此 → 族群超額標 null（樣本太小）
+    brief_filename: pick_outcome_brief.md  # WS-A3 上週 r+5 brief 檔名（寫進最新週報目錄）
     output_dir: research/pick_outcome
+  panel:                     # WS-A2 ground-truth 面板（make build-panel）：因子實驗台資料底盤
+    history_days: 300            # 載入日線快取的回看交易日數（≈13 個月）
+    horizons_td: [5, 10, 20, 40] # 前瞻窗（交易日）；entry=次一交易日、未到期/下市=null
+    ma_windows: [20, 60]         # 位階均線窗（ma{w}_dist_pct）
+    vol_lookback: 20             # 量比回看窗（窗不足=null，不填 0）
+    reconcile_tol_pct: 0.5       # 核價抽查容差%（TWSE 兩端點交叉：STOCK_DAY 修訂 vs daily_all 快照）
+    reconcile_pass_rate: 0.995   # 端點一致率低於此＝核價 FAIL（分歧＝快照未含盤後修訂，面板採修訂值）
+    reconcile_samples: 10        # 核價抽查檔數
+    output_dir: research/panel
   diagnostic:                # M-Diag1「抓太晚」診斷（make diagnose）：候選宇宙延伸度曲線＋排序訊號 IC
     history_days: 250            # 載入日線快取的回看交易日數
     horizons_td: [5, 10, 20]    # 前瞻窗（交易日；須可被 trading_days_per_week 整除）
