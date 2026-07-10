@@ -186,8 +186,9 @@ def run_build_panel(settings: Path, out_dir: Path | None) -> None:
         n_ok = int(recon["within_tol"].sum())
         rate = n_ok / n if n else 0.0
         worst = recon.row(0, named=True)
+        verdict = "PASS" if rate >= pass_rate else "FAIL"
         lines += [
-            f"- 樣本 {n} 筆（{recon['stock_id'].n_unique()} 檔）；"
+            f"- **核價判定：{verdict}**——樣本 {n} 筆（{recon['stock_id'].n_unique()} 檔）；"
             f"差 <{tol_pct}%：{n_ok}/{n}（{rate:.2%}，通過線 {pass_rate:.1%}）；"
             f"最大差 {worst['diff_pct']:.3f}%（{worst['stock_id']} @ {worst['date']}）。",
             "- 分歧筆＝daily_all 當日快照 vs STOCK_DAY 事後修訂；面板採修訂值（逐筆如下）。",
