@@ -935,6 +935,19 @@ def backtest_factor_lab_cmd(
     run_factor_lab(settings, out_dir)
 
 
+@backtest_app.command("rotation-efficacy")
+def backtest_rotation_efficacy_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/rotation_efficacy）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """WS-C 輪動欄效度：歷史重建逐週訊號→生產對表→forward basket IC/lift＋榜外機會成本。"""
+    from tw_screener.backtest.rotation_efficacy_runner import run_rotation_efficacy
+
+    run_rotation_efficacy(settings, out_dir)
+
+
 @backtest_app.command("diagnose")
 def backtest_diagnose_cmd(
     out_dir: Path | None = typer.Option(

@@ -339,6 +339,12 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     min_train_frac: 0.4          # 首段訓練占比下限
     buckets: 5                   # 橫斷面分位桶數
     output_dir: research/factor_lab
+  rotation_efficacy:         # WS-C 輪動欄效度（make rotation-efficacy）：重建→對表→IC/lift
+    horizons_td: [5, 10, 20]     # forward basket 檢驗窗（交易日）
+    n_splits: 3                  # walk-forward 段數（週頻樣本 ~50 週，3 段夠粗）
+    min_train_frac: 0.4
+    n_boot: 1000                 # lift 表 bootstrap 重抽次數
+    output_dir: research/rotation_efficacy
   diagnostic:                # M-Diag1「抓太晚」診斷（make diagnose）：候選宇宙延伸度曲線＋排序訊號 IC
     history_days: 250            # 載入日線快取的回看交易日數
     horizons_td: [5, 10, 20]    # 前瞻窗（交易日；須可被 trading_days_per_week 整除）

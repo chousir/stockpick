@@ -23,7 +23,7 @@ def _load_institutional_all(cache_dir: Path) -> pl.DataFrame:
     files = sorted(cache_dir.glob("institutional_*.parquet"))
     if not files:
         return pl.DataFrame()
-    need = ["date", "stock_id", "foreign_net", "trust_net", "dealer_net"]
+    need = ["date", "stock_id", "foreign_net", "trust_net", "dealer_net", "total_net"]
     frames = []
     for f in files:
         try:

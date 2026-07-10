@@ -400,3 +400,28 @@ def render_report_md(rep: FactorReport, note: str = "") -> list[str]:
         ]
     lines.append("")
     return lines
+
+
+def bootstrap_mean_ci(
+    values: Sequence[float],
+    n_boot: int = 1000,
+    alpha: float = 0.05,
+    seed: int = 20260710,
+) -> tuple[float | None, float | None]:
+    """平均數的 bootstrap 百分位 CI（lift 表用；純 python、無 numpy 依賴）。
+
+    n<10 → (None, None)（重抽不出分布，誠實不給）。
+    """
+    import random as _random
+
+    clean = [v for v in values if v is not None and not math.isnan(v)]
+    n = len(clean)
+    if n < 10:
+        return None, None
+    rng = _random.Random(seed)
+    means = sorted(
+        sum(rng.choices(clean, k=n)) / n for _ in range(n_boot)
+    )
+    lo_i = int(n_boot * (alpha / 2))
+    hi_i = int(n_boot * (1 - alpha / 2)) - 1
+    return means[lo_i], means[hi_i]

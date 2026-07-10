@@ -1,7 +1,7 @@
 .PHONY: help init sync test test-unit lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry doctor \
         group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
-        build-panel factor-lab pick-outcome-brief \
+        build-panel factor-lab pick-outcome-brief rotation-efficacy \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check
 
@@ -125,6 +125,9 @@ build-panel:  ## WS-A2 ground-truth 面板：date×stock_id 前瞻報酬/位階/
 
 factor-lab:  ## WS-B 因子實驗台驗收：機器等價＋docs/19 基準對表＋面板首驗（產 research/factor_lab/）
 	uv run tw-screener backtest factor-lab
+
+rotation-efficacy:  ## WS-C 輪動欄效度：歷史重建→生產對表→forward basket IC/lift（產 research/rotation_efficacy/）
+	uv run tw-screener backtest rotation-efficacy
 
 backtest-strategies:  ## 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤（規劃書 03 V1，產 research/strategy_backtest/）
 	uv run tw-screener backtest strategies
