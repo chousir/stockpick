@@ -350,6 +350,14 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     rs_window: 20                # rs_subind 回看窗（個股 vs 次產業籃報酬差）
     n_boot: 1000
     output_dir: research/laggard_grid
+  flow_inflection:           # WS-E 資金流 inflection 因子族（make flow-inflection）
+    horizons_td: [10, 20]        # 評估窗（交易日）
+    n_splits: 4
+    min_train_frac: 0.4
+    buckets: 5
+    z_window: 60                 # z-of-z 的滾動 z 窗（同 rotation z_window）
+    min_effect_ic: 0.03          # 效應量底線（未校準啟發式；n 數萬時防大樣本假顯著）
+    output_dir: research/flow_inflection
   diagnostic:                # M-Diag1「抓太晚」診斷（make diagnose）：候選宇宙延伸度曲線＋排序訊號 IC
     history_days: 250            # 載入日線快取的回看交易日數
     horizons_td: [5, 10, 20]    # 前瞻窗（交易日；須可被 trading_days_per_week 整除）

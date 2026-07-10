@@ -961,6 +961,19 @@ def backtest_laggard_grid_cmd(
     run_laggard_grid(settings, out_dir)
 
 
+@backtest_app.command("flow-inflection")
+def backtest_flow_inflection_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/flow_inflection）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """WS-E 資金流 inflection 因子族首驗（差分/加速度/z-of-z/主體拆分，走 factor_lab）。"""
+    from tw_screener.backtest.flow_inflection_runner import run_flow_inflection
+
+    run_flow_inflection(settings, out_dir)
+
+
 @backtest_app.command("diagnose")
 def backtest_diagnose_cmd(
     out_dir: Path | None = typer.Option(
