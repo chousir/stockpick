@@ -922,6 +922,19 @@ def backtest_build_panel_cmd(
     run_build_panel(settings, out_dir)
 
 
+@backtest_app.command("factor-lab")
+def backtest_factor_lab_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/factor_lab）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """WS-B 因子實驗台驗收：機器等價＋docs/19 基準對表＋面板全宇宙首驗。"""
+    from tw_screener.backtest.factor_lab_runner import run_factor_lab
+
+    run_factor_lab(settings, out_dir)
+
+
 @backtest_app.command("diagnose")
 def backtest_diagnose_cmd(
     out_dir: Path | None = typer.Option(

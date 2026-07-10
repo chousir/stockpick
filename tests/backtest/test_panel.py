@@ -81,9 +81,15 @@ def test_market_baseline_median_and_alpha() -> None:
 
 
 def test_etf_and_warrant_excluded() -> None:
-    """00 開頭（ETF）與含非數字（權證）整檔排除。"""
+    """00 開頭（ETF）、含字母（權證）、6 位數字（權證/TDR）整檔排除；只留 4 位數普通股。"""
     stocks = pl.concat(
-        [_px("2330", [100.0] * 3), _px("0050", [100.0] * 3), _px("2330Y", [1.0] * 3)]
+        [
+            _px("2330", [100.0] * 3),
+            _px("0050", [100.0] * 3),
+            _px("2330Y", [1.0] * 3),
+            _px("708855", [1.0] * 3),  # 上櫃權證（6 位數字，實測 daily_all 混入）
+            _px("910861", [10.0] * 3),  # TDR
+        ]
     )
     panel = build_price_panel(stocks, horizons=(1,), ma_windows=(2,), vol_lookback=2)
     assert set(panel["stock_id"].unique().to_list()) == {"2330"}

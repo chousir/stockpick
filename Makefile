@@ -123,6 +123,9 @@ backfill-universe-history:  ## ⏳ 一次性回補全部次產業成員日線（
 build-panel:  ## WS-A2 ground-truth 面板：date×stock_id 前瞻報酬/位階/法人/量比 parquet（產 research/panel/）
 	uv run tw-screener backtest build-panel
 
+factor-lab:  ## WS-B 因子實驗台驗收：機器等價＋docs/19 基準對表＋面板首驗（產 research/factor_lab/）
+	uv run tw-screener backtest factor-lab
+
 backtest-strategies:  ## 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤（規劃書 03 V1，產 research/strategy_backtest/）
 	uv run tw-screener backtest strategies
 

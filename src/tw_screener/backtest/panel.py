@@ -31,9 +31,14 @@ _ID_COLS = ("date", "stock_id")
 
 
 def _non_etf_expr() -> pl.Expr:
-    """ETF/權證排除（與 grouping.is_etf_or_warrant 同語義的向量式）。"""
+    """普通股過濾：恰 4 位數字且非 00 開頭。
+
+    比 grouping.is_etf_or_warrant 更嚴——daily_all 含 6 位數字權證（03–08xxxx／
+    70xxxx，實測 7,793 檔）會通過「非 00 開頭＋全數字」檢查、污染等權基準；
+    TDR（91xxxx）與 ETN（02xxxx）一併排除（非選股宇宙，如實劃界）。
+    """
     sid = pl.col("stock_id")
-    return ~sid.str.starts_with("00") & sid.str.contains(r"^\d+$")
+    return sid.str.contains(r"^\d{4}$") & ~sid.str.starts_with("00")
 
 
 def _cumulative_dividends(px: pl.DataFrame, dividends: pl.DataFrame | None) -> pl.DataFrame:
