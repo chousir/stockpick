@@ -21,7 +21,7 @@
   Yahoo 概念股       │ config/concepts.yaml 主題標籤（手標次產業＋自動爬概念股）      │
                     └──────────────────────────┬───────────────────────────────┘
                                                ▼
- make week GROUP=defg ＝ 一條指令串起以下十步：
+ make week GROUP=defg ＝ 一條指令串起以下十一步：
  ① fetch-twse                日線/法人/月營收/產業別/官方估值比(PE/PB/殖利率) 增量入快取
  ② fetch-institutional-history 回補近 20 日上市＋上櫃法人（隔幾天沒跑也自動補齊）
  ③ fetch-tdcc                集保大戶持股比（容錯：TDCC 異常不擋，大戶欄退化 null）
@@ -32,6 +32,7 @@
  ⑧ cp-value-candidates       個股 CP 補漲候選＋C2 三重濾網 → cp_candidates.md（group Section 6 要讀）
  ⑨ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv（含揭露欄）
  ⑩ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
+ ⑪ pick-outcome-brief        上週 picks r+5/α/勝率＋偽陰性一頁 → 本週輸入包（容錯：失敗不擋）
                                                ▼
  手動：把報告貼給 Claude（docs/11 prompt）→ pick.md（首屏 ≤60 行一頁決策卡；核心層距季線 >+15% 硬擋）
  手動：tw-screener picks sync 解析 pick.md 尾端區塊、整批寫底帳 → 每季 make pick-outcome 算命中率×α（pick 閉環）
@@ -180,6 +181,11 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `uv run tw-screener market regime`                     | 大盤 regime 姿態：進攻/中性/防禦（規劃書 03 V2）     | 盤後看大盤閘門                       |
 | `uv run tw-screener portfolio check`                   | 組合層風控體檢：標籤/因子簇集中度（規劃書 03 V3）    | 持股變動後                           |
 | `make week-check`                                      | 產物完整性檢查（week 已內含，可單獨重跑）            | 懷疑某步無聲失敗時                   |
+| `make build-panel`                                     | ground-truth 面板 parquet：前瞻報酬/位階/法人/量比＋核價（docs/22 WS-A） | 研究軌任何因子驗證前                 |
+| `make factor-lab`                                      | 因子實驗台驗收：機器等價＋docs/19 對表＋面板首驗（docs/22 WS-B） | 面板重建後                           |
+| `make rotation-efficacy`                               | 輪動欄效度：歷史重建→生產對表→forward basket IC/lift（docs/22 WS-C） | 每季                                 |
+| `make laggard-grid`                                    | 族群強弱×領先落後×位階 forward 報酬格（docs/22 WS-D） | 每季                                 |
+| `make flow-inflection`                                 | 資金流 inflection 因子族首驗（docs/22 WS-E）          | 樣本變厚後重驗                       |
 | `make doctor`                                          | Goodinfo 健康檢查（week 已內含，可單獨重跑）         | 懷疑被擋/改版時                      |
 | `make fetch-tdcc`                                      | TDCC 集保大戶持股比（week 已內含）                   | 大戶欄空值時單獨補                   |
 | `make fetch-twse`                                      | 增量抓日線/法人/月營收                               | 通常不必單獨跑（week 含）            |

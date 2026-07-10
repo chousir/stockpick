@@ -37,3 +37,15 @@
 錯誤信念：索引行寫越詳細，未來 session 越省事。
 修正：索引一行一鉤 ≤120 字元，細節寫進記憶檔本體（recall 時才載入）。
 落點：playbook/40 §3、playbook/00 一-1。
+
+## 2026-07-10 全市場快取含 6 位數權證碼，「非 00 開頭＋全數字」濾不掉
+現象：W28 面板首建 9,770 檔——daily/otc_daily 快照混入 7,793 檔 6 位數權證（70xxxx 等），通過 is_etf_or_warrant 語義的向量檢查，污染全市場等權基準。
+錯誤信念：以為 is_etf_or_warrant（00 開頭或含字母）對任何來源都足以框出普通股宇宙。
+修正：ground-truth 用途一律收緊為「恰 4 位數字且非 00 開頭」（TDR/ETN 一併排除並記錄）；並抽 unique id 數對台股常識（上市+上櫃 <2,000）做 sanity check。
+落點：backtest/panel.py `_non_etf_expr` docstring＋docs/22 §1；screener 管線維持原函式（其宇宙來源本就乾淨）。
+
+## 2026-07-10 n 數萬時 CI 不跨 0 ≠ 有訊號——效應量底線要寫進 runner
+現象：WS-E 資金流 inflection 因子 IC −0.009、CI [−0.016,−0.002] 不跨 0，首版 console 判「存活候選」；實際效應量≈0（docs/19 有用訊號都在 0.09–0.25）。
+錯誤信念：CI 不跨 0＋跨段同號就算存活（判準漏了效應量維度）。
+修正：大樣本評估一律加 |IC| 底線（flow_inflection min_effect_ic=0.03，未校準啟發式明標）；裁決三件套＝CI＋效應量＋跨段一致。
+落點：playbook/20 §6.5 原則已有，本次把它變成 runner 內建防線（flow_inflection_runner）；docs/22 §0 存活判準。
