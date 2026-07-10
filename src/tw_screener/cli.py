@@ -909,6 +909,71 @@ def backtest_strategies_cmd(
     run_backtest_strategies(hold_weeks, out_dir, settings)
 
 
+@backtest_app.command("build-panel")
+def backtest_build_panel_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="面板輸出目錄（預設讀 settings，research/panel）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """WS-A2 ground-truth 面板：date×stock_id 前瞻報酬/位階/法人/量比 parquet＋核價抽查。"""
+    from tw_screener.backtest.panel_runner import run_build_panel
+
+    run_build_panel(settings, out_dir)
+
+
+@backtest_app.command("factor-lab")
+def backtest_factor_lab_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/factor_lab）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """WS-B 因子實驗台驗收：機器等價＋docs/19 基準對表＋面板全宇宙首驗。"""
+    from tw_screener.backtest.factor_lab_runner import run_factor_lab
+
+    run_factor_lab(settings, out_dir)
+
+
+@backtest_app.command("rotation-efficacy")
+def backtest_rotation_efficacy_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/rotation_efficacy）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """WS-C 輪動欄效度：歷史重建逐週訊號→生產對表→forward basket IC/lift＋榜外機會成本。"""
+    from tw_screener.backtest.rotation_efficacy_runner import run_rotation_efficacy
+
+    run_rotation_efficacy(settings, out_dir)
+
+
+@backtest_app.command("laggard-grid")
+def backtest_laggard_grid_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/laggard_grid）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """WS-D 族群內強弱：族群強弱×個股領先落後×位階 forward 報酬格（WS5-② 正式驗證）。"""
+    from tw_screener.backtest.laggard_grid_runner import run_laggard_grid
+
+    run_laggard_grid(settings, out_dir)
+
+
+@backtest_app.command("flow-inflection")
+def backtest_flow_inflection_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/flow_inflection）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """WS-E 資金流 inflection 因子族首驗（差分/加速度/z-of-z/主體拆分，走 factor_lab）。"""
+    from tw_screener.backtest.flow_inflection_runner import run_flow_inflection
+
+    run_flow_inflection(settings, out_dir)
+
+
 @backtest_app.command("diagnose")
 def backtest_diagnose_cmd(
     out_dir: Path | None = typer.Option(
@@ -985,11 +1050,17 @@ def picks_outcome_cmd(
     hold_weeks: str | None = typer.Option(
         None, help="固定持有窗清單（逗號分隔，預設讀 settings，如 2,4,8,12）"
     ),
+    brief: bool = typer.Option(
+        False, "--brief", help="WS-A3：只產上週 picks r+5 一頁 brief 進最新週報目錄（輸入包）"
+    ),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
     """F1 PO2–PO4：分層命中率×α（vs 大盤＋vs 族群）＋偽陰性帳，產 research/pick_outcome/。"""
-    from tw_screener.backtest.picks_outcome_runner import run_picks_outcome
+    from tw_screener.backtest.picks_outcome_runner import run_picks_brief, run_picks_outcome
 
+    if brief:
+        run_picks_brief(settings)
+        return
     run_picks_outcome(settings, exit_date, diff, hold_weeks)
 
 

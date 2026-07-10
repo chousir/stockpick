@@ -60,7 +60,7 @@ propicks_flags:
   # M-WS5a（WS5-②）sector-wide 旗標降輪動：同旗標在該次產業掛旗佔比 ≥ 此% 且成員 ≥ min → 標
   # sector_flag_note「族群共振」（＝輪動足跡，不當個股排除理由）。金融 W21 土洋對作 8/17 掛旗實例。
   sector_coverage_pct: 60.0
-  sector_coverage_min_members: 5   # 次產業候選數 < 此 → 不算覆蓋度（小族群/庫存觀察無意義，同 rotation min_members）
+  sector_coverage_min_members: 5   # 次產業候選數 < 此 → 不算覆蓋度（小族群/庫存觀察無意義；獨立門檻——rotation.min_members 已於 W28 降 4，此處維持 5）
 
 themes_build:
   category_labels: ["概念股"]   # 只抓概念股；集團股 / 電子產業不抓
@@ -199,7 +199,8 @@ rotation:
                              # （short/long 一律為子集）；10d 為分析層補窗加的中端鏡頭，對齊個股法人近端窗 5/10d；
                              # momentum/breadth/concentration 仍錨在 short/long
   history_days: 250          # 載入法人/價量歷史天數（≈ 1 年）
-  min_members: 5             # 籃子最小成員數（小於此不列排名，避免單檔灌水）
+  min_members: 4             # 籃子最小成員數（W28 factor-lab：晶圓代工4檔53週+11.5pp
+                             # 制度性榜外＝最大具名機會成本，docs/22 §2；3 檔以下仍擋）
   clip_daily_return_pct: 10.0  # 籃子個股日報酬夾限＝台股漲跌停；防減資/分割未還原假跳動毒化指數
   top_n: 10                  # 報表/CLI 顯示前 N 名
   rank_by: trend_score       # 排名鍵（ΔRank 基準）。F3 改價格趨勢分數（價格證據優先）——
@@ -322,7 +323,42 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     clip_daily_return_pct: 10.0  # 持有窗大盤等權指數日報酬夾限（複用 V1 機制）
     min_sample_warn: 20          # 樣本低於此 → 報表標「僅供方向性、未達顯著」
     min_subind_members: 3        # 次產業同窗有價成員低於此 → 族群超額標 null（樣本太小）
+    brief_filename: pick_outcome_brief.md  # WS-A3 上週 r+5 brief 檔名（寫進最新週報目錄）
     output_dir: research/pick_outcome
+  panel:                     # WS-A2 ground-truth 面板（make build-panel）：因子實驗台資料底盤
+    history_days: 300            # 載入日線快取的回看交易日數（≈13 個月）
+    horizons_td: [5, 10, 20, 40] # 前瞻窗（交易日）；entry=次一交易日、未到期/下市=null
+    ma_windows: [20, 60]         # 位階均線窗（ma{w}_dist_pct）
+    vol_lookback: 20             # 量比回看窗（窗不足=null，不填 0）
+    reconcile_tol_pct: 0.5       # 核價抽查容差%（TWSE 兩端點交叉：STOCK_DAY 修訂 vs daily_all 快照）
+    reconcile_pass_rate: 0.995   # 端點一致率低於此＝核價 FAIL（分歧＝快照未含盤後修訂，面板採修訂值）
+    reconcile_samples: 10        # 核價抽查檔數
+    output_dir: research/panel
+  factor_lab:                # WS-B 統一因子實驗台（make factor-lab）：IC/CI/walk-forward/殘差
+    panel_path: research/panel/panel.parquet  # 面板來源（make build-panel 產物）
+    n_splits: 4                  # walk-forward 測試段數（expanding、embargo=horizon+1）
+    min_train_frac: 0.4          # 首段訓練占比下限
+    buckets: 5                   # 橫斷面分位桶數
+    output_dir: research/factor_lab
+  rotation_efficacy:         # WS-C 輪動欄效度（make rotation-efficacy）：重建→對表→IC/lift
+    horizons_td: [5, 10, 20]     # forward basket 檢驗窗（交易日）
+    n_splits: 3                  # walk-forward 段數（週頻樣本 ~50 週，3 段夠粗）
+    min_train_frac: 0.4
+    n_boot: 1000                 # lift 表 bootstrap 重抽次數
+    output_dir: research/rotation_efficacy
+  laggard_grid:              # WS-D 族群內強弱 2×2×位階 forward 報酬格（make laggard-grid）
+    horizons_td: [10, 20]        # forward 窗（交易日）
+    rs_window: 20                # rs_subind 回看窗（個股 vs 次產業籃報酬差）
+    n_boot: 1000
+    output_dir: research/laggard_grid
+  flow_inflection:           # WS-E 資金流 inflection 因子族（make flow-inflection）
+    horizons_td: [10, 20]        # 評估窗（交易日）
+    n_splits: 4
+    min_train_frac: 0.4
+    buckets: 5
+    z_window: 60                 # z-of-z 的滾動 z 窗（同 rotation z_window）
+    min_effect_ic: 0.03          # 效應量底線（未校準啟發式；n 數萬時防大樣本假顯著）
+    output_dir: research/flow_inflection
   diagnostic:                # M-Diag1「抓太晚」診斷（make diagnose）：候選宇宙延伸度曲線＋排序訊號 IC
     history_days: 250            # 載入日線快取的回看交易日數
     horizons_td: [5, 10, 20]    # 前瞻窗（交易日；須可被 trading_days_per_week 整除）

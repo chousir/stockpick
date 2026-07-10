@@ -538,3 +538,93 @@ def render_outcome_report(
                 )
 
     return "\n".join(lines)
+
+
+def render_weekly_brief(
+    picks_r: pl.DataFrame,
+    excluded_r: pl.DataFrame,
+    week: str,
+    data_date: date | None,
+    horizon_td: int = 5,
+) -> str:
+    """WS-A3 一頁 brief：上週 picks r+{h}／α／勝率＋excluded 偽陰性（進下週輸入包）。
+
+    picks_r／excluded_r＝compute_forward_returns(hold_weeks=1) 輸出（strategy_id 欄
+    分別承載 layer／剔除 reason）。只讀 matured 列；無到期樣本 → 誠實標註不編數字。
+    """
+    lines = [
+        f"# 上週 picks 短櫃（{week}・r+{horizon_td}）",
+        "",
+        f"- 評估週 {week}（data_date {data_date or '未取得'}）；entry＝次一交易日收盤、"
+        f"exit＝entry 後第 {horizon_td} 交易日；除息還原；α＝減同窗等權全市場。",
+        "- 用途：下週選股輸入包的「上週結果回饋」一頁；完整分層/反事實帳見季度 "
+        "`make pick-outcome`。",
+        "",
+    ]
+    valid = (
+        picks_r.filter((pl.col("status") == "matured") & pl.col("return_pct").is_not_null())
+        if not picks_r.is_empty()
+        else pl.DataFrame()
+    )
+    if valid.is_empty():
+        lines.append("> picks r+5 尚無到期樣本（快取未跨窗）——本頁僅佔位，資料到齊自動補。")
+        return "\n".join(lines)
+
+    def _fmean(df: pl.DataFrame, col: str) -> float:
+        v = df[col].mean()
+        return float(v) if isinstance(v, (int, float)) else 0.0
+
+    n = valid.height
+    win = valid.filter(pl.col("return_pct") > 0).height
+    beat = valid.filter(pl.col("excess_return_pct") > 0).height
+    avg_r = _fmean(valid, "return_pct")
+    avg_a = _fmean(valid, "excess_return_pct")
+    lines += [
+        f"## picks（n={n}）",
+        "",
+        f"- 勝率（絕對）**{win}/{n}**・勝過大盤 **{beat}/{n}**・"
+        f"平均 r+{horizon_td} **{avg_r:+.2f}%**・平均 α **{avg_a:+.2f}pp**。",
+        "",
+        "| 層 | 股票 | r+5 | 大盤 | α |",
+        "|---|---|---|---|---|",
+    ]
+    order = {"core": 0, "opportunity": 1, "pool": 2}
+    ordered = valid.with_columns(
+        pl.col("strategy_id").replace_strict(order, default=9).alias("_o")
+    ).sort("_o", "excess_return_pct", descending=[False, True])
+    for r in ordered.iter_rows(named=True):
+        lines.append(
+            f"| {_layer_label(r['strategy_id'])} | {r['stock_id']} {r['name'] or ''} "
+            f"| {_pct(r['return_pct'])} | {_pct(r['market_return_pct'])} "
+            f"| {_pct(r['excess_return_pct'])} |"
+        )
+
+    lines += ["", "## excluded 偽陰性（同窗）", ""]
+    evalid = (
+        excluded_r.filter((pl.col("status") == "matured") & pl.col("return_pct").is_not_null())
+        if not excluded_r.is_empty()
+        else pl.DataFrame()
+    )
+    if evalid.is_empty():
+        lines.append("> 該週無 excluded 紀錄或尚未到期。")
+    else:
+        en = evalid.height
+        ebeat = evalid.filter(pl.col("excess_return_pct") > 0)
+        lines.append(
+            f"- 剔除 {en} 檔、其中 **{ebeat.height} 檔跑贏大盤**（偽陰性候選）；"
+            f"剔除組平均 r+{horizon_td} {_fmean(evalid, 'return_pct'):+.2f}%。"
+        )
+        if not ebeat.is_empty():
+            lines += [
+                "",
+                "| 旗標 | 股票 | r+5 | α |",
+                "|---|---|---|---|",
+                *[
+                    f"| {r['strategy_id']} | {r['stock_id']} {r['name'] or ''} "
+                    f"| {_pct(r['return_pct'])} | {_pct(r['excess_return_pct'])} |"
+                    for r in ebeat.sort("excess_return_pct", descending=True).iter_rows(
+                        named=True
+                    )
+                ],
+            ]
+    return "\n".join(lines)

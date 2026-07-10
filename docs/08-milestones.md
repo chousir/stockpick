@@ -846,3 +846,18 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **docs/11 讀法**：任務 0 加 ETF 列三原則（只看報酬/位階/組合曝險；法人欄含申贖/造市機制性流量僅參考；不套個股多空/基本面框架）。
 - **既有 reports/ 不回溯**——本次僅重生 W28 `holdings_enriched.csv` 驗收；報表正文 W29 重跑生效。
 - 驗收：`make test` 綠（+4：skip_etf 迴歸/ETF 收列、etf_exposure 併標籤、asset_type 欄、雷達濾 ETF）；重生 W28 holdings_enriched=10 列（6 股+4 ETF）；`portfolio check` n=10 且半導體計入 0050/00981A。
+
+---
+
+## M-FactorLab（W28 委託）：統一因子實驗台與回測驗證（規劃書 22・WS-A~G）
+
+> 對應規劃書 [docs/22-factor-lab-w28.md](22-factor-lab-w28.md)。委託問題＝**哪些可調指標值得留在系統裡**。第一約束 anti-overfitting：walk-forward（expanding＋embargo）、每表 n/CI、格點全 cell、**零 gate 改動**（變更全走提案 diff → F1 裁決）。
+
+- **WS-A 資料底盤**：`make build-panel` ground-truth 面板（date×stock_id、r+5/10/20/40 防前視＋除息還原＋未到期/下市 null、等權中位基準/alpha、位階/法人拆分/量比）；核價＝TWSE 兩端點交叉 99.89% PASS＋Goodinfo 快照日位移全解釋；普通股濾網收緊「恰 4 位數字」（6 位數權證 7,793 檔曾混入）。`make week` 末段接 `pick-outcome --brief`（上週 r+5/α/偽陰性一頁進輸入包）。
+- **WS-B factor_lab**：`evaluate()`＝pooled IC/Fisher CI＋walk-forward＋分桶＋殘差 IC（遞迴偏相關、無 numpy）；`grid_scan` 硬限 ≤3 維×≤5 檔全 cell。驗收：機器等價 vs diagnostic Δ<1e-9＋docs/19 兩基準同號±0.10 複現。**宇宙效應發現**：ma60_dist 候選宇宙內穩定負、全市場 regime-dependent——反追高是候選池內定律非全市場定律。
+- **WS-C 輪動欄效度**：歷史重建 59 週 point-in-time 訊號（生產對表 quadrant 74–97%）→ **trend_score 唯一存活**（IC +0.087/+0.148/+0.175 跨段同號分桶單調）；ΔRank/flow_turn 退潮偵測/freshness 否證；榜外機會成本＝晶圓代工（4 檔）53 週 +11.5pp。
+- **WS-D laggard 格**：2×2×位階 12 cell 全列——ambush（強×落後×貼低）r+20 +5.20 vs 全體 +4.91 CI 重疊＝**未達升主排序權重門檻，維持 cp 副表**（WS5-② 正式裁決）。
+- **WS-E flow inflection**：差分/加速度/z-of-z/主體拆分**全數否證**（|IC|≤0.013 效應量≈0；runner 內建 min_effect_ic 防大樣本假顯著）；融資減肥/大戶 WoW 快取深度不足如實標註。
+- **WS-F 組合對照賽**：無條件存活＝1（<3）→ **不足以組合、維持 rule-tier**（不硬建 composite；開賽門檻＝個股層存活 ≥3 且跨 ≥2 regime）。
+- **WS-G 提案（2026-07-10 F1 裁決三案全採納，紀錄 docs/22 §6.1）**：① rotation.min_members 5→4（晶圓代工制度性榜外）＝**已套用**；② docs/11 三欄讀法降級＝**已套用**；③ F2 15% 明確不收緊（維持季度協議）＝零變更僅記錄。
+- 驗收：`make test` 綠（+25：panel 11/factor_lab 11+/rotation_efficacy 6/laggard 3/flow 5）；ruff/mypy 零淨增；核價/複現/全 cell/零 gate/brief 五項委託驗收全過。
