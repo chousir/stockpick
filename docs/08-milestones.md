@@ -853,7 +853,7 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 
 > 對應規劃書 [docs/22-factor-lab-w28.md](22-factor-lab-w28.md)。委託問題＝**哪些可調指標值得留在系統裡**。第一約束 anti-overfitting：walk-forward（expanding＋embargo）、每表 n/CI、格點全 cell、**零 gate 改動**（變更全走提案 diff → F1 裁決）。
 
-- **WS-A 資料底盤**：`make build-panel` ground-truth 面板（date×stock_id、r+5/10/20/40 防前視＋除息還原＋未到期/下市 null、等權中位基準/alpha、位階/法人拆分/量比）；核價＝TWSE 兩端點交叉 99.96% PASS＋Goodinfo 快照日位移全解釋；普通股濾網收緊「恰 4 位數字」（6 位數權證 7,793 檔曾混入）。`make week` 末段接 `pick-outcome --brief`（上週 r+5/α/偽陰性一頁進輸入包）。
+- **WS-A 資料底盤**：`make build-panel` ground-truth 面板（date×stock_id、r+5/10/20/40 防前視＋除息還原＋未到期/下市 null、等權中位基準/alpha、位階/法人拆分/量比）；核價＝TWSE 兩端點交叉 99.89% PASS＋Goodinfo 快照日位移全解釋；普通股濾網收緊「恰 4 位數字」（6 位數權證 7,793 檔曾混入）。`make week` 末段接 `pick-outcome --brief`（上週 r+5/α/偽陰性一頁進輸入包）。
 - **WS-B factor_lab**：`evaluate()`＝pooled IC/Fisher CI＋walk-forward＋分桶＋殘差 IC（遞迴偏相關、無 numpy）；`grid_scan` 硬限 ≤3 維×≤5 檔全 cell。驗收：機器等價 vs diagnostic Δ<1e-9＋docs/19 兩基準同號±0.10 複現。**宇宙效應發現**：ma60_dist 候選宇宙內穩定負、全市場 regime-dependent——反追高是候選池內定律非全市場定律。
 - **WS-C 輪動欄效度**：歷史重建 59 週 point-in-time 訊號（生產對表 quadrant 74–97%）→ **trend_score 唯一存活**（IC +0.087/+0.148/+0.175 跨段同號分桶單調）；ΔRank/flow_turn 退潮偵測/freshness 否證；榜外機會成本＝晶圓代工（4 檔）53 週 +11.5pp。
 - **WS-D laggard 格**：2×2×位階 12 cell 全列——ambush（強×落後×貼低）r+20 +5.20 vs 全體 +4.91 CI 重疊＝**未達升主排序權重門檻，維持 cp 副表**（WS5-② 正式裁決）。
