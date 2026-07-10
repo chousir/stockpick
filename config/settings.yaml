@@ -60,7 +60,7 @@ propicks_flags:
   # M-WS5a（WS5-②）sector-wide 旗標降輪動：同旗標在該次產業掛旗佔比 ≥ 此% 且成員 ≥ min → 標
   # sector_flag_note「族群共振」（＝輪動足跡，不當個股排除理由）。金融 W21 土洋對作 8/17 掛旗實例。
   sector_coverage_pct: 60.0
-  sector_coverage_min_members: 5   # 次產業候選數 < 此 → 不算覆蓋度（小族群/庫存觀察無意義，同 rotation min_members）
+  sector_coverage_min_members: 5   # 次產業候選數 < 此 → 不算覆蓋度（小族群/庫存觀察無意義；獨立門檻——rotation.min_members 已於 W28 降 4，此處維持 5）
 
 themes_build:
   category_labels: ["概念股"]   # 只抓概念股；集團股 / 電子產業不抓
@@ -199,7 +199,8 @@ rotation:
                              # （short/long 一律為子集）；10d 為分析層補窗加的中端鏡頭，對齊個股法人近端窗 5/10d；
                              # momentum/breadth/concentration 仍錨在 short/long
   history_days: 250          # 載入法人/價量歷史天數（≈ 1 年）
-  min_members: 5             # 籃子最小成員數（小於此不列排名，避免單檔灌水）
+  min_members: 4             # 籃子最小成員數（W28 factor-lab：晶圓代工4檔53週+11.5pp
+                             # 制度性榜外＝最大具名機會成本，docs/22 §2；3 檔以下仍擋）
   clip_daily_return_pct: 10.0  # 籃子個股日報酬夾限＝台股漲跌停；防減資/分割未還原假跳動毒化指數
   top_n: 10                  # 報表/CLI 顯示前 N 名
   rank_by: trend_score       # 排名鍵（ΔRank 基準）。F3 改價格趨勢分數（價格證據優先）——

@@ -859,5 +859,5 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **WS-D laggard 格**：2×2×位階 12 cell 全列——ambush（強×落後×貼低）r+20 +5.20 vs 全體 +4.91 CI 重疊＝**未達升主排序權重門檻，維持 cp 副表**（WS5-② 正式裁決）。
 - **WS-E flow inflection**：差分/加速度/z-of-z/主體拆分**全數否證**（|IC|≤0.013 效應量≈0；runner 內建 min_effect_ic 防大樣本假顯著）；融資減肥/大戶 WoW 快取深度不足如實標註。
 - **WS-F 組合對照賽**：無條件存活＝1（<3）→ **不足以組合、維持 rule-tier**（不硬建 composite；開賽門檻＝個股層存活 ≥3 且跨 ≥2 regime）。
-- **WS-G 提案（未套用）**：① rotation.min_members 5→4（晶圓代工制度性榜外）；② docs/11 三欄讀法降級；③ F2 15% 明確不收緊（維持季度協議）。
+- **WS-G 提案（2026-07-10 F1 裁決三案全採納，紀錄 docs/22 §6.1）**：① rotation.min_members 5→4（晶圓代工制度性榜外）＝**已套用**；② docs/11 三欄讀法降級＝**已套用**；③ F2 15% 明確不收緊（維持季度協議）＝零變更僅記錄。
 - 驗收：`make test` 綠（+25：panel 11/factor_lab 11+/rotation_efficacy 6/laggard 3/flow 5）；ruff/mypy 零淨增；核價/複現/全 cell/零 gate/brief 五項委託驗收全過。

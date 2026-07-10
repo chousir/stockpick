@@ -121,6 +121,19 @@ quadrant 補「主升續勢＝動能延續描述，出貨警訊無領先性」�
 **不提案**：trend_score 併入族群主分數次權重——揭露已足（WS5-b 並列欄）、單 regime
 不釘權重，延既有 F1 節奏；min_members 降至 3（members≤3 組 +1.71 明確差）。
 
+### 6.1 裁決紀錄（F1・2026-07-10）
+
+使用者委託裁決並授權 merge。**三案全數採納**：
+- **提案 1 採納・已套用**：`rotation.min_members` 5→4（config/settings.yaml）；同步修
+  `sector_coverage_min_members` 過時註解（原寫「同 rotation min_members」）與 docs/11
+  「成員 <5 檔」舊引用。
+- **提案 2 採納・已套用**：docs/11 ΔRank／flow_turn／freshness 標「描述性、無前瞻證據、
+  不得當進出場依據」，quadrant 補「主升續勢＝動能延續描述、出貨警訊無領先性」，
+  「退潮→降一級」舊讀法作廢。產出報表模板（sector_rotation.md.j2）本已標
+  「事實揭露、非方向訊號」，免動。
+- **提案 3 採納・零變更**：F2 `core_ext_ma60_max_pct` 維持 15.0；收緊與否回 docs/20 §7
+  季度校準協議（候選層 pick-outcome 口徑、W28+ 樣本）裁決。
+
 ## 7. 限制（誠實帳）
 
 1. **單一 regime**：全樣本 2025-01~2026-07 多頭偏；所有正向結論都可能是「多頭裡
