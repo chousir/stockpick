@@ -1030,6 +1030,16 @@ def backtest_diagnose_cmd(
     run_diagnostic(settings, out_dir)
 
 
+@backtest_app.command("regime-history")
+def backtest_regime_history_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """WS-H.3 regime 標籤歷史化：V2 引擎逐日 as-of 重算＋輸出 regime_labels.parquet（研究軌）。"""
+    from tw_screener.backtest.regime_history import run_regime_history
+
+    run_regime_history(settings)
+
+
 @report_app.command("check")
 def report_check_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),

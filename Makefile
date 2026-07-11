@@ -1,7 +1,7 @@
 .PHONY: help init sync test test-unit lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history fetch-margin-history build-themes screen screen-all screen-dry doctor \
         group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
-        build-panel factor-lab pick-outcome-brief rotation-efficacy laggard-grid flow-inflection \
+        build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid flow-inflection \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check snapshot-week
 
@@ -129,6 +129,9 @@ fetch-margin-history:  ## 回補近 N 個交易日上市融資融券（DAYS=20 �
 
 build-panel:  ## WS-A2 ground-truth 面板：date×stock_id 前瞻報酬/位階/法人/量比 parquet（產 research/panel/）
 	uv run tw-screener backtest build-panel
+
+regime-history:  ## WS-H.3 regime 標籤歷史化：V2 引擎逐日 as-of 重算（產 research/panel/regime_labels.parquet）
+	uv run tw-screener backtest regime-history
 
 factor-lab:  ## WS-B 因子實驗台驗收：機器等價＋docs/19 基準對表＋面板首驗（產 research/factor_lab/）
 	uv run tw-screener backtest factor-lab
