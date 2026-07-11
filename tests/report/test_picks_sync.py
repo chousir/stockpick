@@ -211,6 +211,33 @@ def test_sync_candidates_takes_precedence_over_watchlist(tmp_path):
     assert abs(row["ext_ma60_pct"] - 8.4) < 1e-9
 
 
+def test_sync_late_entry_key_accepted_and_persisted(tmp_path):
+    """WS-L：pick.md 區塊每筆可選 late_entry 鍵（白名單同步），值落進底帳。"""
+    settings, week_dir = _setup_week(tmp_path)
+    _write_pick_md(
+        week_dir,
+        "<!-- picks:begin -->\n"
+        "picks:\n"
+        '  - {stock: "3006", layer: core, late_entry: true}\n'
+        "excluded:\n"
+        '  - {stock: "2344", reason: 過熱, late_entry: true}\n'
+        "<!-- picks:end -->\n",
+    )
+    run_picks_sync(settings, WEEK)
+    pick_row = load_week_picks(week_dir).row(0, named=True)
+    assert pick_row["late_entry"] is True
+    excl_row = load_week_excluded(week_dir).row(0, named=True)
+    assert excl_row["late_entry"] is True
+
+
+def test_sync_late_entry_defaults_false_when_omitted(tmp_path):
+    settings, week_dir = _setup_week(tmp_path)
+    _write_pick_md(week_dir, GOOD_BLOCK)
+    run_picks_sync(settings, WEEK)
+    row = load_week_picks(week_dir).row(0, named=True)
+    assert row["late_entry"] is False
+
+
 def test_sync_core_without_ext_warns_but_records(tmp_path, capsys):
     settings, week_dir = _setup_week(tmp_path)
     _write_pick_md(

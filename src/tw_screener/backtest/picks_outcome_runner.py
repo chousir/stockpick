@@ -165,11 +165,14 @@ def run_picks_outcome(
         console.print(f"  翻轉解剖：{diff_df.height} 筆降級（詳報告 §5）")
 
 
-def run_picks_brief(settings: Path) -> None:
+def run_picks_brief(settings: Path, week: str | None = None) -> None:
     """WS-A3：上週 picks r+5 brief 一頁 md → 最新週報目錄（輸入包）。
 
     評估週＝底帳中「r+5 已到期」的最近一週；無到期週 → 佔位頁（誠實標註）。
     掛 make week 末段（容錯：底帳/快取缺不擋主流程，exit 0）。
+
+    week（WS-L，可選）：指定則改評估該週、輸出寫到 reports/<week>/pick_outcome_brief.md
+    （該週不存在 → exit 1）；未指定＝現行預設行為，一個位元組都不變。
     """
     import polars as pl
     import yaml
@@ -194,7 +197,11 @@ def run_picks_brief(settings: Path) -> None:
     if not dirs:
         console.print("[yellow]無週報目錄——brief 跳過[/yellow]")
         return
-    out_path = dirs[-1] / brief_name
+    if week is not None and not (reports_dir / week).is_dir():
+        console.print(
+            f"[red]{reports_dir / week} 不存在——week 應為 reports/ 下的週次目錄名[/red]"
+        )
+        raise typer.Exit(1)
 
     picks = load_all_picks(reports_dir)
     if picks.is_empty():
@@ -224,26 +231,65 @@ def run_picks_brief(settings: Path) -> None:
             trading_days_per_week=tdpw, clip_daily_return_pct=clip,
         )
 
+    def _attach_late_entry(
+        returns_df: pl.DataFrame, ledger: pl.DataFrame, week_val: str
+    ) -> pl.DataFrame:
+        """把底帳（picks.csv／excluded.csv）的 late_entry 併回 compute_forward_returns 輸出。
+
+        compute_forward_returns 只認 week_tag/stock_id/name/strategy_id/screened_at 白名單，
+        late_entry 不隨 screens_like 通過，故另外以 (week, stock_id) join 回來（WS-L）。
+        """
+        if returns_df.is_empty() or ledger.is_empty():
+            return returns_df
+        late_map = (
+            ledger.filter(pl.col("week") == week_val)
+            .select("stock_id", "late_entry")
+            .unique(subset="stock_id", keep="first")
+        )
+        return returns_df.join(late_map, on="stock_id", how="left").with_columns(
+            pl.col("late_entry").fill_null(False)
+        )
+
     all_r = _returns(picks, "layer")
     matured = (
         all_r.filter((pl.col("status") == "matured") & pl.col("return_pct").is_not_null())
         if not all_r.is_empty()
         else pl.DataFrame()
     )
-    if matured.is_empty():
+    excluded_all = load_all_excluded(reports_dir)
+
+    if week is not None:
+        target_week = week
+        out_path = reports_dir / week / brief_name
+        picks_r = (
+            matured.filter(pl.col("week_tag") == target_week)
+            if not matured.is_empty()
+            else pl.DataFrame()
+        )
+        excl_week = (
+            excluded_all.filter(pl.col("week") == target_week)
+            if not excluded_all.is_empty()
+            else pl.DataFrame()
+        )
+        excl_r = _returns(excl_week, "reason")
+    elif matured.is_empty():
         target_week = str(picks["week"].max())
+        out_path = dirs[-1] / brief_name
         picks_r = pl.DataFrame()
         excl_r = pl.DataFrame()
     else:
         target_week = str(matured["week_tag"].max())
+        out_path = dirs[-1] / brief_name
         picks_r = matured.filter(pl.col("week_tag") == target_week)
-        excluded = load_all_excluded(reports_dir)
         excl_week = (
-            excluded.filter(pl.col("week") == target_week)
-            if not excluded.is_empty()
+            excluded_all.filter(pl.col("week") == target_week)
+            if not excluded_all.is_empty()
             else pl.DataFrame()
         )
         excl_r = _returns(excl_week, "reason")
+
+    picks_r = _attach_late_entry(picks_r, picks, target_week)
+    excl_r = _attach_late_entry(excl_r, excluded_all, target_week)
 
     dd = picks.filter(pl.col("week") == target_week)["data_date"]
     data_date = dd[0] if dd.len() else None

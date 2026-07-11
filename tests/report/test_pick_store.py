@@ -146,3 +146,77 @@ def test_core_extension_gate_disabled_or_unknown():
     assert core_extension_violation("core", 40.0, None) is None  # 未設定門檻＝不啟用
     assert core_extension_violation("core", 40.0, 0.0) is None
     assert core_extension_violation("core", None, 15.0) is None  # 乖離未知→runner 警告後如實記
+
+
+# ── WS-L：同週 data_date 一致性衛生 ──────────────────────────────────────────
+
+
+def test_upsert_pick_rejects_inconsistent_data_date_same_week(tmp_path):
+    """W26 型事故的預防性衛生：同週第二檔 data_date 與既有列不同 → 預設擋，訊息含既有/新值/週次。"""
+    week_dir = tmp_path / "2026-W27"
+    upsert_pick(week_dir, _ROW)  # 2610, data_date 2026-06-30
+    other = {**_ROW, "stock_id": "3293", "data_date": date(2026, 7, 1)}
+    with pytest.raises(ValueError) as exc:
+        upsert_pick(week_dir, other)
+    msg = str(exc.value)
+    assert "2026-06-30" in msg  # 既有值
+    assert "2026-07-01" in msg  # 新值
+    assert "2026-W27" in msg  # 週次
+    assert "late_entry" in msg
+    # 擋下後未落帳
+    out = load_week_picks(week_dir)
+    assert out.height == 1
+
+
+def test_upsert_pick_late_entry_true_allows_and_persists(tmp_path):
+    """late_entry=True 明示覆寫：放行寫入且該欄落地。"""
+    week_dir = tmp_path / "2026-W27"
+    upsert_pick(week_dir, _ROW)
+    other = {**_ROW, "stock_id": "3293", "data_date": date(2026, 7, 1), "late_entry": True}
+    upsert_pick(week_dir, other)
+    out = load_week_picks(week_dir)
+    assert out.height == 2
+    row = out.filter(pl.col("stock_id") == "3293").row(0, named=True)
+    assert row["late_entry"] is True
+    # 原本那筆未指定 late_entry → 預設 False 落地
+    first = out.filter(pl.col("stock_id") == "2610").row(0, named=True)
+    assert first["late_entry"] is False
+
+
+def test_upsert_excluded_rejects_inconsistent_data_date_same_week(tmp_path):
+    week_dir = tmp_path / "2026-W27"
+    row = {
+        "week": "2026-W27",
+        "data_date": date(2026, 6, 30),
+        "stock_id": "2327",
+        "name": "國巨",
+        "reason": "過熱",
+        "detail": None,
+    }
+    upsert_excluded(week_dir, row)
+    other = {**row, "stock_id": "3293", "data_date": date(2026, 7, 1)}
+    with pytest.raises(ValueError, match="late_entry"):
+        upsert_excluded(week_dir, other)
+    upsert_excluded(week_dir, {**other, "late_entry": True})
+    out = load_week_excluded(week_dir)
+    assert out.height == 2
+
+
+def test_upsert_pick_first_of_week_never_blocked_regardless_of_late_entry(tmp_path):
+    """該週第一筆沒有既有列可比對，不論 late_entry 為何都放行。"""
+    week_dir = tmp_path / "2026-W27"
+    upsert_pick(week_dir, _ROW)
+    assert load_week_picks(week_dir).row(0, named=True)["late_entry"] is False
+
+
+def test_load_legacy_csv_without_late_entry_column_backfills_false(tmp_path):
+    """舊 CSV 無 late_entry 欄 → 載入時補 False，不得爆炸。"""
+    week_dir = tmp_path / "2026-W27"
+    week_dir.mkdir(parents=True)
+    legacy_cols = [c for c in PICKS_SCHEMA if c != "late_entry"]
+    pl.DataFrame([{c: _ROW[c] for c in legacy_cols}]).write_csv(week_dir / "picks.csv")
+    out = load_week_picks(week_dir)
+    assert dict(out.schema) == dict(PICKS_SCHEMA)
+    assert out.row(0, named=True)["late_entry"] is False
+    # load_all_picks 也要能吃舊檔不爆炸
+    assert load_all_picks(tmp_path).height == 1

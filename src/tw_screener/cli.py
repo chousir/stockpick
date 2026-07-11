@@ -1016,6 +1016,10 @@ def picks_record_cmd(
     data_date: str | None = typer.Option(
         None, help="資料日 YYYY-MM-DD（預設自動讀該週 screen_result 的 screened_at）"
     ),
+    late_entry: bool = typer.Option(
+        False, "--late-entry",
+        help="明示覆寫同週 data_date 一致性檢查（快取缺資料致 entry 順延等已知情形）",
+    ),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
     """F1-PO1：把一檔 pick／剔除紀錄寫進 reports/<week>/picks.csv 或 excluded.csv（冪等）。"""
@@ -1023,7 +1027,7 @@ def picks_record_cmd(
 
     run_pick_record(
         settings, week, stock, layer, sub, entry, stop, thesis, ext_ma60,
-        excluded, reason, detail, name, data_date,
+        excluded, reason, detail, name, data_date, late_entry,
     )
 
 
@@ -1053,13 +1057,19 @@ def picks_outcome_cmd(
     brief: bool = typer.Option(
         False, "--brief", help="WS-A3：只產上週 picks r+5 一頁 brief 進最新週報目錄（輸入包）"
     ),
+    week: str | None = typer.Option(
+        None,
+        "--week",
+        help="僅 --brief：指定評估週次（如 2026-W27），輸出改寫該週目錄的 pick_outcome_brief.md"
+        "（預設＝底帳中 r+5 已到期的最近一週，寫最新週報目錄）",
+    ),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
     """F1 PO2–PO4：分層命中率×α（vs 大盤＋vs 族群）＋偽陰性帳，產 research/pick_outcome/。"""
     from tw_screener.backtest.picks_outcome_runner import run_picks_brief, run_picks_outcome
 
     if brief:
-        run_picks_brief(settings)
+        run_picks_brief(settings, week)
         return
     run_picks_outcome(settings, exit_date, diff, hold_weeks)
 

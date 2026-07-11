@@ -26,8 +26,10 @@ console = Console()
 PICKS_BLOCK_BEGIN = "<!-- picks:begin -->"
 PICKS_BLOCK_END = "<!-- picks:end -->"
 
-_PICK_KEYS = {"stock", "layer", "sub", "entry", "stop", "thesis", "name", "ext_ma60"}
-_EXCLUDED_KEYS = {"stock", "reason", "detail", "name"}
+_PICK_KEYS = {
+    "stock", "layer", "sub", "entry", "stop", "thesis", "name", "ext_ma60", "late_entry",
+}
+_EXCLUDED_KEYS = {"stock", "reason", "detail", "name", "late_entry"}
 
 
 def _load_week_dir(settings: Path, week: str) -> tuple[Path, dict[str, Any]]:
@@ -138,8 +140,13 @@ def run_pick_record(
     detail: str | None,
     name: str | None,
     data_date: str | None,
+    late_entry: bool = False,
 ) -> None:
-    """記錄一列 pick（core/opportunity/pool）或剔除紀錄（--excluded --reason）。"""
+    """記錄一列 pick（core/opportunity/pool）或剔除紀錄（--excluded --reason）。
+
+    late_entry：明示覆寫「同週 data_date 一致性」檢查（WS-L）——本筆 data_date 與
+    該週既有列不同時，預設 raise；快取缺資料等致 entry 順延的已知情形才給 True。
+    """
     from tw_screener.report.pick_store import (
         core_extension_violation,
         upsert_excluded,
@@ -174,6 +181,7 @@ def run_pick_record(
                     "name": resolved_name,
                     "reason": reason,
                     "detail": detail,
+                    "late_entry": late_entry,
                 },
             )
             console.print(
@@ -210,6 +218,7 @@ def run_pick_record(
                     "stop": stop,
                     "ext_ma60_pct": resolved_ext,
                     "thesis_tag": thesis_tag,
+                    "late_entry": late_entry,
                 },
             )
             ext_txt = f"{resolved_ext:+.1f}%" if resolved_ext is not None else "—"
@@ -383,6 +392,7 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
                 "stop": _opt_str(raw.get("stop")),
                 "ext_ma60_pct": row_ext,
                 "thesis_tag": _opt_str(raw.get("thesis")),
+                "late_entry": bool(raw.get("late_entry", False)),
             }
         )
 
@@ -417,6 +427,7 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
                 "name": _opt_str(raw.get("name")) or found_name,
                 "reason": reason,
                 "detail": _opt_str(raw.get("detail")),
+                "late_entry": bool(raw.get("late_entry", False)),
             }
         )
 

@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import datetime as _dt
 from datetime import date
+from pathlib import Path
 
 import polars as pl
+import pytest
+import typer
+import yaml
 
 from tw_screener.backtest.picks_outcome import (
     compute_todate_returns,
@@ -17,9 +21,12 @@ from tw_screener.backtest.picks_outcome import (
     layer_summary,
     median_window_return,
     render_outcome_report,
+    render_weekly_brief,
     week_over_week_diff,
     weekly_layer_table,
 )
+from tw_screener.backtest.picks_outcome_runner import run_picks_brief
+from tw_screener.report.pick_store import upsert_pick
 
 
 def _price_series(stock_id: str, start: date, closes: list[float]) -> pl.DataFrame:
@@ -254,3 +261,130 @@ def test_render_outcome_report_sections():
     assert "偽陰性" in md
     assert "方向性" in md  # 樣本小警語
     assert "翻轉解剖" in md
+
+
+# ─── render_weekly_brief：WS-L 進場日欄＋late_entry 標記 ──────────────────────
+
+
+def _picks_returns_frame(rows: list[dict], with_late_col: bool = True) -> pl.DataFrame:
+    base = {
+        "week_tag": "2026-W27",
+        "stock_id": "X",
+        "name": "X",
+        "strategy_id": "core",
+        "hold_weeks": 1,
+        "screened_at": date(2026, 6, 30),
+        "entry_date": date(2026, 7, 1),
+        "exit_date": date(2026, 7, 8),
+        "entry_price": 100.0,
+        "exit_price": 110.0,
+        "return_pct": 10.0,
+        "market_return_pct": 2.0,
+        "excess_return_pct": 8.0,
+        "status": "matured",
+        "late_entry": False,
+    }
+    df = pl.DataFrame([{**base, **r} for r in rows])
+    return df if with_late_col else df.drop("late_entry")
+
+
+def test_render_weekly_brief_includes_entry_date_column():
+    picks_r = _picks_returns_frame([{"stock_id": "2610", "name": "華航"}])
+    md = render_weekly_brief(picks_r, pl.DataFrame(), "2026-W27", date(2026, 6, 30))
+    assert "進場日" in md
+    assert "2026-07-01" in md
+
+
+def test_render_weekly_brief_marks_late_entry_with_footnote():
+    picks_r = _picks_returns_frame([
+        {"stock_id": "2610", "name": "華航"},
+        {
+            "stock_id": "3293", "name": "鈊象",
+            "entry_date": date(2026, 7, 3), "late_entry": True,
+        },
+    ])
+    md = render_weekly_brief(picks_r, pl.DataFrame(), "2026-W27", date(2026, 6, 30))
+    assert "2026-07-03*" in md  # late 列加星號
+    assert "2026-07-01*" not in md  # 未標 late 的列不加星號
+    assert "late_entry" in md  # footnote 說明
+
+
+def test_render_weekly_brief_backward_compatible_without_late_entry_column():
+    """picks_r 沒有 late_entry 欄（舊呼叫端／未 join）仍可正常渲染，不炸、不冒出註腳。"""
+    picks_r = _picks_returns_frame([{"stock_id": "2610", "name": "華航"}], with_late_col=False)
+    md = render_weekly_brief(picks_r, pl.DataFrame(), "2026-W27", date(2026, 6, 30))
+    assert "進場日" in md
+    assert "late_entry" not in md
+
+
+def test_render_weekly_brief_missing_entry_date_shows_dash():
+    picks_r = _picks_returns_frame([{"stock_id": "2610", "name": "華航", "entry_date": None}])
+    md = render_weekly_brief(picks_r, pl.DataFrame(), "2026-W27", date(2026, 6, 30))
+    assert "| — |" in md
+
+
+# ─── run_picks_brief：WS-L --week 指定週重產 ──────────────────────────────────
+
+
+def _build_reports_and_cache(tmp_path: Path) -> tuple[Path, Path]:
+    """兩週（2026-W19／2026-W20）皆有到期 pick＋涵蓋兩週窗的合成日線快取。
+
+    回傳 (settings, reports_dir)。
+    """
+    reports = tmp_path / "reports"
+    cache_root = tmp_path / "cache"
+    twse_cache = cache_root / "twse"
+    twse_cache.mkdir(parents=True)
+
+    closes = [100.0 + i * 0.5 for i in range(30)]  # 30 個交易日，兩週 entry+hold 窗都夠長
+    _price_series("2610", date(2026, 6, 1), closes).write_parquet(
+        twse_cache / "daily_all_20260601.parquet"
+    )
+
+    def _row(week: str, data_date: date) -> dict:
+        return {
+            "week": week, "data_date": data_date, "stock_id": "2610", "name": "華航",
+            "layer": "core", "sub_industry": None, "entry_zone": None, "stop": None,
+            "ext_ma60_pct": None, "thesis_tag": None,
+        }
+
+    upsert_pick(reports / "2026-W19", _row("2026-W19", date(2026, 6, 1)))
+    upsert_pick(reports / "2026-W20", _row("2026-W20", date(2026, 6, 8)))
+
+    settings = tmp_path / "settings.yaml"
+    settings.write_text(
+        yaml.safe_dump(
+            {
+                "paths": {"reports_dir": str(reports), "cache_dir": str(cache_root)},
+                "backtest": {"picks": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return settings, reports
+
+
+def test_run_picks_brief_week_param_writes_to_specified_week_dir(tmp_path):
+    settings, reports = _build_reports_and_cache(tmp_path)
+    run_picks_brief(settings, week="2026-W19")
+    out = reports / "2026-W19" / "pick_outcome_brief.md"
+    assert out.exists()
+    content = out.read_text(encoding="utf-8")
+    assert "2026-W19" in content
+    assert "進場日" in content
+    assert not (reports / "2026-W20" / "pick_outcome_brief.md").exists()
+
+
+def test_run_picks_brief_default_unaffected_by_week_param(tmp_path):
+    """不指定 week＝現行預設行為：評估底帳中 r+5 已到期最近一週，寫最新週報目錄。"""
+    settings, reports = _build_reports_and_cache(tmp_path)
+    run_picks_brief(settings)
+    out = reports / "2026-W20" / "pick_outcome_brief.md"  # dirs[-1]，且 W20 也是到期最近一週
+    assert out.exists()
+    assert "2026-W20" in out.read_text(encoding="utf-8")
+
+
+def test_run_picks_brief_invalid_week_exits(tmp_path):
+    settings, _reports = _build_reports_and_cache(tmp_path)
+    with pytest.raises(typer.Exit):
+        run_picks_brief(settings, week="2026-W99")

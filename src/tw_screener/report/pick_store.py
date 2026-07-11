@@ -33,6 +33,7 @@ PICKS_SCHEMA: dict[str, type[pl.DataType]] = {
     "stop": pl.Utf8,           # 停損條件（自由文字，如「收盤破季線19.16」）
     "ext_ma60_pct": pl.Float64,  # 入選時距季線乖離%（主虧損剖面欄，§1.3）
     "thesis_tag": pl.Utf8,     # 入選論點短標（如「F 主升續勢」）
+    "late_entry": pl.Boolean,  # 明示覆寫同週 data_date 一致性檢查（WS-L；預設 False）
 }
 
 EXCLUDED_SCHEMA: dict[str, type[pl.DataType]] = {
@@ -42,6 +43,7 @@ EXCLUDED_SCHEMA: dict[str, type[pl.DataType]] = {
     "name": pl.Utf8,
     "reason": pl.Utf8,         # 剔除旗標類別（過熱／土洋對作／投信主導／低流動／轉弱…）
     "detail": pl.Utf8,         # 補充說明（可空）
+    "late_entry": pl.Boolean,  # 明示覆寫同週 data_date 一致性檢查（WS-L；預設 False）
 }
 
 PICKS_FILENAME = "picks.csv"
@@ -61,12 +63,16 @@ def _read_csv(path: Path, schema: dict[str, type[pl.DataType]]) -> pl.DataFrame:
         return pl.DataFrame(schema=schema)
     if "data_date" in df.columns and df.schema["data_date"] == pl.Utf8:
         df = df.with_columns(pl.col("data_date").str.to_date(strict=False))
-    return df.select(
+    out = df.select(
         [
             pl.col(c).cast(dt) if c in df.columns else pl.lit(None, dtype=dt).alias(c)
             for c, dt in schema.items()
         ]
     )
+    if "late_entry" in schema:
+        # 舊 CSV 無此欄／欄位存在但為空 → 補 False（新欄位不得讓歷史 CSV 爆炸）
+        out = out.with_columns(pl.col("late_entry").fill_null(False))
+    return out
 
 
 def load_week_picks(week_dir: Path) -> pl.DataFrame:
@@ -147,11 +153,38 @@ def _validate(row: dict, schema: dict[str, type[pl.DataType]]) -> None:
         raise ValueError("excluded 列必須有 reason（剔除旗標類別）")
 
 
+def _check_data_date_consistency(existing: pl.DataFrame, row: dict) -> None:
+    """同週 data_date 一致性（WS-L）：與同週其他列 data_date 不同 → 擋，除非 late_entry=True。
+
+    事故背景：W26 快取缺上櫃收盤致某檔 entry 順延、基準窗跟著位移，數字不可比——
+    ledger 本身當時 data_date 一致，本檢查是預防性衛生（擋未來手誤），非該事故的直接修復。
+    existing 已是單一週目錄下的既有列，故直接比對（不需另篩 week 欄）。
+    """
+    if existing.is_empty():
+        return
+    others = existing.filter(pl.col("stock_id") != row.get("stock_id"))
+    if others.is_empty():
+        return
+    ref_dates = others["data_date"].drop_nulls().unique().to_list()
+    if not ref_dates or row.get("data_date") in ref_dates:
+        return
+    if row.get("late_entry"):
+        return
+    raise ValueError(
+        f"{row.get('week')} 該週既有 data_date={ref_dates[0]}，"
+        f"本筆 {row.get('stock_id')} data_date={row.get('data_date')} 不一致"
+        "——快取缺資料等致 entry 順延時，用 late_entry=True 明示覆寫"
+    )
+
+
 def _upsert(
     week_dir: Path, row: dict, schema: dict[str, type[pl.DataType]], filename: str
 ) -> pl.DataFrame:
     _validate(row, schema)
+    if "late_entry" in schema:
+        row = {**row, "late_entry": bool(row.get("late_entry") or False)}
     existing = _read_csv(week_dir / filename, schema)
+    _check_data_date_consistency(existing, row)
     new = pl.DataFrame([{c: row.get(c) for c in schema}], schema=schema)
     replaced = existing.filter(pl.col("stock_id") == row["stock_id"]).height
     if replaced:

@@ -393,6 +393,13 @@ def _rate(v: object) -> str:
     return f"{float(v):.0%}" if isinstance(v, (int, float)) else "—"
 
 
+def _entry_date_cell(entry_date: object, late: bool) -> str:
+    """WS-L：進場日欄值；late_entry=True → 加 `*`（footnote 見呼叫端）。"""
+    if not isinstance(entry_date, date):
+        return "—"
+    return f"{entry_date}*" if late else str(entry_date)
+
+
 def _layer_label(layer: str | None) -> str:
     return _LAYER_LABEL.get(layer or "", layer or "—")
 
@@ -550,7 +557,9 @@ def render_weekly_brief(
     """WS-A3 一頁 brief：上週 picks r+{h}／α／勝率＋excluded 偽陰性（進下週輸入包）。
 
     picks_r／excluded_r＝compute_forward_returns(hold_weeks=1) 輸出（strategy_id 欄
-    分別承載 layer／剔除 reason）。只讀 matured 列；無到期樣本 → 誠實標註不編數字。
+    分別承載 layer／剔除 reason），可選帶 late_entry 欄（bool，來自 pick_store 底帳，
+    WS-L）——picks 表「進場日」欄值後加 `*` 並附註腳，標出基準窗與同週其他列不同步的列。
+    只讀 matured 列；無到期樣本 → 誠實標註不編數字。
     """
     lines = [
         f"# 上週 picks 短櫃（{week}・r+{horizon_td}）",
@@ -585,19 +594,30 @@ def render_weekly_brief(
         f"- 勝率（絕對）**{win}/{n}**・勝過大盤 **{beat}/{n}**・"
         f"平均 r+{horizon_td} **{avg_r:+.2f}%**・平均 α **{avg_a:+.2f}pp**。",
         "",
-        "| 層 | 股票 | r+5 | 大盤 | α |",
-        "|---|---|---|---|---|",
+        "| 層 | 股票 | 進場日 | r+5 | 大盤 | α |",
+        "|---|---|---|---|---|---|",
     ]
     order = {"core": 0, "opportunity": 1, "pool": 2}
     ordered = valid.with_columns(
         pl.col("strategy_id").replace_strict(order, default=9).alias("_o")
     ).sort("_o", "excess_return_pct", descending=[False, True])
+    has_late = "late_entry" in ordered.columns
+    any_late = False
     for r in ordered.iter_rows(named=True):
+        late = bool(r.get("late_entry")) if has_late else False
+        any_late = any_late or late
         lines.append(
             f"| {_layer_label(r['strategy_id'])} | {r['stock_id']} {r['name'] or ''} "
+            f"| {_entry_date_cell(r['entry_date'], late)} "
             f"| {_pct(r['return_pct'])} | {_pct(r['market_return_pct'])} "
             f"| {_pct(r['excess_return_pct'])} |"
         )
+    if any_late:
+        lines += [
+            "",
+            "> `*`＝該檔 late_entry（快取缺資料等致 entry 順延，基準窗與同週其他列不同步、"
+            "數字不可比）。",
+        ]
 
     lines += ["", "## excluded 偽陰性（同窗）", ""]
     evalid = (
