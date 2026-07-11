@@ -342,6 +342,9 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     n_splits: 4                  # walk-forward 測試段數（expanding、embargo=horizon+1）
     min_train_frac: 0.4          # 首段訓練占比下限
     buckets: 5                   # 橫斷面分位桶數
+    inference: block_bootstrap   # WS-I 推論硬化：CI 新預設（週頻/日頻快照×前瞻窗重疊，Fisher-z 偏窄；docs/22 §7.2）
+    n_boot: 1000                 # moving-block bootstrap 重抽次數
+    seed: 42                     # bootstrap 亂數種子（deterministic，供機器等價/回歸重跑對表）
     output_dir: research/factor_lab
   rotation_efficacy:         # WS-C 輪動欄效度（make rotation-efficacy）：重建→對表→IC/lift
     horizons_td: [5, 10, 20]     # forward basket 檢驗窗（交易日）

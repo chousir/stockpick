@@ -9,9 +9,13 @@ import polars as pl
 import pytest
 
 from tw_screener.backtest.factor_lab import (
+    _stride_dates,
+    bootstrap_mean_ci,
     bucket_table,
     evaluate,
     grid_scan,
+    inference_footer,
+    moving_block_bootstrap_ci,
     residual_ic,
     walk_forward_splits,
 )
@@ -171,3 +175,85 @@ def test_grid_scan_train_test_separation() -> None:
     total = panel.height
     for r in out.iter_rows(named=True):
         assert r["train_n"] + r["test_n"] < total
+
+
+# ── WS-I：moving-block bootstrap 推論硬化 ───────────────────────────────────
+
+
+def test_moving_block_bootstrap_ci_deterministic_and_block_structured() -> None:
+    """同 seed 決定性；重抽序列可切成長度=block_len 的連續段，段內值全來自原序列相鄰位置。"""
+    values = [float(i) for i in range(200)]  # 平移可辨識序列：values[i] == i
+    seen: list[list[float]] = []
+
+    def _record(seq: list[float]) -> float:
+        seen.append(list(seq))
+        return sum(seq) / len(seq)
+
+    ci1 = moving_block_bootstrap_ci(values, block_len=10, n_boot=50, seed=7, stat=_record)
+    ci2 = moving_block_bootstrap_ci(values, block_len=10, n_boot=50, seed=7, stat=_record)
+    assert ci1 == ci2  # 同 seed 全 deterministic
+
+    assert len(seen) == 100  # 兩次呼叫各 50 次重抽都被記錄
+    for seq in seen:
+        assert len(seq) == 200  # 200/10 整除，無截斷邊界
+        for start in range(0, 200, 10):
+            block = seq[start : start + 10]
+            diffs = [b - a for a, b in zip(block, block[1:])]
+            assert diffs == [1.0] * 9  # 塊內連續遞增 1 ＝來自原序列連續段
+
+
+def test_moving_block_bootstrap_wider_than_iid_under_autocorrelation() -> None:
+    """強自相關序列：block bootstrap 保留依賴結構，CI 寬度應大於（誤當獨立的）iid bootstrap。"""
+    rng = random.Random(99)
+    t = 300
+    x = [rng.gauss(0, 1)]
+    for _ in range(t - 1):
+        x.append(0.9 * x[-1] + rng.gauss(0, 0.3))  # AR(1)，rho=0.9 強自相關
+    block_lo, block_hi = moving_block_bootstrap_ci(x, block_len=21, n_boot=500, seed=3)
+    iid_lo, iid_hi = bootstrap_mean_ci(x, n_boot=500, seed=3)
+    assert block_lo is not None and iid_lo is not None
+    assert (block_hi - block_lo) > (iid_hi - iid_lo)
+
+
+def test_moving_block_bootstrap_thin_sample_none() -> None:
+    assert moving_block_bootstrap_ci([1.0] * 5, block_len=3, n_boot=100, seed=1) == (None, None)
+
+
+def test_nonoverlap_stride_selects_correct_dates() -> None:
+    """30 日、horizon=10 → 非重疊子樣本取日 0/10/20（索引，含第一天）。"""
+    ds = _dates(30)
+    picked = _stride_dates(ds, 10)
+    assert picked == [ds[0], ds[10], ds[20]]
+
+
+def test_inference_footer_is_exactly_three_lines() -> None:
+    lines = inference_footer(
+        sample_span="2025-01-10~2026-07-09",
+        regime_dist="regime 標籤未附（WS-H 前）＝2025-01~2026-07 多頭偏",
+        method_desc="moving-block bootstrap（block=21td・B=1000・seed=42）",
+        membership_desc="今日 concepts.yaml（非 point-in-time）",
+    )
+    assert len(lines) == 3
+    assert all(isinstance(line, str) and line.startswith("- ") for line in lines)
+
+
+def test_evaluate_ws_i_fields_present_and_pooled_unchanged() -> None:
+    """evaluate() 回傳新欄存在；pooled 舊欄數值不變（機器等價，只加欄不改值）。"""
+    panel = _panel(beta=-0.5, n_days=120, n_stocks=40)
+    rep = evaluate(panel, "factor", horizon=5, target="y", n_splits=3)
+
+    # 舊欄數值不變（同 test_evaluate_detects_negative_ic_with_ci 的斷言）
+    row = rep.pooled.row(0, named=True)
+    assert row["ic"] < -0.2
+    assert row["ci_hi"] < 0
+    assert row["n"] == panel.height
+    assert rep.consistent_sign is True
+    assert rep.splits.height == 3
+
+    # 新欄存在且方向與 pooled 一致（強訊號，per-date mean 也應顯著負）
+    assert rep.mean_daily_ic is not None and rep.mean_daily_ic < -0.2
+    bs_lo, bs_hi = rep.bs_ci
+    assert bs_lo is not None and bs_hi is not None and bs_hi < 0
+    assert rep.nonoverlap.get("n_dates", 0) >= 1
+    assert {"method", "B", "L", "seed", "T", "span"} <= set(rep.inference_meta)
+    assert rep.inference_meta["method"] == "block_bootstrap"

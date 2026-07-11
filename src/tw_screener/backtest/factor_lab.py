@@ -56,6 +56,11 @@ class FactorReport:
     buckets: pl.DataFrame       # bucket / n / median / mean / win_rate
     residual: pl.DataFrame = field(default_factory=pl.DataFrame)  # controls 偏相關
     controls: tuple[str, ...] = ()
+    # ── WS-I 推論硬化（moving-block bootstrap CI；docs/22 §7.2 誠實帳的修正）──
+    mean_daily_ic: float | None = None                        # per-date IC 等權 mean（A 法）
+    bs_ci: tuple[float | None, float | None] = (None, None)    # moving-block bootstrap CI95（B 法）
+    nonoverlap: dict = field(default_factory=dict)             # {ic,ci_lo,ci_hi,n_dates}（D 法）
+    inference_meta: dict = field(default_factory=dict)         # {method,B,L,seed,T,span}
 
     @property
     def consistent_sign(self) -> bool | None:
@@ -202,6 +207,57 @@ def bucket_table(
     )
 
 
+def daily_ic_series(df: pl.DataFrame, factor: str, target: str) -> list[tuple[date, float]]:
+    """每交易日橫斷面 Spearman IC（WS-I A 法）：該日有效樣本 <10 檔跳過該日。
+
+    回 [(date, ic), ...] 依日期升冪；點估計（dates 等權 mean）由呼叫端算——
+    這裡只給序列，供 bootstrap／未來 debug 共用同一份底料。
+    """
+    if df.is_empty() or not {factor, target, "date"}.issubset(df.columns):
+        return []
+    clean = df.drop_nulls([factor, target])
+    sizes = clean.group_by("date").agg(pl.len().alias("_n"))
+    keep = sizes.filter(pl.col("_n") >= 10)["date"].to_list()
+    if not keep:
+        return []
+    thick = clean.filter(pl.col("date").is_in(keep))
+    ranked = _rank_within_date(thick, [factor, target])
+    ic_df = (
+        ranked.group_by("date")
+        .agg(pl.corr(f"_rk_{factor}", f"_rk_{target}").alias("ic"))
+        .drop_nulls("ic")
+        .sort("date")
+    )
+    return list(zip(ic_df["date"].to_list(), ic_df["ic"].to_list(), strict=True))
+
+
+def _stride_dates(dates: Sequence[date], stride: int) -> list[date]:
+    """非重疊 stride 抽樣（WS-I D 法）：唯一日期升冪排序，每隔 stride 天取一天（含第一天）。"""
+    uniq = sorted(set(dates))
+    if stride < 1:
+        return uniq
+    return uniq[::stride]
+
+
+def nonoverlap_ic(df: pl.DataFrame, factor: str, target: str, horizon: int) -> dict:
+    """非重疊子樣本（stride=horizon）pooled Spearman IC＋Fisher CI（WS-I D 法）。
+
+    相鄰觀測間隔 ≥horizon 交易日 → 前瞻窗不重疊 → Fisher-z 常態假設近似成立，
+    與 moving-block bootstrap（B 法）互為交叉檢驗。回 {ic,ci_lo,ci_hi,n_dates}
+    （資料不足 → 全 None／0，如實標註不臆造）。
+    """
+    empty: dict = {"ic": None, "ci_lo": None, "ci_hi": None, "n_dates": 0}
+    if df.is_empty() or not {factor, target, "date"}.issubset(df.columns):
+        return empty
+    picked = _stride_dates(df["date"].to_list(), horizon)
+    if not picked:
+        return empty
+    sub = df.filter(pl.col("date").is_in(picked)).drop_nulls([factor, target])
+    ic, n = spearman(sub, factor, target)
+    lo, hi = fisher_ci(ic, n) if ic is not None else (None, None)
+    return {"ic": ic, "ci_lo": lo, "ci_hi": hi, "n_dates": len(picked)}
+
+
 def evaluate(
     df: pl.DataFrame,
     factor: str | pl.Expr,
@@ -212,16 +268,26 @@ def evaluate(
     n_splits: int = 4,
     min_train_frac: float = 0.4,
     embargo_td: int | None = None,
+    inference: str = "block_bootstrap",
+    n_boot: int = 1000,
+    seed: int = 42,
+    block_td: int | None = None,
 ) -> FactorReport:
-    """統一因子評估（模組 docstring 的 1–4 全套）。
+    """統一因子評估（模組 docstring 的 1–4 全套＋WS-I 推論硬化）。
 
     Args:
         df: 面板形資料（需含 date 與 factor/target/controls 欄）。
         factor: 欄名或 pl.Expr（Expr 需 .alias 命名）。
-        horizon: 前瞻窗（交易日）；決定預設 target 與 embargo。
+        horizon: 前瞻窗（交易日）；決定預設 target、embargo 與 bootstrap 塊長。
         target: 預設 f"alpha{horizon}"（面板超額欄）。
         controls: 殘差 IC 的控制欄（如 ["ma60_dist_pct"]）。
         embargo_td: 預設 horizon+1（前瞻窗跨界滲漏的最小隔離）。
+        inference: CI 推論法，預設 "block_bootstrap"（WS-I 新預設，修正週頻/日頻
+            快照×前瞻窗重疊下 Fisher-z 偏窄，見 docs/22 §7.2）。pooled 欄的
+            Fisher-z 恆算（對照連續性）；傳其他值只跳過 bootstrap 計算，不崩潰。
+        n_boot: moving-block bootstrap 重抽次數。
+        seed: bootstrap 亂數種子（同 seed 全 deterministic）。
+        block_td: bootstrap 塊長（交易日）；None → max(horizon+1, 2)。
     """
     target = target or f"alpha{horizon}"
     if isinstance(factor, pl.Expr):
@@ -236,9 +302,29 @@ def evaluate(
             factor=str(factor), horizon=horizon, target=target,
             pooled=empty_ic, splits=pl.DataFrame(), buckets=pl.DataFrame(),
             controls=tuple(controls),
+            inference_meta={
+                "method": inference, "B": n_boot, "L": 0, "seed": seed, "T": 0, "span": None,
+            },
         )
     base = df.drop_nulls([factor, target])
     pooled = pl.DataFrame([_ic_row(base, factor, target)])
+
+    block_len = block_td if block_td is not None else max(horizon + 1, 2)
+    daily = daily_ic_series(base, factor, target)
+    mean_daily_ic: float | None = None
+    bs_ci: tuple[float | None, float | None] = (None, None)
+    if inference == "block_bootstrap" and daily:
+        ic_values = [v for _, v in daily]
+        mean_daily_ic = _mean(ic_values)
+        bs_ci = moving_block_bootstrap_ci(
+            ic_values, block_len=block_len, n_boot=n_boot, seed=seed
+        )
+    nonoverlap = nonoverlap_ic(base, factor, target, horizon)
+    span = f"{daily[0][0]}~{daily[-1][0]}" if daily else None
+    inference_meta = {
+        "method": inference, "B": n_boot, "L": block_len, "seed": seed,
+        "T": len(daily), "span": span,
+    }
 
     emb = (horizon + 1) if embargo_td is None else embargo_td
     splits = walk_forward_splits(
@@ -270,6 +356,10 @@ def evaluate(
         buckets=bucket_table(base, factor, target, buckets=buckets),
         residual=resid,
         controls=tuple(controls),
+        mean_daily_ic=mean_daily_ic,
+        bs_ci=bs_ci,
+        nonoverlap=nonoverlap,
+        inference_meta=inference_meta,
     )
 
 
@@ -348,8 +438,32 @@ def _fmt(v: object, nd: int = 3) -> str:
     return f"{float(v):+.{nd}f}" if isinstance(v, (int, float)) else "—"
 
 
-def render_report_md(rep: FactorReport, note: str = "") -> list[str]:
-    """FactorReport → markdown 段落（pooled＋walk-forward＋分桶＋殘差，全表帶 n/CI）。"""
+def inference_footer(
+    sample_span: str, regime_dist: str, method_desc: str, membership_desc: str
+) -> list[str]:
+    """固定三行 footer（WS-I F 法）：樣本期間＋regime 分布／推論方法／membership 處理。
+
+    每張結果表尾接（render_report_md 自動呼叫）；供未來其他報表沿用同一誠實揭露格式。
+    """
+    return [
+        f"- 樣本期間：{sample_span}；regime 分布：{regime_dist}。",
+        f"- 推論方法：{method_desc}。",
+        f"- membership 處理：{membership_desc}。",
+    ]
+
+
+def render_report_md(
+    rep: FactorReport,
+    note: str = "",
+    regime_dist: str = "regime 標籤未附（WS-H 前）＝2025-01~2026-07 多頭偏",
+    membership_desc: str = "今日 concepts.yaml（非 point-in-time）",
+) -> list[str]:
+    """FactorReport → markdown 段落（pooled＋bootstrap CI＋walk-forward＋分桶＋殘差＋footer）。
+
+    WS-I：pooled 列沿用 Fisher-z（對照連續性）；新增 per-date IC mean 的
+    moving-block bootstrap CI95（新預設推論）與非重疊子樣本 Fisher CI（交叉檢驗）；
+    表尾固定接三行誠實揭露 footer（inference_footer，見 docs/22 §7.2 動機）。
+    """
     lines = [f"### `{rep.factor}` → `{rep.target}`（r+{rep.horizon}）{note}", ""]
     if rep.pooled.is_empty() or rep.pooled.row(0, named=True)["ic"] is None:
         lines.append("> 無法計算（樣本不足或欄缺）——如實標註。")
@@ -360,7 +474,30 @@ def render_report_md(rep: FactorReport, note: str = "") -> list[str]:
         p["ci_lo"] is not None and p["ci_lo"] < 0 < p["ci_hi"]
     )
     verdict = "**無證據（CI 跨 0）**" if crosses else "CI 不跨 0"
-    lines.append(f"- pooled IC **{_fmt(p['ic'])}** CI95 {ci}・n={p['n']}・{verdict}。")
+    lines.append(
+        f"- pooled IC **{_fmt(p['ic'])}** CI95 {ci}・n={p['n']}・{verdict}"
+        "（Fisher-z 解析近似，對照連續性；重疊窗下偏窄，見下）。"
+    )
+    meta = rep.inference_meta or {}
+    if rep.mean_daily_ic is not None:
+        bs_lo, bs_hi = rep.bs_ci
+        if bs_lo is not None and bs_hi is not None:
+            bs_txt = f"[{_fmt(bs_lo)}, {_fmt(bs_hi)}]"
+            bs_verdict = "**無證據（CI 跨 0）**" if bs_lo < 0 < bs_hi else "CI 不跨 0"
+        else:
+            bs_txt, bs_verdict = "—", "T<10，無法重抽"
+        lines.append(
+            f"- per-date IC mean **{_fmt(rep.mean_daily_ic)}**（T={meta.get('T', 0)} 交易日"
+            f"等權）moving-block bootstrap CI95 {bs_txt}（L={meta.get('L')}td・"
+            f"B={meta.get('B')}・seed={meta.get('seed')}）・{bs_verdict}。"
+        )
+    nv = rep.nonoverlap or {}
+    if nv.get("ic") is not None:
+        nv_ci = f"[{_fmt(nv['ci_lo'])}, {_fmt(nv['ci_hi'])}]" if nv["ci_lo"] is not None else "—"
+        lines.append(
+            f"- 非重疊 stride={rep.horizon}td 子樣本 IC **{_fmt(nv['ic'])}** Fisher CI95 {nv_ci}"
+            f"・n_dates={nv['n_dates']}（觀測近似獨立，交叉檢驗）。"
+        )
     if not rep.residual.is_empty():
         r = rep.residual.row(0, named=True)
         rci = f"[{_fmt(r['ci_lo'])}, {_fmt(r['ci_hi'])}]" if r["ci_lo"] is not None else "—"
@@ -399,7 +536,61 @@ def render_report_md(rep: FactorReport, note: str = "") -> list[str]:
             ],
         ]
     lines.append("")
+    lines += inference_footer(
+        sample_span=meta.get("span") or "—（per-date IC 不可得，T<10）",
+        regime_dist=regime_dist,
+        method_desc=(
+            f"moving-block bootstrap（block={meta.get('L')}td・B={meta.get('B')}・"
+            f"seed={meta.get('seed')}）為 CI 預設；Fisher-z 僅供對照連續性"
+            "（重疊窗下偏窄，docs/22 §7.2）"
+        ),
+        membership_desc=membership_desc,
+    )
+    lines.append("")
     return lines
+
+
+def _mean(values: Sequence[float]) -> float:
+    return sum(values) / len(values)
+
+
+def moving_block_bootstrap_ci(
+    values: Sequence[float],
+    block_len: int,
+    n_boot: int = 1000,
+    seed: int = 42,
+    stat: Callable[[list[float]], float] = _mean,
+) -> tuple[float | None, float | None]:
+    """Moving-block bootstrap 百分位 CI（WS-I C 法・通用 helper，供 basket/laggard 表重用）。
+
+    對序列（按既定順序，通常＝日期升冪）重抽 ceil(T/L) 個長度 L 的區塊（起點
+    uniform∈[0, T-L]，區塊可重疊）、串接後截斷回長度 T，計 stat（預設 mean）；
+    重複 n_boot 次、CI＝percentile [2.5, 97.5]。純 python（無 numpy 依賴，鐵律 4）。
+
+    T<10 → (None, None)（重抽不出可信分布，誠實不給，門檻同 bootstrap_mean_ci）；
+    block_len ≥ T 時截斷至 T（單一區塊＝退化為對整段重抽，仍可跑不崩潰）。
+    """
+    import random as _random
+
+    clean = [v for v in values if v is not None and not math.isnan(v)]
+    t = len(clean)
+    if t < 10:
+        return None, None
+    length = max(1, min(block_len, t))
+    n_blocks = math.ceil(t / length)
+    max_start = t - length
+    rng = _random.Random(seed)
+    stats: list[float] = []
+    for _ in range(n_boot):
+        resampled: list[float] = []
+        for _ in range(n_blocks):
+            start = rng.randint(0, max_start)
+            resampled.extend(clean[start : start + length])
+        stats.append(stat(resampled[:t]))
+    stats.sort()
+    lo_i = int(n_boot * 0.025)
+    hi_i = int(n_boot * 0.975) - 1
+    return stats[lo_i], stats[hi_i]
 
 
 def bootstrap_mean_ci(

@@ -96,6 +96,9 @@ def run_factor_lab(settings: Path, out_dir: Path | None) -> None:
     n_splits = int(fl.get("n_splits", 4))
     min_train_frac = float(fl.get("min_train_frac", 0.4))
     buckets = int(fl.get("buckets", 5))
+    inference = str(fl.get("inference", "block_bootstrap"))
+    n_boot = int(fl.get("n_boot", 1000))
+    seed = int(fl.get("seed", 42))
     panel_path = Path(fl.get("panel_path", "research/panel/panel.parquet"))
     out = out_dir or Path(fl.get("output_dir", "research/factor_lab"))
     horizons = tuple(
@@ -110,7 +113,7 @@ def run_factor_lab(settings: Path, out_dir: Path | None) -> None:
         "# factor_lab 驗收（WS-B）",
         "",
         f"- 產出日：{date.today()}；n_splits={n_splits}、min_train_frac={min_train_frac}、"
-        f"buckets={buckets}。",
+        f"buckets={buckets}、inference={inference}（n_boot={n_boot}・seed={seed}，WS-I）。",
         "",
     ]
 
@@ -129,6 +132,7 @@ def run_factor_lab(settings: Path, out_dir: Path | None) -> None:
             rep = lab.evaluate(
                 sub, r["feature"], horizon=int(r["horizon_td"]),
                 target="excess_return_pct", n_splits=0,
+                inference=inference, n_boot=n_boot, seed=seed,
             )
             mine = rep.pooled.row(0, named=True)["ic"]
             delta = abs((mine or 0.0) - r["ic"]) if mine is not None else None
@@ -155,14 +159,18 @@ def run_factor_lab(settings: Path, out_dir: Path | None) -> None:
             lines.append("> W21–W25 r+20 無到期樣本——對表未執行。")
         else:
             bench_ok = True
-            lines += ["| feature | docs/19 | 本次 | CI95 | n | 判定 |", "|---|---|---|---|---|---|"]
+            lines += [
+                "| feature | docs/19 | 本次 | Fisher CI95 | bs_CI95(T)（WS-I） | n | 判定 |",
+                "|---|---|---|---|---|---|---|",
+            ]
             for feat, bench in _DOCS19_BENCH.items():
                 rep = lab.evaluate(
-                    sub19, feat, horizon=20, target="excess_return_pct", n_splits=0
+                    sub19, feat, horizon=20, target="excess_return_pct", n_splits=0,
+                    inference=inference, n_boot=n_boot, seed=seed,
                 )
                 p = rep.pooled.row(0, named=True)
                 if p["ic"] is None:
-                    lines.append(f"| {feat} | {bench:+.2f} | — | — | — | 無法計算 |")
+                    lines.append(f"| {feat} | {bench:+.2f} | — | — | — | — | 無法計算 |")
                     bench_ok = False
                     continue
                 ok = abs(p["ic"] - bench) <= 0.10 and (p["ic"] * bench > 0)
@@ -171,14 +179,22 @@ def run_factor_lab(settings: Path, out_dir: Path | None) -> None:
                     f"[{p['ci_lo']:+.2f}, {p['ci_hi']:+.2f}]"
                     if p["ci_lo"] is not None else "—"
                 )
+                bs_lo, bs_hi = rep.bs_ci
+                t_obs = rep.inference_meta.get("T", 0) if rep.inference_meta else 0
+                bs_col = (
+                    f"[{bs_lo:+.2f}, {bs_hi:+.2f}](T={t_obs})"
+                    if bs_lo is not None else f"—（T={t_obs}<10，無法重抽）"
+                )
                 lines.append(
-                    f"| {feat} | {bench:+.2f} | {p['ic']:+.3f} | {ci} | {p['n']} "
+                    f"| {feat} | {bench:+.2f} | {p['ic']:+.3f} | {ci} | {bs_col} | {p['n']} "
                     f"| {'✓ 同號±0.10' if ok else '✗ 超出'} |"
                 )
             lines += [
                 "",
                 "> 註：docs/19 撰寫時 r+20 僅 W21–W22 到期；本次樣本已多出後續到期週，"
-                "數值非逐位複現、同號且量級一致即判複現。",
+                "數值非逐位複現、同號且量級一致即判複現。判定欄仍依 Fisher CI（既有邏輯不動）；"
+                "bs_CI95 為 WS-I 新增對照欄，候選宇宙週頻樣本通常 T<10"
+                "（如實標「無法重抽」，不臆造）。",
                 "",
             ]
             console.print(f"  docs/19 對表：{'PASS' if bench_ok else 'FAIL'}")
@@ -203,6 +219,7 @@ def run_factor_lab(settings: Path, out_dir: Path | None) -> None:
             rep = lab.evaluate(
                 panel, feat, horizon=20, controls=ctrls,
                 buckets=buckets, n_splits=n_splits, min_train_frac=min_train_frac,
+                inference=inference, n_boot=n_boot, seed=seed,
             )
             lines += lab.render_report_md(rep)
             if not rep.splits.is_empty():
