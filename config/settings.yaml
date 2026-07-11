@@ -337,6 +337,7 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     reconcile_tol_pct: 0.5       # 核價抽查容差%（TWSE 兩端點交叉：STOCK_DAY 修訂 vs daily_all 快照）
     reconcile_pass_rate: 0.995   # 端點一致率低於此＝核價 FAIL（分歧＝快照未含盤後修訂，面板採修訂值）
     reconcile_samples: 10        # 核價抽查檔數
+    delisted_list: research/survivorship/delisted_2022.csv  # WS-J.3 官方下市清單（TWSE OpenAPI）；面板標 delisted=true；缺檔→全 False＋報告提示
     output_dir: research/panel
   factor_lab:                # WS-B 統一因子實驗台（make factor-lab）：IC/CI/walk-forward/殘差
     panel_path: research/panel/panel.parquet  # 面板來源（make build-panel 產物）

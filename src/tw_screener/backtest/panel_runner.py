@@ -102,6 +102,26 @@ def _load_regime_labels(path: Path) -> pl.DataFrame:
         return pl.DataFrame()
 
 
+def _load_delisted_ids(path: Path) -> list[str]:
+    """讀 WS-J.3 官方下市清單 csv（stock_id 欄）；缺檔/壞檔 → 空清單如實揭露未標。"""
+    if not path.exists():
+        return []
+    try:
+        return pl.read_csv(path, schema_overrides={"stock_id": pl.Utf8})["stock_id"].to_list()
+    except Exception as e:  # noqa: BLE001 — 清單壞不擋面板本體
+        console.print(f"[yellow]下市清單讀取失敗（{e}），delisted 全 False[/yellow]")
+        return []
+
+
+def apply_delisted_flag(panel: pl.DataFrame, delisted_ids: list[str]) -> pl.DataFrame:
+    """面板加 delisted 欄（WS-J.3）：官方下市清單成員＝True。
+
+    語義：True 列＝該股其後（或清單日）已下市——r+k 尾端 null 屬「下市給 null 不給 0」
+    邊界（playbook/20 §6.3），研究端可據此欄分離生存者。清單空＝全 False（未標非無）。
+    """
+    return panel.with_columns(pl.col("stock_id").is_in(delisted_ids).alias("delisted"))
+
+
 def _coverage_report_lines(panel: pl.DataFrame, otc_stock_ids: frozenset[str]) -> list[str]:
     """逐年覆蓋率表（籌碼/除息/融資/TDCC）＋基準口徑警語（build 報告用，純揭露不裁決）。"""
     if panel.is_empty():
@@ -236,6 +256,18 @@ def run_build_panel(settings: Path, out_dir: Path | None) -> None:
     if panel.is_empty():
         console.print("[red]面板為空——輸入資料異常[/red]")
         raise typer.Exit(1)
+
+    delisted_raw = pn.get("delisted_list")
+    delisted_ids = _load_delisted_ids(Path(str(delisted_raw))) if delisted_raw else []
+    panel = apply_delisted_flag(panel, delisted_ids)
+    n_delisted_in_panel = (
+        panel.filter(pl.col("delisted"))["stock_id"].n_unique() if delisted_ids else 0
+    )
+    console.print(
+        f"  delisted 標記：清單 {len(delisted_ids)} 檔、面板內有價者 {n_delisted_in_panel} 檔"
+        if delisted_ids
+        else "  delisted 標記：清單未產（research/survivorship/），全 False"
+    )
 
     out.mkdir(parents=True, exist_ok=True)
     pq = out / "panel.parquet"

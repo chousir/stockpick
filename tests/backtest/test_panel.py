@@ -296,3 +296,15 @@ def test_regime_join_by_date() -> None:
 def test_empty_input_returns_empty() -> None:
     assert build_price_panel(pl.DataFrame()).is_empty()
     assert panel_summary(pl.DataFrame()).is_empty()
+
+
+def test_apply_delisted_flag_marks_list_members_only() -> None:
+    """WS-J.3 delisted 欄：清單成員 True、其餘 False；空清單全 False（未標非無）。"""
+    from tw_screener.backtest.panel_runner import apply_delisted_flag
+
+    px = _px("2330", [100.0] * 4).vstack(_px("6423", [50.0] * 4))
+    panel = build_price_panel(px, horizons=(1,), ma_windows=(2,), vol_lookback=2)
+    flagged = apply_delisted_flag(panel, ["6423"])
+    assert flagged.filter(pl.col("stock_id") == "6423")["delisted"].all()
+    assert not flagged.filter(pl.col("stock_id") == "2330")["delisted"].any()
+    assert not apply_delisted_flag(panel, [])["delisted"].any()

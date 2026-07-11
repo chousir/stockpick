@@ -1017,6 +1017,19 @@ def backtest_flow_inflection_cmd(
     run_flow_inflection(settings, out_dir)
 
 
+@backtest_app.command("margin-factors")
+def backtest_margin_factors_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設 research/margin_factors）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """WS-K 籌碼因子首驗（融資減肥/大戶WoW/融資量比，docs/23 §3 預註冊，走 factor_lab）。"""
+    from tw_screener.backtest.margin_factors_runner import run_margin_factors
+
+    run_margin_factors(settings, out_dir)
+
+
 @backtest_app.command("diagnose")
 def backtest_diagnose_cmd(
     out_dir: Path | None = typer.Option(

@@ -1850,7 +1850,9 @@ class TWSEClient:
             logger.warning("ISIN 上櫃一覽表解析結果為空")
         return df
 
-    def fetch_stock_history(self, stock_id: str, months: int = 3) -> pl.DataFrame:
+    def fetch_stock_history(
+        self, stock_id: str, months: int = 3, anchor: date | None = None
+    ) -> pl.DataFrame:
         """
         抓單檔近 N 個月的 OHLCV 歷史，自動分派 TWSE / TPEX。
 
@@ -1858,21 +1860,26 @@ class TWSEClient:
         - 其餘走 TWSE `STOCK_DAY` 端點
         - 兩者共用 cache：stock_day_{stock_id}_{YYYYMM}.parquet（下游無感）
         - 兩者共用 schema：11 欄、單位皆為股 / 元（TPEX 抓回後 ×1000 對齊）
+        - anchor（WS-J.3）：從指定日期（而非今天）的當月往回走——下市股從今天走會
+          先踩 40+ 個空月觸發連 2 空月早停，永遠走不到它活著的月份；回補下市股
+          歷史時傳 anchor=下市日。
         """
         if stock_id in self._load_otc_ids():
             return self.fetch_stock_history_tpex(stock_id, months)
-        return self._fetch_stock_history_twse(stock_id, months)
+        return self._fetch_stock_history_twse(stock_id, months, anchor=anchor)
 
-    def _fetch_stock_history_twse(self, stock_id: str, months: int = 3) -> pl.DataFrame:
+    def _fetch_stock_history_twse(
+        self, stock_id: str, months: int = 3, anchor: date | None = None
+    ) -> pl.DataFrame:
         """
         TWSE 上市股 OHLCV 歷史（legacy STOCK_DAY 端點）。
         快取到 stock_day_{stock_id}_{YYYYMM}.parquet：
           - 過去月份永久快取（資料不再變動）
-          - 當月用 ttl_hours 過期（資料每日新增）
+          - 當月用 ttl_hours 過期（資料每日新增；anchor 為過去月時不涉當月）
         """
         _empty_schema = _STOCK_DAY_SCHEMA
-        today = date.today()
-        current_ym = today.strftime("%Y%m")
+        today = anchor or date.today()
+        current_ym = date.today().strftime("%Y%m")
 
         # Fast path：所有月份的 cache 都齊全 → 一次讀完，靜默回傳
         expected_files: list[Path] = []

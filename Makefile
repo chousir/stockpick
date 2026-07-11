@@ -1,7 +1,7 @@
 .PHONY: help init sync test test-unit lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history fetch-margin-history build-themes screen screen-all screen-dry doctor \
         group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
-        build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid flow-inflection \
+        build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid flow-inflection margin-factors \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check snapshot-week
 
@@ -144,6 +144,9 @@ laggard-grid:  ## WS-D 族群內強弱：2×2×位階 forward 報酬格（產 re
 
 flow-inflection:  ## WS-E 資金流 inflection 因子族首驗（產 research/flow_inflection/）
 	uv run tw-screener backtest flow-inflection
+
+margin-factors:  ## WS-K 籌碼因子首驗：融資減肥/大戶WoW/融資量比（docs/23 §3 預註冊，產 research/margin_factors/）
+	uv run tw-screener backtest margin-factors
 
 backtest-strategies:  ## 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤（規劃書 03 V1，產 research/strategy_backtest/）
 	uv run tw-screener backtest strategies

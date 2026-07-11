@@ -1874,3 +1874,28 @@ def test_load_margin_signals_skips_legacy_schema(tmp_path: Path):
     # 只剩本版那筆 2330；上櫃/舊 schema 都被略過
     assert out["stock_id"].to_list() == ["2330"]
     assert out["margin_balance"][0] == 31000
+
+
+def test_fetch_stock_history_anchor_walks_from_anchor_month(tmp_path: Path):
+    """WS-J.3 anchor：下市股從下市日當月往回走（非今天）——快取齊全時 fast-path 零打網。"""
+    client = TWSEClient(
+        base_url="https://test.invalid",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+    client._otc_ids = set()  # 避免 _load_otc_ids 觸發 ISIN 抓取
+    for ym in ("202205", "202206"):
+        pl.DataFrame(
+            {
+                "date": [date(int(ym[:4]), int(ym[4:]), 15)],
+                "stock_id": ["2456"],
+                "open": [10.0], "high": [10.0], "low": [10.0], "close": [10.0],
+                "trade_volume": [1000], "trade_value": [10000],
+                "change": [0.0], "transaction": [10], "name": ["奇力新"],
+            }
+        ).write_parquet(tmp_path / f"stock_day_2456_{ym}.parquet")
+    df = client.fetch_stock_history("2456", months=2, anchor=date(2022, 6, 20))
+    assert df["date"].min() == date(2022, 5, 15)
+    assert df["date"].max() == date(2022, 6, 15)
