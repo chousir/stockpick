@@ -13,8 +13,8 @@ paths:
 cache:
   retention:
     daily_days: 400          # 全市場日線：daily_/daily_all_/otc_daily_
-    institutional_days: 400  # 三大法人：institutional_/institutional_otc_
-    margin_days: 400         # 融資融券：margin_/margin_otc_
+    institutional_days: 1700 # 三大法人：institutional_/institutional_otc_（W28 二輪回補到 2022-01，窗必須蓋住回補資產）
+    margin_days: 1700        # 融資融券：margin_/margin_otc_（同上；≈2022-01 起 ~1653 日）
     valuation_days: 400      # 估值比：valuation_ratios_
     stock_day_keep_all: true # 個股月檔（stock_day_<sid>_）小、與候選回補相關，預設全留
 
