@@ -329,7 +329,8 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     brief_filename: pick_outcome_brief.md  # WS-A3 上週 r+5 brief 檔名（寫進最新週報目錄）
     output_dir: research/pick_outcome
   panel:                     # WS-A2 ground-truth 面板（make build-panel）：因子實驗台資料底盤
-    history_days: 300            # 載入日線快取的回看交易日數（≈13 個月）
+    history_days: 1220           # 載入日線快取的回看交易日數（W28 二輪：≈2021-08 起載入，含指標暖身）
+    panel_start: "2022-01-01"    # 面板輸出起日（指標算完後裁切；暖身段不輸出）——涵蓋 2022 空頭/2023 復甦/2024-25 多頭
     horizons_td: [5, 10, 20, 40] # 前瞻窗（交易日）；entry=次一交易日、未到期/下市=null
     ma_windows: [20, 60]         # 位階均線窗（ma{w}_dist_pct）
     vol_lookback: 20             # 量比回看窗（窗不足=null，不填 0）
@@ -346,6 +347,9 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     n_boot: 1000                 # moving-block bootstrap 重抽次數
     seed: 42                     # bootstrap 亂數種子（deterministic，供機器等價/回歸重跑對表）
     output_dir: research/factor_lab
+  regime_history:            # WS-H.3 regime 標籤歷史化（make regime-history）：V2 引擎逐日 as-of 重算
+    start: "2022-01-01"          # 標籤起日（與 panel_start 對齊）
+    output_path: research/panel/regime_labels.parquet  # date×regime 標籤（panel build 自動 join）
   rotation_efficacy:         # WS-C 輪動欄效度（make rotation-efficacy）：重建→對表→IC/lift
     horizons_td: [5, 10, 20]     # forward basket 檢驗窗（交易日）
     n_splits: 3                  # walk-forward 段數（週頻樣本 ~50 週，3 段夠粗）
