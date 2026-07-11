@@ -19,11 +19,23 @@ date × stock_id 面板，任何因子研究 join 一次即可取得前瞻報酬
   該日無法人資料 → null，不填 0）。
 - vol_ratio：今日量／前 vol_lookback 日均量（**窗不足 → null**；與 grouping 篩選層
   fill 0 的降級慣例不同——面板是 ground truth，缺就是缺）。
+- chip_coverage：該日「該股所屬市場段」（上市／上櫃，由 otc_stock_ids 判定，未提供
+  → 全視為上市）三大法人資料**有無發布**（非該股個股有無資料）；=False 的列
+  foreign/trust/dealer_net 強制 null（區分「該市場段未發布」vs「淨買超 0」）。
+- div_coverage：現金股利還原覆蓋範圍（起日＝dividends 聯集 min(ex_date)；無股利輸入
+  → 全 False）；False 的列 r{h} 若窗內跨除息日則**未還原**（系統性低估）。
+- margin_balance_lots：融資餘額（張，Float64；僅上市——OTC 與無資料日一律 null，不填 0）。
+- big_holder_pct/big_holder_1000_pct：TDCC 集保大戶占比（≥400／≥1000 張；僅 TDCC
+  資料日（週五）有值，其餘 null，不前補）。
+- regime：大盤 regime 標籤（純 date join；regime 輸入缺席／空 → 全 null）。
+- panel_start：所有指標於完整載入窗算完後、輸出前依此日期裁切（None → 不裁切）。
 
 純函式；IO（快取載入、parquet 落地、核價抽查取樣）由 panel_runner 負責。
 """
 
 from __future__ import annotations
+
+from datetime import date
 
 import polars as pl
 
@@ -89,6 +101,11 @@ def build_price_panel(
     horizons: tuple[int, ...] = (5, 10, 20, 40),
     ma_windows: tuple[int, ...] = (20, 60),
     vol_lookback: int = 20,
+    otc_stock_ids: frozenset[str] | None = None,
+    panel_start: date | None = None,
+    margin: pl.DataFrame | None = None,
+    tdcc: pl.DataFrame | None = None,
+    regime: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """組 ground-truth 面板（欄位約定見模組 docstring）。
 
@@ -100,6 +117,11 @@ def build_price_panel(
         horizons: 前瞻窗（交易日）。
         ma_windows: 位階均線窗。
         vol_lookback: 量比回看窗。
+        otc_stock_ids: 已知上櫃股清單（chip_coverage 市場段判定用；None/空 → 全視為上市）。
+        panel_start: 輸出裁切起日（None → 不裁切＝現行為）。
+        margin: 融資融券長表（date/stock_id/margin_balance，張；僅上市）。
+        tdcc: derive_big_holders() 輸出（data_date/stock_id/big_holder_pct/big_holder_1000_pct）。
+        regime: 大盤 regime 標籤（date/regime_label[/regime_score]；純 date join）。
 
     Returns:
         date × stock_id 面板；輸入空 → 空表。
@@ -159,18 +181,106 @@ def build_price_panel(
         *[(pl.col(f"r{h}") - pl.col(f"mkt_ew_r{h}")).alias(f"alpha{h}") for h in horizons]
     )
 
+    # 除息還原覆蓋：起日＝股利聯集 min(ex_date)；無股利輸入 → 全 False（如實揭露未還原範圍）
+    div_start = (
+        dividends["ex_date"].min()
+        if dividends is not None and not dividends.is_empty() and "ex_date" in dividends.columns
+        else None
+    )
+    panel = panel.with_columns(
+        (pl.col("date") >= div_start).alias("div_coverage")
+        if div_start is not None
+        else pl.lit(False).alias("div_coverage")
+    )
+
+    # 三大法人：市場段（otc_stock_ids 判定）＋ chip_coverage＝「該市場段當日有無發布」，
+    # 非該股個別有無資料——不覆蓋的市場段/日期，foreign/trust/dealer_net 強制 null。
+    otc_ids = list(otc_stock_ids) if otc_stock_ids else []
+    panel = panel.with_columns(
+        pl.when(pl.col("stock_id").is_in(otc_ids))
+        .then(pl.lit("otc"))
+        .otherwise(pl.lit("listed"))
+        .alias("_market")
+    )
     if institutional is not None and not institutional.is_empty():
         inst = (
             institutional.with_columns(pl.col("stock_id").cast(pl.Utf8))
             .select("date", "stock_id", "foreign_net", "trust_net", "dealer_net")
             .unique(subset=list(_ID_COLS), keep="first")
         )
-        panel = panel.join(inst, on=["date", "stock_id"], how="left")
+        covered = (
+            inst.with_columns(
+                pl.when(pl.col("stock_id").is_in(otc_ids))
+                .then(pl.lit("otc"))
+                .otherwise(pl.lit("listed"))
+                .alias("_market")
+            )
+            .select("date", "_market")
+            .unique()
+            .with_columns(pl.lit(True).alias("chip_coverage"))
+        )
+        panel = (
+            panel.join(inst, on=["date", "stock_id"], how="left")
+            .join(covered, on=["date", "_market"], how="left")
+            .with_columns(pl.col("chip_coverage").fill_null(value=False))
+        )
+        panel = panel.with_columns(
+            *[
+                pl.when(pl.col("chip_coverage")).then(pl.col(c)).otherwise(None).alias(c)
+                for c in ("foreign_net", "trust_net", "dealer_net")
+            ]
+        )
     else:
         panel = panel.with_columns(
             *[pl.lit(None, dtype=pl.Int64).alias(c)
-              for c in ("foreign_net", "trust_net", "dealer_net")]
+              for c in ("foreign_net", "trust_net", "dealer_net")],
+            pl.lit(False).alias("chip_coverage"),
         )
+    panel = panel.drop("_market")
+
+    margin_need = {"date", "stock_id", "margin_balance"}
+    if margin is not None and not margin.is_empty() and margin_need.issubset(margin.columns):
+        mg = (
+            margin.with_columns(pl.col("stock_id").cast(pl.Utf8))
+            .select(
+                "date",
+                "stock_id",
+                pl.col("margin_balance").cast(pl.Float64).alias("margin_balance_lots"),
+            )
+            .unique(subset=list(_ID_COLS), keep="first")
+        )
+        panel = panel.join(mg, on=["date", "stock_id"], how="left")
+    else:
+        panel = panel.with_columns(pl.lit(None, dtype=pl.Float64).alias("margin_balance_lots"))
+
+    tdcc_need = {"data_date", "stock_id", "big_holder_pct", "big_holder_1000_pct"}
+    if tdcc is not None and not tdcc.is_empty() and tdcc_need.issubset(tdcc.columns):
+        td = (
+            tdcc.with_columns(pl.col("stock_id").cast(pl.Utf8))
+            .select(
+                pl.col("data_date").alias("date"),
+                "stock_id",
+                "big_holder_pct",
+                "big_holder_1000_pct",
+            )
+            .unique(subset=["date", "stock_id"], keep="first")
+        )
+        panel = panel.join(td, on=["date", "stock_id"], how="left")
+    else:
+        panel = panel.with_columns(
+            pl.lit(None, dtype=pl.Float64).alias("big_holder_pct"),
+            pl.lit(None, dtype=pl.Float64).alias("big_holder_1000_pct"),
+        )
+
+    regime_need = {"date", "regime_label"}
+    if regime is not None and not regime.is_empty() and regime_need.issubset(regime.columns):
+        reg = (
+            regime.select(pl.col("date"), pl.col("regime_label").alias("regime"))
+            .unique(subset=["date"], keep="first")
+        )
+        panel = panel.join(reg, on="date", how="left")
+    else:
+        panel = panel.with_columns(pl.lit(None, dtype=pl.Utf8).alias("regime"))
 
     if membership is not None and not membership.is_empty():
         first_sub = membership.group_by("stock_id", maintain_order=True).agg(
@@ -179,6 +289,10 @@ def build_price_panel(
         panel = panel.join(first_sub, on="stock_id", how="left")
     else:
         panel = panel.with_columns(pl.lit(None, dtype=pl.Utf8).alias("sub_industry"))
+
+    # 輸出裁切：指標已在完整載入窗（含暖身段）算完，這裡只切輸出範圍，不影響任何指標值
+    if panel_start is not None:
+        panel = panel.filter(pl.col("date") >= panel_start)
 
     return panel.sort("stock_id", "date")
 
@@ -203,6 +317,8 @@ def panel_summary(panel: pl.DataFrame, horizons: tuple[int, ...] = (5, 10, 20, 4
         *(f"r{h}" for h in horizons),
         "ma20_dist_pct", "ma60_dist_pct", "vol_ratio",
         "foreign_net", "trust_net", "dealer_net",
+        "chip_coverage", "div_coverage",
+        "margin_balance_lots", "big_holder_pct", "big_holder_1000_pct", "regime",
     ]
     for c in check_cols:
         if c in panel.columns:

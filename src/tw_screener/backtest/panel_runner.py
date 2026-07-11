@@ -1,7 +1,8 @@
-"""ground-truth 面板編排（WS-A2；自 cli.py 薄殼呼叫）。
+"""ground-truth 面板編排（WS-A2＋WS-H.2/K.1；自 cli.py 薄殼呼叫）。
 
-載入 日線/除息/三大法人 快取＋concepts.yaml 次產業 → panel 純函式 →
-research/panel/panel.parquet＋build 報告＋核價抽查（vs 該週 Goodinfo screen_result 收盤）。
+載入 日線/除息/三大法人/融資融券/TDCC 集保/regime 標籤 快取＋concepts.yaml 次產業 →
+panel 純函式（panel_start 裁切＋chip/div_coverage 旗標）→ research/panel/panel.parquet
+＋build 報告（含逐年覆蓋率段）＋核價抽查（vs 該週 Goodinfo screen_result 收盤）。
 CLI 只保留參數解析。
 """
 
@@ -18,22 +19,128 @@ from rich.console import Console
 console = Console()
 
 
-def _load_institutional_all(cache_dir: Path) -> pl.DataFrame:
-    """讀全部 institutional_*.parquet（含 _otc_）→ 法人日淨額長表（無檔回空表）。"""
+def _load_institutional_all(cache_dir: Path) -> tuple[pl.DataFrame, frozenset[str]]:
+    """讀全部 institutional_*.parquet（含 _otc_）→ 法人日淨額長表 ＋ OTC 股清單（無檔回空）。
+
+    OTC 股清單＝曾出現在 institutional_otc_*.parquet 的 stock_id 聯集——chip_coverage
+    市場段判定用；不另開資料源，沿用既有法人快取的檔名切分（minimal path）。
+    """
     files = sorted(cache_dir.glob("institutional_*.parquet"))
     if not files:
-        return pl.DataFrame()
+        return pl.DataFrame(), frozenset()
     need = ["date", "stock_id", "foreign_net", "trust_net", "dealer_net", "total_net"]
     frames = []
     for f in files:
         try:
-            lf = pl.scan_parquet(f).select(need)
+            lf = pl.scan_parquet(f).select(need).with_columns(
+                pl.lit("_otc_" in f.name).alias("_is_otc")
+            )
             frames.append(lf)
         except Exception as e:  # noqa: BLE001 — 單日法人檔壞掉不擋面板
             console.print(f"[yellow]法人快取 {f.name} 讀取失敗（{e}），跳過[/yellow]")
     if not frames:
+        return pl.DataFrame(), frozenset()
+    merged = pl.concat(frames, how="vertical_relaxed").collect()
+    otc_ids = frozenset(merged.filter(pl.col("_is_otc"))["stock_id"].unique().to_list())
+    return merged.drop("_is_otc"), otc_ids
+
+
+def _load_margin_all(cache_dir: Path) -> pl.DataFrame:
+    """讀全部 margin_*.parquet（僅上市；排除舊版 margin_otc_/5 欄遺留檔）→ 融資融券長表。
+
+    schema 防禦同 twse.py load_margin_signals：排除欄位不符本版 _MARGIN_SCHEMA 的舊快取，
+    避免 concat 衝突（無檔／全不符回空表，呼叫端降級為 margin_balance_lots 全 null）。
+    """
+    need = ["date", "stock_id", "margin_balance"]
+    files = sorted(
+        f for f in cache_dir.glob("margin_*.parquet") if not f.name.startswith("margin_otc_")
+    )
+    if not files:
         return pl.DataFrame()
-    return pl.concat(frames, how="vertical_relaxed").collect()
+    frames = []
+    for f in files:
+        try:
+            df = pl.read_parquet(f)
+        except Exception as e:  # noqa: BLE001 — 單日融資檔壞掉不擋面板
+            console.print(f"[yellow]融資快取 {f.name} 讀取失敗（{e}），跳過[/yellow]")
+            continue
+        if set(need).issubset(df.columns):
+            frames.append(df.select(need))
+        else:
+            console.print(f"[yellow]略過 schema 不符的舊版融資快取 {f.name}[/yellow]")
+    if not frames:
+        return pl.DataFrame()
+    return pl.concat(frames, how="vertical_relaxed")
+
+
+def _load_tdcc_all(cache_dir: Path) -> pl.DataFrame:
+    """讀全部 tdcc_distribution_*.parquet（原始級距長表）→ derive_big_holders() 週度大戶占比。"""
+    from tw_screener.data.tdcc import derive_big_holders
+
+    files = sorted(cache_dir.glob("tdcc_distribution_*.parquet"))
+    if not files:
+        return pl.DataFrame()
+    frames = []
+    for f in files:
+        try:
+            frames.append(pl.read_parquet(f))
+        except Exception as e:  # noqa: BLE001 — 單週 TDCC 檔壞掉不擋面板
+            console.print(f"[yellow]TDCC 快取 {f.name} 讀取失敗（{e}），跳過[/yellow]")
+    if not frames:
+        return pl.DataFrame()
+    return derive_big_holders(pl.concat(frames, how="vertical_relaxed"))
+
+
+def _load_regime_labels(path: Path) -> pl.DataFrame:
+    """讀 regime_labels.parquet（WS-H.3 另一模組產出）；不存在／讀失敗 → 空表如實揭露未產。"""
+    if not path.exists():
+        return pl.DataFrame()
+    try:
+        return pl.read_parquet(path)
+    except Exception as e:  # noqa: BLE001 — 檔壞不擋面板本體
+        console.print(f"[yellow]regime 標籤讀取失敗（{e}），視同未產[/yellow]")
+        return pl.DataFrame()
+
+
+def _coverage_report_lines(panel: pl.DataFrame, otc_stock_ids: frozenset[str]) -> list[str]:
+    """逐年覆蓋率表（籌碼/除息/融資/TDCC）＋基準口徑警語（build 報告用，純揭露不裁決）。"""
+    if panel.is_empty():
+        return ["> 面板為空，無覆蓋率可報。"]
+    p = panel.with_columns(
+        pl.col("date").dt.year().alias("_year"),
+        pl.when(pl.col("stock_id").is_in(list(otc_stock_ids)))
+        .then(pl.lit("otc"))
+        .otherwise(pl.lit("listed"))
+        .alias("_market"),
+    )
+    lines = [
+        "| 年 | 面板列數 | 宇宙檔數 | chip_coverage(上市) | chip_coverage(上櫃) "
+        "| margin join(僅上市) | TDCC 週數 | div_coverage |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    def _rate(s: pl.Series) -> str:
+        m = s.mean()
+        return f"{float(m):.1%}" if isinstance(m, (int, float)) else "—"
+
+    for y in sorted(p["_year"].unique().to_list()):
+        yp = p.filter(pl.col("_year") == y)
+        listed = yp.filter(pl.col("_market") == "listed")
+        otc = yp.filter(pl.col("_market") == "otc")
+        chip_listed = _rate(listed["chip_coverage"]) if listed.height else "—"
+        chip_otc = _rate(otc["chip_coverage"]) if otc.height else "—"
+        margin_rate = _rate(listed["margin_balance_lots"].is_not_null()) if listed.height else "—"
+        tdcc_weeks = yp.filter(pl.col("big_holder_pct").is_not_null())["date"].n_unique()
+        div_rate = _rate(yp["div_coverage"])
+        lines.append(
+            f"| {y} | {yp.height} | {yp['stock_id'].n_unique()} | {chip_listed} | {chip_otc} "
+            f"| {margin_rate} | {tdcc_weeks} | {div_rate} |"
+        )
+    lines += [
+        "",
+        "> **基準口徑警語**：2022-2024 宇宙＝次產業成員回補（今日 concepts）、2025+ 為全市場快照"
+        "——mkt_ew 等權基準在兩段的宇宙口徑不同，跨段比較 alpha 要看此段。",
+    ]
+    return lines
 
 
 def _goodinfo_close_reference(reports_dir: Path) -> pl.DataFrame:
@@ -81,6 +188,10 @@ def run_build_panel(settings: Path, out_dir: Path | None) -> None:
     out = out_dir or Path(pn.get("output_dir", "research/panel"))
     cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
     reports_dir = Path(cfg["paths"]["reports_dir"])
+    panel_start_raw = pn.get("panel_start")
+    panel_start = date.fromisoformat(str(panel_start_raw)) if panel_start_raw else None
+    regime_path_raw = cfg.get("backtest", {}).get("regime_history", {}).get("output_path")
+    regime_path = Path(regime_path_raw) if regime_path_raw else None
 
     console.print(f"[bold]載入日線快取（近 {history_days} 交易日、三來源）...[/bold]")
     # 面板優先序（與生產 load 預設相反）：STOCK_DAY 月檔＝事後修訂的官方歷史，
@@ -95,12 +206,19 @@ def run_build_panel(settings: Path, out_dir: Path | None) -> None:
         raise typer.Exit(1)
     since = price["date"].min()
     dividends = load_recent_dividends(cache_dir, since) if isinstance(since, date) else None
-    institutional = _load_institutional_all(cache_dir)
+    institutional, otc_stock_ids = _load_institutional_all(cache_dir)
+    margin = _load_margin_all(cache_dir)
+    tdcc = _load_tdcc_all(cache_dir)
+    regime = _load_regime_labels(regime_path) if regime_path is not None else pl.DataFrame()
     membership = list_subindustries()
 
     n_inst = institutional.height if not institutional.is_empty() else 0
     n_div = dividends.height if dividends is not None and not dividends.is_empty() else 0
-    console.print(f"  價格 {price.height} 列・法人 {n_inst} 列・除息 {n_div} 筆")
+    console.print(
+        f"  價格 {price.height} 列・法人 {n_inst} 列（OTC {len(otc_stock_ids)} 檔）・"
+        f"除息 {n_div} 筆・融資 {margin.height} 列・TDCC {tdcc.height} 檔・"
+        f"regime {regime.height} 列"
+    )
     panel = build_price_panel(
         price,
         dividends=dividends,
@@ -109,6 +227,11 @@ def run_build_panel(settings: Path, out_dir: Path | None) -> None:
         horizons=horizons,
         ma_windows=ma_windows,
         vol_lookback=vol_lookback,
+        otc_stock_ids=otc_stock_ids,
+        panel_start=panel_start,
+        margin=margin,
+        tdcc=tdcc,
+        regime=regime,
     )
     if panel.is_empty():
         console.print("[red]面板為空——輸入資料異常[/red]")
@@ -175,6 +298,15 @@ def run_build_panel(settings: Path, out_dir: Path | None) -> None:
         "|---|---|",
         *[f"| {r['metric']} | {r['value']} |" for r in summary.iter_rows(named=True)],
         "",
+        "## 覆蓋率（逐年；WS-H.2/K.1）",
+        "",
+        *_coverage_report_lines(panel, otc_stock_ids),
+        "",
+    ]
+    if regime_path is None or regime.is_empty():
+        lines.append("> regime 標籤未產（先跑 make regime-history）。")
+        lines.append("")
+    lines += [
         "## 核價抽查（主：TWSE 兩獨立端點交叉；面板＝STOCK_DAY 修訂值、ref＝daily_all 快照）",
         "",
     ]

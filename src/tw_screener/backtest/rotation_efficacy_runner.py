@@ -118,7 +118,7 @@ def run_rotation_efficacy(settings: Path, out_dir: Path | None) -> None:
     panel = pl.read_parquet(panel_path)
     price = panel.select("date", "stock_id", "close", "volume")
     membership = list_subindustries()
-    institutional = _load_institutional_all(cache_dir)
+    institutional, _ = _load_institutional_all(cache_dir)  # OTC 清單僅 panel build 用
     if membership.is_empty() or institutional.is_empty():
         console.print("[red]缺次產業成員或法人快取[/red]")
         raise typer.Exit(1)

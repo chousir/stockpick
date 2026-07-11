@@ -163,6 +163,136 @@ def test_reconcile_close_diff() -> None:
     assert recon.row(1, named=True)["within_tol"]
 
 
+def test_panel_start_crops_output_but_keeps_warmup_computed() -> None:
+    """panel_start 只裁切輸出範圍；指標仍在完整（含暖身段）窗上算——
+    裁切日首日 ma60_dist 非 null（若裁切發生在指標計算前，暖身段被砍、此值必為 null）。"""
+    days = [date(2026, 1, 5) + timedelta(days=i) for i in range(70)]
+    closes = [100.0 + i * 0.5 for i in range(70)]
+    px = pl.DataFrame(
+        {"date": days, "stock_id": ["2330"] * 70, "close": closes, "volume": [1000.0] * 70}
+    )
+    start = days[62]  # 裁切日在第 60 根之後 → 完整窗下 ma60 已可算
+    panel_full = build_price_panel(px, horizons=(1,), ma_windows=(60,), vol_lookback=2)
+    panel_cropped = build_price_panel(
+        px, horizons=(1,), ma_windows=(60,), vol_lookback=2, panel_start=start
+    )
+    assert panel_cropped["date"].min() == start
+    assert panel_cropped.height == panel_full.filter(pl.col("date") >= start).height
+    first_row = panel_cropped.sort("date").row(0, named=True)
+    full_row = panel_full.filter(pl.col("date") == start).row(0, named=True)
+    assert first_row["ma60_dist_pct"] is not None
+    assert first_row["ma60_dist_pct"] == pytest.approx(full_row["ma60_dist_pct"])
+
+
+def test_panel_start_absent_equals_current_behavior() -> None:
+    """panel_start 缺席（None，預設）→ 輸出與不傳這個參數完全等價（既有行為不變）。"""
+    px = _px("2330", [100.0, 102.0, 101.0, 105.0, 108.0])
+    baseline = build_price_panel(px, horizons=(1,), ma_windows=(3,), vol_lookback=2)
+    explicit_none = build_price_panel(
+        px, horizons=(1,), ma_windows=(3,), vol_lookback=2, panel_start=None
+    )
+    assert baseline.equals(explicit_none)
+
+
+def test_chip_coverage_market_segment_and_null_out() -> None:
+    """chip_coverage＝該日「該市場段」（otc_stock_ids 判定）有無發布法人資料；上市/上櫃互不影響；
+    False 的列 foreign/trust/dealer_net 強制 null（區分「該市場段未發布」vs「淨買超 0」）。"""
+    listed, otc = "2330", "5388"
+    px = pl.concat([_px(listed, [100.0, 101.0, 102.0]), _px(otc, [50.0, 51.0, 52.0])])
+    inst = pl.DataFrame(
+        {
+            "date": [_DAYS[0], _DAYS[0], _DAYS[1], _DAYS[1], _DAYS[2]],
+            "stock_id": [listed, otc, listed, otc, listed],  # day2：OTC 市場段整段缺席
+            "foreign_net": [100, 200, 110, 210, 120],
+            "trust_net": [10, 20, 11, 21, 12],
+            "dealer_net": [1, 2, 1, 2, 1],
+        }
+    )
+    panel = build_price_panel(
+        px,
+        institutional=inst,
+        otc_stock_ids=frozenset({otc}),
+        horizons=(1,),
+        ma_windows=(2,),
+        vol_lookback=2,
+    )
+    day2 = panel.filter(pl.col("date") == _DAYS[2])
+    otc_day2 = day2.filter(pl.col("stock_id") == otc).row(0, named=True)
+    listed_day2 = day2.filter(pl.col("stock_id") == listed).row(0, named=True)
+    assert otc_day2["chip_coverage"] is False
+    assert otc_day2["foreign_net"] is None and otc_day2["trust_net"] is None
+    assert listed_day2["chip_coverage"] is True  # 上市股不受 OTC 缺席影響
+    assert listed_day2["foreign_net"] == 120
+
+    day0_otc = panel.filter(
+        (pl.col("date") == _DAYS[0]) & (pl.col("stock_id") == otc)
+    ).row(0, named=True)
+    assert day0_otc["chip_coverage"] is True
+    assert day0_otc["foreign_net"] == 200
+
+
+def test_div_coverage_boundary_from_min_ex_date() -> None:
+    """div_coverage 起日＝dividends 聯集 min(ex_date)；起日前 False、起日（含）後 True；
+    無股利輸入 → 全 False。"""
+    px = _px("2330", [100.0] * 5)
+    div = pl.DataFrame(
+        {
+            "stock_id": ["2330", "2330"],
+            "ex_date": [_DAYS[2], _DAYS[4]],
+            "cash_dividend": [1.0, 2.0],
+        }
+    )
+    panel = build_price_panel(px, dividends=div, horizons=(1,), ma_windows=(2,), vol_lookback=2)
+    cov = panel.sort("date")["div_coverage"].to_list()
+    assert cov == [False, False, True, True, True]  # 起日＝min(ex_date)＝_DAYS[2]
+
+    panel_no_div = build_price_panel(px, horizons=(1,), ma_windows=(2,), vol_lookback=2)
+    assert panel_no_div["div_coverage"].to_list() == [False] * 5
+
+
+def test_margin_and_tdcc_join_null_not_zero() -> None:
+    """margin_balance_lots／big_holder_pct：無資料日 null，不填 0（僅提供日有值）。"""
+    px = _px("2330", [100.0] * 4)
+    margin = pl.DataFrame({"date": [_DAYS[0]], "stock_id": ["2330"], "margin_balance": [1500]})
+    tdcc = pl.DataFrame(
+        {
+            "data_date": [_DAYS[1]],
+            "stock_id": ["2330"],
+            "big_holder_pct": [42.5],
+            "big_holder_1000_pct": [10.1],
+        }
+    )
+    panel = build_price_panel(
+        px, margin=margin, tdcc=tdcc, horizons=(1,), ma_windows=(2,), vol_lookback=2
+    )
+    p = panel.sort("date")
+    assert p["margin_balance_lots"].to_list() == [1500.0, None, None, None]
+    assert p["big_holder_pct"].to_list() == [None, 42.5, None, None]
+    assert p["big_holder_1000_pct"].to_list() == [None, 10.1, None, None]
+
+    panel_none = build_price_panel(px, horizons=(1,), ma_windows=(2,), vol_lookback=2)
+    assert panel_none["margin_balance_lots"].null_count() == panel_none.height
+    assert panel_none["big_holder_pct"].null_count() == panel_none.height
+
+
+def test_regime_join_by_date() -> None:
+    """regime：純 date join（輸入 regime_label 欄 → 面板 regime 欄）；輸入缺席 → 全 null。"""
+    px = _px("2330", [100.0] * 4)
+    regime = pl.DataFrame(
+        {
+            "date": [_DAYS[0], _DAYS[2]],
+            "regime_label": ["bull", "bear"],
+            "regime_score": [0.8, -0.5],
+        }
+    )
+    panel = build_price_panel(px, regime=regime, horizons=(1,), ma_windows=(2,), vol_lookback=2)
+    p = panel.sort("date")
+    assert p["regime"].to_list() == ["bull", None, "bear", None]
+
+    panel_none = build_price_panel(px, horizons=(1,), ma_windows=(2,), vol_lookback=2)
+    assert panel_none["regime"].null_count() == panel_none.height
+
+
 def test_empty_input_returns_empty() -> None:
     assert build_price_panel(pl.DataFrame()).is_empty()
     assert panel_summary(pl.DataFrame()).is_empty()
