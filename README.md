@@ -118,7 +118,7 @@ make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退�
 首次設定做完後，平時就這幾條（產出與貼 Claude 細節見上方「主流程」）：
 
 ```bash
-make week GROUP=defg                              # ①~⑩ 一鍵跑完（尾段 week-check 缺產物自動 WARNING）
+make week GROUP=defg                              # ①~⑪ 一鍵跑完（尾段 week-check 缺產物自動 WARNING＋pick-outcome-brief）
 # 貼給 Claude 的 6 類檔（全在 reports/YYYY-Www/，詳見上方主流程表）：
 #   group_analysis.md  sector_rotation.md  candidates_enriched.csv
 #   cp_candidates.md  holdings/watchlist_enriched.csv  screen_result_*.csv
@@ -158,7 +158,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 
 | 指令                                                     | 做什麼                                               | 何時用                               |
 | -------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------ |
-| `make week GROUP=defg`                                 | 完整週流程 ①~⑩                                     | **每週一次（主入口）**         |
+| `make week GROUP=defg`                                 | 完整週流程 ①~⑪                                     | **每週一次（主入口）**         |
 | `make pick-outcome`                                    | pick 閉環：分層命中率×α（vs 大盤＋族群）＋偽陰性帳 | 每季（pick 底帳變厚後）              |
 | `make dash-dev`                                        | 起 dashboard 開發伺服器（FastAPI:8000＋Vite:5173）   | 視覺化瀏覽本週報告（§13）           |
 
@@ -504,6 +504,9 @@ make typecheck   # mypy
 | [`docs/18-intra-sector-laggard-production.md`](./docs/18-intra-sector-laggard-production.md) | 族群內落後濾鏡生產化（冠軍 S+ 內 rs_subind<0 進場加分上線）                                                         |
 | [`docs/17-dashboard-spec.md`](./docs/17-dashboard-spec.md)                                   | **投資戰情室 Dashboard** 規劃書（讀 reports/ 的本機 HUD、M-Dash 拆解、API/頁面/Privacy 遮罩）                 |
 | [`docs/19-late-entry-launch-diagnosis.md`](./docs/19-late-entry-launch-diagnosis.md)         | 抓太晚＋漏起漲診斷（M-Diag1；`make diagnose`→延伸度曲線/漏抓五態雷達/金融斷點；根＝排序追高）                 |
+| [`docs/20-ranking-reform-ws5.md`](./docs/20-ranking-reform-ws5.md)                           | 排序改革 WS5：貼底揭露欄＋sector-wide 旗標降輪動＋次產業表 rotation 趨勢分/Rank 並列＋F2 +15% 校準協議         |
+| [`docs/21-etf-holdings-integration.md`](./docs/21-etf-holdings-integration.md)               | ETF 持股整合：holdings ETF 輕量列（asset_type/報酬追蹤）＋組合曝險手標 etf_exposure；ETF 不進個股 alpha 框架  |
+| [`docs/22-factor-lab-w28.md`](./docs/22-factor-lab-w28.md)                                   | W28 統一因子實驗台（WS-A~G 收官）：trend_score 唯一存活、inflection 族/ΔRank/退潮全否證、宇宙效應方法論        |
 | [`docs/proposals/`](./docs/proposals/00-index.md)                                            | 審查改善規劃書 01–05（效能技債/資料韌性/量化驗證閉環/架構瘦身/**選股有效性總改造 F1–F5**，皆已收官）        |
 | [`docs/99-troubleshooting.md`](./docs/99-troubleshooting.md)                                 | 常見問題與解法                                                                                                      |
 
