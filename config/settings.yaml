@@ -137,6 +137,9 @@ report:
       - pick.md                   # excluded.csv 不列：當週可能真無旗標剔除，缺檔合法
       - picks.csv
 
+snapshots:                        # WS-J.1 point-in-time 快照：凍結當週 concepts/watchlist/holdings/次產業宇宙成員
+  dir: data/snapshots             # 目的地根目錄（data/ 已在 .gitignore）；子目錄依週次 tag（如 2026-W28）
+
 near_flow:                        # 規劃書 05 F5（沿舊 06 NF1）：近端籌碼揭露欄——純揭露非 gate
                                   # （§1.4 實證：近端佔比單獨無判別力，不得當排序主判）
   min_lots: 1000                  # 法人 20 日買超 < 此張數 → 該邊不評（無「前段買很兇」可揭露）

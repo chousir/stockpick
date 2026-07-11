@@ -3,7 +3,7 @@
         group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
         build-panel factor-lab pick-outcome-brief rotation-efficacy laggard-grid flow-inflection \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
-        dash-install dash-dev dash-build dash dash-test week-check
+        dash-install dash-dev dash-build dash dash-test week-check snapshot-week
 
 .DEFAULT_GOAL := help
 
@@ -31,6 +31,7 @@ endif
 	-$(MAKE) rotation   # 先跑輪動（group 的 2.8 雷達要讀 sector_rotation.csv 並列；失敗不擋主流程）
 	-$(MAKE) cp-value-candidates   # 個股 CP 補漲候選＋三重濾網（group 的 7. 分析請求要讀 cp_candidates.md；失敗不擋）
 	$(MAKE) group
+	-$(MAKE) snapshot-week   # WS-J.1 point-in-time 快照：凍結本週 concepts/watchlist/holdings/宇宙成員（失敗不擋主流程）
 	$(MAKE) week-check   # 尾段產物完整性檢查（規劃書 05 F4）：上面容錯步驟若無聲失敗，這裡點名
 	-$(MAKE) pick-outcome-brief   # WS-A3 上週 picks r+5 回饋一頁（輸入包；失敗不擋主流程）
 
@@ -81,6 +82,9 @@ group:  ## 跑族群分析，產出 group_analysis.md
 
 week-check:  ## 產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（規劃書 05 F4；不擋流程）
 	uv run tw-screener report check
+
+snapshot-week:  ## WS-J.1 point-in-time 快照：凍結本週 concepts/watchlist/holdings/次產業宇宙成員到 data/snapshots/<週次>/
+	uv run tw-screener report snapshot
 
 # ─── 進階：偶爾手動 ──────────────────────────────────────────────────────────
 

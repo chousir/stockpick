@@ -997,6 +997,17 @@ def report_check_cmd(
     run_artifact_check(settings)
 
 
+@report_app.command("snapshot")
+def report_snapshot_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """WS-J.1：凍結當週 concepts/watchlist/holdings/次產業宇宙成員到 data/snapshots/<週次>/。"""
+    from tw_screener.report.snapshot import run_week_snapshot
+
+    out_dir = run_week_snapshot(settings)
+    console.print(f"[green]週快照輸出：[/green][bold]{out_dir}[/bold]")
+
+
 @picks_app.command("record")
 def picks_record_cmd(
     week: str = typer.Option(..., help="週次目錄名（如 2026-W27）"),
