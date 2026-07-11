@@ -190,8 +190,9 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make fetch-tdcc`                                      | TDCC 集保大戶持股比（week 已內含）                   | 大戶欄空值時單獨補                   |
 | `make fetch-twse`                                      | 增量抓日線/法人/月營收                               | 通常不必單獨跑（week 含）            |
 | `make fetch-stock STOCK_ID=2330`                       | 抓單檔完整資料                                       | 臨時看一檔沒快取的股                 |
-| `make fetch-institutional-history DAYS=20`             | 回補近 N 日法人                                      | 法人快取斷檔時                       |
-| `make backfill-universe-history`                       | 一次性回補全次產業成員日線（8-12 小時可續跑）        | 新環境冷啟動（§12）                 |
+| `make fetch-institutional-history DAYS=20`             | 回補近 N 日法人（上市 T86＋上櫃 3itrade_hedge，皆可回查歷史） | 法人快取斷檔時                 |
+| `make fetch-margin-history DAYS=20`                    | 回補近 N 日上市融資融券（舊版 MI_MARGN，可回查歷史） | 融資融券快取斷檔時                   |
+| `make backfill-universe-history`                       | 一次性回補全次產業成員日線（8-12 小時可續跑；`START=2022-01-01` 可指定起始月覆蓋 `MONTHS`） | 新環境冷啟動 / 面板延伸（§12）  |
 | `uv run tw-screener data prune-cache`                  | 依 settings.cache 保留窗清舊快取                     | 快取肥大時                           |
 | `make build-themes`                                    | 爬 Yahoo 概念股更新 concepts.yaml                    | 每月或新題材出現時（`DRY=1` 預演） |
 | `make audit-concepts`                                  | 清查 concepts.yaml 無價成員（不改檔）                | 久久檢查興櫃/下市/誤標               |

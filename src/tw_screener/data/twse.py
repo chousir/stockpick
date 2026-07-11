@@ -276,6 +276,72 @@ def _parse_margin(data: list[dict[str, Any]], trade_date: date) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=_MARGIN_SCHEMA)
 
 
+# 舊版 rwd/zh/marginTrading/MI_MARGN 端點（帶 date= 可回查歷史）的個股表格位置索引：
+# tables[0]=市場加總統計（非個股，略過）、tables[1]=逐股彙總。欄位含重複表頭（融資/融券皆有
+# 買進/賣出等同名欄，見 groups: 股票(2)+融資(6)+融券(6)+資券互抵(1)+註記(1)），故用位置索引
+# 而非欄名對映（2022 抓樣本已驗證，見規劃書 02 WS-K.1）。
+_MARGIN_HIST_COL = {
+    "stock_id": 0,
+    "name": 1,
+    "mb_prev": 5,
+    "mb": 6,
+    "sb_prev": 11,
+    "sb": 12,
+    "note": 15,
+}
+
+
+def _parse_margin_legacy(payload: dict[str, Any]) -> pl.DataFrame:
+    """解析舊版 MI_MARGN（rwd/zh/marginTrading，帶 date= 可回查歷史）JSON → 與 _MARGIN_SCHEMA 同構。
+
+    結構：{stat, date, tables:[市場加總統計, 逐股彙總]}。tables[1] 為逐股表，欄位用位置索引取
+    （見 _MARGIN_HIST_COL）；margin_chg/short_chg 定義（今日餘額－前日餘額）對齊 _parse_margin，
+    使回補資料與 fetch_margin 的日常累積可無縫合併、共用 margin_{date}.parquet 快取池。
+    非交易日（stat 非 OK，或 tables 不足 2 個，或個股表無資料）回空表。
+    """
+    if not payload or payload.get("stat") != "OK":
+        return pl.DataFrame(schema=_MARGIN_SCHEMA)
+    date_str: str = payload.get("date", "")
+    if not date_str or len(date_str) != 8:
+        logger.warning("MI_MARGN（舊版）回應缺 date 欄位，略過")
+        return pl.DataFrame(schema=_MARGIN_SCHEMA)
+    trade_date = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+
+    tables = payload.get("tables") or []
+    if len(tables) < 2 or not isinstance(tables[1], dict):
+        return pl.DataFrame(schema=_MARGIN_SCHEMA)
+    data_rows: list[list[Any]] = tables[1].get("data") or []
+    if not data_rows:
+        return pl.DataFrame(schema=_MARGIN_SCHEMA)
+
+    c = _MARGIN_HIST_COL
+    min_len = max(c.values()) + 1
+    rows = []
+    for r in data_rows:
+        if not r or len(r) < min_len:
+            continue
+        sid = str(r[c["stock_id"]]).strip()
+        if not sid:
+            continue
+        mb = _safe_int(r[c["mb"]])
+        mb_prev = _safe_int(r[c["mb_prev"]])
+        sb = _safe_int(r[c["sb"]])
+        sb_prev = _safe_int(r[c["sb_prev"]])
+        rows.append(
+            {
+                "date": trade_date,
+                "stock_id": sid,
+                "stock_name": str(r[c["name"]]).strip(),
+                "margin_balance": mb,
+                "margin_chg": mb - mb_prev,
+                "short_balance": sb,
+                "short_chg": sb - sb_prev,
+                "note": str(r[c["note"]]).strip(),
+            }
+        )
+    return pl.DataFrame(rows, schema=_MARGIN_SCHEMA)
+
+
 # 以下端點只放「路徑」（API 契約），host 由 settings 提供（tpex.base_url /
 # twse.legacy_base_url / twse.isin_base_url），client 以 f"{base}{PATH}" 組 URL。
 _TPEX_STOCK_DAY_PATH = "/www/zh-tw/afterTrading/tradingStock"
@@ -975,6 +1041,16 @@ def _months_back(base: date, n: int) -> date:
     return date(year, month, 1)
 
 
+def _months_from_start(today: date, start: date) -> int:
+    """換算「今天所在月」回推到「start 所在月（含）」的月數，供 --start 覆蓋 --months 用。
+
+    對齊 fetch_stock_history 的月份語意（n=0 為當月、n=months-1 為最遠月）：
+    months=1 代表 start 與 today 同月；跨年會正確進位。start 晚於 today 所在月 → 回傳 <1
+    （呼叫端應視為錯誤，不回補未來）。
+    """
+    return (today.year - start.year) * 12 + (today.month - start.month) + 1
+
+
 def filter_dividend_calendar(
     df: pl.DataFrame,
     today: date,
@@ -1250,9 +1326,9 @@ class TWSEClient:
 
         logger.info("fetch_institutional_history: 取得 {} 個交易日法人資料", collected)
 
-        # 順帶補抓上櫃法人（TPEX 只有最新一日，逐次累積）
+        # 順帶補抓上櫃法人（舊版 3itrade_hedge 可回查歷史，同 days，逐日累積、自癒 OTC 缺口）
         try:
-            self.fetch_otc_institutional()
+            self.fetch_otc_institutional_history(days=days)
         except Exception as e:  # noqa: BLE001 — 上櫃法人失敗不擋上市回補
             logger.warning("fetch_institutional_history: 上櫃法人抓取失敗 — {}", e)
 
@@ -1307,6 +1383,59 @@ class TWSEClient:
         else:
             logger.warning("MI_MARGN {} 回傳空資料（端點異常或非交易日）", date_str)
         return df
+
+    def fetch_margin_history(self, days: int = 20) -> pl.DataFrame:
+        """回補近 days 個交易日的上市融資融券（舊版 rwd/zh/marginTrading/MI_MARGN，帶 date=
+        可回查歷史），逐日存 margin_{date}.parquet（與 fetch_margin 同檔名慣例＝共用快取池，
+        analysis 端 load_margin_signals 可無縫合併日常累積與本次回補）。
+
+        僅上市（MI_MARGN 現況即如此；上櫃融資融券仍為缺口，同 fetch_margin docstring）。
+        從 latest_trading_date() 往回走日曆日：週末直接跳過（不打網），非交易日（stat 非 OK
+        或個股表為空）不計入 days，已有快取的日期直接讀檔（過去資料不再變動）。
+        """
+        latest = self.latest_trading_date()
+        if latest is None:
+            logger.warning("fetch_margin_history: 無法取得 trading_date，略過")
+            return pl.DataFrame(schema=_MARGIN_SCHEMA)
+
+        frames: list[pl.DataFrame] = []
+        collected = 0
+        steps = 0
+        max_lookback = days * 2 + 14  # 日曆日上限，避免連假時無限往回
+        cur = latest
+        while collected < days and steps < max_lookback:
+            steps += 1
+            if cur.weekday() >= 5:  # 週六/日無資料，不浪費請求
+                cur -= timedelta(days=1)
+                continue
+            date_str = cur.strftime("%Y%m%d")
+            cache_file = self.cache_dir / f"margin_{date_str}.parquet"
+            if cache_file.exists():
+                frames.append(load_parquet(cache_file))
+                collected += 1
+                cur -= timedelta(days=1)
+                continue
+            url = (
+                f"{self.legacy_base_url}/rwd/zh/marginTrading/MI_MARGN"
+                f"?date={date_str}&selectType=ALL&response=json"
+            )
+            df = _parse_margin_legacy(self._get_legacy(url))
+            if not df.is_empty():
+                save_parquet(df, cache_file)
+                frames.append(df)
+                collected += 1
+            else:
+                logger.info("MI_MARGN {} 無資料（非交易日 / 未發布），略過", date_str)
+            cur -= timedelta(days=1)
+
+        logger.info("fetch_margin_history: 取得 {} 個交易日融資融券資料", collected)
+        if not frames:
+            return pl.DataFrame(schema=_MARGIN_SCHEMA)
+        return (
+            pl.concat(frames)
+            .unique(subset=["date", "stock_id"])
+            .sort(["date", "stock_id"])
+        )
 
     def load_margin_signals(self, n_days: int = 6) -> pl.DataFrame:
         """純讀近 n_days 個交易日 margin_*.parquet，回最新日每股融資融券＋margin_chg_5d（不打網）。

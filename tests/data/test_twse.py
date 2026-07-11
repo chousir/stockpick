@@ -10,16 +10,19 @@ import pytest
 
 from tw_screener.data.cache import find_latest, is_fresh, load_parquet, save_parquet
 from tw_screener.data.twse import (
+    _MARGIN_SCHEMA,
     _TWSE_INDUSTRY_NAMES,
     TWSEClient,
     _clean_float,
     _clean_int,
     _months_back,
+    _months_from_start,
     _parse_daily_all,
     _parse_dividend_calendar,
     _parse_institutional,
     _parse_listed_industry,
     _parse_margin,
+    _parse_margin_legacy,
     _parse_revenue,
     _parse_stock_day,
     _parse_tpex_institutional,
@@ -1333,6 +1336,35 @@ def test_fetch_otc_institutional_cache_hit(tmp_path: Path):
     assert df.filter(pl.col("stock_id") == "6488")["foreign_net"][0] == 100
 
 
+def test_fetch_otc_institutional_history_cache_fast_path(tmp_path: Path, monkeypatch):
+    """已有快取涵蓋 days 個交易日 → fast-path 全讀檔，httpx.get 完全不打網（WS-H.2）。"""
+    import httpx as _httpx
+
+    # latest_trading_date = 2026-05-18（週一）；days=2 → 5/18、5/15（跳過 5/16、5/17 週末）
+    for d in (date(2026, 5, 18), date(2026, 5, 15)):
+        save_parquet(
+            pl.DataFrame({
+                "date": [d], "stock_id": ["6488"], "stock_name": ["環球晶"],
+                "foreign_net": [1], "trust_net": [0], "dealer_net": [0], "total_net": [1],
+            }),
+            tmp_path / f"institutional_otc_{d.strftime('%Y%m%d')}.parquet",
+        )
+    _seed_daily(tmp_path, date(2026, 5, 18))
+
+    def _boom(*a: object, **kw: object) -> None:
+        raise AssertionError("cache 已齊全，不該打網")
+
+    monkeypatch.setattr(_httpx, "get", _boom)
+
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    df = client.fetch_otc_institutional_history(days=2)
+    dates = sorted(str(d) for d in df["date"].unique().to_list())
+    assert dates == ["2026-05-15", "2026-05-18"]
+
+
 # ─── load_volume_history ──────────────────────────────────────────────────────
 
 
@@ -1663,6 +1695,72 @@ def test_parse_margin_safe_int_handles_blank():
     assert row["short_balance"] == 0 and row["short_chg"] == 0
 
 
+# ─── WS-K.1 融資融券歷史回補（舊版 rwd/zh/marginTrading/MI_MARGN）───────────────
+
+MARGIN_LEGACY_FIXTURE = FIXTURE_DIR / "margin_legacy.json"
+
+
+def _load_margin_legacy_fixture() -> dict:
+    import json
+    return json.loads(MARGIN_LEGACY_FIXTURE.read_text(encoding="utf-8"))
+
+
+def test_parse_margin_legacy_matches_schema():
+    """舊版 legacy MI_MARGN（tables 位置陣列）解析結果須與 _MARGIN_SCHEMA 同構（欄位/單位）。"""
+    df = _parse_margin_legacy(_load_margin_legacy_fixture())
+    assert df.columns == [
+        "date", "stock_id", "stock_name",
+        "margin_balance", "margin_chg", "short_balance", "short_chg", "note",
+    ]
+    for col_name, dtype in _MARGIN_SCHEMA.items():
+        assert df.schema[col_name] == dtype, f"{col_name} dtype 應為 {dtype}"
+    r = {x["stock_id"]: x for x in df.iter_rows(named=True)}
+    # 單位＝張（不除 1000）；chg = 今日餘額 − 前日餘額，定義對齊 OpenAPI 版 _parse_margin
+    assert r["1101"]["margin_balance"] == 6596 and r["1101"]["margin_chg"] == 45
+    assert r["1101"]["short_balance"] == 111 and r["1101"]["short_chg"] == 5
+    assert r["2317"]["margin_chg"] == 8414 and r["2317"]["short_chg"] == 171
+    assert r["2330"]["margin_balance"] == 26792 and r["2330"]["short_chg"] == -94
+    assert df["date"][0] == date(2022, 1, 5)
+
+
+def test_parse_margin_legacy_blank_fields_treated_as_zero():
+    """個股表中融券前日/今日餘額為空字串（無融券）→ 視為 0，不 crash。"""
+    df = _parse_margin_legacy(_load_margin_legacy_fixture())
+    row = df.filter(pl.col("stock_id") == "9999").row(0, named=True)
+    assert row["margin_balance"] == 100 and row["margin_chg"] == 100  # 前日空 → 0
+    assert row["short_balance"] == 0 and row["short_chg"] == 0
+
+
+def test_parse_margin_legacy_non_trading_day_empty():
+    """stat 非 OK（非交易日/查詢失敗）→ 回空表，不 crash。"""
+    assert _parse_margin_legacy({"stat": "查無資料", "date": "20220101", "tables": []}).is_empty()
+
+
+def test_parse_margin_legacy_missing_tables_empty():
+    payload = {"stat": "OK", "date": "20220105", "tables": [{"data": []}]}  # 只有 1 個 table
+    assert _parse_margin_legacy(payload).is_empty()
+
+
+def test_months_from_start_basic():
+    # 今天 2026-07-11，start 2022-01-01 → 回推到 2022-01（含）的月數
+    assert _months_from_start(date(2026, 7, 11), date(2022, 1, 1)) == 55
+
+
+def test_months_from_start_same_month_boundary():
+    # start 與 today 同月 → 只需當月，1 個月
+    assert _months_from_start(date(2026, 7, 11), date(2026, 7, 1)) == 1
+
+
+def test_months_from_start_cross_year():
+    # 跨年：2026-01 回推到 2025-12（含）→ 2 個月
+    assert _months_from_start(date(2026, 1, 15), date(2025, 12, 1)) == 2
+
+
+def test_months_from_start_future_start_invalid():
+    # start 晚於 today 所在月 → 回傳 <1，呼叫端（cli）應視為錯誤
+    assert _months_from_start(date(2026, 7, 11), date(2026, 8, 1)) < 1
+
+
 def _write_margin_day(cache_dir: Path, d: date, balance_2330: int) -> None:
     pl.DataFrame(
         {
@@ -1678,6 +1776,58 @@ def _margin_client(tmp_path: Path) -> TWSEClient:
         base_url="https://test.invalid", cache_dir=tmp_path,
         ttl_hours=6.0, user_agent="test", interval_sec=0.0,
     )
+
+
+def test_fetch_margin_history_reuses_cache(tmp_path: Path):
+    """已有快取的日期直接讀檔、不重打 legacy MI_MARGN（fast-path，WS-K.1）。"""
+    _seed_daily(tmp_path, date(2026, 5, 18))
+    _write_margin_day(tmp_path, date(2026, 5, 18), 31000)
+    client = _margin_client(tmp_path)
+    called: list[str] = []
+    client._get_legacy = lambda url: called.append(url) or {}  # type: ignore[method-assign]
+
+    df = client.fetch_margin_history(days=1)
+    assert called == [], "已有快取的日期不應重打 MI_MARGN"
+    assert not df.is_empty()
+    assert df.filter(pl.col("stock_id") == "2330")["margin_balance"][0] == 31000
+
+
+def test_fetch_margin_history_skips_weekends_and_writes_cache(tmp_path: Path):
+    """回補：週末跳過不打網、逐日存 margin_{date}.parquet，與 fetch_margin 共用檔名慣例。"""
+    import re
+
+    _seed_daily(tmp_path, date(2026, 5, 18))  # latest_trading_date = 2026-05-18（週一）
+    client = _margin_client(tmp_path)
+
+    called: list[str] = []
+
+    def fake_legacy(url: str) -> dict:
+        called.append(url)
+        m = re.search(r"date=(\d{8})", url)
+        assert m is not None
+        d = m.group(1)
+        return {
+            "stat": "OK", "date": d,
+            "tables": [
+                {"fields": [], "data": []},
+                {
+                    "fields": ["代號", "名稱", "買進", "賣出", "現金償還", "前日餘額", "今日餘額",
+                               "次一營業日限額", "買進", "賣出", "現券償還", "前日餘額", "今日餘額",
+                               "次一營業日限額", "資券互抵", "註記"],
+                    "data": [["2330", "台積電", "1", "1", "0", "100", "110", "999",
+                               "0", "0", "0", "5", "5", "999", "0", " "]],
+                },
+            ],
+        }
+
+    client._get_legacy = fake_legacy  # type: ignore[method-assign]
+
+    df = client.fetch_margin_history(days=2)
+    dates = sorted(str(d) for d in df["date"].unique().to_list())
+    assert dates == ["2026-05-15", "2026-05-18"]
+    assert not any("20260516" in u or "20260517" in u for u in called), "週末不該打網"
+    assert (tmp_path / "margin_20260518.parquet").exists()
+    assert (tmp_path / "margin_20260515.parquet").exists()
 
 
 def test_load_margin_signals_chg_5d(tmp_path: Path):

@@ -209,6 +209,25 @@ def data_fetch_institutional_history(
     console.print(f"[green]  上櫃：{n_otc} 個交易日、{len(df_otc)} 筆[/green]")
 
 
+@data_app.command("fetch-margin-history")
+def data_fetch_margin_history(
+    days: int = typer.Option(20, "--days", help="回補的交易日數，預設 20"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """回補近 N 個交易日的上市融資融券（舊版 MI_MARGN，帶 date= 可回查歷史）。
+
+    僅上市（現況即如此，上櫃融資融券仍為缺口）。缺日自動補、已快取的日跳過，
+    寫入與 fetch_margin 共用的 margin_{date}.parquet 快取池，load_margin_signals 可無縫合併。
+    """
+    from tw_screener.data.twse import create_client
+
+    client = create_client(settings)
+    console.print(f"[bold]回補近 {days} 個交易日上市融資融券（MI_MARGN）...[/bold]")
+    df = client.fetch_margin_history(days=days)
+    n_days = df["date"].n_unique() if not df.is_empty() else 0
+    console.print(f"[green]  上市：{n_days} 個交易日、{len(df)} 筆[/green]")
+
+
 @data_app.command("backfill-otc-history")
 def data_backfill_otc_history(
     months: int = typer.Option(13, "--months", help="每檔回補月數（13≈年線）"),
@@ -259,7 +278,16 @@ def data_backfill_otc_history(
 
 @data_app.command("backfill-universe-history")
 def data_backfill_universe_history(
-    months: int = typer.Option(13, "--months", help="每檔回補月數（13≈年線）"),
+    months: int = typer.Option(13, "--months", help="每檔回補月數（13≈年線）；與 --start 二擇一"),
+    start: str = typer.Option(
+        "",
+        "--start",
+        help=(
+            "指定回補起始月（YYYY-MM-DD）；有指定時覆蓋 --months，"
+            "換算為「今天回推到 start 當月（含）」的月數。"
+            "W28 二輪：面板延伸至 2022-01-01。"
+        ),
+    ),
     limit: int = typer.Option(0, "--limit", help="只跑前 N 檔（測試用；0=全部）"),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
@@ -268,14 +296,29 @@ def data_backfill_universe_history(
     為何需要：STOCK_DAY_ALL / otc_daily_all 都只能往未來累積、過去補不回（docs/02），
     rotation z 需 60+ 日、calibration 需 ~250 日。本指令對 concepts.yaml 全部次產業成員
     逐檔走 `fetch_stock_history`（自動分派 TWSE STOCK_DAY / TPEX tradingStock，限速 1 秒/請求），
-    把輪動籃子的歷史密度從「snapshot 累積」補成「~1 年」。
+    把輪動籃子的歷史密度從「snapshot 累積」補成「~1 年」。--start 可指定回補到更早的起始月
+    （如 factor-lab 二輪面板延伸），內部換算成 --months 後走同一套邏輯。
 
     優先補成員多的次產業（成員數由多到少排序、跨次產業去重）。過去月份永久快取——中斷重跑
     會自動跳過已完成的檔（fast path），天然可續跑。全量首跑約 8-12 小時，建議掛背景；
     之後每日 fetch-twse 累積即可，不需重跑。涵蓋上櫃成員，故為 backfill-otc-history 的超集。
     """
+    from datetime import date as _date
+
     from tw_screener.analysis.sector_universe import list_subindustries
-    from tw_screener.data.twse import create_client
+    from tw_screener.data.twse import _months_from_start, create_client
+
+    if start:
+        try:
+            start_date = _date.fromisoformat(start)
+        except ValueError:
+            console.print(f"[red]--start 格式錯誤（需 YYYY-MM-DD）：{start}[/red]")
+            raise typer.Exit(1) from None
+        months = _months_from_start(_date.today(), start_date)
+        if months < 1:
+            console.print(f"[red]--start {start} 晚於本月，無需回補[/red]")
+            raise typer.Exit(1)
+        console.print(f"[bold]--start {start} → 換算回補月數 {months}[/bold]")
 
     client = create_client(settings)
     members = list_subindustries()

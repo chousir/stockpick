@@ -1,5 +1,5 @@
 .PHONY: help init sync test test-unit lint typecheck fmt clean clean-cache deep-clean \
-        fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history build-themes screen screen-all screen-dry doctor \
+        fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history fetch-margin-history build-themes screen screen-all screen-dry doctor \
         group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
         build-panel factor-lab pick-outcome-brief rotation-efficacy laggard-grid flow-inflection \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
@@ -119,8 +119,11 @@ build-themes:  ## 爬 Yahoo 概念股 merge 進 config/concepts.yaml（DRY=1 只
 audit-concepts:  ## 清查 concepts.yaml 次產業無價成員（興櫃/下市/誤標；只報告不改檔）
 	uv run tw-screener sector universe --audit
 
-backfill-universe-history:  ## ⏳ 一次性回補全部次產業成員日線（上市+上櫃，~1500 檔×13 月，8-12 小時，可中斷續跑）
-	uv run tw-screener data backfill-universe-history --months $(or $(MONTHS),13)
+backfill-universe-history:  ## ⏳ 一次性回補全部次產業成員日線（上市+上櫃，~1500 檔×13 月，8-12 小時，可中斷續跑；START=2022-01-01 可指定起始月覆蓋 MONTHS）
+	uv run tw-screener data backfill-universe-history $(if $(START),--start $(START),--months $(or $(MONTHS),13))
+
+fetch-margin-history:  ## 回補近 N 個交易日上市融資融券（DAYS=20 可調，舊版 MI_MARGN 可回查歷史）
+	uv run tw-screener data fetch-margin-history --days $(or $(DAYS),20)
 
 # ─── 進階：研究軌／季度校準 ──────────────────────────────────────────────────
 
