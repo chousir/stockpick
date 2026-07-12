@@ -81,7 +81,7 @@ def test_is_stale(tmp_path: Path):
     f = make_fetcher(tmp_path)
     p = tmp_path / "old.html.gz"
     p.touch()
-    old_ts = time.time() - 2 * 86400  # 2 天前，必早於最近一個交易日盤後界線
+    old_ts = time.time() - 10 * 86400  # 10 天前——2 天在「假日+週末連休≥3 天」時晚於最近交易日盤後界線（2026-07-12 實際踩到），10 天蓋住任何連休
     os.utime(p, (old_ts, old_ts))
     assert not f._is_fresh(p)
 
@@ -222,7 +222,7 @@ def test_stale_cache_triggers_network(tmp_path: Path):
     url = "https://goodinfo.tw/tw/StockList.asp?stale=1"
 
     fetcher._write_cache(fetcher._cache_path(url), "<html>old</html>")
-    old_ts = time.time() - 2 * 86400
+    old_ts = time.time() - 10 * 86400  # 同上：2 天在長連休時不夠舊
     os.utime(fetcher._cache_path(url), (old_ts, old_ts))
 
     http_calls: list[str] = []

@@ -49,3 +49,9 @@
 錯誤信念：CI 不跨 0＋跨段同號就算存活（判準漏了效應量維度）。
 修正：大樣本評估一律加 |IC| 底線（flow_inflection min_effect_ic=0.03，未校準啟發式明標）；裁決三件套＝CI＋效應量＋跨段一致。
 落點：playbook/20 §6.5 原則已有，本次把它變成 runner 內建防線（flow_inflection_runner）；docs/22 §0 存活判準。
+
+## 2026-07-12 日期相依測試在長連休假紅
+現象：goodinfo test_is_stale／test_stale_cache_triggers_network 假設「2 天前必早於最近交易日盤後界線」；07-10（五）休市＋週末＝連 3 非交易日，週日跑測試時 2 天前的檔案仍新鮮（實作正確、測試日曆假設破）→ 全綠 suite 無故紅 2 條。
+錯誤信念：相對 time.time() 的偏移量只要「夠多天」就穩定；2 天看似夠。
+修正：涉及交易日界線的測試，偏移量要蓋住最長可能連休（取 10 天）；更優解＝直接用實作自身的界線函式構造時間戳（同檔 test_fresh_aligns_to_trading_day_boundary 即此法）。另：pipeline `make test | tail` 的出口碼是 tail 的——驗證步驟不可用 pipe 吞出口碼。
+落點：本條＋測試已修（tests/screener/goodinfo/test_fetcher.py）；尚未制度化其他日期相依測試的排查。
