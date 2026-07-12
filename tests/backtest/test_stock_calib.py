@@ -866,3 +866,93 @@ def test_render_laggard_filter_report_verdict():
     assert "升級" in md  # precision 增量＋賺賠不惡化 → 升級
     empty_md = render_laggard_filter_report(pl.DataFrame(), None, base, filt, "ambush", params, {})
     assert "無法分組" in empty_md
+
+
+# ── WS-H.4b regime 切片（signal_triggers / cp_regime_slice_section）──────────
+
+
+def test_signal_triggers_rebuilds_named_signal():
+    from tw_screener.backtest.stock_calib import signal_triggers
+
+    panel, _ = _scan_fixture()
+    trig = signal_triggers(
+        panel, "trust_flow_20d_z (z>1.0)", z_thresholds=(1.0,), volume_thresholds=(1.0,)
+    )
+    assert trig.height == 1 and trig["stock_id"][0] == "A"  # idx5 單一上穿
+    # 查無此名 → 空表不炸
+    none = signal_triggers(panel, "沒有這個訊號", z_thresholds=(1.0,))
+    assert none.is_empty()
+
+
+def test_cp_regime_slice_missing_labels_unlabeled_bucket():
+    from tw_screener.backtest.stock_calib import cp_regime_slice_section
+
+    panel, episodes = _scan_fixture()
+    scan = scan_stock_signals(
+        panel, episodes, z_thresholds=(1.0,), volume_thresholds=(1.0,),
+        position_low_pct=15.0, lead_window=5, occupy_days=5, z_min_periods=2,
+    )
+    empty_labels = pl.DataFrame(schema={"date": pl.Date, "regime_label": pl.Utf8})
+    section = cp_regime_slice_section(
+        panel, scan, episodes, empty_labels,
+        min_triggers=1, min_lift=1.0,
+        z_thresholds=(1.0,), volume_thresholds=(1.0,),
+        lead_window=5, occupy_days=5, z_min_periods=2,
+    )
+    text = "\n".join(section)
+    assert "## regime 切片（WS-H.4b・最佳因子" in text
+    assert "未標" in text  # regime 檔缺 → 全落未標桶照列
+    assert "樣本期間" in text  # inference_footer 三行
+
+
+def test_cp_regime_slice_no_qualified_factor_skips_honestly():
+    from tw_screener.backtest.stock_calib import cp_regime_slice_section
+
+    panel, episodes = _scan_fixture()
+    scan = scan_stock_signals(
+        panel, episodes, z_thresholds=(1.0,), volume_thresholds=(1.0,),
+        position_low_pct=15.0, lead_window=5, occupy_days=5, z_min_periods=2,
+    )
+    empty_labels = pl.DataFrame(schema={"date": pl.Date, "regime_label": pl.Utf8})
+    section = cp_regime_slice_section(
+        panel, scan, episodes, empty_labels,
+        min_triggers=1, min_lift=99.0,  # 無因子過門檻
+        z_thresholds=(1.0,), volume_thresholds=(1.0,),
+        lead_window=5, occupy_days=5, z_min_periods=2,
+    )
+    assert any("無主 lift 可切片" in ln for ln in section)
+
+
+def test_cp_report_with_regime_section_keeps_old_sections():
+    """回歸：CP 報告＋切片＝純增段——舊段落全數仍在（同 cp_calib_runner 的接法）。"""
+    from tw_screener.backtest.stock_calib import (
+        cp_regime_slice_section,
+        render_cp_calibration_report,
+    )
+
+    panel, episodes = _scan_fixture()
+    scan = scan_stock_signals(
+        panel, episodes, z_thresholds=(1.0,), volume_thresholds=(1.0,),
+        position_low_pct=15.0, lead_window=5, occupy_days=5, z_min_periods=2,
+    )
+    params = {"fwd_n_days": 20, "fwd_x_pct": 15.0, "cooldown_days": 5, "lead_window": 5}
+    report = render_cp_calibration_report(
+        scan, episodes, "L1 埋伏", "測試獵物", params, {"universe": "listed"},
+        min_triggers=1, min_lift=1.0,
+    )
+    empty_labels = pl.DataFrame(schema={"date": pl.Date, "regime_label": pl.Utf8})
+    full = report + "\n".join(
+        cp_regime_slice_section(
+            panel, scan, episodes, empty_labels,
+            min_triggers=1, min_lift=1.0,
+            z_thresholds=(1.0,), volume_thresholds=(1.0,),
+            lead_window=5, occupy_days=5, z_min_periods=2,
+        )
+    ) + "\n"
+    # 舊段落一個不少
+    assert "# 個股起漲事件回測校準 — L1 埋伏" in full
+    assert "## 訊號掃描" in full
+    assert "## 建議因子名單" in full
+    assert "統計力但書" in full
+    # 新段落接尾
+    assert "## regime 切片（WS-H.4b・最佳因子" in full

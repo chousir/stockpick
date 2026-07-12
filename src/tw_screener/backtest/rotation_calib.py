@@ -330,14 +330,19 @@ def evaluate_quadrants(
 
     Returns:
         {"forward": 每象限前瞻報酬統計, "entry": 進入「流入×未漲」觸發命中統計
-        （現行門檻＋⚡貼低精確變體）}；輸入不足回兩張空表。
+        （現行門檻＋⚡貼低精確變體）, "entry_triggers": 各變體 entry 觸發明細
+        （variant/sub_industry/date，WS-H.4b regime 切片重聚合用）}；輸入不足回空表。
     """
     import math  # noqa: F401 — is_finite 由 polars 提供，math 留給未來擴充
 
     from tw_screener.report.rotation_report import Q_COOL, Q_DISTRIBUTE, Q_NEXT, Q_TREND
 
     flow_col = f"net_flow_{long_window}d"
-    empty = {"forward": pl.DataFrame(), "entry": pl.DataFrame()}
+    empty = {
+        "forward": pl.DataFrame(),
+        "entry": pl.DataFrame(),
+        "entry_triggers": pl.DataFrame(),
+    }
     if flows.is_empty() or baskets.is_empty() or flow_col not in flows.columns:
         return empty
 
@@ -420,6 +425,7 @@ def evaluate_quadrants(
     forward = scored.group_by("quadrant").agg(aggs).sort("quadrant")
 
     entry_rows: list[dict] = []
+    trigger_frames: list[pl.DataFrame] = []
     if not episodes.is_empty():
         calendar = sorted(
             set(flows["date"].unique().to_list()) | set(episodes["start_date"].to_list())
@@ -441,8 +447,10 @@ def evaluate_quadrants(
             trig = q.filter(pl.col("_enter")).select(["sub_industry", "date"])
             stats = evaluate_triggers(trig, episodes, calendar, lead_window, occupy_days)
             entry_rows.append({"variant": label, **stats})
+            trigger_frames.append(trig.with_columns(pl.lit(label).alias("variant")))
     entry = pl.DataFrame(entry_rows) if entry_rows else pl.DataFrame()
-    return {"forward": forward, "entry": entry}
+    entry_triggers = pl.concat(trigger_frames) if trigger_frames else pl.DataFrame()
+    return {"forward": forward, "entry": entry, "entry_triggers": entry_triggers}
 
 
 def render_calibration_report(
@@ -592,3 +600,74 @@ def render_calibration_report(
         "",
     ]
     return "\n".join(lines)
+
+
+def entry_regime_slice_section(
+    entry_triggers: pl.DataFrame,
+    episodes: pl.DataFrame,
+    flows: pl.DataFrame,
+    regime_labels: pl.DataFrame,
+    lead_window: int = 15,
+    occupy_days: int = 15,
+    membership_desc: str = "今日 concepts.yaml（非 point-in-time）",
+) -> list[str]:
+    """WS-H.4b：「流入×未漲」entry 攔截的 regime 切片段落（純增段，接報告尾）。
+
+    事件日＝進入「流入×未漲」象限的 entry 觸發日（evaluate_quadrants 的 _enter 穿越日）；
+    按事件日 join regime 標籤分桶，逐桶重算命中率/lift（桶基率同步分桶重算）＋
+    bs_CI95（block=lead_window+1，日頻）。calendar/occupy 口徑與 evaluate_quadrants
+    的 entry 統計完全一致（同一份 evaluate_triggers 判定邏輯的事件級鏡射）。
+    regime_labels 空 → 事件全落「未標」桶照列不裁決；entry_triggers 空 → 段落誠實跳過。
+    """
+    from tw_screener.backtest.factor_lab import inference_footer
+    from tw_screener.backtest.regime_slice import (
+        regime_base_rates,
+        regime_slice_table,
+        render_regime_slice_section,
+        render_regime_slice_table,
+        slice_method_desc,
+        trigger_outcomes,
+    )
+
+    heading = "## 進入「流入×未漲」× regime 切片（WS-H.4b）"
+    if entry_triggers.is_empty() or episodes.is_empty() or flows.is_empty():
+        return render_regime_slice_section(
+            heading, pl.DataFrame(), "樣本不足", "—", lead_window, membership_desc
+        )
+    calendar = sorted(
+        set(flows["date"].unique().to_list()) | set(episodes["start_date"].to_list())
+    )
+    sample_span = f"{calendar[0]} ~ {calendar[-1]}"
+    lines = ["", heading, ""]
+    any_table = False
+    for variant in entry_triggers["variant"].unique(maintain_order=True).to_list():
+        trig = entry_triggers.filter(pl.col("variant") == variant).select(
+            ["sub_industry", "date"]
+        )
+        keys = set(episodes["sub_industry"].to_list()) | set(trig["sub_industry"].to_list())
+        base_rates = regime_base_rates(
+            episodes, calendar, keys, regime_labels, lead_window, occupy_days
+        )
+        outcomes = trigger_outcomes(trig, episodes, calendar, lead_window, occupy_days)
+        table, verdict = regime_slice_table(
+            outcomes, regime_labels, base_rates, horizon_days=lead_window
+        )
+        lines += [f"### {variant}", ""]
+        if table.is_empty():
+            lines += ["（無可用觸發事件——本變體切片誠實跳過。）", ""]
+            continue
+        lines += render_regime_slice_table(table, verdict)
+        lines.append("")
+        any_table = True
+    if not any_table:
+        lines.append("（regime 標籤缺席或無可用觸發事件——本段誠實跳過，不影響上方既有結果。）")
+        return lines
+    regime_dist = (
+        "regime 標籤未附（事件全落「未標」桶）"
+        if regime_labels.is_empty()
+        else "各變體逐桶 n 見上表"
+    )
+    lines += inference_footer(
+        sample_span, regime_dist, slice_method_desc(lead_window), membership_desc
+    )
+    return lines

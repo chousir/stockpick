@@ -25,10 +25,12 @@ def run_cp_calibration(out_dir: Path, settings: Path) -> None:
     )
     from tw_screener.analysis.sector_universe import list_subindustries
     from tw_screener.analysis.stock_panel import build_stock_panel, compute_coverage_meta
+    from tw_screener.backtest.regime_slice import load_regime_labels
     from tw_screener.backtest.stock_calib import (
         _laggard_lift_significance,
         _rs_subind_col,
         compute_cross_window_lead,
+        cp_regime_slice_section,
         detect_ambush_episodes,
         detect_breakout_episodes,
         detect_reversal_episodes,
@@ -101,6 +103,16 @@ def run_cp_calibration(out_dir: Path, settings: Path) -> None:
     inter_g_thr = float(inter.get("g_threshold", 0.0))
     inter_zsig = float(inter.get("z_sig", 1.96))
     cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+    # WS-H.4b regime 切片標籤（settings backtest.regime_history.output_path）；
+    # 檔缺 → 空表：各 label 報告的切片段誠實跳過或全落「未標」桶，不影響既有段落。
+    regime_path = Path(
+        cfg.get("backtest", {})
+        .get("regime_history", {})
+        .get("output_path", "research/panel/regime_labels.parquet")
+    )
+    regime_labels = load_regime_labels(regime_path)
+    if regime_labels.is_empty():
+        console.print(f"[yellow]regime 標籤缺（{regime_path}）——切片段標「未標」/跳過[/yellow]")
 
     console.print(f"[bold]載入上市資料（{history_days} 交易日）...[/bold]")
     # 個股層只框上市：只讀 daily_*（otc_daily_/stock_day_ 不符此 glob），docs/13 §4 B1
@@ -236,6 +248,24 @@ def run_cp_calibration(out_dir: Path, settings: Path) -> None:
             report += "\n" + "\n".join(
                 render_cross_window_lead(lead_df, early_z, early_min_lead)
             )
+        # WS-H.4b regime 切片（純增段：既有段落與數字不動）
+        report += "\n".join(
+            cp_regime_slice_section(
+                panel,
+                scan,
+                episodes,
+                regime_labels,
+                min_triggers=min_triggers,
+                min_lift=min_lift,
+                z_thresholds=z_thr,
+                volume_thresholds=vol_thr,
+                position_low_pct=position_low_pct,
+                early_gate=early_cfg if early_on else None,
+                lead_window=lead_window,
+                occupy_days=int(lp.get("cooldown_days", 15)),
+                z_min_periods=z_min_periods,
+            )
+        ) + "\n"
         (out_dir / f"calibration_{tag}_{key}.md").write_text(report, encoding="utf-8")
         scan.write_csv(out_dir / f"calibration_{tag}_{key}.csv")
 

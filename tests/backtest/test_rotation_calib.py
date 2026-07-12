@@ -325,3 +325,85 @@ def test_render_report_includes_quadrant_section():
     assert "四象限可信度" in md
     assert "狀態描述、不是多空判詞" in md
     assert "⚡貼低" in md
+
+
+# ─── WS-H.4b regime 切片（entry_triggers 明細＋切片段落）──────────────────────
+
+
+def test_evaluate_quadrants_returns_entry_triggers():
+    from tw_screener.backtest.rotation_calib import evaluate_quadrants
+
+    flows, baskets, episodes = _quad_fixture()
+    out = evaluate_quadrants(
+        flows, baskets, episodes, long_window=20, next_precision_low_pct=5.0,
+    )
+    trig = out["entry_triggers"]
+    assert not trig.is_empty()
+    assert {"variant", "sub_industry", "date"} <= set(trig.columns)
+    assert trig["variant"].n_unique() == 2  # 現行＋⚡貼低
+    # 空輸入時該鍵也存在（回空表不炸）
+    empty = evaluate_quadrants(pl.DataFrame(), pl.DataFrame(), pl.DataFrame())
+    assert empty["entry_triggers"].is_empty()
+
+
+def test_entry_regime_slice_missing_regime_file_unlabeled_not_crash():
+    from pathlib import Path
+
+    from tw_screener.backtest.regime_slice import load_regime_labels
+    from tw_screener.backtest.rotation_calib import (
+        entry_regime_slice_section,
+        evaluate_quadrants,
+    )
+
+    flows, baskets, episodes = _quad_fixture()
+    out = evaluate_quadrants(
+        flows, baskets, episodes, long_window=20, next_precision_low_pct=5.0,
+    )
+    labels = load_regime_labels(Path("does/not/exist.parquet"))  # 檔缺 → 空表
+    section = entry_regime_slice_section(
+        out["entry_triggers"], episodes, flows, labels, lead_window=15, occupy_days=15
+    )
+    text = "\n".join(section)
+    assert "regime 切片（WS-H.4b）" in text
+    assert "未標" in text  # 事件全落「未標」桶照列，不裁決不炸
+    assert "樣本期間" in text  # inference_footer 三行
+
+
+def test_report_with_regime_section_keeps_old_sections():
+    """回歸：切片＝純增段——舊段落全數仍在，新段落接尾。"""
+    from tw_screener.backtest.rotation_calib import (
+        entry_regime_slice_section,
+        evaluate_quadrants,
+    )
+
+    flows, baskets, episodes = _quad_fixture()
+    scan = scan_signals(
+        flows, episodes, z_thresholds=(1.0,), breadth_thresholds=(0.5,),
+        z_window=60, z_min_periods=30, lead_window=15, occupy_days=15,
+    )
+    quad_stats = evaluate_quadrants(
+        flows, baskets, episodes, long_window=20, next_precision_low_pct=5.0,
+    )
+    params = {
+        "x_pct": 10.0, "n_days": 15, "m_days": 60, "low_base_tol_pct": 3.0,
+        "cooldown_days": 15, "lead_window": 15, "z_window": 60,
+    }
+    md = render_calibration_report(
+        scan, episodes, params, (D0, D0 + timedelta(days=99)),
+        min_triggers=1, min_lift=1.0, quadrant_stats=quad_stats,
+    )
+    empty_labels = pl.DataFrame(schema={"date": pl.Date, "regime_label": pl.Utf8})
+    full = md + "\n".join(
+        entry_regime_slice_section(
+            quad_stats["entry_triggers"], episodes, flows, empty_labels,
+            lead_window=15, occupy_days=15,
+        )
+    ) + "\n"  # 同 run_sector_calibrate 的接法
+    # 舊段落一個不少
+    assert "# 次產業起漲點回測校準報告" in full
+    assert "## 訊號掃描" in full
+    assert "## 建議名單" in full
+    assert "四象限可信度" in full
+    assert "狀態描述、不是多空判詞" in full
+    # 新段落接尾
+    assert "## 進入「流入×未漲」× regime 切片（WS-H.4b）" in full

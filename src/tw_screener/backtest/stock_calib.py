@@ -28,6 +28,7 @@ config/research/cp_value_calib.yaml，規劃書 04 A2）：
   6. B-P2 主導度單調    dom 分位 × 控制位階（docs/15 T1）
   7. B-P3 個股×族群交互  S×G 2×2（docs/15 T2）
   8. Part C 落後度      族群內落後度單調 + 冠軍 S+ 落後濾鏡（docs/16 C-P1/C-P2）
+  9. WS-H.4b regime 切片  signal_triggers / cp_regime_slice_section（分桶邏輯在 regime_slice.py）
 """
 
 from __future__ import annotations
@@ -1991,3 +1992,109 @@ def render_laggard_filter_report(
         "",
     ]
     return "\n".join(lines)
+
+
+# ── 9. WS-H.4b regime 切片：最佳因子的觸發事件按事件日 regime 分桶重算 lift ──────────────
+# 事件日＝訊號向上穿越觸發日（_stock_triggers 的 date）；episodes 只當命中裁判。
+# 判定/分桶/CI 邏輯集中在 backtest/regime_slice.py（與 rotation 側共用，防漂移）。
+def signal_triggers(
+    panel: pl.DataFrame,
+    signal_name: str,
+    z_thresholds: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0),
+    volume_thresholds: tuple[float, ...] = (1.0, 1.5, 2.0),
+    position_low_pct: float = 15.0,
+    early_gate: dict | None = None,
+) -> pl.DataFrame:
+    """重建單一具名訊號的觸發明細（stock_id/date）——沿用 _build_signal_jobs 同一條件定義。
+
+    scan_stock_signals 只回聚合統計；regime 切片需要逐 trigger 事件日，故以 _select_jobs
+    取同名 job 的條件串重算（保證與主掃描一致、不重寫條件）。查無此訊號名回空表。
+    """
+    jobs = _select_jobs(
+        panel, {signal_name}, z_thresholds, volume_thresholds, position_low_pct, early_gate
+    )
+    if not jobs:
+        return pl.DataFrame(schema={"stock_id": pl.Utf8, "date": pl.Date})
+    return _stock_triggers(panel, jobs[0][1])
+
+
+def cp_regime_slice_section(
+    panel: pl.DataFrame,
+    scan: pl.DataFrame,
+    episodes: pl.DataFrame,
+    regime_labels: pl.DataFrame,
+    min_triggers: int = 8,
+    min_lift: float = 1.3,
+    z_thresholds: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0),
+    volume_thresholds: tuple[float, ...] = (1.0, 1.5, 2.0),
+    position_low_pct: float = 15.0,
+    early_gate: dict | None = None,
+    lead_window: int = 15,
+    occupy_days: int = 15,
+    z_min_periods: int = 30,
+    membership_desc: str = "今日 concepts.yaml（非 point-in-time）",
+) -> list[str]:
+    """WS-H.4b：CP 校準主結果表的 regime 切片段落（純增段，接單 label 報告尾）。
+
+    切片對象＝該 label 的最佳過門檻因子（與 summary「最佳因子」同一濾法：觸發 ≥min_triggers
+    ・lift ≥min_lift・中位領先 >0，lift 排序取首）；其觸發事件按事件日 regime 分桶，
+    逐桶重算命中率/lift（桶基率同步分桶重算）＋bs_CI95（block=lead_window+1，日頻）。
+    calendar/warmup 口徑與 scan_stock_signals 完全一致。無過門檻因子或 regime 檔缺 →
+    段落照列並誠實註明（不裁決、不炸）。
+    """
+    from tw_screener.backtest.regime_slice import (
+        regime_base_rates,
+        regime_slice_table,
+        render_regime_slice_section,
+        trigger_outcomes,
+    )
+
+    if panel.is_empty() or scan.is_empty() or episodes.is_empty():
+        return render_regime_slice_section(
+            "## regime 切片（WS-H.4b）", pl.DataFrame(), "樣本不足", "—",
+            lead_window, membership_desc,
+        )
+    qualified = scan.filter(
+        (pl.col("n_triggers") >= min_triggers)
+        & (pl.col("lift").is_not_null())
+        & (pl.col("lift") >= min_lift)
+        & (pl.col("median_lead_days") > 0)
+    ).sort("lift", descending=True)
+    if qualified.is_empty():
+        return [
+            "",
+            "## regime 切片（WS-H.4b）",
+            "",
+            f"（無因子過門檻（lift ≥{min_lift}・觸發 ≥{min_triggers}・領先 >0 日）——"
+            "無主 lift 可切片，本段誠實跳過。）",
+        ]
+    best = str(qualified.row(0, named=True)["signal"])
+    triggers = signal_triggers(
+        panel, best, z_thresholds, volume_thresholds, position_low_pct, early_gate
+    )
+    calendar = sorted(panel["date"].unique().to_list())
+    warmup_pos = min(z_min_periods, len(calendar) - 1)
+    base_rates = regime_base_rates(
+        episodes,
+        calendar,
+        panel["stock_id"].unique().to_list(),
+        regime_labels,
+        lead_window,
+        occupy_days,
+        warmup_pos,
+        key_col="stock_id",
+    )
+    outcomes = trigger_outcomes(
+        triggers, episodes, calendar, lead_window, occupy_days, warmup_pos, key_col="stock_id"
+    )
+    table, verdict = regime_slice_table(
+        outcomes, regime_labels, base_rates, horizon_days=lead_window
+    )
+    return render_regime_slice_section(
+        f"## regime 切片（WS-H.4b・最佳因子 {best}）",
+        table,
+        verdict,
+        f"{calendar[0]} ~ {calendar[-1]}",
+        lead_window,
+        membership_desc,
+    )

@@ -526,6 +526,29 @@ def run_sector_calibrate(
         min_lift=float(cal.get("min_lift", 1.5)),
         quadrant_stats=quadrant_stats,
     )
+
+    # WS-H.4b regime 切片（純增段：既有段落與數字不動；regime 檔缺 → 段落誠實跳過）
+    from tw_screener.backtest.regime_slice import load_regime_labels
+    from tw_screener.backtest.rotation_calib import entry_regime_slice_section
+
+    regime_path = Path(
+        cfg.get("backtest", {})
+        .get("regime_history", {})
+        .get("output_path", "research/panel/regime_labels.parquet")
+    )
+    regime_labels = load_regime_labels(regime_path)
+    if regime_labels.is_empty():
+        console.print(f"[yellow]regime 標籤缺（{regime_path}）——切片段標「未標」/跳過[/yellow]")
+    report += "\n".join(
+        entry_regime_slice_section(
+            quadrant_stats["entry_triggers"],
+            episodes,
+            flows,
+            regime_labels,
+            lead_window=p["lead_window"],
+            occupy_days=p["cooldown_days"],
+        )
+    ) + "\n"
     out_dir.mkdir(parents=True, exist_ok=True)
     tag = _date.today().strftime("%Y%m%d")
     md_path = out_dir / f"calibration_{tag}.md"
