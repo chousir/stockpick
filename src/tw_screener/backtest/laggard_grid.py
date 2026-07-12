@@ -18,12 +18,41 @@ from __future__ import annotations
 
 import polars as pl
 
-from tw_screener.backtest.factor_lab import bootstrap_mean_ci
+from tw_screener.backtest.factor_lab import (
+    REGIME_LABELS,
+    REGIME_MIN_N,
+    bootstrap_mean_ci,
+    moving_block_bootstrap_ci,
+)
 
 
 def _smean(s: pl.Series) -> float | None:
     v = s.mean()
     return float(v) if isinstance(v, (int, float)) else None
+
+
+def _tier_labels(tier_edges: tuple[float, float]) -> tuple[str, str, str]:
+    lo, hi = tier_edges
+    return (f"貼低≤{lo:.0f}", f"中段{lo:.0f}–{hi:.0f}", f"延伸>{hi:.0f}")
+
+
+def _assign_cells(stock_rows: pl.DataFrame, tier_edges: tuple[float, float]) -> pl.DataFrame:
+    """三維 cell 標籤（group_strength/stock_pos/tier）——laggard_cell_grid 與
+    regime 切片版共用同一份切法，防兩處口徑漂移。丟三維任一 null 的列。"""
+    lo, hi = tier_edges
+    tiers = _tier_labels(tier_edges)
+    return (
+        stock_rows.drop_nulls(["rs_subind", "trend_score", "ma60_dist_pct"])
+        .with_columns(
+            pl.when(pl.col("trend_score") >= pl.col("trend_score").median().over("date"))
+            .then(pl.lit("族群強")).otherwise(pl.lit("族群弱")).alias("group_strength"),
+            pl.when(pl.col("rs_subind") < 0.0)
+            .then(pl.lit("落後")).otherwise(pl.lit("領先")).alias("stock_pos"),
+            pl.when(pl.col("ma60_dist_pct") <= lo).then(pl.lit(tiers[0]))
+            .when(pl.col("ma60_dist_pct") <= hi).then(pl.lit(tiers[1]))
+            .otherwise(pl.lit(tiers[2])).alias("tier"),
+        )
+    )
 
 
 def stock_rs_vs_group(
@@ -79,19 +108,7 @@ def laggard_cell_grid(
     need = {"date", "rs_subind", "trend_score", "ma60_dist_pct"}
     if stock_rows.is_empty() or not need.issubset(stock_rows.columns):
         return pl.DataFrame(schema=schema)
-    lo, hi = tier_edges
-    base = (
-        stock_rows.drop_nulls(["rs_subind", "trend_score", "ma60_dist_pct"])
-        .with_columns(
-            pl.when(pl.col("trend_score") >= pl.col("trend_score").median().over("date"))
-            .then(pl.lit("族群強")).otherwise(pl.lit("族群弱")).alias("group_strength"),
-            pl.when(pl.col("rs_subind") < 0.0)
-            .then(pl.lit("落後")).otherwise(pl.lit("領先")).alias("stock_pos"),
-            pl.when(pl.col("ma60_dist_pct") <= lo).then(pl.lit(f"貼低≤{lo:.0f}"))
-            .when(pl.col("ma60_dist_pct") <= hi).then(pl.lit(f"中段{lo:.0f}–{hi:.0f}"))
-            .otherwise(pl.lit(f"延伸>{hi:.0f}")).alias("tier"),
-        )
-    )
+    base = _assign_cells(stock_rows, tier_edges)
     if base.is_empty():
         return pl.DataFrame(schema=schema)
     mid_date = base["date"].median()
@@ -145,3 +162,78 @@ def laggard_cell_grid(
     return pl.DataFrame(rows, schema=schema).sort(
         ["horizon", "group_strength", "stock_pos", "tier"]
     )
+
+
+def laggard_cell_grid_by_regime(
+    stock_rows: pl.DataFrame,
+    horizons: tuple[int, ...] = (10, 20),
+    tier_edges: tuple[float, float] = (10.0, 15.0),
+    n_boot: int = 1000,
+    seed: int = 42,
+    regime_col: str = "regime",
+) -> pl.DataFrame:
+    """cell×regime forward 報酬格（WS-H.4a）：12 cell × 3 regime **全列舉**，含空
+    cell（n=0、統計欄 null）——樣本薄是預期，照列不藏格。
+
+    CI＝per-date mean 序列的 moving-block bootstrap（block=horizon+1；快照雖週頻，
+    塊長沿 WS-H.4a 規格以日頻 horizon 記）；mean 欄＝該序列等權平均（與 CI 同一
+    統計量，非 pooled mean）。thin＝n_dates < REGIME_MIN_N（30），呼叫端據此把該
+    cell 排除於跨 regime 裁決分母（factor_lab.regime_alignment_verdict）。
+
+    regime_col 缺席或全 null（WS-H 標籤未產）→ 空表，呼叫端誠實跳過整段。
+    """
+    schema = {
+        "horizon": pl.Int64, "regime": pl.Utf8, "group_strength": pl.Utf8,
+        "stock_pos": pl.Utf8, "tier": pl.Utf8, "n": pl.Int64, "n_dates": pl.Int64,
+        "mean": pl.Float64, "ci_lo": pl.Float64, "ci_hi": pl.Float64, "thin": pl.Boolean,
+    }
+    need = {"date", "rs_subind", "trend_score", "ma60_dist_pct"}
+    if (
+        stock_rows.is_empty()
+        or not need.issubset(stock_rows.columns)
+        or regime_col not in stock_rows.columns
+        or stock_rows[regime_col].drop_nulls().is_empty()
+    ):
+        return pl.DataFrame(schema=schema)
+    base = _assign_cells(stock_rows, tier_edges)
+    if base.is_empty():
+        return pl.DataFrame(schema=schema)
+    tiers = _tier_labels(tier_edges)
+    rows: list[dict] = []
+    for h in horizons:
+        tgt = f"alpha{h}"
+        if tgt not in base.columns:
+            continue
+        sub = base.drop_nulls([tgt])
+        for reg in REGIME_LABELS:
+            for gs in ("族群強", "族群弱"):
+                for sp in ("落後", "領先"):
+                    for tier in tiers:
+                        g = sub.filter(
+                            (pl.col(regime_col) == reg)
+                            & (pl.col("group_strength") == gs)
+                            & (pl.col("stock_pos") == sp)
+                            & (pl.col("tier") == tier)
+                        )
+                        daily = (
+                            g.group_by("date").agg(pl.col(tgt).mean().alias("_m")).sort("date")
+                        )
+                        vals = [float(v) for v in daily["_m"].to_list() if v is not None]
+                        lo_ci, hi_ci = (
+                            moving_block_bootstrap_ci(
+                                vals, block_len=h + 1, n_boot=n_boot, seed=seed
+                            )
+                            if vals
+                            else (None, None)
+                        )
+                        rows.append(
+                            {
+                                "horizon": h, "regime": reg, "group_strength": gs,
+                                "stock_pos": sp, "tier": tier, "n": g.height,
+                                "n_dates": len(vals),
+                                "mean": (sum(vals) / len(vals)) if vals else None,
+                                "ci_lo": lo_ci, "ci_hi": hi_ci,
+                                "thin": len(vals) < REGIME_MIN_N,
+                            }
+                        )
+    return pl.DataFrame(rows, schema=schema)

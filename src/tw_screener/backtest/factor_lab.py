@@ -363,6 +363,165 @@ def evaluate(
     )
 
 
+#: analysis/regime.py ATTACK/NEUTRAL/DEFENSE 中文標籤（factor_lab/rotation_efficacy/
+#: laggard_grid 的 regime 切片段共用，語彙不得分歧）。
+REGIME_LABELS: tuple[str, ...] = ("進攻", "中性", "防禦")
+#: docs/23 §1c：切片樣本（per-date IC 序列長度 T／per-週序列長度）< 此門檻 → 表照列標
+#: 「樣本不足」，但不計入跨 regime 同向裁決的分母（避免薄樣本的假方向污染晉升判定）。
+REGIME_MIN_N = 30
+
+
+def regime_ic_slices(
+    df: pl.DataFrame,
+    factor: str,
+    target: str,
+    horizon: int,
+    regime_col: str = "regime",
+    regime_labels: Sequence[str] = REGIME_LABELS,
+    min_n_dates: int = REGIME_MIN_N,
+    controls: Sequence[str] = (),
+    buckets: int = 5,
+    inference: str = "block_bootstrap",
+    n_boot: int = 1000,
+    seed: int = 42,
+    block_td: int | None = None,
+) -> pl.DataFrame:
+    """regime 切片 IC 表（docs/23 §1c 晉升鐵則第三條的資料底料）：對 regime_col 各分類各跑
+    evaluate()（n_splits=0，只取 pooled/per-date IC，不切 walk-forward——regime 切片本身
+    已是另一種穩健性切法，避免雙重切分把樣本切到不可判）。
+
+    block_td：bootstrap 塊長覆寫（None → evaluate 預設 horizon+1）。週頻序列（如
+    rotation 週訊號）呼叫端應傳 ceil(horizon/5)+1（regime_slice.block_len_for_horizon
+    weekly=True），日頻維持預設。
+
+    regime_col 缺席或全 null（WS-H 標籤未產）→ 空表，呼叫端誠實標「regime 標籤未產」跳過
+    （不臆造、不裁決）。切片 n_dates（per-date IC 序列長度 T）< min_n_dates → thin=True，
+    該列照列輸出，供 regime_alignment_verdict 排除於裁決分母。
+
+    Returns: regime/n_dates/mean_ic/ci_lo/ci_hi/thin（schema 固定；不合格輸入→空表同 schema）。
+    """
+    schema = {
+        "regime": pl.Utf8, "n_dates": pl.Int64, "mean_ic": pl.Float64,
+        "ci_lo": pl.Float64, "ci_hi": pl.Float64, "thin": pl.Boolean,
+    }
+    if df.is_empty() or regime_col not in df.columns or df[regime_col].drop_nulls().is_empty():
+        return pl.DataFrame(schema=schema)
+    rows: list[dict] = []
+    for r in regime_labels:
+        sub = df.filter(pl.col(regime_col) == r)
+        rep = evaluate(
+            sub, factor, horizon=horizon, target=target, controls=controls,
+            buckets=buckets, n_splits=0, inference=inference, n_boot=n_boot, seed=seed,
+            block_td=block_td,
+        )
+        t_obs = int((rep.inference_meta or {}).get("T", 0) or 0)
+        rows.append(
+            {
+                "regime": r, "n_dates": t_obs, "mean_ic": rep.mean_daily_ic,
+                "ci_lo": rep.bs_ci[0], "ci_hi": rep.bs_ci[1], "thin": t_obs < min_n_dates,
+            }
+        )
+    return pl.DataFrame(rows, schema=schema)
+
+
+def regime_mean_slices(
+    df: pl.DataFrame,
+    target: str,
+    block_len: int,
+    regime_col: str = "regime",
+    regime_labels: Sequence[str] = REGIME_LABELS,
+    min_n_dates: int = REGIME_MIN_N,
+    n_boot: int = 1000,
+    seed: int = 42,
+) -> pl.DataFrame:
+    """regime 切片 mean-lift 表（供 rotation quadrant/★ lift 與 laggard cell 重用）：
+    各 regime 子樣本的 target 以 per-date（＝per-週，若輸入為週頻）mean 序列做
+    moving_block_bootstrap_ci——mean 欄＝該序列等權平均（與 CI 同一統計量，
+    非 pooled mean；相鄰快照前瞻窗重疊，pooled CI 偏窄，同 docs/22 §7.2 動機）。
+
+    block_len：呼叫端依頻率算好傳入（週頻 ceil(horizon/5)+1、日頻 horizon+1，
+    regime_slice.block_len_for_horizon）。regime_col 缺席或全 null → 空表誠實跳過。
+    切片全空（n=0）照列（n/n_dates=0、統計欄 null）——「不藏格」慣例。
+
+    Returns: regime/n/n_dates/mean/ci_lo/ci_hi/thin（thin＝n_dates < min_n_dates）。
+    """
+    schema = {
+        "regime": pl.Utf8, "n": pl.Int64, "n_dates": pl.Int64, "mean": pl.Float64,
+        "ci_lo": pl.Float64, "ci_hi": pl.Float64, "thin": pl.Boolean,
+    }
+    if (
+        df.is_empty()
+        or target not in df.columns
+        or regime_col not in df.columns
+        or df[regime_col].drop_nulls().is_empty()
+    ):
+        return pl.DataFrame(schema=schema)
+    rows: list[dict] = []
+    for r in regime_labels:
+        sub = df.filter(pl.col(regime_col) == r).drop_nulls([target])
+        daily = (
+            sub.group_by("date").agg(pl.col(target).mean().alias("_m")).sort("date")
+            if not sub.is_empty()
+            else pl.DataFrame(schema={"date": pl.Date, "_m": pl.Float64})
+        )
+        values = [float(v) for v in daily["_m"].to_list() if v is not None]
+        lo, hi = (
+            moving_block_bootstrap_ci(values, block_len=block_len, n_boot=n_boot, seed=seed)
+            if values
+            else (None, None)
+        )
+        rows.append(
+            {
+                "regime": r, "n": sub.height, "n_dates": len(values),
+                "mean": _mean(values) if values else None,
+                "ci_lo": lo, "ci_hi": hi, "thin": len(values) < min_n_dates,
+            }
+        )
+    return pl.DataFrame(rows, schema=schema)
+
+
+def regime_alignment_verdict(
+    slices: pl.DataFrame,
+    full_sign: int,
+    value_col: str = "mean_ic",
+    regime_col: str = "regime",
+    thin_col: str = "thin",
+    attack_label: str = "進攻",
+) -> tuple[str, list[str], int]:
+    """docs/23 §1c 跨 regime 升降級裁決（純函式；factor_lab/rotation_efficacy/laggard_grid
+    的 regime 切片段共用，避免三處各寫一套、語彙分歧）。slices schema 需含
+    regime_col/value_col/thin_col（regime_ic_slices 或同構的 lift 版切片表皆可餵）。
+
+    規則（docs/23 §1c，寫死不得因手感調鬆）：
+    - 可判切片（非 thin 且 value_col 非 null）數 <1 → 「regime 樣本不足（無可判切片）」；
+    - 與 full_sign 同號的可判切片數 ≥2 → 「跨 regime 穩健」；
+    - 同號數 ==1 且該切片為 attack_label（進攻）→ 「bull-only」（docs/23 §1c 原始語意是
+      「WS-H 前樣本全落單一多頭偏窗」；WS-H 後泛化為「就算三個 regime 都有樣本，也只有
+      多頭那片撐得住」——仍是同一件事：不能只靠多頭證據晉升）；
+    - 其餘（同號數 ==1 但非進攻，或同號數 ==0）→ 「regime-dependent」（docs/23 §1(a) 同語彙）。
+
+    full_sign 須傳 ±1（0 視為正號的反面、不建議傳 0——呼叫端應先把「≥0 記正」正規化）。
+
+    Returns: (裁決字串, 同向 regime 標籤 list, 可判切片數)。
+    """
+    if slices.is_empty():
+        return "regime 樣本不足（無可判切片）", [], 0
+    usable = slices.filter(~pl.col(thin_col) & pl.col(value_col).is_not_null())
+    present = usable.height
+    if present < 1:
+        return "regime 樣本不足（無可判切片）", [], 0
+    same = [
+        str(row[regime_col])
+        for row in usable.iter_rows(named=True)
+        if (row[value_col] > 0) == (full_sign > 0)
+    ]
+    if len(same) >= 2:
+        return "跨 regime 穩健", same, present
+    if len(same) == 1 and same[0] == attack_label:
+        return "bull-only", same, present
+    return "regime-dependent", same, present
+
+
 def grid_scan(
     df: pl.DataFrame,
     make_factor: Callable[..., pl.Expr],

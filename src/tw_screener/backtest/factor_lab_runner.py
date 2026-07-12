@@ -15,15 +15,29 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import polars as pl
 import typer
 from rich.console import Console
 
+if TYPE_CHECKING:
+    from tw_screener.backtest.factor_lab import FactorReport
+
 console = Console()
 
 _DOCS19_WEEKS = ("2026-W21", "2026-W22", "2026-W23", "2026-W24", "2026-W25")
 _DOCS19_BENCH = {"ma60_dist_pct": -0.25, "vol_ratio": 0.14}  # r+20、target=excess
+
+
+def _fmt_ic(v: float | None) -> str:
+    return f"{v:+.3f}" if v is not None else "—"
+
+
+def _fmt_ci(lo: float | None, hi: float | None) -> str:
+    if lo is None or hi is None:
+        return "—"
+    return f"[{lo:+.3f}, {hi:+.3f}]"
 
 
 def _candidate_joined(cfg: dict, horizons: tuple[int, ...]) -> pl.DataFrame:
@@ -201,6 +215,8 @@ def run_factor_lab(settings: Path, out_dir: Path | None) -> None:
 
     # ── 3. 面板全宇宙首驗（走 walk-forward＋殘差 IC）────────────────────────────
     lines += ["## 3. 面板全宇宙首驗（target=alpha20）", ""]
+    panel: pl.DataFrame | None = None
+    panel_reps: dict[str, FactorReport] = {}  # feat → 全樣本 rep（第 4 段基準沿用，不重算）
     if not panel_path.exists():
         lines.append(f"> 無面板 `{panel_path}`——先跑 make build-panel。")
         console.print(f"[yellow]無面板 {panel_path}，跳過第 3 段[/yellow]")
@@ -221,9 +237,79 @@ def run_factor_lab(settings: Path, out_dir: Path | None) -> None:
                 buckets=buckets, n_splits=n_splits, min_train_frac=min_train_frac,
                 inference=inference, n_boot=n_boot, seed=seed,
             )
+            panel_reps[feat] = rep
             lines += lab.render_report_md(rep)
             if not rep.splits.is_empty():
                 rep.splits.write_csv(out / f"panel_{feat}_splits_{tag}.csv")
+
+    # ── 4. regime 切片（WS-H.4a；docs/23 §1c 晉升鐵則 (c)）─────────────────────
+    # 升降級規則（docs/23 §1c，寫死不得因手感調鬆）：
+    #   - ≥2 個可判 regime 切片與全樣本 per-date IC mean 同向 → 「跨 regime 穩健」；
+    #   - 僅 1 個同向且該切片＝進攻 → 「bull-only」（分不清因子有效 vs 多頭裡強者恆強，
+    #     只能列候補、不得晉升）；
+    #   - 其餘 → 「regime-dependent」。切片 n_dates<30 → 照列標「樣本不足」，不進裁決分母
+    #     （regime_alignment_verdict 的 thin 排除）。
+    lines += ["## 4. regime 切片（r+20、target=alpha20；docs/23 §1c）", ""]
+    if panel is None:
+        lines.append(f"> 無面板 `{panel_path}`——本段隨第 3 段一併跳過。")
+    elif "regime" not in panel.columns or panel["regime"].drop_nulls().is_empty():
+        lines.append(
+            "> regime 標籤未產（面板 regime 欄缺席或全 null）——本段誠實跳過；"
+            "先跑 make regime-history 再 make build-panel。"
+        )
+        console.print("[yellow]regime 標籤未產，第 4 段跳過[/yellow]")
+    else:
+        for feat in ("ma60_dist_pct", "vol_ratio"):
+            full_rep = panel_reps[feat]
+            full_ic = full_rep.mean_daily_ic
+            if full_ic is None:
+                lines += [
+                    f"### `{feat}`", "", "> 全樣本 per-date IC 不可得——切片無基準，跳過。", "",
+                ]
+                continue
+            full_sign = 1 if full_ic >= 0 else -1
+            slices = lab.regime_ic_slices(
+                panel, feat, target="alpha20", horizon=20,
+                inference=inference, n_boot=n_boot, seed=seed,
+            )
+            verdict, same, present = lab.regime_alignment_verdict(slices, full_sign)
+            lines += [
+                f"### `{feat}`（全樣本 mean_IC {full_ic:+.3f}）",
+                "",
+                "| regime | n_dates | mean_IC | bs_CI95 | 與全樣本同向？ |",
+                "|---|---|---|---|---|",
+            ]
+            for r in slices.iter_rows(named=True):
+                if r["mean_ic"] is None:
+                    align = "—"
+                elif r["thin"]:
+                    align = "樣本不足（不裁決）"
+                else:
+                    align = "同向" if (r["mean_ic"] > 0) == (full_sign > 0) else "反向"
+                lines.append(
+                    f"| {r['regime']} | {r['n_dates']} | {_fmt_ic(r['mean_ic'])} "
+                    f"| {_fmt_ci(r['ci_lo'], r['ci_hi'])} | {align} |"
+                )
+            dist = "、".join(
+                f"{r['regime']} n_dates={r['n_dates']}" for r in slices.iter_rows(named=True)
+            )
+            lines += [
+                "",
+                f"跨 regime 同向數：{len(same)}/{present}"
+                f"（同向切片：{'、'.join(same) if same else '無'}）→ 升降級：**{verdict}**",
+                "",
+                *lab.inference_footer(
+                    sample_span=(full_rep.inference_meta or {}).get("span") or "—",
+                    regime_dist=dist,
+                    method_desc=(
+                        f"moving-block bootstrap（block=21td・B={n_boot}・seed={seed}）"
+                        "為 CI 預設；Fisher-z 僅供對照連續性（重疊窗下偏窄，docs/22 §7.2）"
+                    ),
+                    membership_desc="今日 concepts.yaml（非 point-in-time）",
+                ),
+                "",
+            ]
+            console.print(f"  regime 切片 {feat}：{len(same)}/{present} 同向・{verdict}")
 
     md = out / f"factor_lab_{tag}.md"
     md.write_text("\n".join(lines), encoding="utf-8")

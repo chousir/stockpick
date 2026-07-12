@@ -31,6 +31,32 @@ def _lift_rows(tbl: pl.DataFrame) -> list[str]:
     return out
 
 
+def _mean_slice_rows(slices: pl.DataFrame, full_sign: int) -> list[str]:
+    """regime_mean_slices 表 → markdown 列（regime/n/n_週/mean/bs_CI95/同向?；缺值 — 佔位）。"""
+    out = []
+    for r in slices.iter_rows(named=True):
+        mean = f"{r['mean']:+.2f}pp" if r["mean"] is not None else "—"
+        ci = (
+            f"[{r['ci_lo']:+.2f}, {r['ci_hi']:+.2f}]" if r["ci_lo"] is not None
+            else "—（<10 週不可重抽）"
+        )
+        if r["mean"] is None:
+            align = "—"
+        elif r["thin"]:
+            align = "樣本不足（不裁決）"
+        else:
+            align = "同向" if (r["mean"] > 0) == (full_sign > 0) else "反向"
+        out.append(
+            f"| {r['regime']} | {r['n']} | {r['n_dates']} | {mean} | {ci} | {align} |"
+        )
+    return out
+
+
+def _regime_dist(slices: pl.DataFrame, n_col: str = "n_dates") -> str:
+    """切片 n 分布字串（inference_footer 第一行用；＝表實際切片 n，不引全樣本敘述）。"""
+    return "、".join(f"{r['regime']} {n_col}={r[n_col]}" for r in slices.iter_rows(named=True))
+
+
 def _load_production_snapshots(reports_dir: Path) -> pl.DataFrame:
     """各週 sector_rotation.csv concat（舊週缺欄補 null；供重建對表）。"""
     frames: list[pl.DataFrame] = []
@@ -82,6 +108,7 @@ def run_rotation_efficacy(settings: Path, out_dir: Path | None) -> None:
     from tw_screener.backtest import factor_lab as lab
     from tw_screener.backtest import rotation_efficacy as eff
     from tw_screener.backtest.panel_runner import _load_institutional_all
+    from tw_screener.backtest.regime_slice import block_len_for_horizon, load_regime_labels
     from tw_screener.backtest.rotation_calib import standardize_signals
 
     with open(settings) as f:
@@ -133,6 +160,11 @@ def run_rotation_efficacy(settings: Path, out_dir: Path | None) -> None:
     baskets = compute_subindustry_baskets(membership, price)
     position = eff.basket_position_series(baskets, position_window=pos_window)
     trend = eff.trend_score_series(price, membership, baskets)
+    # 重建深度（WS-H.4a 讀碼確認）：週快照＝面板日期 ∩ 法人快取日期，兩者皆無程式上限
+    # ——面板由 panel.history_days/panel_start（settings）決定、法人走 _load_institutional_all
+    # 全量讀；第一輪只有 59 週是舊 institutional retention=400 天的資料邊界，非寫死窗
+    # （rotation.history_days=250 只用於生產 runner，不在此路徑）。2022 回補批次落地後
+    # 重跑即自動延伸至 ~230 週，無需改參數。
     snap_dates = [
         d for d in eff.weekly_snapshot_dates(panel["date"].unique().to_list())
         if d in set(flows_z["date"].unique().to_list())
@@ -280,6 +312,150 @@ def run_rotation_efficacy(settings: Path, out_dir: Path | None) -> None:
             ],
             "",
         ]
+
+    # ── 5. regime 切片（WS-H.4a；docs/23 §1c 晉升鐵則 (c)）─────────────────────
+    # 升降級規則（docs/23 §1c，寫死）：≥2 個可判切片與全樣本同向＝「跨 regime 穩健」；
+    # 僅進攻同向＝「bull-only」（只能列候補，不得晉升）；其餘＝「regime-dependent」。
+    # 切片 n<30 週＝「樣本不足」照列不裁決（factor_lab.regime_alignment_verdict 共用規則）。
+    lines += [f"## 5. regime 切片（WS-H.4a・r+{h_main}、target={tgt}・docs/23 §1c）", ""]
+    regime_path = Path(
+        cfg.get("backtest", {}).get("regime_history", {}).get(
+            "output_path", "research/panel/regime_labels.parquet"
+        )
+    )
+    labels = load_regime_labels(regime_path)
+    if labels.is_empty():
+        lines += [
+            f"> regime 標籤未產（{regime_path} 缺席或不可讀）——本段誠實跳過"
+            "（先跑 make regime-history）。",
+            "",
+        ]
+        console.print("[yellow]regime 標籤未產，第 5 段跳過[/yellow]")
+    else:
+        sig_r = sig.join(
+            labels.select("date", pl.col("regime_label").alias("regime")),
+            on="date", how="left",
+        )
+        blk_w = block_len_for_horizon(h_main, weekly=True)  # 週頻：ceil(h/5)+1 週
+        span = f"{sig_r['date'].min()!s}~{sig_r['date'].max()!s}"
+        footer_kw = {
+            "method_desc": (
+                f"moving-block bootstrap（週頻 block={blk_w} 週・B={n_boot}・seed=42）"
+                "對 per-週序列算 CI95；相鄰週前瞻窗重疊，pooled CI 偏窄僅供對照"
+                "（docs/22 §7.2）"
+            ),
+            "membership_desc": "今日 concepts.yaml（非 point-in-time）",
+        }
+
+        # 5.1 trend_score IC 切片（週訊號日 join regime 標籤）
+        full_rep = lab.evaluate(
+            sig_r, "trend_score", horizon=h_main, target=tgt,
+            buckets=4, n_splits=0, block_td=blk_w,
+        )
+        lines += [f"### 5.1 `trend_score` IC 切片（r+{h_main}）", ""]
+        if full_rep.mean_daily_ic is None:
+            lines += ["> 全樣本 per-週 IC 不可得——切片無基準，跳過。", ""]
+        else:
+            full_sign = 1 if full_rep.mean_daily_ic >= 0 else -1
+            slices = lab.regime_ic_slices(
+                sig_r, "trend_score", target=tgt, horizon=h_main, block_td=blk_w,
+            )
+            verdict, same, present = lab.regime_alignment_verdict(slices, full_sign)
+            lines += [
+                f"全樣本 mean_IC {full_rep.mean_daily_ic:+.3f}"
+                f"（T={full_rep.inference_meta.get('T', 0)} 週）",
+                "",
+                "| regime | n_週 | mean_IC | bs_CI95 | 與全樣本同向？ |",
+                "|---|---|---|---|---|",
+            ]
+            for r in slices.iter_rows(named=True):
+                if r["mean_ic"] is None:
+                    align = "—"
+                elif r["thin"]:
+                    align = "樣本不足（不裁決）"
+                else:
+                    align = "同向" if (r["mean_ic"] > 0) == (full_sign > 0) else "反向"
+                ci = (
+                    f"[{r['ci_lo']:+.3f}, {r['ci_hi']:+.3f}]" if r["ci_lo"] is not None
+                    else "—（<10 週不可重抽）"
+                )
+                mic = f"{r['mean_ic']:+.3f}" if r["mean_ic"] is not None else "—"
+                lines.append(f"| {r['regime']} | {r['n_dates']} | {mic} | {ci} | {align} |")
+            lines += [
+                "",
+                f"跨 regime 同向數：{len(same)}/{present}"
+                f"（同向切片：{'、'.join(same) if same else '無'}）→ 升降級：**{verdict}**",
+                "",
+                *lab.inference_footer(
+                    sample_span=span, regime_dist=_regime_dist(slices), **footer_kw
+                ),
+                "",
+            ]
+            console.print(f"  regime 切片 trend_score：{len(same)}/{present} 同向・{verdict}")
+
+            # 分桶表切片版（各 regime 子樣本 4 桶；形狀對照，不下裁決）
+            lines += [
+                f"trend_score 分桶（regime 切片版・4 桶・target={tgt}）：",
+                "",
+                "| regime | 桶(低→高) | n | mean | win |",
+                "|---|---|---|---|---|",
+            ]
+            for reg in lab.REGIME_LABELS:
+                btbl = lab.bucket_table(
+                    sig_r.filter(pl.col("regime") == reg), "trend_score", tgt, buckets=4
+                )
+                if btbl.is_empty():
+                    lines.append(f"| {reg} | — | 0 | — | — |")
+                    continue
+                for b in btbl.iter_rows(named=True):
+                    lines.append(
+                        f"| {reg} | {b['bucket']} | {b['n']} | {b['mean']:+.2f}pp "
+                        f"| {b['win_rate']:.0%} |"
+                    )
+            lines.append("")
+
+        # 5.2 quadrant 主升續勢 lift 切片＋5.3 ★ entry lift 切片（basket mean lift）
+        star_expr = pl.col("entry_triggered").fill_null(False)
+        for title, subset in (
+            (
+                f"5.2 quadrant「{eff.Q_TREND}」lift 切片",
+                sig_r.filter(pl.col("quadrant") == eff.Q_TREND),
+            ),
+            (f"5.3 ★ entry lift 切片（{entry_col}>{entry_thr}）", sig_r.filter(star_expr)),
+        ):
+            lines += [f"### {title}（r+{h_main}）", ""]
+            daily_full = (
+                subset.drop_nulls([tgt]).group_by("date")
+                .agg(pl.col(tgt).mean().alias("_m")).sort("date")
+            )
+            full_vals = [float(v) for v in daily_full["_m"].to_list() if v is not None]
+            if not full_vals:
+                lines += ["> 全樣本無可用觸發週——切片無基準，跳過。", ""]
+                continue
+            full_mean = sum(full_vals) / len(full_vals)
+            full_sign = 1 if full_mean >= 0 else -1
+            slices = lab.regime_mean_slices(subset, target=tgt, block_len=blk_w, n_boot=n_boot)
+            verdict, same, present = lab.regime_alignment_verdict(
+                slices, full_sign, value_col="mean"
+            )
+            lines += [
+                f"全樣本 per-週 mean {full_mean:+.2f}pp（{len(full_vals)} 週）",
+                "",
+                "| regime | n | n_週 | mean | bs_CI95 | 與全樣本同向？ |",
+                "|---|---|---|---|---|---|",
+                *_mean_slice_rows(slices, full_sign),
+                "",
+                f"跨 regime 同向數：{len(same)}/{present}"
+                f"（同向切片：{'、'.join(same) if same else '無'}）→ 升降級：**{verdict}**",
+                "",
+                *lab.inference_footer(
+                    sample_span=span, regime_dist=_regime_dist(slices), **footer_kw
+                ),
+                "",
+            ]
+            console.print(
+                f"  regime 切片 {title.split(' ')[1]}：{len(same)}/{present} 同向・{verdict}"
+            )
 
     sig.write_csv(out / f"rotation_signals_weekly_{tag}.csv")
     md = out / f"rotation_efficacy_{tag}.md"

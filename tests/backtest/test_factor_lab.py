@@ -16,6 +16,9 @@ from tw_screener.backtest.factor_lab import (
     grid_scan,
     inference_footer,
     moving_block_bootstrap_ci,
+    regime_alignment_verdict,
+    regime_ic_slices,
+    regime_mean_slices,
     residual_ic,
     walk_forward_splits,
 )
@@ -257,3 +260,139 @@ def test_evaluate_ws_i_fields_present_and_pooled_unchanged() -> None:
     assert rep.nonoverlap.get("n_dates", 0) >= 1
     assert {"method", "B", "L", "seed", "T", "span"} <= set(rep.inference_meta)
     assert rep.inference_meta["method"] == "block_bootstrap"
+
+
+# ── WS-H.4a：regime 切片＋跨 regime 升降級（docs/23 §1c）──────────────────────
+
+
+def _regime_panel(
+    betas: dict[str, float], days_per_regime: dict[str, int], n_stocks: int = 20, seed: int = 13
+) -> pl.DataFrame:
+    """各 regime 段落各自的 factor→y 斜率（橫斷面關係依 regime 而變）。"""
+    rng = random.Random(seed)
+    rows = []
+    i = 0
+    for regime, n_days in days_per_regime.items():
+        beta = betas[regime]
+        for _ in range(n_days):
+            d = _D0 + timedelta(days=i)
+            i += 1
+            for s in range(n_stocks):
+                f = rng.gauss(0, 1)
+                rows.append(
+                    {
+                        "date": d, "stock_id": f"s{s:03d}", "regime": regime,
+                        "factor": f, "y": beta * f + rng.gauss(0, 0.3),
+                    }
+                )
+    return pl.DataFrame(rows)
+
+
+def test_regime_ic_slices_all_null_or_missing_returns_empty() -> None:
+    """regime 欄全 null 或缺席（WS-H 標籤未產）→ 空表，呼叫端誠實跳過不炸。"""
+    panel = _regime_panel({"進攻": 1.0}, {"進攻": 15})
+    all_null = panel.with_columns(pl.lit(None, dtype=pl.Utf8).alias("regime"))
+    assert regime_ic_slices(all_null, "factor", target="y", horizon=5).is_empty()
+    no_col = panel.drop("regime")
+    assert regime_ic_slices(no_col, "factor", target="y", horizon=5).is_empty()
+    assert regime_ic_slices(pl.DataFrame(), "factor", target="y", horizon=5).is_empty()
+
+
+def test_regime_ic_slices_three_regimes_rows_and_alignment() -> None:
+    """三 regime 各 40 日：切片 3 列、非 thin；同向數＝與全樣本符號一致的切片數。"""
+    panel = _regime_panel(
+        {"進攻": 1.0, "中性": 1.0, "防禦": -1.0},
+        {"進攻": 40, "中性": 40, "防禦": 40},
+    )
+    slices = regime_ic_slices(panel, "factor", target="y", horizon=5)
+    assert slices.height == 3
+    rows = {r["regime"]: r for r in slices.iter_rows(named=True)}
+    assert all(not rows[k]["thin"] and rows[k]["n_dates"] == 40 for k in rows)
+    assert rows["進攻"]["mean_ic"] > 0.5 and rows["中性"]["mean_ic"] > 0.5
+    assert rows["防禦"]["mean_ic"] < -0.5
+    # 全樣本符號＝正 → 進攻/中性 同向（2/3）→ 跨 regime 穩健
+    verdict, same, present = regime_alignment_verdict(slices, 1)
+    assert verdict == "跨 regime 穩健"
+    assert sorted(same) == ["中性", "進攻"] and present == 3
+
+
+def test_regime_alignment_verdict_bull_only_and_dependent() -> None:
+    """僅進攻同向＝bull-only；僅中性同向＝regime-dependent（docs/23 §1c）。"""
+    panel = _regime_panel(
+        {"進攻": 1.0, "中性": -1.0, "防禦": -1.0},
+        {"進攻": 40, "中性": 40, "防禦": 40},
+    )
+    slices = regime_ic_slices(panel, "factor", target="y", horizon=5)
+    verdict, same, present = regime_alignment_verdict(slices, 1)  # 全樣本視為正
+    assert verdict == "bull-only" and same == ["進攻"] and present == 3
+    # 同一張表、全樣本視為負 → 同向＝中性/防禦 2 片 → 穩健
+    verdict_neg, same_neg, _ = regime_alignment_verdict(slices, -1)
+    assert verdict_neg == "跨 regime 穩健" and sorted(same_neg) == ["中性", "防禦"]
+
+    panel2 = _regime_panel(
+        {"進攻": -1.0, "中性": 1.0, "防禦": -1.0},
+        {"進攻": 40, "中性": 40, "防禦": 40},
+    )
+    slices2 = regime_ic_slices(panel2, "factor", target="y", horizon=5)
+    verdict2, same2, _ = regime_alignment_verdict(slices2, 1)
+    assert verdict2 == "regime-dependent" and same2 == ["中性"]
+
+
+def test_regime_ic_slices_thin_excluded_from_denominator() -> None:
+    """n_dates<30 的切片標 thin、照列但不進裁決分母。"""
+    panel = _regime_panel(
+        {"進攻": 1.0, "中性": 1.0, "防禦": 1.0},
+        {"進攻": 40, "中性": 40, "防禦": 15},  # 防禦僅 15 日 → thin
+    )
+    slices = regime_ic_slices(panel, "factor", target="y", horizon=5)
+    rows = {r["regime"]: r for r in slices.iter_rows(named=True)}
+    assert rows["防禦"]["thin"] is True and rows["防禦"]["n_dates"] == 15
+    assert rows["防禦"]["mean_ic"] is not None  # 照列（表上有值）
+    verdict, same, present = regime_alignment_verdict(slices, 1)
+    assert present == 2 and verdict == "跨 regime 穩健"  # 分母排除 thin
+
+
+def test_regime_alignment_verdict_empty_or_all_thin() -> None:
+    empty = pl.DataFrame(
+        schema={"regime": pl.Utf8, "mean_ic": pl.Float64, "thin": pl.Boolean}
+    )
+    verdict, same, present = regime_alignment_verdict(empty, 1)
+    assert verdict == "regime 樣本不足（無可判切片）" and same == [] and present == 0
+    all_thin = pl.DataFrame(
+        {"regime": ["進攻"], "mean_ic": [0.5], "thin": [True]}
+    )
+    verdict2, _, present2 = regime_alignment_verdict(all_thin, 1)
+    assert verdict2 == "regime 樣本不足（無可判切片）" and present2 == 0
+
+
+def test_regime_mean_slices_rows_and_empty_slice_listed() -> None:
+    """mean-lift 切片：各 regime per-date mean 序列；無資料 regime 照列 n=0 不藏格。"""
+    rng = random.Random(21)
+    rows = []
+    for i in range(24):  # 進攻 12 日、中性 12 日；防禦 0 日（缺席）
+        d = _D0 + timedelta(days=i)
+        regime = "進攻" if i < 12 else "中性"
+        sign = 1.0 if regime == "進攻" else -1.0
+        for g in range(3):  # 每日 3 筆（籃子）
+            rows.append(
+                {"date": d, "grp": f"g{g}", "regime": regime,
+                 "val": sign * 2.0 + rng.gauss(0, 0.2)}
+            )
+    df = pl.DataFrame(rows)
+    slices = regime_mean_slices(df, target="val", block_len=3, min_n_dates=10)
+    assert slices.height == 3
+    r = {x["regime"]: x for x in slices.iter_rows(named=True)}
+    assert r["進攻"]["n"] == 36 and r["進攻"]["n_dates"] == 12 and r["進攻"]["mean"] > 1.5
+    assert r["中性"]["mean"] < -1.5 and not r["中性"]["thin"]
+    assert r["防禦"]["n"] == 0 and r["防禦"]["mean"] is None and r["防禦"]["thin"] is True
+    # 進攻/中性可判、僅進攻與正號同向 → bull-only（docs/23 §1c）
+    verdict, same, present = regime_alignment_verdict(slices, 1, value_col="mean")
+    assert verdict == "bull-only" and same == ["進攻"] and present == 2
+
+
+def test_regime_mean_slices_all_null_regime_empty() -> None:
+    df = pl.DataFrame(
+        {"date": [_D0], "regime": [None], "val": [1.0]},
+        schema={"date": pl.Date, "regime": pl.Utf8, "val": pl.Float64},
+    )
+    assert regime_mean_slices(df, target="val", block_len=3).is_empty()

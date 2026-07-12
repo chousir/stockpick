@@ -172,3 +172,62 @@ def test_compare_with_production_match_rates() -> None:
     assert abs(r["trend_mad"] - 1.0) < 1e-9
     assert abs(r["quadrant_match"] - 0.5) < 1e-9
     assert r["freshness_match"] == 1.0  # 雙 null＝一致
+
+
+# ── WS-H.4a：週訊號 regime 切片（runner 第 5 段的純函式路徑）─────────────────
+
+
+def test_quadrant_lift_regime_slices_weekly() -> None:
+    """主升續勢子集 join regime 後三切片：列數/同向數正確（鏡射 runner 5.2 流程）。"""
+    import random
+
+    from tw_screener.backtest.factor_lab import (
+        regime_alignment_verdict,
+        regime_mean_slices,
+    )
+
+    rng = random.Random(31)
+    # 36 個週訊號日：進攻/中性/防禦各 12 週，每週 3 個族群、全部主升續勢
+    rows = []
+    d = _D0
+    for w in range(36):
+        while d.weekday() != 4:
+            d += timedelta(days=1)
+        regime = ("進攻", "中性", "防禦")[w // 12]
+        sign = 1.0 if regime in ("進攻", "中性") else -1.0
+        for g in range(3):
+            rows.append(
+                {
+                    "date": d, "sub_industry": f"g{g}", "quadrant": Q_TREND,
+                    "regime": regime,
+                    "basket_alpha20": sign * 3.0 + rng.gauss(0, 0.3),
+                }
+            )
+        d += timedelta(days=7)
+    sig = pl.DataFrame(rows)
+
+    sub = sig.filter(pl.col("quadrant") == Q_TREND)
+    slices = regime_mean_slices(sub, target="basket_alpha20", block_len=5, min_n_dates=10)
+    assert slices.height == 3
+    r = {x["regime"]: x for x in slices.iter_rows(named=True)}
+    assert r["進攻"]["n_dates"] == 12 and r["進攻"]["n"] == 36
+    assert r["進攻"]["mean"] > 2.0 and r["中性"]["mean"] > 2.0 and r["防禦"]["mean"] < -2.0
+    assert all(not x["thin"] for x in slices.iter_rows(named=True))
+    # 全樣本 per-週 mean 為正（2/3 段為 +3）→ 進攻/中性同向 → 跨 regime 穩健
+    verdict, same, present = regime_alignment_verdict(slices, 1, value_col="mean")
+    assert verdict == "跨 regime 穩健" and sorted(same) == ["中性", "進攻"] and present == 3
+
+
+def test_regime_slices_all_null_label_skips() -> None:
+    """regime 欄全 null（標籤未產）→ 切片空表＝runner 誠實跳過路徑，不炸。"""
+    from tw_screener.backtest.factor_lab import regime_mean_slices
+
+    sig = pl.DataFrame(
+        {
+            "date": [date(2026, 1, 9)] * 3,
+            "sub_industry": ["a", "b", "c"],
+            "regime": pl.Series([None] * 3, dtype=pl.Utf8),
+            "basket_alpha20": [1.0, 2.0, 3.0],
+        }
+    )
+    assert regime_mean_slices(sig, target="basket_alpha20", block_len=5).is_empty()
