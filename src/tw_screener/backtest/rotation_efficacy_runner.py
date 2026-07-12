@@ -96,20 +96,34 @@ def _load_production_snapshots(reports_dir: Path) -> pl.DataFrame:
     )
 
 
-def run_rotation_efficacy(settings: Path, out_dir: Path | None) -> None:
-    """WS-C：重建→驗證→IC/lift→榜外機會成本。"""
+def run_rotation_efficacy(
+    settings: Path, out_dir: Path | None, membership_source: str = "concepts"
+) -> None:
+    """WS-C：重建→驗證→IC/lift→榜外機會成本。
+
+    membership_source："concepts"（預設，手標次產業）｜"official"（WS-J.2 robustness
+    版，TWSE/OTC 官方產業別粗分類取代手標次產業；輸出檔名加 _official 後綴、不覆蓋
+    基準版）。
+    """
     import yaml
 
     from tw_screener.analysis.rotation import (
         compute_fund_flows,
         compute_subindustry_baskets,
     )
-    from tw_screener.analysis.sector_universe import list_subindustries
+    from tw_screener.analysis.sector_universe import list_subindustries, load_industry_mapping
     from tw_screener.backtest import factor_lab as lab
     from tw_screener.backtest import rotation_efficacy as eff
     from tw_screener.backtest.panel_runner import _load_institutional_all
     from tw_screener.backtest.regime_slice import block_len_for_horizon, load_regime_labels
     from tw_screener.backtest.rotation_calib import standardize_signals
+
+    if membership_source not in eff.MEMBERSHIP_SOURCES:
+        console.print(
+            f"[red]--membership 需為 {'|'.join(eff.MEMBERSHIP_SOURCES)}，"
+            f"收到 {membership_source!r}[/red]"
+        )
+        raise typer.Exit(1)
 
     with open(settings) as f:
         cfg = yaml.safe_load(f)
@@ -144,7 +158,13 @@ def run_rotation_efficacy(settings: Path, out_dir: Path | None) -> None:
         raise typer.Exit(1)
     panel = pl.read_parquet(panel_path)
     price = panel.select("date", "stock_id", "close", "volume")
-    membership = list_subindustries()
+    n_official_excluded: int | None = None
+    if membership_source == "official":
+        industry = load_industry_mapping(cache_dir)
+        membership = eff.official_membership_frame(industry)
+        n_official_excluded = industry.height - membership.height
+    else:
+        membership = list_subindustries()
     institutional, _ = _load_institutional_all(cache_dir)  # OTC 清單僅 panel build 用
     if membership.is_empty() or institutional.is_empty():
         console.print("[red]缺次產業成員或法人快取[/red]")
@@ -181,10 +201,13 @@ def run_rotation_efficacy(settings: Path, out_dir: Path | None) -> None:
         f"＝{sig.height} 列"
     )
 
-    tag = date.today().strftime("%Y%m%d")
+    base_tag = date.today().strftime("%Y%m%d")
+    is_official = membership_source == "official"
+    tag = base_tag + ("_official" if is_official else "")
     out.mkdir(parents=True, exist_ok=True)
     lines: list[str] = [
-        "# rotation 欄位效度（WS-C・歷史重建 forward basket 檢驗）",
+        "# rotation 欄位效度（WS-C・歷史重建 forward basket 檢驗）"
+        + ("（membership=TWSE 官方產業別・粗分類 robustness 版）" if is_official else ""),
         "",
         f"- 產出日：{date.today()}；週快照 {sig['date'].n_unique()} 週"
         f"（{sig['date'].min()!s} ~ {sig['date'].max()!s}）"
@@ -192,8 +215,14 @@ def run_rotation_efficacy(settings: Path, out_dir: Path | None) -> None:
         f"- 訊號重建＝生產表達式鏡像（z rolling {z_window} 日、位階 {pos_window} 日、"
         f"趨勢分權重同生產）；forward＝面板 basket 等權 r/alpha（entry 次一交易日）。",
         "- ⚠️ r+20 相鄰週窗重疊（自相關），CI 偏樂觀；裁決以方向與跨段一致性為主。",
-        "",
     ]
+    if is_official:
+        lines.append(
+            "- membership=TWSE/OTC 官方產業別（粗分類，非手標次產業）；"
+            f"官方缺分類（如新股尚未歸類）誠實排除 {n_official_excluded} 檔、不兜底——"
+            "粒度差異（如官方大類 vs 手標細分次產業）如實使用，不做映射補償。"
+        )
+    lines.append("")
 
     # ── 0. 重建 vs 生產快照對表 ────────────────────────────────────────────────
     prod = _load_production_snapshots(reports_dir)
@@ -344,7 +373,11 @@ def run_rotation_efficacy(settings: Path, out_dir: Path | None) -> None:
                 "對 per-週序列算 CI95；相鄰週前瞻窗重疊，pooled CI 偏窄僅供對照"
                 "（docs/22 §7.2）"
             ),
-            "membership_desc": "今日 concepts.yaml（非 point-in-time）",
+            "membership_desc": (
+                "TWSE/OTC 官方產業別（粗分類・非 point-in-time，official robustness 版）"
+                if is_official
+                else "今日 concepts.yaml（非 point-in-time）"
+            ),
         }
 
         # 5.1 trend_score IC 切片（週訊號日 join regime 標籤）
@@ -456,6 +489,14 @@ def run_rotation_efficacy(settings: Path, out_dir: Path | None) -> None:
             console.print(
                 f"  regime 切片 {title.split(' ')[1]}：{len(same)}/{present} 同向・{verdict}"
             )
+
+    if is_official:
+        lines += [
+            f"> 對照基準版（membership=concepts.yaml 手標次產業）："
+            f"`{out / f'rotation_efficacy_{base_tag}.md'}`——本版（official）不自動比對"
+            "數字，結論落差由人工/主對話對照判讀。",
+            "",
+        ]
 
     sig.write_csv(out / f"rotation_signals_weekly_{tag}.csv")
     md = out / f"rotation_efficacy_{tag}.md"

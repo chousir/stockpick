@@ -16,15 +16,29 @@ from rich.console import Console
 console = Console()
 
 
-def run_laggard_grid(settings: Path, out_dir: Path | None) -> None:
-    """WS-D：族群強弱 × 個股領先落後 × 位階 forward 報酬格。"""
+def run_laggard_grid(
+    settings: Path, out_dir: Path | None, membership_source: str = "concepts"
+) -> None:
+    """WS-D：族群強弱 × 個股領先落後 × 位階 forward 報酬格。
+
+    membership_source："concepts"（預設，手標次產業）｜"official"（WS-J.2 robustness
+    版，TWSE/OTC 官方產業別粗分類取代手標次產業；輸出檔名加 _official 後綴、不覆蓋
+    基準版）。
+    """
     import yaml
 
     from tw_screener.analysis.rotation import compute_subindustry_baskets
-    from tw_screener.analysis.sector_universe import list_subindustries
+    from tw_screener.analysis.sector_universe import list_subindustries, load_industry_mapping
     from tw_screener.backtest import factor_lab as lab
     from tw_screener.backtest import laggard_grid as lg
     from tw_screener.backtest import rotation_efficacy as eff
+
+    if membership_source not in eff.MEMBERSHIP_SOURCES:
+        console.print(
+            f"[red]--membership 需為 {'|'.join(eff.MEMBERSHIP_SOURCES)}，"
+            f"收到 {membership_source!r}[/red]"
+        )
+        raise typer.Exit(1)
 
     with open(settings) as f:
         cfg = yaml.safe_load(f)
@@ -49,7 +63,14 @@ def run_laggard_grid(settings: Path, out_dir: Path | None) -> None:
         console.print(f"[red]無面板 {panel_path}——先跑 make build-panel[/red]")
         raise typer.Exit(1)
     panel = pl.read_parquet(panel_path)
-    membership = list_subindustries()
+    n_official_excluded: int | None = None
+    if membership_source == "official":
+        cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+        industry = load_industry_mapping(cache_dir)
+        membership = eff.official_membership_frame(industry)
+        n_official_excluded = industry.height - membership.height
+    else:
+        membership = list_subindustries()
     if membership.is_empty():
         console.print("[red]缺次產業成員[/red]")
         raise typer.Exit(1)
@@ -82,7 +103,9 @@ def run_laggard_grid(settings: Path, out_dir: Path | None) -> None:
         console.print("[red]格為空——輸入資料異常[/red]")
         raise typer.Exit(1)
 
-    tag = date.today().strftime("%Y%m%d")
+    base_tag = date.today().strftime("%Y%m%d")
+    is_official = membership_source == "official"
+    tag = base_tag + ("_official" if is_official else "")
     out.mkdir(parents=True, exist_ok=True)
     grid.write_csv(out / f"laggard_grid_{tag}.csv")
 
@@ -91,7 +114,8 @@ def run_laggard_grid(settings: Path, out_dir: Path | None) -> None:
 
     n_weeks = stock_rows["date"].n_unique()
     lines = [
-        "# 族群內強弱 2×2×位階 forward 報酬格（WS-D・WS5-② 正式驗證）",
+        "# 族群內強弱 2×2×位階 forward 報酬格（WS-D・WS5-② 正式驗證）"
+        + ("（membership=TWSE 官方產業別・粗分類 robustness 版）" if is_official else ""),
         "",
         f"- 產出日：{date.today()}；逐週快照 {n_weeks} 週×個股層；"
         f"維度＝族群強弱（trend_score 同日中位切）×個股領先/落後（rs_subind<0，"
@@ -99,8 +123,14 @@ def run_laggard_grid(settings: Path, out_dir: Path | None) -> None:
         f">{ext_gate:.0f}）。",
         "- target＝個股 alpha{h}（vs 全市場等權中位）；**所有 cell 全列**；"
         "h1/h2＝前後半段平均（同向性）。單一多頭偏 regime；相鄰週窗重疊 CI 偏樂觀。",
-        "",
     ]
+    if is_official:
+        lines.append(
+            "- membership=TWSE/OTC 官方產業別（粗分類，非手標次產業）；"
+            f"官方缺分類（如新股尚未歸類）誠實排除 {n_official_excluded} 檔、不兜底——"
+            "粒度差異（如官方大類 vs 手標細分次產業）如實使用，不做映射補償。"
+        )
+    lines.append("")
     for h in sorted(set(grid["horizon"].to_list())):
         sub = grid.filter(pl.col("horizon") == h)
         lines += [
@@ -210,10 +240,23 @@ def run_laggard_grid(settings: Path, out_dir: Path | None) -> None:
                         "對 cell×regime 的 per-date mean 序列算 CI95；相鄰週快照前瞻窗"
                         "重疊，pooled CI 偏窄僅供對照（docs/22 §7.2）"
                     ),
-                    membership_desc="今日 concepts.yaml（非 point-in-time）",
+                    membership_desc=(
+                        "TWSE/OTC 官方產業別（粗分類・非 point-in-time，"
+                        "official robustness 版）"
+                        if is_official
+                        else "今日 concepts.yaml（非 point-in-time）"
+                    ),
                 ),
                 "",
             ]
+
+    if is_official:
+        lines += [
+            f"> 對照基準版（membership=concepts.yaml 手標次產業）："
+            f"`{out / f'laggard_grid_{base_tag}.md'}`——本版（official）不自動比對"
+            "數字，結論落差由人工/主對話對照判讀。",
+            "",
+        ]
 
     md = out / f"laggard_grid_{tag}.md"
     md.write_text("\n".join(lines), encoding="utf-8")

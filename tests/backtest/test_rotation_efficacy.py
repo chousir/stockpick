@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from pathlib import Path
 
 import polars as pl
+import yaml
 
 from tw_screener.backtest.rotation_efficacy import (
     Q_DISTRIBUTE,
@@ -14,9 +16,11 @@ from tw_screener.backtest.rotation_efficacy import (
     basket_position_series,
     category_lift_table,
     compare_with_production,
+    official_membership_frame,
     rotation_signal_panel,
     weekly_snapshot_dates,
 )
+from tw_screener.backtest.rotation_efficacy_runner import run_rotation_efficacy
 
 _D0 = date(2026, 1, 5)  # 週一
 
@@ -231,3 +235,199 @@ def test_regime_slices_all_null_label_skips() -> None:
         }
     )
     assert regime_mean_slices(sig, target="basket_alpha20", block_len=5).is_empty()
+
+
+# ── WS-J.2 membership robustness：official_membership_frame＋runner 煙測 ────
+
+
+def test_official_membership_frame_schema_matches_list_subindustries(tmp_path) -> None:
+    """official 版 membership frame 與 list_subindustries()（concepts 版）同 schema。"""
+    from tw_screener.analysis.sector_universe import list_subindustries
+
+    concepts_schema = list_subindustries(tmp_path / "nope.yaml").schema  # 空表照樣同 schema
+    industry = pl.DataFrame(
+        [
+            ("2330", "台積電", "24", "半導體業"),
+            ("2454", "聯發科", "24", "半導體業"),
+            ("9999", "新股尚未歸類", "99", ""),  # industry_name 空 → 誠實排除
+        ],
+        schema=["stock_id", "stock_name", "industry_code", "industry_name"],
+        orient="row",
+    )
+    out = official_membership_frame(industry)
+    assert out.schema == concepts_schema
+    assert out.columns == ["sub_industry", "stock_id"]
+    assert set(out["stock_id"].to_list()) == {"2330", "2454"}
+    assert out["sub_industry"].to_list() == ["半導體業", "半導體業"]
+
+
+def test_official_membership_frame_empty_input() -> None:
+    schema = {
+        "stock_id": pl.Utf8, "stock_name": pl.Utf8,
+        "industry_code": pl.Utf8, "industry_name": pl.Utf8,
+    }
+    out = official_membership_frame(pl.DataFrame(schema=schema))
+    assert out.is_empty()
+    assert out.columns == ["sub_industry", "stock_id"]
+
+
+# ── run_rotation_efficacy --membership 煙測（全離線合成 panel/institutional）──
+
+_MEMBER_STOCKS = ["1101", "1102", "1103", "2201", "2202", "2203"]
+
+
+def _weekdays(n: int, start: date = _D0) -> list[date]:
+    out, d = [], start
+    while len(out) < n:
+        if d.weekday() < 5:
+            out.append(d)
+        d += timedelta(days=1)
+    return out
+
+
+def _re_panel(stocks: list[str], n_days: int = 60) -> pl.DataFrame:
+    """6 檔×60 交易日合成 panel：close/volume/r5/alpha5 全無 null。"""
+    days = _weekdays(n_days)
+    rows = []
+    for i, d in enumerate(days):
+        for si, sid in enumerate(stocks):
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "close": 100.0 + si * 5.0 + i * (0.3 + si * 0.15),
+                    "volume": 1_000_000,
+                    "r5": 1.0 + 0.05 * i - 0.2 * si,
+                    "alpha5": 0.5 + 0.05 * i - 0.2 * si,
+                }
+            )
+    return pl.DataFrame(rows)
+
+
+def _re_institutional(stocks: list[str], n_days: int = 60) -> pl.DataFrame:
+    days = _weekdays(n_days)
+    rows = []
+    for i, d in enumerate(days):
+        for si, sid in enumerate(stocks):
+            trust = (100_000 if i % 10 < 5 else -50_000) + si * 1_000
+            rows.append(
+                {
+                    "date": d, "stock_id": sid,
+                    "foreign_net": -trust // 2, "trust_net": trust,
+                    "dealer_net": 0, "total_net": trust - trust // 2,
+                }
+            )
+    return pl.DataFrame(rows)
+
+
+def _write_re_settings(
+    tmp_path: Path, panel: pl.DataFrame, institutional: pl.DataFrame,
+    out_dir: Path, cache_dir: Path,
+) -> Path:
+    panel_path = tmp_path / "panel.parquet"
+    panel.write_parquet(panel_path)
+    twse_cache = cache_dir / "twse"
+    twse_cache.mkdir(parents=True, exist_ok=True)
+    institutional.write_parquet(twse_cache / "institutional_all.parquet")
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(exist_ok=True)
+    cfg = {
+        "paths": {"reports_dir": str(reports_dir), "cache_dir": str(cache_dir)},
+        "backtest": {
+            "factor_lab": {"panel_path": str(panel_path)},
+            "rotation_efficacy": {
+                "horizons_td": [5], "n_boot": 30, "n_splits": 0,
+                "output_dir": str(out_dir),
+            },
+            "regime_history": {"output_path": str(tmp_path / "no_such_regime.parquet")},
+        },
+    }
+    settings = tmp_path / "settings.yaml"
+    settings.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    return settings
+
+
+def test_run_rotation_efficacy_concepts_default_filename_has_no_suffix(tmp_path, monkeypatch):
+    """不傳 membership_source（預設 concepts）＝現行行為零變化，輸出檔名無 _official 後綴。"""
+    panel = _re_panel(_MEMBER_STOCKS)
+    institutional = _re_institutional(_MEMBER_STOCKS)
+    out_dir = tmp_path / "out"
+    cache_dir = tmp_path / "cache"
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "concepts.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "concepts": {
+                    "1101": "甲次產業", "1102": "甲次產業", "1103": "甲次產業",
+                    "2201": "乙次產業", "2202": "乙次產業", "2203": "乙次產業",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = _write_re_settings(tmp_path, panel, institutional, out_dir, cache_dir)
+    monkeypatch.chdir(tmp_path)
+
+    run_rotation_efficacy(settings, out_dir)  # membership_source 用預設值
+
+    files = {p.name for p in out_dir.iterdir()}
+    tag = date.today().strftime("%Y%m%d")
+    assert f"rotation_signals_weekly_{tag}.csv" in files
+    assert f"rotation_efficacy_{tag}.md" in files
+    assert not any("_official" in f for f in files)
+    md_text = (out_dir / f"rotation_efficacy_{tag}.md").read_text(encoding="utf-8")
+    assert "membership=TWSE 官方產業別" not in md_text
+    assert "對照基準版" not in md_text
+
+
+def _re_industry_df(rows: list[tuple[str, str, str, str]]) -> pl.DataFrame:
+    return pl.DataFrame(
+        rows, schema=["stock_id", "stock_name", "industry_code", "industry_name"],
+        orient="row",
+    )
+
+
+def test_run_rotation_efficacy_official_membership_filename_has_suffix(tmp_path):
+    """membership_source="official"：輸出檔名加 _official 後綴、不覆蓋基準版；報告標明來源。"""
+    panel = _re_panel(_MEMBER_STOCKS)
+    institutional = _re_institutional(_MEMBER_STOCKS)
+    out_dir = tmp_path / "out"
+    cache_dir = tmp_path / "cache"
+    settings = _write_re_settings(tmp_path, panel, institutional, out_dir, cache_dir)
+    _re_industry_df(
+        [
+            ("1101", "股1101", "10", "水泥工業"),
+            ("1102", "股1102", "10", "水泥工業"),
+            ("1103", "股1103", "10", "水泥工業"),
+            ("2201", "股2201", "20", "運輸業"),
+            ("2202", "股2202", "20", "運輸業"),
+            ("2203", "股2203", "20", "運輸業"),
+            ("9999", "新股尚未歸類", "", ""),  # industry_name 空 → 應被誠實排除
+        ]
+    ).write_parquet(cache_dir / "twse" / "industry_202607.parquet")
+
+    run_rotation_efficacy(settings, out_dir, "official")
+
+    tag = date.today().strftime("%Y%m%d") + "_official"
+    files = {p.name for p in out_dir.iterdir()}
+    assert f"rotation_signals_weekly_{tag}.csv" in files
+    assert f"rotation_efficacy_{tag}.md" in files
+    md_text = (out_dir / f"rotation_efficacy_{tag}.md").read_text(encoding="utf-8")
+    assert "membership=TWSE 官方產業別" in md_text
+    assert "官方缺分類" in md_text and "排除 1 檔" in md_text
+    assert "對照基準版" in md_text
+    base_tag = date.today().strftime("%Y%m%d")
+    assert f"rotation_efficacy_{base_tag}.md" in md_text  # 對照提示指到基準版路徑（不覆蓋）
+
+
+def test_run_rotation_efficacy_invalid_membership_source_exits(tmp_path):
+    panel = _re_panel(_MEMBER_STOCKS)
+    institutional = _re_institutional(_MEMBER_STOCKS)
+    out_dir = tmp_path / "out"
+    cache_dir = tmp_path / "cache"
+    settings = _write_re_settings(tmp_path, panel, institutional, out_dir, cache_dir)
+    import pytest
+    import typer
+
+    with pytest.raises(typer.Exit):
+        run_rotation_efficacy(settings, out_dir, "bogus")

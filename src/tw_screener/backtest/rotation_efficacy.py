@@ -27,6 +27,9 @@ from tw_screener.backtest.factor_lab import bootstrap_mean_ci
 _TREND_WEIGHTS = {"basket_ma": 0.40, "member_breadth": 0.35, "leader_rs": 0.25}
 Q_NEXT, Q_TREND, Q_DISTRIBUTE, Q_COOL = "下一棒", "主升續勢", "出貨警訊", "退潮觀察"
 
+# WS-J.2 membership robustness：族群層 runner 的 membership 來源選項。
+MEMBERSHIP_SOURCES = ("concepts", "official")
+
 
 def weekly_snapshot_dates(dates: list[date]) -> list[date]:
     """每 ISO 週最後一個交易日（鏡射週報節奏；避免日頻重疊窗灌水）。"""
@@ -354,4 +357,27 @@ def compare_with_production(
         )
         .sort("date")
         .select(list(schema))
+    )
+
+
+def official_membership_frame(industry: pl.DataFrame) -> pl.DataFrame:
+    """load_industry_mapping() 輸出 → 與 list_subindustries() 同 schema 的 membership frame。
+
+    WS-J.2 membership robustness：以 TWSE/OTC 官方產業別（粗分類）取代手標次產業，
+    industry_name 直接當 sub_industry 用——粒度差異（如官方「電子零組件業」大類 vs
+    手標「IC設計」細分）如實使用，不做映射補償，這正是 robustness 測試的目的。
+
+    industry_name 缺（null 或空字串，如新股尚未歸類）者誠實排除、不兜底；呼叫端可用
+    `industry.height − 回傳值.height` 算出被排除檔數並記入報告（docs/22 §7.3 誠實帳）。
+    """
+    schema = {"sub_industry": pl.Utf8, "stock_id": pl.Utf8}
+    if industry.is_empty():
+        return pl.DataFrame(schema=schema)
+    return (
+        industry.filter(
+            pl.col("industry_name").is_not_null() & (pl.col("industry_name") != "")
+        )
+        .select(pl.col("industry_name").alias("sub_industry"), pl.col("stock_id"))
+        .unique(maintain_order=True)
+        .sort(["sub_industry", "stock_id"])
     )
