@@ -359,6 +359,77 @@ def data_backfill_universe_history(
     console.print(f"[green]回補完成：成功 {done}、失敗 {failed}[/green]")
 
 
+@data_app.command("backfill-daily-history")
+def data_backfill_daily_history(
+    start: str = typer.Option(..., "--start", help="回補起始日（YYYY-MM-DD，含）"),
+    end: str = typer.Option(
+        ..., "--end", help="回補結束日（YYYY-MM-DD，含）；由 end 往 start 逐日曆日走"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """一次性逐日回補全市場歷史日線（TWSE MI_INDEX bulk，一天一請求，含下市股）。
+
+    動機：per-stock 逐檔回補（backfill-universe-history）對 ~1100+ 檔太慢；MI_INDEX
+    一天一請求即可回補全市場，覆蓋含下市股，修正 mkt_ew 等基準宇宙的生存者偏差。
+
+    從 --end 往 --start 逐日曆日走（跳週末，不浪費請求），兩市場（TWSE + TPEX）都嘗試：
+    TWSE 走 `fetch_daily_all_historical`（MI_INDEX，已驗證可回查任意歷史交易日）；TPEX 走
+    `fetch_otc_daily_all_historical`（現況為安全 no-op，見該方法 docstring 的端點探測結論）。
+    單日失敗記 log 不中斷整批；已有快取的日期直接讀檔跳過（天然可續跑）；每 50 個日曆日印進度。
+    """
+    from datetime import date as _date
+    from datetime import timedelta as _timedelta
+
+    from tw_screener.data.twse import create_client
+
+    try:
+        start_date = _date.fromisoformat(start)
+        end_date = _date.fromisoformat(end)
+    except ValueError:
+        console.print(f"[red]--start/--end 格式錯誤（需 YYYY-MM-DD）：{start} / {end}[/red]")
+        raise typer.Exit(1) from None
+    if start_date > end_date:
+        console.print(f"[red]--start {start} 不可晚於 --end {end}[/red]")
+        raise typer.Exit(1)
+
+    client = create_client(settings)
+    total_days = (end_date - start_date).days + 1
+    console.print(f"[bold]逐日回補全市場歷史日線：{start} → {end}（{total_days} 日曆日）[/bold]")
+
+    cur = end_date
+    processed = done_twse = done_otc = failed = 0
+    while cur >= start_date:
+        processed += 1
+        if cur.weekday() >= 5:  # 週六/日兩市場皆無資料，不浪費請求
+            cur -= _timedelta(days=1)
+            continue
+        try:
+            df_twse = client.fetch_daily_all_historical(cur)
+            if not df_twse.is_empty():
+                done_twse += 1
+        except Exception as e:  # noqa: BLE001 — 單日失敗不該中斷整批回補
+            failed += 1
+            console.print(f"[yellow]  {cur} TWSE 失敗：{e}[/yellow]")
+        try:
+            df_otc = client.fetch_otc_daily_all_historical(cur)
+            if not df_otc.is_empty():
+                done_otc += 1
+        except Exception as e:  # noqa: BLE001
+            failed += 1
+            console.print(f"[yellow]  {cur} TPEX 失敗：{e}[/yellow]")
+        if processed % 50 == 0:
+            console.print(
+                f"  進度：已走 {processed}/{total_days} 日曆日"
+                f"（TWSE 成功 {done_twse}、TPEX 成功 {done_otc}）"
+            )
+        cur -= _timedelta(days=1)
+
+    console.print(
+        f"[green]回補完成：TWSE {done_twse} 個交易日、TPEX {done_otc} 個交易日、"
+        f"失敗 {failed} 次[/green]"
+    )
+
+
 @data_app.command("fetch-candidates-history")
 def data_fetch_candidates_history(
     week: str = typer.Option("", "--week", help="週別標籤，預設取最新一週"),

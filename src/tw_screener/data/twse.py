@@ -152,6 +152,104 @@ def _parse_daily_all(data: list[dict[str, Any]]) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=schema)
 
 
+def _find_table_with_fields(
+    tables: list[dict[str, Any]], required: tuple[str, ...]
+) -> dict[str, Any] | None:
+    """在多表 payload（MI_INDEX／TPEX otc 歷史端點）中找出欄名涵蓋 required 全部欄位的表。
+
+    用欄名（去除首尾空白後精確比對）定位，而非固定索引——避免表數量隨日期/公告增減
+    （如特殊處理註記表、除權息調整表）時位置漂移。找不到符合的表回 None。
+    """
+    for t in tables:
+        fields = {str(f).strip() for f in (t.get("fields") or [])}
+        if all(name in fields for name in required):
+            return t
+    return None
+
+
+def _parse_daily_all_historical(payload: dict[str, Any]) -> pl.DataFrame:
+    """解析 TWSE legacy MI_INDEX（歷史全市場日線）→ 與 daily_{date}.parquet 完全同 schema（11 欄）。
+
+    MI_INDEX 一次回傳多張表（指數/大盤統計/漲跌家數…），目標表為「每日收盤行情」——用
+    `_find_table_with_fields` 以欄名（含「證券代號」「收盤價」）定位，不用固定 tables[8]
+    位置索引。「漲跌(+/-)」欄是 HTML 片段（`color:red`=漲、`color:green`=跌、其餘〔平盤/
+    除權息當日無比較基準〕視為 0），實際漲跌幅在另一欄「漲跌價差」（純數字量），兩者相乘
+    還原 signed change。2026-07-12 對拍：與既有 daily_20260709.parquet 交集 1364 檔
+    close/trade_volume/trade_value/change/transaction 全等（規劃書見 WS-K.2 回報）。
+    收盤價無法解析（權證/牛熊證/當日無成交等）的列整列略過；非交易日／找不到目標表回空表。
+    """
+    schema = {
+        "date": pl.Date,
+        "stock_id": pl.Utf8,
+        "name": pl.Utf8,
+        "trade_volume": pl.Int64,
+        "trade_value": pl.Int64,
+        "open": pl.Float64,
+        "high": pl.Float64,
+        "low": pl.Float64,
+        "close": pl.Float64,
+        "change": pl.Float64,
+        "transaction": pl.Int64,
+    }
+    if not payload or payload.get("stat") != "OK":
+        return pl.DataFrame(schema=schema)
+    date_str: str = str(payload.get("date", ""))
+    if not date_str or len(date_str) != 8:
+        logger.warning("MI_INDEX 回應缺 date 欄位，略過")
+        return pl.DataFrame(schema=schema)
+    trade_date = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+
+    table = _find_table_with_fields(payload.get("tables") or [], ("證券代號", "收盤價"))
+    if table is None:
+        logger.warning("MI_INDEX {} 找不到每日收盤行情表，略過", date_str)
+        return pl.DataFrame(schema=schema)
+
+    fields = [str(f).strip() for f in table.get("fields", [])]
+    idx = {name: i for i, name in enumerate(fields)}
+    data_rows: list[list[Any]] = table.get("data") or []
+
+    def col(row: list[Any], name: str) -> str:
+        i = idx.get(name)
+        if i is None or i >= len(row):
+            return ""
+        v = row[i]
+        return v.strip() if isinstance(v, str) else str(v)
+
+    def _sign(html_cell: str) -> float:
+        if "red" in html_cell:
+            return 1.0
+        if "green" in html_cell:
+            return -1.0
+        return 0.0
+
+    rows = []
+    for r in data_rows:
+        try:
+            close = _clean_float(col(r, "收盤價"))
+            if close is None:
+                continue
+            diff = _clean_float(col(r, "漲跌價差")) or 0.0
+            change = _sign(col(r, "漲跌(+/-)")) * diff
+            rows.append(
+                {
+                    "date": trade_date,
+                    "stock_id": col(r, "證券代號"),
+                    "name": col(r, "證券名稱"),
+                    "trade_volume": _clean_int(col(r, "成交股數")),
+                    "trade_value": _clean_int(col(r, "成交金額")),
+                    "open": _clean_float(col(r, "開盤價")),
+                    "high": _clean_float(col(r, "最高價")),
+                    "low": _clean_float(col(r, "最低價")),
+                    "close": close,
+                    "change": change,
+                    "transaction": _clean_int(col(r, "成交筆數")),
+                }
+            )
+        except (KeyError, ValueError, IndexError) as e:
+            logger.warning("略過無效 MI_INDEX 列：{} — {}", r[:2] if r else "?", e)
+    return pl.DataFrame(rows, schema=schema)
+
+
 def _parse_institutional(payload: dict[str, Any]) -> pl.DataFrame:
     """
     解析 legacy T86 三大法人買賣超回應 → DataFrame。
@@ -349,6 +447,11 @@ _TPEX_INST_PATH = "/openapi/v1/tpex_3insti_daily_trading"
 # 上櫃法人「歷史」回查：OpenAPI 只回最新日，舊版 .php 端點吃 d=民國日期可回補（避險版，逐股）。
 _TPEX_INST_HIST_PATH = "/web/stock/3insti/daily_trade/3itrade_hedge_result.php"
 _TPEX_DAILY_PATH = "/openapi/v1/tpex_mainboard_daily_close_quotes"
+# 上櫃全市場「歷史」日線候選端點（現代 afterTrading JSON，帶 date= 理論上可回查任意交易日）。
+# ⚠ 2026-07-12 對拍：對 2022-01-05 與 2026-07-09 兩測試日皆回 stat=ok 但 tables[0].data 為空
+# （totalCount=0）——6 請求驗證預算內未能確認此端點真的支援回查任意歷史日，見
+# fetch_otc_daily_all_historical / _parse_tpex_daily_all_historical docstring 的防呆說明。
+_TPEX_DAILY_HIST_PATH = "/www/zh-tw/afterTrading/otc"
 # 單季基本面（毛利率/EPS）：TWSE OpenAPI（上市）+ TPEX OpenAPI（上櫃）。
 # ⚠ TPEX 端點命名不一致（187ap17 無 t、t187ap14 有 t），2026-06-12 實測為準。
 _FUND_MARGIN_OTC_PATH = "/openapi/v1/mopsfin_187ap17_O"
@@ -409,6 +512,83 @@ def _parse_tpex_daily_all(data: list[dict[str, Any]]) -> pl.DataFrame:
             )
         except (KeyError, ValueError) as e:
             logger.warning(f"略過無效上櫃行情：{r.get('SecuritiesCompanyCode', '?')} — {e}")
+    return pl.DataFrame(rows, schema=schema)
+
+
+def _parse_tpex_daily_all_historical(
+    payload: dict[str, Any], trading_date: date
+) -> pl.DataFrame:
+    """解析 TPEX 現代 afterTrading/otc 歷史端點 → 與 otc_daily_{date}.parquet 完全同 schema。
+
+    防呆（防「毒面板」）：payload 頂層 `date`（8 碼西元）須等於請求的 trading_date，否則
+    視為該端點未真正支援回查此日（實測會恆回「當日」資料而忽略 date 參數，見
+    fetch_otc_daily_all_historical docstring）→ 回空表、呼叫端不落檔，避免把別日資料
+    誤存進歷史檔名。單位：成交股數/成交金額(元) 為股/元（不需 ×1000，與現行
+    stk_quote_result.php 端點 2026-07-09 真實資料對拍值一致，同 _parse_tpex_daily_all）。
+    收盤價無法解析（無成交/權證等）的列整列略過。
+    """
+    schema = {
+        "date": pl.Date,
+        "stock_id": pl.Utf8,
+        "name": pl.Utf8,
+        "trade_volume": pl.Int64,
+        "trade_value": pl.Int64,
+        "open": pl.Float64,
+        "high": pl.Float64,
+        "low": pl.Float64,
+        "close": pl.Float64,
+        "change": pl.Float64,
+        "transaction": pl.Int64,
+    }
+    if not payload or payload.get("stat") != "ok":
+        return pl.DataFrame(schema=schema)
+    date_str = str(payload.get("date", ""))
+    if date_str != trading_date.strftime("%Y%m%d"):
+        logger.warning(
+            "TPEX otc 回應日期 {} 與請求 {} 不符，端點可能不支援回查此日，略過",
+            date_str,
+            trading_date,
+        )
+        return pl.DataFrame(schema=schema)
+
+    table = _find_table_with_fields(payload.get("tables") or [], ("代號", "收盤"))
+    if table is None:
+        return pl.DataFrame(schema=schema)
+
+    fields = [str(f).strip() for f in table.get("fields", [])]
+    idx = {name: i for i, name in enumerate(fields)}
+    data_rows: list[list[Any]] = table.get("data") or []
+
+    def col(row: list[Any], name: str) -> str:
+        i = idx.get(name)
+        if i is None or i >= len(row):
+            return ""
+        v = row[i]
+        return v.strip() if isinstance(v, str) else str(v)
+
+    rows = []
+    for r in data_rows:
+        try:
+            close = _clean_float(col(r, "收盤"))
+            if close is None:
+                continue
+            rows.append(
+                {
+                    "date": trading_date,
+                    "stock_id": col(r, "代號"),
+                    "name": col(r, "名稱"),
+                    "trade_volume": _clean_int(col(r, "成交股數")),
+                    "trade_value": _clean_int(col(r, "成交金額(元)")),
+                    "open": _clean_float(col(r, "開盤")),
+                    "high": _clean_float(col(r, "最高")),
+                    "low": _clean_float(col(r, "最低")),
+                    "close": close,
+                    "change": _clean_float(col(r, "漲跌")),
+                    "transaction": _clean_int(col(r, "成交筆數")),
+                }
+            )
+        except (KeyError, ValueError, IndexError) as e:
+            logger.warning("略過無效 TPEX otc 歷史列：{} — {}", r[:2] if r else "?", e)
     return pl.DataFrame(rows, schema=schema)
 
 
@@ -1238,6 +1418,37 @@ class TWSEClient:
         save_parquet(df, cache_file)
         return df
 
+    def fetch_daily_all_historical(self, trading_date: date) -> pl.DataFrame:
+        """回補指定歷史交易日的全市場日線（TWSE legacy MI_INDEX），存 daily_{date}.parquet。
+
+        與 fetch_daily_all()（只能拿「今天」，STOCK_DAY_ALL 的 date= 參數被無視，docs/02
+        已知陷阱 #2）互補：MI_INDEX 的 date= 參數確實支援任意歷史交易日（2022-01-05 起已驗、
+        2026-07-09 對拍與既有 OpenAPI 快取全等，見 _parse_daily_all_historical docstring），
+        一天一請求即可回補全市場（含下市股，修正輪動基準宇宙的生存者偏差）。
+
+        快取與日常 fetch_daily_all() 共用同一 daily_{YYYYMMDD}.parquet 檔名池——已存在則
+        直接讀、不重打網（天然可續跑）；歷史資料為事後最終值，不再變動，故用「檔案存在」
+        而非 TTL 判斷新鮮度（同 fetch_margin_history／fetch_institutional_history 慣例）。
+        非交易日／空資料 → 不落檔，回空表。
+        """
+        date_str = trading_date.strftime("%Y%m%d")
+        cache_file = self.cache_dir / f"daily_{date_str}.parquet"
+        if cache_file.exists():
+            logger.info("命中快取 {}", cache_file)
+            return load_parquet(cache_file)
+
+        url = (
+            f"{self.legacy_base_url}/exchangeReport/MI_INDEX?response=json"
+            f"&date={date_str}&type=ALLBUT0999"
+        )
+        payload = self._get_legacy(url)
+        df = _parse_daily_all_historical(payload)
+        if not df.is_empty():
+            save_parquet(df, cache_file)
+        else:
+            logger.info("MI_INDEX {} 無資料（非交易日 / 未發布），略過", date_str)
+        return df
+
     def fetch_institutional(self) -> pl.DataFrame:
         """
         抓三大法人（legacy T86）。query date 與檔名都以 latest_trading_date() 為錨點。
@@ -1633,6 +1844,41 @@ class TWSEClient:
         cache_file = self.cache_dir / f"otc_daily_{max_date.strftime('%Y%m%d')}.parquet"
         save_parquet(df, cache_file)
         logger.info("上櫃日線快取 → {} ({} 檔)", cache_file, len(df))
+        return df
+
+    def fetch_otc_daily_all_historical(self, trading_date: date) -> pl.DataFrame:
+        """回補指定歷史交易日的上櫃全市場日線，存 otc_daily_{date}.parquet。
+
+        ⚠ 2026-07-12 探測結論（誠實記錄，未校準）：嘗試現代 TPEX JSON 端點
+        （afterTrading/otc?date=YYYY/MM/DD），對 2022-01-05 與 2026-07-09 兩測試日皆回
+        stat=ok 但 tables[0].data 為空（totalCount=0）；另試過的舊制 stk_quote_result.php
+        回 200 且欄位/單位皆與現行 otc_daily 快取對得上，但 d= 參數被忽略、恆回「當日」
+        資料——若照樣落檔會把「今日資料」誤存進歷史檔名、毒化面板，故未採用。
+        6 請求驗證預算內未找到確認可回查任意歷史日的上櫃 bulk 端點；本方法目前呼叫現代
+        端點 + `_parse_tpex_daily_all_historical` 的「回應 date 需等於請求 date」防呆，
+        實質是安全的 no-op（回空表、不落檔），待之後找到可用端點再補上。上櫃歷史回補
+        現況仍需靠既有的逐檔 TPEX tradingStock 路徑（backfill-universe-history，非本次
+        milestone 範圍）。
+
+        快取命名與 fetch_otc_daily_all() 共用 otc_daily_{YYYYMMDD}.parquet 池；已存在則
+        直接讀、不打網（天然可續跑）。
+        """
+        date_str = trading_date.strftime("%Y%m%d")
+        cache_file = self.cache_dir / f"otc_daily_{date_str}.parquet"
+        if cache_file.exists():
+            logger.info("命中快取 {}", cache_file)
+            return load_parquet(cache_file)
+
+        url = (
+            f"{self.tpex_base_url}{_TPEX_DAILY_HIST_PATH}"
+            f"?date={trading_date.strftime('%Y/%m/%d')}&response=json"
+        )
+        payload = self._get_legacy(url)
+        df = _parse_tpex_daily_all_historical(payload, trading_date)
+        if not df.is_empty():
+            save_parquet(df, cache_file)
+        else:
+            logger.info("TPEX otc {} 無資料或端點不支援回查此日，略過", date_str)
         return df
 
     def fetch_quarterly_fundamentals(self) -> pl.DataFrame:

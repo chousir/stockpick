@@ -119,6 +119,84 @@ def test_parse_daily_all_empty():
     assert "close" in df.columns
 
 
+# ─── MI_INDEX 歷史全市場日線（WS-K.2 逐日回補）───────────────────────────────
+
+
+def _load_mi_index_fixture(name: str) -> dict:
+    with open(FIXTURE_DIR / name) as f:
+        return json.load(f)
+
+
+def test_parse_daily_all_historical_matches_schema():
+    """MI_INDEX 歷史版 schema 需與既有 daily_*.parquet（_parse_daily_all）完全同構。"""
+    from tw_screener.data.twse import _parse_daily_all_historical
+
+    df = _parse_daily_all_historical(_load_mi_index_fixture("mi_index_sample.json"))
+    assert df.columns == [
+        "date", "stock_id", "name", "trade_volume", "trade_value",
+        "open", "high", "low", "close", "change", "transaction",
+    ]
+    assert df.schema["change"] == pl.Float64
+    assert df.schema["trade_volume"] == pl.Int64
+    assert df.schema["transaction"] == pl.Int64
+
+
+def test_parse_daily_all_historical_sign_and_skip():
+    """紅漲/綠跌/X(除權息當日無比較基準)正確還原 signed change；無成交列與過短列略過。"""
+    from tw_screener.data.twse import _parse_daily_all_historical
+
+    df = _parse_daily_all_historical(_load_mi_index_fixture("mi_index_sample.json"))
+    # 00625K（收盤價 '--'，無成交）與 "9998"（欄位不足）都應被略過
+    assert df["stock_id"].to_list() == ["0050", "0053", "1470"]
+    r = {row["stock_id"]: row for row in df.iter_rows(named=True)}
+    assert r["0050"]["change"] == pytest.approx(-0.30)  # 綠跌：sign(-1) × 漲跌價差 0.30
+    assert r["0053"]["change"] == pytest.approx(0.05)   # 紅漲：sign(+1) × 漲跌價差 0.05
+    assert r["1470"]["change"] == pytest.approx(0.0)    # X 註記（除權息）視為平盤
+    assert df["date"][0] == date(2022, 1, 5)
+    assert r["0050"]["trade_volume"] == 11730618
+    assert r["0050"]["close"] == pytest.approx(149.30)
+    assert r["0053"]["trade_value"] == 1107698
+
+
+def test_parse_daily_all_historical_non_trading_day_empty():
+    from tw_screener.data.twse import _parse_daily_all_historical
+
+    payload = {"stat": "查無資料", "date": "20220101", "tables": []}
+    assert _parse_daily_all_historical(payload).is_empty()
+
+
+def test_parse_daily_all_historical_missing_table_empty():
+    """找不到「每日收盤行情」表（欄名不含證券代號/收盤價）→ 回空表，不 crash。"""
+    from tw_screener.data.twse import _parse_daily_all_historical
+
+    payload = {"stat": "OK", "date": "20220105", "tables": [{"fields": ["a", "b"], "data": []}]}
+    assert _parse_daily_all_historical(payload).is_empty()
+
+
+def test_reconcile_daily_historical_against_openapi_cache_values():
+    """對拍（規劃書 WS-K.2）：MI_INDEX 歷史版解析值須與既有 OpenAPI daily_20260709.parquet
+    真實值全等。2026-07-12 人工對拍：交集 1364/1369 檔 close/trade_volume/trade_value/
+    change/transaction 全等；未交集的 5 檔（00707R/020011/020012/020036/1312A，ETN／
+    特別股類）為可解釋差異——MI_INDEX「每日收盤行情(不含權證/牛熊證/可展延牛熊證)」表
+    本就不含這幾檔的類別。此處把該次對拍的 3 檔真實數字（2330/2317/0050）固定成迴歸測試，
+    離線可跑、不依賴 gitignored 的 data/cache。
+    """
+    from tw_screener.data.twse import _parse_daily_all_historical
+
+    df = _parse_daily_all_historical(
+        _load_mi_index_fixture("mi_index_reconcile_20260709.json")
+    )
+    r = {row["stock_id"]: row for row in df.iter_rows(named=True)}
+    # 以下數字取自既有 daily_20260709.parquet（OpenAPI 版）2026-07-12 對拍時讀出的真實值
+    assert r["2330"]["close"] == pytest.approx(2415.0)
+    assert r["2330"]["change"] == pytest.approx(-50.0)
+    assert r["2330"]["trade_volume"] == 34681018
+    assert r["2317"]["close"] == pytest.approx(237.5)
+    assert r["2317"]["change"] == pytest.approx(0.0)
+    assert r["0050"]["close"] == pytest.approx(105.80)
+    assert r["0050"]["change"] == pytest.approx(-0.25)
+
+
 def test_parse_valuation_ratios_merges_both_markets():
     # 上市 BWIBBU_d：Date 西元緊湊、PEratio 空字串=虧損（PB 仍在）
     bwibbu = [
@@ -779,6 +857,66 @@ def test_fetch_daily_all_empty_response(tmp_path: Path):
     assert df.is_empty()
     # 空 response → 不應建任何 daily_*.parquet
     assert list(tmp_path.glob("daily_*.parquet")) == []
+
+
+# ─── fetch_daily_all_historical（MI_INDEX 逐日回補，WS-K.2）───────────────────
+
+
+def test_fetch_daily_all_historical_cache_hit(tmp_path: Path):
+    """已有 daily_{date}.parquet 快取 → 直接讀、不打網（天然可續跑）。"""
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    pl.DataFrame({
+        "date": [date(2022, 1, 5)], "stock_id": ["2330"], "name": ["台積電"],
+        "trade_volume": [1000], "trade_value": [1000000], "open": [600.0], "high": [605.0],
+        "low": [598.0], "close": [600.0], "change": [1.0], "transaction": [500],
+    }).write_parquet(tmp_path / "daily_20220105.parquet")
+
+    called: list[str] = []
+    client._get_legacy = lambda url: called.append(url) or {}  # type: ignore[method-assign]
+
+    df = client.fetch_daily_all_historical(date(2022, 1, 5))
+    assert called == [], "快取命中時不應呼叫 _get_legacy"
+    assert df["stock_id"].to_list() == ["2330"]
+
+
+def test_fetch_daily_all_historical_fetches_and_caches(tmp_path: Path):
+    """快取未命中 → 打 MI_INDEX、解析後存進 daily_{date}.parquet（與日常累積共用檔名池）。"""
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    payload = _load_mi_index_fixture("mi_index_sample.json")
+    calls: list[str] = []
+
+    def fake_legacy(url: str) -> dict:
+        calls.append(url)
+        return payload
+
+    client._get_legacy = fake_legacy  # type: ignore[method-assign]
+
+    df = client.fetch_daily_all_historical(date(2022, 1, 5))
+    assert len(calls) == 1
+    assert "MI_INDEX" in calls[0] and "date=20220105" in calls[0]
+    assert (tmp_path / "daily_20220105.parquet").exists()
+    assert not df.is_empty()
+
+
+def test_fetch_daily_all_historical_non_trading_day_no_cache_file(tmp_path: Path):
+    """非交易日（空資料）→ 不落檔。"""
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    client._get_legacy = (  # type: ignore[method-assign]
+        lambda url: {"stat": "查無資料", "date": "20220101", "tables": []}
+    )
+
+    df = client.fetch_daily_all_historical(date(2022, 1, 1))
+    assert df.is_empty()
+    assert not (tmp_path / "daily_20220101.parquet").exists()
 
 
 # ─── _months_back ─────────────────────────────────────────────────────────────
@@ -1538,6 +1676,55 @@ def test_parse_tpex_daily_all():
     assert r["change"] == 110.0
 
 
+# ─── TPEX afterTrading/otc 歷史全市場日線（WS-K.2 逐日回補）──────────────────
+
+
+def test_parse_tpex_daily_all_historical_matches_schema():
+    from tw_screener.data.twse import _parse_tpex_daily_all_historical
+
+    df = _parse_tpex_daily_all_historical(
+        _load_mi_index_fixture("otc_daily_historical_sample.json"), date(2026, 7, 9)
+    )
+    assert df.columns == [
+        "date", "stock_id", "name", "trade_volume", "trade_value",
+        "open", "high", "low", "close", "change", "transaction",
+    ]
+
+
+def test_parse_tpex_daily_all_historical_values_and_skip():
+    """成交股數/成交金額(元) 已是股/元（不需 ×1000）；漲跌為純帶號字串；無成交列略過。"""
+    from tw_screener.data.twse import _parse_tpex_daily_all_historical
+
+    df = _parse_tpex_daily_all_historical(
+        _load_mi_index_fixture("otc_daily_historical_sample.json"), date(2026, 7, 9)
+    )
+    assert df["stock_id"].to_list() == ["006201", "00679B", "00687C", "00695B"]  # 9999 無成交略過
+    r = {row["stock_id"]: row for row in df.iter_rows(named=True)}
+    assert r["006201"]["trade_volume"] == 200019
+    assert r["006201"]["trade_value"] == 9440357
+    assert r["006201"]["change"] == pytest.approx(0.51)
+    assert r["00687C"]["change"] == pytest.approx(-0.01)
+    assert r["00695B"]["change"] == pytest.approx(0.0)
+    assert df["date"][0] == date(2026, 7, 9)
+
+
+def test_parse_tpex_daily_all_historical_date_mismatch_returns_empty():
+    """端點若忽略 date= 參數、恆回別日資料 → 防呆回空表（防毒面板，2026-07-12 對拍發現的
+    真實現況：afterTrading/otc 現代端點兩測試日皆空、stk_quote_result.php 舊制回當日資料
+    而忽略請求日）。"""
+    from tw_screener.data.twse import _parse_tpex_daily_all_historical
+
+    payload = _load_mi_index_fixture("otc_daily_historical_sample.json")  # 標記 date=20260709
+    df = _parse_tpex_daily_all_historical(payload, date(2022, 1, 5))
+    assert df.is_empty()
+
+
+def test_parse_tpex_daily_all_historical_stat_not_ok_empty():
+    from tw_screener.data.twse import _parse_tpex_daily_all_historical
+
+    assert _parse_tpex_daily_all_historical({"stat": "error"}, date(2026, 7, 9)).is_empty()
+
+
 def test_fetch_otc_daily_all_cache_hit(tmp_path: Path):
     """TTL 內命中 otc_daily_* 快取不打網；且不污染 fetch_daily_all 的 daily_* glob。"""
     client = _make_client(tmp_path)
@@ -1549,6 +1736,58 @@ def test_fetch_otc_daily_all_cache_hit(tmp_path: Path):
     assert df["stock_id"].to_list() == ["8299"]
     # fetch_daily_all 的 find_latest("daily_*.parquet") 不應撿到 otc_daily_*
     assert find_latest(client.cache_dir, "daily_*.parquet") is None
+
+
+# ─── fetch_otc_daily_all_historical（TPEX 逐日回補，WS-K.2）───────────────────
+
+
+def test_fetch_otc_daily_all_historical_cache_hit(tmp_path: Path):
+    """已有 otc_daily_{date}.parquet 快取 → 直接讀、不打網。"""
+    client = _make_client(tmp_path)
+    pl.DataFrame({
+        "date": [date(2026, 7, 9)], "stock_id": ["006201"], "name": ["元大富櫃50"],
+        "trade_volume": [200019], "trade_value": [9440357], "open": [46.52], "high": [47.80],
+        "low": [46.52], "close": [46.85], "change": [0.51], "transaction": [197],
+    }).write_parquet(tmp_path / "otc_daily_20260709.parquet")
+
+    called: list[str] = []
+    client._get_legacy = lambda url: called.append(url) or {}  # type: ignore[method-assign]
+
+    df = client.fetch_otc_daily_all_historical(date(2026, 7, 9))
+    assert called == [], "快取命中時不應呼叫 _get_legacy"
+    assert df["stock_id"].to_list() == ["006201"]
+
+
+def test_fetch_otc_daily_all_historical_fetches_and_caches(tmp_path: Path):
+    client = _make_client(tmp_path)
+    payload = _load_mi_index_fixture("otc_daily_historical_sample.json")
+    calls: list[str] = []
+
+    def fake_legacy(url: str) -> dict:
+        calls.append(url)
+        return payload
+
+    client._get_legacy = fake_legacy  # type: ignore[method-assign]
+
+    df = client.fetch_otc_daily_all_historical(date(2026, 7, 9))
+    assert len(calls) == 1
+    assert "afterTrading/otc" in calls[0] and "date=2026/07/09" in calls[0]
+    assert (tmp_path / "otc_daily_20260709.parquet").exists()
+    assert not df.is_empty()
+
+
+def test_fetch_otc_daily_all_historical_date_mismatch_no_cache_write(tmp_path: Path):
+    """端點忽略 date= 恆回當日資料時（2026-07-12 對拍實測現況）→ 防呆偵測不落檔，避免把
+    別日資料誤存進歷史檔名（毒化面板）。"""
+    client = _make_client(tmp_path)
+    payload = _load_mi_index_fixture("otc_daily_historical_sample.json")  # 標記 date=20260709
+    client._get_legacy = lambda url: payload  # type: ignore[method-assign]
+
+    # 呼叫端要的是 2022-01-05（模擬端點恆回今日、忽略歷史 date 參數的現實狀況）
+    df = client.fetch_otc_daily_all_historical(date(2022, 1, 5))
+    assert df.is_empty()
+    assert not (tmp_path / "otc_daily_20220105.parquet").exists()
+    assert not (tmp_path / "otc_daily_20260709.parquet").exists()  # 也不誤存成回應內的日期
 
 
 def test_parse_quarterly_fundamentals_merges_four_endpoints():
