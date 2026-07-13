@@ -21,7 +21,7 @@
   Yahoo 概念股       │ config/concepts.yaml 主題標籤（手標次產業＋自動爬概念股）      │
                     └──────────────────────────┬───────────────────────────────┘
                                                ▼
- make week GROUP=defg ＝ 一條指令串起以下十一步：
+ make week GROUP=defg ＝ 一條指令串起以下十二步：
  ① fetch-twse                日線/法人/月營收/產業別/官方估值比(PE/PB/殖利率) 增量入快取
  ② fetch-institutional-history 回補近 20 日上市＋上櫃法人（隔幾天沒跑也自動補齊）
  ③ fetch-tdcc                集保大戶持股比（容錯：TDCC 異常不擋，大戶欄退化 null）
@@ -31,8 +31,9 @@
  ⑦ rotation                  ★ 次產業輪動（全市場宇宙・價格趨勢分數主鍵＋趨勢領頭板）→ sector_rotation.md/csv
  ⑧ cp-value-candidates       個股 CP 補漲候選＋C2 三重濾網 → cp_candidates.md（group Section 6 要讀）
  ⑨ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv（含揭露欄）
- ⑩ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
- ⑪ pick-outcome-brief        上週 picks r+5/α/勝率＋偽陰性一頁 → 本週輸入包（容錯：失敗不擋）
+ ⑩ snapshot-week             point-in-time 週快照：凍結 concepts/宇宙/持股 → data/snapshots/（容錯：失敗不擋）
+ ⑪ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
+ ⑫ pick-outcome-brief        上週 picks r+5/α/勝率＋偽陰性一頁 → 本週輸入包（容錯：失敗不擋）
                                                ▼
  手動：把報告貼給 Claude（docs/11 prompt）→ pick.md（首屏 ≤60 行一頁決策卡；核心層距季線 >+15% 硬擋）
  手動：tw-screener picks sync 解析 pick.md 尾端區塊、整批寫底帳 → 每季 make pick-outcome 算命中率×α（pick 閉環）
@@ -88,7 +89,7 @@ watchlist/watchlist.csv    stock_id,note                     # 例：3035,等回
 
 ## 主流程：一條指令 `make week GROUP=defg`
 
-平時**只需要這一條**（整合最完整的主流程，含資料抓取＋法人回補＋集保大戶＋Goodinfo 健檢＋篩選＋資金輪動＋個股 CP 補漲＋族群分析＋產物檢查）：
+平時**只需要這一條**（整合最完整的主流程，含資料抓取＋法人回補＋集保大戶＋Goodinfo 健檢＋篩選＋資金輪動＋個股 CP 補漲＋族群分析＋週快照＋產物檢查）：
 
 ```bash
 make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退役（規劃書 04 A4）
@@ -118,7 +119,7 @@ make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退�
 首次設定做完後，平時就這幾條（產出與貼 Claude 細節見上方「主流程」）：
 
 ```bash
-make week GROUP=defg                              # ①~⑪ 一鍵跑完（尾段 week-check 缺產物自動 WARNING＋pick-outcome-brief）
+make week GROUP=defg                              # ①~⑫ 一鍵跑完（尾段 week-check 缺產物自動 WARNING＋pick-outcome-brief）
 # 貼給 Claude 的 6 類檔（全在 reports/YYYY-Www/，詳見上方主流程表）：
 #   group_analysis.md  sector_rotation.md  candidates_enriched.csv
 #   cp_candidates.md  holdings/watchlist_enriched.csv  screen_result_*.csv
@@ -158,7 +159,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 
 | 指令                                                     | 做什麼                                               | 何時用                               |
 | -------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------ |
-| `make week GROUP=defg`                                 | 完整週流程 ①~⑪                                     | **每週一次（主入口）**         |
+| `make week GROUP=defg`                                 | 完整週流程 ①~⑫                                     | **每週一次（主入口）**         |
 | `make pick-outcome`                                    | pick 閉環：分層命中率×α（vs 大盤＋族群）＋偽陰性帳 | 每季（pick 底帳變厚後）              |
 | `make dash-dev`                                        | 起 dashboard 開發伺服器（FastAPI:8000＋Vite:5173）   | 視覺化瀏覽本週報告（§13）           |
 
@@ -183,9 +184,13 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make week-check`                                      | 產物完整性檢查（week 已內含，可單獨重跑）            | 懷疑某步無聲失敗時                   |
 | `make build-panel`                                     | ground-truth 面板 parquet：前瞻報酬/位階/法人/量比＋核價（docs/22 WS-A） | 研究軌任何因子驗證前                 |
 | `make factor-lab`                                      | 因子實驗台驗收：機器等價＋docs/19 對表＋面板首驗（docs/22 WS-B） | 面板重建後                           |
-| `make rotation-efficacy`                               | 輪動欄效度：歷史重建→生產對表→forward basket IC/lift（docs/22 WS-C） | 每季                                 |
-| `make laggard-grid`                                    | 族群強弱×領先落後×位階 forward 報酬格（docs/22 WS-D） | 每季                                 |
+| `make rotation-efficacy`                               | 輪動欄效度：歷史重建→生產對表→forward basket IC/lift（docs/22 WS-C；`backtest rotation-efficacy --membership official` 出官方產業別 robustness 版） | 每季                                 |
+| `make laggard-grid`                                    | 族群強弱×領先落後×位階 forward 報酬格（docs/22 WS-D；`--membership official` 同上） | 每季                                 |
 | `make flow-inflection`                                 | 資金流 inflection 因子族首驗（docs/22 WS-E）          | 樣本變厚後重驗                       |
+| `make margin-factors`                                  | 融資減肥/大戶 WoW/margin_to_vol 三籌碼因子首驗（預註冊 docs/23 §3） | 面板重建後                    |
+| `make regime-history`                                  | regime 標籤歷史化：V2 引擎逐日 as-of 重算（2022-01 起，docs/23 WS-H.3） | 面板延伸前（先產標籤）        |
+| `make snapshot-week`                                    | point-in-time 週快照：凍結 concepts/宇宙/持股到 data/snapshots/（docs/23 WS-J.1） | week 已內含，可單獨重跑     |
+| `make backfill-daily-history START=… END=…`         | bulk 逐日全市場歷史（TWSE MI_INDEX，一日一請求；上櫃無 bulk 走逐檔） | 面板延伸冷啟動（比逐檔快）    |
 | `make doctor`                                          | Goodinfo 健康檢查（week 已內含，可單獨重跑）         | 懷疑被擋/改版時                      |
 | `make fetch-tdcc`                                      | TDCC 集保大戶持股比（week 已內含）                   | 大戶欄空值時單獨補                   |
 | `make fetch-twse`                                      | 增量抓日線/法人/月營收                               | 通常不必單獨跑（week 含）            |
