@@ -2138,3 +2138,32 @@ def test_fetch_stock_history_anchor_walks_from_anchor_month(tmp_path: Path):
     df = client.fetch_stock_history("2456", months=2, anchor=date(2022, 6, 20))
     assert df["date"].min() == date(2022, 5, 15)
     assert df["date"].max() == date(2022, 6, 15)
+
+
+def test_parse_tpex_stock_day_accepts_both_volume_headers():
+    """TPEX tradingStock 表頭 2024↓「成交仟股」vs 2025↑「成交張數」皆須解析（W28 二輪回歸）。
+
+    只認新表頭曾讓 2022-2024 上櫃歷史整月略過（parser 對舊表頭回空、觸發連 2 月空早停）。
+    """
+    from tw_screener.data.twse import _parse_tpex_stock_day
+
+    def _payload(vol_header: str, roc_date: str) -> dict:
+        return {
+            "stat": "ok",
+            "tables": [
+                {
+                    "fields": ["日 期", vol_header, "成交仟元", "開盤", "最高", "最低",
+                               "收盤", "漲跌", "筆數"],
+                    "data": [[roc_date, "2,906", "1,233,687", "412.00", "432.00",
+                              "412.00", "421.00", "11.00", "3,272"]],
+                }
+            ],
+        }
+
+    old = _parse_tpex_stock_day(_payload("成交仟股", "113/12/02"), "6488")  # 2024
+    new = _parse_tpex_stock_day(_payload("成交張數", "114/03/03"), "6488")  # 2025
+    assert old.height == 1 and new.height == 1
+    assert old["trade_volume"][0] == 2906 * 1000  # 兩表頭量級同、×1000＝股
+    assert new["trade_volume"][0] == 2906 * 1000
+    assert old["close"][0] == 421.0 and new["close"][0] == 421.0
+    assert old["date"][0].year == 2024 and new["date"][0].year == 2025

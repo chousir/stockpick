@@ -974,7 +974,9 @@ def _parse_tpex_stock_day(payload: dict[str, Any], stock_id: str) -> pl.DataFram
     rows = []
     for r in data_rows:
         try:
-            volume_lots = _clean_int(col(r, "成交張數"))  # 仟股
+            # TPEX 2024↓ 舊表頭＝「成交仟股」、2025↑ 改「成交張數」（量級同＝千股，×1000＝股）；
+            # 只認新表頭會讓 2022-2024 上櫃歷史整月略過（W28 二輪查獲）
+            volume_lots = _clean_int(col(r, "成交張數", "成交仟股"))  # 仟股/張
             value_lots = _clean_int(col(r, "成交仟元"))  # 仟元
             rows.append(
                 {
