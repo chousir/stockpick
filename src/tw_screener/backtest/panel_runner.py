@@ -157,8 +157,11 @@ def _coverage_report_lines(panel: pl.DataFrame, otc_stock_ids: frozenset[str]) -
         )
     lines += [
         "",
-        "> **基準口徑警語**：2022-2024 宇宙＝次產業成員回補（今日 concepts）、2025+ 為全市場快照"
-        "——mkt_ew 等權基準在兩段的宇宙口徑不同，跨段比較 alpha 要看此段。",
+        "> **基準口徑警語（W28 二輪 bulk 回補後）**：**上市段全年皆全市場**"
+        "（2022-2024 走 MI_INDEX bulk 逐日回補、2025+ 為日快照）；**上櫃段 2022-2024 僅"
+        "次產業成員**（今日 concepts∩OTC，TPEX 無 bulk 歷史端點、只能逐檔補成員），"
+        "2025+ 才全市場。故 mkt_ew 等權基準在 2022-2024 相對少計上櫃小型股、口徑偏上市，"
+        "跨段比較 alpha 要看此段（純多頭 2025+ 全市場 vs 2022-2024 上市全+上櫃成員）。",
     ]
     return lines
 
