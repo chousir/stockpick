@@ -144,8 +144,10 @@ quadrant 補「主升續勢＝動能延續描述，出貨警訊無領先性」�
    2022 空頭/2023 復甦/2024-25 多頭）、V2 regime 引擎逐日 as-of 歷史化（1,093 天
    標籤：中性 541/進攻 390/防禦 162；一致性抽查 7/7）、五個研究 runner 全部內建
    regime 切片段＋升降級裁決（≥2 regime 同向＝跨 regime 穩健／僅進攻＝bull-only）。
-   第一輪各存活結論的切片裁決＝（WS-H.4 重跑後回填 docs/23 §2）。晉升鐵則 (c) 已
-   寫死：無 ≥2 regime 同向不得晉升主排序。
+   切片裁決（2026-07-15 重跑，總表 docs/23 §2.1）：**trend_score 升級「跨 regime
+   穩健」**（3/3 全 CI>0）、★ entry 同升、laggard ambush CI 正式分離升可提案候補、
+   ma60_dist 精煉為「防禦 regime 條件性」（−0.118 集中防禦）、vol_ratio 維持降級
+   （全切片 CI 含 0）。晉升鐵則 (c) 已寫死：無 ≥2 regime 同向不得晉升主排序。
 2. **重疊窗自相關 → 已修**：factor_lab 預設推論改 moving-block bootstrap
    （block ≥ horizon+1、B=1000、seed 固定），Fisher-z 降為對照欄；另附非重疊子樣本
    （stride=horizon）robustness 欄；每張結果表 footer 固定三行（樣本期間+regime 分布
@@ -154,8 +156,9 @@ quadrant 補「主升續勢＝動能延續描述，出貨警訊無領先性」�
 3. **membership 非 point-in-time → 已圍住**：(a) 今週（2026-W28）起 `make week`
    自動快照 concepts/宇宙/持股到 `data/snapshots/`——未來的回測可 point-in-time；
    (b) 歷史段仍非 PIT（不可逆），但族群層結論加開 TWSE 官方產業別 robustness 重跑
-   （`--membership official`）——結論保持＝標「粗分類穩健」、翻掉＝標
-   `membership-sensitive` 降級（裁決＝WS-J.2 重跑後回填 docs/23 §2）。
+   （`--membership official`）——裁決（2026-07-15）：**trend_score 與 laggard
+   ambush 皆「粗分類穩健」**（official 版 IC +0.111 全切片 CI>0；ambush CI 分離
+   保持），無結論翻掉＝零 membership-sensitive 降級（docs/23 §2.1）。
    殘餘：歷史 membership 回放（git 版本回放 concepts.yaml）未做。
 4. **OTC 覆蓋 → 已修（並揪出一隻更深的蟲）**：二輪把價格底盤推到 2021-06 起——
    上市走 MI_INDEX bulk 逐日全市場（含下市股、非成員），上櫃逐檔 tradingStock
