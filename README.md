@@ -513,6 +513,7 @@ make typecheck   # mypy
 | [`docs/20-ranking-reform-ws5.md`](./docs/20-ranking-reform-ws5.md)                           | 排序改革 WS5：貼底揭露欄＋sector-wide 旗標降輪動＋次產業表 rotation 趨勢分/Rank 並列＋F2 +15% 校準協議         |
 | [`docs/21-etf-holdings-integration.md`](./docs/21-etf-holdings-integration.md)               | ETF 持股整合：holdings ETF 輕量列（asset_type/報酬追蹤）＋組合曝險手標 etf_exposure；ETF 不進個股 alpha 框架  |
 | [`docs/22-factor-lab-w28.md`](./docs/22-factor-lab-w28.md)                                   | W28 統一因子實驗台（WS-A~G 收官）：trend_score 唯一存活、inflection 族/ΔRank/退潮全否證、宇宙效應方法論        |
+| [`docs/23-backtest-r2-w28.md`](./docs/23-backtest-r2-w28.md)                                 | W28 回測二輪（WS-H~L 收官）：推論硬化 Fisher-z→moving-block bootstrap＋晉升鐵則；補 docs/22 §7 四洞；trend_score 升雙 robustness、★/ambush 升級、WS-K 籌碼三因子無證據/樣本不足 |
 | [`docs/proposals/`](./docs/proposals/00-index.md)                                            | 審查改善規劃書 01–05（效能技債/資料韌性/量化驗證閉環/架構瘦身/**選股有效性總改造 F1–F5**，皆已收官）        |
 | [`docs/99-troubleshooting.md`](./docs/99-troubleshooting.md)                                 | 常見問題與解法                                                                                                      |
 
