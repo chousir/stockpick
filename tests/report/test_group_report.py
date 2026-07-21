@@ -442,3 +442,97 @@ def test_named_list_csv_asset_type_and_etf_lightweight_row(tmp_path):
     assert rows["0050"]["return_pct"] not in (None, "")
     assert float(rows["0050"]["return_pct"]) < 0
     assert rows["0050"]["market_value_k"] not in (None, "")
+
+
+# ─── M-BR1 底部左側揭露欄（規劃書 24 Phase 1：純加法、零行為變更） ────────────────
+
+
+_M_BR1_NEW_FIELDS = frozenset({
+    "rev_yoy_delta", "fundamental_health", "foreign_flow_inflection",
+    "trust_flow_inflection", "inst_flow_inflection",
+    "dist_low_20d_pct", "dist_low_60d_pct", "base_proximity", "contrarian_base",
+})
+
+
+def _br1_members():
+    """20 日賣超 / 近 5 日翻買的左側型單股面板（外資 20d −30,000 張、5d +5,000 張）。"""
+    dates = [date(2026, 5, d) for d in range(1, 13)]
+    fnet = [-5_000_000] * 7 + [1_000_000] * 5  # 股：20日−30,000張、5日+5,000張
+    inst = pl.DataFrame(
+        {
+            "date": dates,
+            "stock_id": ["2330"] * 12,
+            "stock_name": ["公司2330"] * 12,
+            "foreign_net": fnet,
+            "trust_net": [0] * 12,
+            "dealer_net": [0] * 12,
+            "total_net": fnet,
+        }
+    )
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2, institutional=inst,
+    )
+    return results, members
+
+
+def test_m_br1_columns_present_and_classify(tmp_path):
+    """M-BR1 九欄進 candidates CSV，且左側型被分類為『轉買』。"""
+    results, members = _br1_members()
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(
+        members, pl.DataFrame(), results, out,
+        contrarian_cfg={"min_lots": 1000},
+        rev_yoy_delta_map={"2330": (-5.0, None)},
+        rev_yoy_map={"2330": 35.0},
+    )
+    df = pl.read_csv(out)
+    assert _M_BR1_NEW_FIELDS <= set(df.columns)
+    row = {str(r["stock_id"]): r for r in df.iter_rows(named=True)}["2330"]
+    assert row["foreign_flow_inflection"] == "轉買"
+    assert row["fundamental_health"] == "穩健"  # YoY +35% 但小幅降速
+    assert row["rev_yoy_delta"] == -5.0
+
+
+def test_m_br1_is_purely_additive(tmp_path):
+    """Phase 1 驗收核心：加欄前後**既有欄逐位元不變**（零行為變更）。
+
+    以 contrarian_cfg=None（等同舊呼叫端）與帶設定兩路各產一次，比對兩者交集欄位
+    ——只要有一個既有欄變動，M-BR1 就不是純加法、驗收不成立。
+    """
+    results, members = _br1_members()
+    base_out = tmp_path / "base.csv"
+    new_out = tmp_path / "new.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), results, base_out)
+    write_candidates_enriched_csv(
+        members, pl.DataFrame(), results, new_out,
+        contrarian_cfg={"min_lots": 1000}, rev_yoy_delta_map={"2330": (-5.0, None)},
+    )
+    base_df, new_df = pl.read_csv(base_out), pl.read_csv(new_out)
+    legacy_cols = [c for c in base_df.columns if c not in _M_BR1_NEW_FIELDS]
+    assert base_df.select(legacy_cols).equals(new_df.select(legacy_cols))
+    # 且 risk_kind / flow_state 未被賣方分支污染（沿用買方口徑，見 contrarian.py docstring）
+    assert base_df["flow_state"].to_list() == new_df["flow_state"].to_list()
+    assert base_df["risk_kind"].to_list() == new_df["risk_kind"].to_list()
+
+
+def test_m_br1_null_safe_when_inst_missing(tmp_path):
+    """法人缺漏股：三個 inflection 欄如實 null，不假值、不崩潰。"""
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    institutional = _institutional(["2330"], [5_000_000])  # 2454 缺漏
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2, institutional=institutional,
+    )
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(
+        members, pl.DataFrame(), results, out, contrarian_cfg={"min_lots": 1000}
+    )
+    df = pl.read_csv(out)
+    miss = {str(r["stock_id"]): r for r in df.iter_rows(named=True)}["2454"]
+    assert miss["foreign_flow_inflection"] is None
+    assert miss["trust_flow_inflection"] is None
+    assert miss["inst_flow_inflection"] is None
+    assert miss["fundamental_health"] == "待查"   # 無 rev_yoy → 待查，不猜
+    assert miss["contrarian_base"] is False       # 缺資料不得放行

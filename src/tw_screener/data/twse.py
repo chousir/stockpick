@@ -1935,6 +1935,42 @@ class TWSEClient:
             return pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA)
         return load_parquet(files[-1])
 
+    def load_revenue_yoy_deltas(self) -> dict[str, tuple[float | None, float | None]]:
+        """M-BR1：純讀全部 revenue_*.parquet，算每檔月營收 YoY 的二階導（不打網）。
+
+        delta＝最新月 YoY − 上月 YoY（營收動能加速/降速）；delta_prev＝再前一月的同差，
+        供 fundamental_health 的「連 2 月深負＝轉差」判定。快取月數不足 → 該值 None
+        （**不補零、不外插**；快取只累積一個月時全表回 None 是正常誠實結果）。
+
+        快取檔名用抓取月（fetch_revenue 的 date.today()），資料的報告月在 year_month 欄，
+        兩者不必然相同——故一律以 year_month 排序去重，不依賴檔名。
+
+        Returns:
+            {stock_id: (delta, delta_prev)}；無快取回空 dict。
+        """
+        files = list(self.cache_dir.glob("revenue_*.parquet"))
+        if not files:
+            return {}
+        frames = [pl.read_parquet(f) for f in files]
+        df = pl.concat(frames)
+        if df.is_empty() or "year_month" not in df.columns or "yoy_pct" not in df.columns:
+            return {}
+        # 同一報告月可能出現在多個抓取檔中，去重後每檔取最近 3 個報告月
+        recent = (
+            df.unique(subset=["stock_id", "year_month"])
+            .sort("year_month", descending=True)
+            .group_by("stock_id", maintain_order=True)
+            .head(3)
+        )
+        out: dict[str, tuple[float | None, float | None]] = {}
+        for sid, grp in recent.group_by("stock_id"):
+            yoys = grp.sort("year_month", descending=True)["yoy_pct"].to_list()
+            delta = yoys[0] - yoys[1] if len(yoys) >= 2 and None not in yoys[:2] else None
+            delta_prev = yoys[1] - yoys[2] if len(yoys) >= 3 and None not in yoys[1:3] else None
+            key = sid[0] if isinstance(sid, tuple) else sid
+            out[str(key)] = (delta, delta_prev)
+        return out
+
     def fetch_valuation_ratios(self) -> pl.DataFrame:
         """抓官方日估值比（trailing PE/PBR/殖利率），上市 BWIBBU_d + 上櫃 peratio，逐日累積。
 

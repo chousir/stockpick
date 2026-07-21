@@ -264,6 +264,10 @@ def run_group_analysis(settings: Path) -> None:
             if "company_name" in rev_df.columns:
                 name_map.setdefault(sid, str(rr.get("company_name") or ""))
 
+    # M-BR1：月營收 YoY 二階導（本月 YoY − 上月 YoY）；純讀既有快取，不多打一次網。
+    # 餵 fundamental_health 揭露欄——把「YoY 水準」與「加速度」拆開（sell-the-news 真因）。
+    rev_yoy_delta_map = client.load_revenue_yoy_deltas()
+
     # 單季基本面（毛利率/EPS）：純讀快取，由 make fetch-twse 累積
     fund_df = client.load_latest_fundamentals()
     fundamentals_map: dict[str, dict] = (
@@ -318,6 +322,8 @@ def run_group_analysis(settings: Path) -> None:
         fundamentals_map=fundamentals_map, valuation_map=valuation_map,
         big_holder_map=big_holder_map, margin_map=margin_map,
         near_flow_cfg=cfg.get("near_flow", {}),  # F5 近端籌碼揭露欄（沿舊 06 NF1）
+        contrarian_cfg=cfg.get("contrarian_base", {}),  # M-BR1 底部左側揭露欄（規劃書 24）
+        rev_yoy_delta_map=rev_yoy_delta_map,
     )
     # 重疊股重用：庫存/觀察清單同檔一律沿用 candidates 那筆，避免跨 CSV 量比/集中度/成交額分岔
     canonical_rows = {row["stock_id"]: row for row in cand_rows}
@@ -357,6 +363,8 @@ def run_group_analysis(settings: Path) -> None:
             big_holder_map=big_holder_map, margin_map=margin_map,
             holdings_map=hmap, canonical_rows=canonical_rows,
             near_flow_cfg=cfg.get("near_flow", {}),
+            contrarian_cfg=cfg.get("contrarian_base", {}),  # M-BR1（規劃書 24）
+            rev_yoy_delta_map=rev_yoy_delta_map,
         )
         console.print(f"[green]  {label}_enriched.csv：{n} 檔 → {out_csv}[/green]")
 

@@ -148,6 +148,20 @@ near_flow:                        # 規劃書 05 F5（沿舊 06 NF1）：近端�
   risk_ext_ma60_pct: 15           # risk_kind 價格延伸門檻（對齊 F2 核心位階紀律 +15%）
   risk_down_5d_pct: -5            # risk_kind 價格已跌：5日報酬 < 此% 且破月線
 
+contrarian_base:                  # 規劃書 24 M-BR1：底部左側偵測揭露欄——純揭露非 gate、不改剔除/排序
+                                  # （docs/22 §2 flow_turn 已被否證：「賣壓熄→可逢低」直覺尚無前瞻證據。
+                                  #  升 gate 唯一開關＝docs/24 §3 因子檢驗過關，未過恆為描述 tag）
+  min_lots: 1000                  # |法人 20 日淨額| < 此張數 → flow_inflection 不評（量小無可揭露；同 near_flow 口徑）
+  stall_share_pct: 5              # 仍在賣但近5日佔20日累計 < 此% → 熄火（賣壓幾乎停）
+  accel_ratio: 1.0                # 近5日日均 / 20日日均 > 此倍數 → 加速（買賣方向由近5日淨額正負定）
+  at_low_pct: 2.0                 # 距 60 日低 ≤ 此% → 在低
+  near_low_pct: 5.0               # 距 60 日低 ≤ 此% → 貼低（左側接刀的結構支撐要件）
+  mid_pct: 20.0                   # 距 60 日低 ≤ 此% → 中段；超過 → 高檔
+  strong_yoy_pct: 20              # 月營收 YoY ≥ 此且未降速 → 強化（對齊 propicks_flags.strong_leader_yoy_pct）
+  weak_yoy_pct: 5                 # YoY 低於此（仍正）→ 減速（低個位數成長，如聯發科 +2.8%）
+  decel_deep_pct: -30             # YoY 二階導（本月 YoY − 上月 YoY）深於此 → 大幅降速；連 2 月深負 → 轉差
+  thin_margin_pct: 5              # 單季稅後純益率低於此 → 健康分類降一級（毛利高但淨利薄）
+
 trajectory:                       # 規劃書 05 F5（沿舊 07 TR1）：回踩品質軌跡欄——啟發式輔助非買賣訊號
   ma_window: 20                   # 站上/跌破月線天數的均線窗
   pullback_vol_window: 5          # 回踩期均量窗（交易日）

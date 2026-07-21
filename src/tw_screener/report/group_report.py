@@ -846,14 +846,28 @@ def _build_enriched_rows(
     big_holder_map: dict | None = None,
     margin_map: dict | None = None,
     near_flow_cfg: dict | None = None,
+    contrarian_cfg: dict | None = None,
+    rev_yoy_delta_map: dict | None = None,
 ) -> list[dict]:
     """組「每檔 × 技術/籌碼/估值/基本面 + flags」列（candidates / 庫存 / 觀察 共用）。
 
     near_flow_cfg（F5）：近端籌碼揭露欄門檻（settings.near_flow）；None＝欄位仍輸出、
     用預設門檻。flow_state/near_share_5d_pct/risk_kind 為**純揭露非 gate**（§1.4）。
+
+    contrarian_cfg（M-BR1）：底部左側揭露欄門檻（settings.contrarian_base）。
+    fundamental_health/foreign_flow_inflection/base_proximity/contrarian_base 同屬
+    **純揭露非 gate**——不改剔除、不改排序、不進 picks（docs/24 §1、§4.1）。
+    rev_yoy_delta_map={stock_id: (delta, delta_prev)}，缺月＝None（不補零）。
     """
     if members.is_empty():
         return []
+    from tw_screener.analysis.contrarian import (
+        base_proximity,
+        dist_to_low_pct,
+        flow_inflection,
+        fundamental_health,
+        is_contrarian_base,
+    )
     from tw_screener.analysis.grouping import classify_risk_kind, near_flow_state, rank_themes
 
     themes_long = themes_long if themes_long is not None else pl.DataFrame()
@@ -900,6 +914,18 @@ def _build_enriched_rows(
     nf_accel = float(nf.get("accel_share_pct", 40))
     nf_ext = float(nf.get("risk_ext_ma60_pct", 15))
     nf_down = float(nf.get("risk_down_5d_pct", -5))
+    # M-BR1 底部左側揭露欄門檻（settings.contrarian_base）；純揭露非 gate
+    cb = contrarian_cfg or {}
+    cb_min_shares = float(cb.get("min_lots", 1000)) * 1000.0  # 張 → 股
+    cb_stall = float(cb.get("stall_share_pct", 5))
+    cb_accel_ratio = float(cb.get("accel_ratio", 1.0))
+    cb_at_low = float(cb.get("at_low_pct", 2.0))
+    cb_near_low = float(cb.get("near_low_pct", 5.0))
+    cb_mid = float(cb.get("mid_pct", 20.0))
+    cb_strong_yoy = float(cb.get("strong_yoy_pct", 20))
+    cb_weak_yoy = float(cb.get("weak_yoy_pct", 5))
+    cb_decel_deep = float(cb.get("decel_deep_pct", -30))
+    cb_thin_margin = float(cb.get("thin_margin_pct", 5))
 
     def _num(v: object, nd: int = 1) -> float | None:
         if v is None or (isinstance(v, float) and v != v):
@@ -1046,6 +1072,34 @@ def _build_enriched_rows(
         # 正向訊號故獨立欄）；深破線由 risk_kind/pullback_quality 另揭露。docs/20 §WS5-①。
         base_zone = "貼底" if (m60 is not None and m60 <= base_zone_max) else ""
 
+        # M-BR1（規劃書 24）底部左側偵測揭露欄：賣壓熄火 × 基本面完好 × 貼近結構低。
+        # 純加法揭露——不改剔除/排序/picks（docs/24 §1）。與 flow_state 的分工見
+        # analysis/contrarian.py docstring：flow_state 是買方旗標（20 日為負時回 None），
+        # 本組欄雙向評、才看得見「20 日賣超但近 5 日翻買」這個左側佈局要抓的區間。
+        yoy_delta, yoy_delta_prev = (rev_yoy_delta_map or {}).get(sid, (None, None))
+        fund_health = fundamental_health(
+            ryoy, yoy_delta, yoy_delta_prev, net_margin,
+            strong_yoy_pct=cb_strong_yoy, weak_yoy_pct=cb_weak_yoy,
+            decel_deep_pct=cb_decel_deep, thin_margin_pct=cb_thin_margin,
+        )
+        if inst_missing:
+            foreign_infl = trust_infl = inst_infl = None
+        else:
+            foreign_infl, trust_infl, inst_infl = (
+                flow_inflection(
+                    _num(r.get(f"{p}_net"), 0), _num(r.get(f"{p}_net_5d"), 0),
+                    min_shares=cb_min_shares, stall_share_pct=cb_stall,
+                    accel_ratio=cb_accel_ratio,
+                )
+                for p in ("foreign", "trust", "inst")
+            )
+        dist_low_60 = dist_to_low_pct(close, low_60d)
+        dist_low_20 = dist_to_low_pct(close, low_20d)
+        proximity = base_proximity(
+            dist_low_60, at_low_pct=cb_at_low, near_low_pct=cb_near_low, mid_pct=cb_mid
+        )
+        contrarian = is_contrarian_base(fund_health, foreign_infl, proximity)
+
         # 除息還原：5 日視窗內現金股利已加回 momentum_5d（修假負）；標旗供人工查證
         ex_div_cash = _num(r.get("ex_div_cash"), 2)
         div_addback_pct = _num(r.get("div_addback_pct"), 2)
@@ -1127,6 +1181,18 @@ def _build_enriched_rows(
                 # M-WS5a 揭露欄（純揭露非 gate、獨立於 flags 排雷欄）
                 "base_zone": base_zone,          # WS5-①：貼底（距季線 ≤ 門檻＝起漲 base 位階）／空
                 "sector_flag_note": "",          # WS5-②：sector-wide 旗標覆蓋度註記（post-pass 填）
+                # M-BR1 底部左側揭露欄（規劃書 24）：純揭露非 gate、未過 docs/24 §3 因子檢驗
+                # 前 contrarian_base 恆為描述 tag、不進 picks（避免 sync 當成建倉結論）
+                "rev_yoy_delta": _num(yoy_delta, 1),   # 本月 YoY − 上月 YoY（動能二階導）；缺月＝空
+                "fundamental_health": fund_health,     # 強化/穩健/減速/轉差/待查（水準×加速度拆開）
+                # 轉買/熄火/加速賣/轉賣/加速買/平穩；null＝兩窗量皆小或法人缺漏
+                "foreign_flow_inflection": foreign_infl,
+                "trust_flow_inflection": trust_infl,
+                "inst_flow_inflection": inst_infl,
+                "dist_low_20d_pct": dist_low_20,   # 距 20 日低%（愈小愈貼底）
+                "dist_low_60d_pct": dist_low_60,   # 距 60 日低%——把「跌深」與「跌到結構」區分開
+                "base_proximity": proximity,       # 在低(≤2%)/貼低(≤5%)/中段/高檔
+                "contrarian_base": contrarian,     # 三條件同時成立＝底部左側候選（描述 tag）
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
             }
         )
@@ -1151,6 +1217,8 @@ def write_candidates_enriched_csv(
     big_holder_map: dict | None = None,
     margin_map: dict | None = None,
     near_flow_cfg: dict | None = None,
+    contrarian_cfg: dict | None = None,
+    rev_yoy_delta_map: dict | None = None,
 ) -> list[dict]:
     """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
 
@@ -1164,6 +1232,7 @@ def write_candidates_enriched_csv(
         members, themes_long, screener_results, flags_cfg, rev_yoy_map,
         fundamentals_map, valuation_map, big_holder_map, margin_map,
         near_flow_cfg=near_flow_cfg,
+        contrarian_cfg=contrarian_cfg, rev_yoy_delta_map=rev_yoy_delta_map,
     )
     if not rows:
         return []
@@ -1227,6 +1296,16 @@ _CANONICAL_REUSE_FIELDS = (
     "flags",
     "base_zone",         # M-WS5a：跟隨 canonical 的 ma60_dist，重疊股一致
     "sector_flag_note",  # M-WS5a：覆蓋度屬候選宇宙口徑，庫存/觀察重疊股沿用 candidates
+    # M-BR1：三份 CSV 對同一檔的左側判定必須一致（重疊股沿用 candidates 那筆）
+    "rev_yoy_delta",
+    "fundamental_health",
+    "foreign_flow_inflection",
+    "trust_flow_inflection",
+    "inst_flow_inflection",
+    "dist_low_20d_pct",
+    "dist_low_60d_pct",
+    "base_proximity",
+    "contrarian_base",
 )
 
 
@@ -1245,6 +1324,8 @@ def write_named_list_csv(
     holdings_map: dict | None = None,
     canonical_rows: dict[str, dict] | None = None,
     near_flow_cfg: dict | None = None,
+    contrarian_cfg: dict | None = None,
+    rev_yoy_delta_map: dict | None = None,
 ) -> int:
     """輸出庫存/觀察清單 enriched CSV（同 candidates 欄位）。
 
@@ -1257,6 +1338,7 @@ def write_named_list_csv(
         members, themes_long, screener_results, flags_cfg, rev_yoy_map,
         fundamentals_map, valuation_map, big_holder_map, margin_map,
         near_flow_cfg=near_flow_cfg,
+        contrarian_cfg=contrarian_cfg, rev_yoy_delta_map=rev_yoy_delta_map,
     )
     if not rows:
         return 0
