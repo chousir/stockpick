@@ -1651,6 +1651,34 @@ def test_load_institutional_history_respects_n_days(tmp_path: Path):
     assert sorted(df["date"].unique().to_list()) == [date(2026, 6, 8), date(2026, 6, 9)]
 
 
+def test_load_institutional_history_as_of_caps_future_dates(tmp_path: Path):
+    """as_of 封頂：晚於價格錨點的交易日（上櫃法人領先的那天）被砍，消除上市/上櫃不對稱。"""
+    inst_schema = {
+        "date": pl.Date, "stock_id": pl.Utf8, "stock_name": pl.Utf8,
+        "foreign_net": pl.Int64, "trust_net": pl.Int64,
+        "dealer_net": pl.Int64, "total_net": pl.Int64,
+    }
+    # 上市法人停在 7/17（對齊價格錨點）；上櫃法人已有 7/20（TPEX 更新較快）
+    pl.DataFrame({
+        "date": [date(2026, 7, 17)], "stock_id": ["2330"], "stock_name": ["台積電"],
+        "foreign_net": [1000], "trust_net": [0], "dealer_net": [0], "total_net": [1000],
+    }, schema=inst_schema).write_parquet(tmp_path / "institutional_20260717.parquet")
+    pl.DataFrame({
+        "date": [date(2026, 7, 20)], "stock_id": ["8299"], "stock_name": ["群聯"],
+        "foreign_net": [-500], "trust_net": [0], "dealer_net": [0], "total_net": [-500],
+    }, schema=inst_schema).write_parquet(tmp_path / "institutional_otc_20260720.parquet")
+
+    client = _make_client(tmp_path)
+    # 不封頂（回測／歷史序列預設）：7/20 保留
+    uncapped = client.load_institutional_history(n_days=20)
+    assert uncapped["date"].max() == date(2026, 7, 20)
+    # 封頂到價格錨點 7/17：7/20 那筆（連同只在 7/20 出現的上櫃股）被砍
+    capped = client.load_institutional_history(n_days=20, as_of=date(2026, 7, 17))
+    assert capped["date"].max() == date(2026, 7, 17)
+    assert date(2026, 7, 20) not in capped["date"].to_list()
+    assert "8299" not in capped["stock_id"].to_list()
+
+
 # ─── TPEX 上櫃全市場日線 + 單季基本面（資料修復 milestone） ─────────────────────
 
 

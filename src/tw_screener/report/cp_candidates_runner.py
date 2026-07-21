@@ -60,7 +60,11 @@ def run_cp_candidates(settings: Path) -> None:
     console.print(f"[bold]載入上市資料（{history_days} 交易日）...[/bold]")
     # 個股層只框上市：只讀 daily_*（同 B2），docs/13 §4 B1
     market = load_market_history(cache_dir, n_days=history_days, patterns=("daily_*.parquet",))
-    institutional = create_client(settings).load_institutional_history(n_days=history_days)
+    _client = create_client(settings)
+    # as_of 對齊價格錨點：避免上櫃法人領先日線（見 load_institutional_history docstring）。
+    institutional = _client.load_institutional_history(
+        n_days=history_days, as_of=_client.latest_trading_date()
+    )
     members = list_subindustries()
     if market.is_empty():
         console.print("[red]缺上市日線快取（daily_*.parquet）[/red]")

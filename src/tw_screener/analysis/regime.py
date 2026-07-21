@@ -337,7 +337,10 @@ def compute_market_regime(
         from tw_screener.data.twse import create_client
 
         flow_windows = [int(w) for w in rcfg.get("flow", {}).get("windows", [5, 20])]
-        institutional = create_client(settings_path).load_institutional_history(
-            n_days=max(flow_windows) if flow_windows else 20
+        # as_of 對齊價格錨點：避免上櫃法人領先日線（見 load_institutional_history docstring）。
+        _client = create_client(settings_path)
+        institutional = _client.load_institutional_history(
+            n_days=max(flow_windows) if flow_windows else 20,
+            as_of=_client.latest_trading_date(),
         )
     return compute_regime(market, institutional, rcfg)

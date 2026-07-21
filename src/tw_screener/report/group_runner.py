@@ -111,7 +111,11 @@ def run_group_analysis(settings: Path) -> None:
                 f"  候選股 {len(candidate_ids)} 檔，歷史覆蓋 min={cov_min}、median={cov_med} 日"
             )
 
-    institutional = client.load_institutional_history(n_days=20)
+    # as_of 對齊價格錨點（latest_trading_date）：TPEX 上櫃法人更新較快，不封頂會讓上櫃股
+    # 法人多窗領先日線一天、與上市股不對稱（見 load_institutional_history docstring）。
+    institutional = client.load_institutional_history(
+        n_days=20, as_of=client.latest_trading_date()
+    )
     if institutional.is_empty():
         console.print(
             "[yellow]  無法人快取，族群法人強度將為 0[/yellow]"

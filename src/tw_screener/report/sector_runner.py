@@ -167,7 +167,11 @@ def run_sector_flows(week: str, dry: bool, settings: Path) -> None:
         raise typer.Exit(1)
 
     console.print(f"[bold]載入法人/價量歷史（{history_days} 交易日）...[/bold]")
-    institutional = create_client(settings).load_institutional_history(n_days=history_days)
+    _client = create_client(settings)
+    # as_of 對齊價格錨點：避免上櫃法人領先日線（見 load_institutional_history docstring）。
+    institutional = _client.load_institutional_history(
+        n_days=history_days, as_of=_client.latest_trading_date()
+    )
     market = load_market_history(cache_dir, n_days=history_days)
     if institutional.is_empty():
         console.print("[red]無法人快取（請先 make fetch-twse）[/red]")
@@ -257,7 +261,11 @@ def run_sector_rotation(top: int | None, settings: Path) -> None:
     console.print(f"[bold]載入資料（{history_days} 交易日）...[/bold]")
     members = list_subindustries()
     market = load_market_history(cache_dir, n_days=history_days)
-    institutional = create_client(settings).load_institutional_history(n_days=history_days)
+    _client = create_client(settings)
+    # as_of 對齊價格錨點：避免上櫃法人領先日線（見 load_institutional_history docstring）。
+    institutional = _client.load_institutional_history(
+        n_days=history_days, as_of=_client.latest_trading_date()
+    )
     if members.is_empty() or market.is_empty() or institutional.is_empty():
         console.print("[red]缺資料：concepts.yaml / daily 快取 / 法人快取[/red]")
         raise typer.Exit(1)
@@ -443,7 +451,11 @@ def run_sector_calibrate(
     console.print(f"[bold]載入資料（{history_days} 交易日）...[/bold]")
     members = list_subindustries()
     market = load_market_history(cache_dir, n_days=history_days)
-    institutional = create_client(settings).load_institutional_history(n_days=history_days)
+    _client = create_client(settings)
+    # as_of 對齊價格錨點：避免上櫃法人領先日線（見 load_institutional_history docstring）。
+    institutional = _client.load_institutional_history(
+        n_days=history_days, as_of=_client.latest_trading_date()
+    )
     if members.is_empty() or market.is_empty() or institutional.is_empty():
         console.print("[red]缺資料：concepts.yaml / daily 快取 / 法人快取[/red]")
         raise typer.Exit(1)

@@ -1553,11 +1553,19 @@ class TWSEClient:
             .sort(["date", "stock_id"])
         )
 
-    def load_institutional_history(self, n_days: int = 20) -> pl.DataFrame:
+    def load_institutional_history(
+        self, n_days: int = 20, as_of: date | None = None
+    ) -> pl.DataFrame:
         """純讀本地所有 institutional_*.parquet，回傳近 n_days 個交易日（不打網）。
 
         供族群法人強度與報告用；快取由 fetch_institutional /
         fetch_institutional_history 累積。無快取時回空 DataFrame。
+
+        as_of 給定時，先砍掉「晚於 as_of 的交易日」再取近 n_days 日。TPEX 上櫃法人比
+        TWSE 日線（週次／價格錨點）更新更快：週一盤後跑時 STOCK_DAY_ALL 還停在上週五，
+        上櫃法人快取卻已有週一那筆，若不封頂會讓上櫃股的法人多窗領先價格一天、且與
+        上市股（停在上週五）不對稱。傳入價格錨點（latest_trading_date()）對齊右界即可
+        消除此不對稱。as_of=None（預設，回測／歷史序列用）維持不封頂。
         """
         files = sorted(self.cache_dir.glob("institutional_*.parquet"))
         if not files:
@@ -1569,6 +1577,8 @@ class TWSEClient:
             .unique(subset=["date", "stock_id"])
             .sort("date")
         )
+        if as_of is not None:
+            merged = merged.filter(pl.col("date") <= as_of)
         recent_dates = merged["date"].unique().sort(descending=True).head(n_days).to_list()
         return merged.filter(pl.col("date").is_in(recent_dates))
 

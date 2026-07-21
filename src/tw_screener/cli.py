@@ -881,7 +881,10 @@ def analysis_leaders(
                 seen.add(sid)
                 candidate_ids.append(sid)
     price_history = client.load_candidate_history(candidate_ids, n_days=60)
-    institutional = client.load_institutional_history(n_days=20)
+    # as_of 對齊價格錨點：避免上櫃法人領先日線（見 load_institutional_history docstring）。
+    institutional = client.load_institutional_history(
+        n_days=20, as_of=client.latest_trading_date()
+    )
 
     _, enriched_stocks = group_stocks(
         screener_results,
