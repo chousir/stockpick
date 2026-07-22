@@ -1,8 +1,8 @@
 .PHONY: help init sync test test-unit lint typecheck fmt clean clean-cache deep-clean \
         fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history fetch-margin-history build-themes screen screen-all screen-dry doctor \
         group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
-        backfill-daily-history \
-        build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid flow-inflection margin-factors \
+        backfill-daily-history backfill-institutional-history \
+        build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid contrarian-efficacy flow-inflection margin-factors \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check snapshot-week
 
@@ -126,6 +126,9 @@ backfill-universe-history:  ## ⏳ 一次性回補全部次產業成員日線（
 backfill-daily-history:  ## ⏳ 一次性逐日回補全市場歷史日線（MI_INDEX bulk，一天一請求、含下市股；START=2022-01-01 END=2026-07-11 必填）
 	uv run tw-screener data backfill-daily-history --start $(START) --end $(END)
 
+backfill-institutional-history:  ## ⏳ 一次性逐日回補上市法人歷史（T86，一天一請求；顯式 START/END 不依賴錨點，供面板法人冷啟動；START=2022-01-01 END=2025-06-05 必填）
+	uv run tw-screener data backfill-institutional-history --start $(START) --end $(END)
+
 fetch-margin-history:  ## 回補近 N 個交易日上市融資融券（DAYS=20 可調，舊版 MI_MARGN 可回查歷史）
 	uv run tw-screener data fetch-margin-history --days $(or $(DAYS),20)
 
@@ -145,6 +148,9 @@ rotation-efficacy:  ## WS-C 輪動欄效度：歷史重建→生產對表→forw
 
 laggard-grid:  ## WS-D 族群內強弱：2×2×位階 forward 報酬格（產 research/laggard_grid/）
 	uv run tw-screener backtest laggard-grid
+
+contrarian-efficacy:  ## M-BR1 Phase 2 底部左側聯合桶（轉買×貼近低）forward alpha 檢驗＋§1 硬門檻裁決（產 research/contrarian_efficacy/）
+	uv run tw-screener backtest contrarian-efficacy
 
 flow-inflection:  ## WS-E 資金流 inflection 因子族首驗（產 research/flow_inflection/）
 	uv run tw-screener backtest flow-inflection

@@ -430,6 +430,65 @@ def data_backfill_daily_history(
     )
 
 
+@data_app.command("backfill-institutional-history")
+def data_backfill_institutional_history(
+    start: str = typer.Option(..., "--start", help="回補起始日（YYYY-MM-DD，含）"),
+    end: str = typer.Option(..., "--end", help="回補結束日（YYYY-MM-DD，含）"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """一次性逐日回補上市三大法人歷史（TWSE T86，一天一請求）。
+
+    動機：`fetch-institutional-history --days N` 以 latest_trading_date() 為錨點，歷史
+    面板重建時 daily 快取的錨點可能落在回補起點（非今日）→ 走錯方向。本指令以顯式
+    --start/--end 逐日回補、不依賴錨點，供 build-panel 前的法人歷史冷啟動（研究軌）。
+
+    從 --end 往 --start 逐日曆日走（跳週末，不浪費請求）；T86 支援任意歷史交易日
+    （docs/02）；單日失敗記 log 不中斷；已有快取的日期直接讀檔跳過（天然可續跑）；
+    **僅上市 T86**（上櫃歷史日線 no-op → OTC 無價格可算位階，面板不納，故不抓 OTC 法人）。
+    每 50 個日曆日印進度。
+    """
+    from datetime import date as _date
+    from datetime import timedelta as _timedelta
+
+    from tw_screener.data.twse import create_client
+
+    try:
+        start_date = _date.fromisoformat(start)
+        end_date = _date.fromisoformat(end)
+    except ValueError:
+        console.print(f"[red]--start/--end 格式錯誤（需 YYYY-MM-DD）：{start} / {end}[/red]")
+        raise typer.Exit(1) from None
+    if start_date > end_date:
+        console.print(f"[red]--start {start} 不可晚於 --end {end}[/red]")
+        raise typer.Exit(1)
+
+    client = create_client(settings)
+    total_days = (end_date - start_date).days + 1
+    console.print(
+        f"[bold]逐日回補上市法人歷史（T86）：{start} → {end}（{total_days} 日曆日）[/bold]"
+    )
+
+    cur = end_date
+    processed = done = failed = 0
+    while cur >= start_date:
+        processed += 1
+        if cur.weekday() >= 5:  # 週末 TWSE 無資料，不浪費請求
+            cur -= _timedelta(days=1)
+            continue
+        try:
+            df = client.fetch_institutional(as_of=cur)
+            if not df.is_empty():
+                done += 1
+        except Exception as e:  # noqa: BLE001 — 單日失敗不中斷整批
+            failed += 1
+            console.print(f"[yellow]  {cur} T86 失敗：{e}[/yellow]")
+        if processed % 50 == 0:
+            console.print(f"  進度：已走 {processed}/{total_days} 日曆日（T86 成功 {done}）")
+        cur -= _timedelta(days=1)
+
+    console.print(f"[green]回補完成：T86 {done} 個交易日、失敗 {failed} 次[/green]")
+
+
 @data_app.command("fetch-candidates-history")
 def data_fetch_candidates_history(
     week: str = typer.Option("", "--week", help="週別標籤，預設取最新一週"),
@@ -1086,6 +1145,19 @@ def backtest_laggard_grid_cmd(
     from tw_screener.backtest.laggard_grid_runner import run_laggard_grid
 
     run_laggard_grid(settings, out_dir, membership)
+
+
+@backtest_app.command("contrarian-efficacy")
+def backtest_contrarian_efficacy_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/contrarian_efficacy）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """M-BR1 Phase 2：底部左側聯合桶（轉買×貼近低）forward alpha 檢驗＋§1 硬門檻裁決。"""
+    from tw_screener.backtest.contrarian_efficacy_runner import run_contrarian_efficacy
+
+    run_contrarian_efficacy(settings, out_dir)
 
 
 @backtest_app.command("flow-inflection")

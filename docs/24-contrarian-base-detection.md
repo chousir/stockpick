@@ -26,8 +26,8 @@
 | 階段 | 狀態 | 內容 |
 |---|---|---|
 | **Phase 1 描述** | ✅ 本分支完成 | 四欄進三份 enriched CSV（純加法、零行為變更），surface 給人看與回測 |
-| **Phase 2 驗證** | ⏳ 待跑 | 面板重建兩條件、block-bootstrap CI、跨 regime——升 gate 的唯一依據 |
-| **Phase 3 gate** | ⛔ 未啟用 | 僅在 Phase 2 過關後才准把 `contrarian_base` 升為**機會層** gate（永不核心） |
+| **Phase 2 驗證** | ✅ 已跑・**否證**（見 §3.1） | 面板重建兩條件、lift block-bootstrap CI、跨 regime——**三門檻全數未過**，聯合桶反而顯著落後宇宙 |
+| **Phase 3 gate** | ⛔ **永久未啟用** | Phase 2 否證 → `contrarian_base` 定案為**描述欄**，不升機會層、不寫入 picks（同 flow_turn） |
 
 **升 gate 硬門檻（Phase 2 通過條件）**：方向 ≥4/5 walk-forward 分段一致 ＋ block-bootstrap
 CI 排除 0 ＋ **跨 ≥2 regime**（尤其須含 2022 空頭年）。三缺一 → `contrarian_base`
@@ -72,18 +72,21 @@ F2 位階紀律與三鏡頭，最高只能列機會/觀察、且強制小注。
 ∧ `base_proximity ∈ {在低,貼低}`。**Phase 2 通過前僅為描述 tag，不進 picks、不改
 excluded 行為。**
 
-## 3. Phase 2 驗證路徑（待跑・裁決 2026-07-21 拍板）
+## 3. Phase 2 驗證路徑（已跑 2026-07-22・裁決 2026-07-21 拍板）
 
 **原規格設想的路徑走不通，改採面板重建**：
 1. **PO4 excluded 帳撐不起檢驗**：全歷史 7 週 `reason=價格已跌` 僅 **7 筆**（vs 過熱 31／
    土洋對作 24），分兩桶對照後每桶個位數。降為個案敘事，不當裁決依據。
 2. **rev_yoy 無歷史**（§2.1）→ `fundamental_health` 不進回測。
 3. **可回測的只有兩條件**：`flow_inflection=轉買` × `base_proximity ∈ {在低,貼低}`，
-   用 WS-C 對 rotation 欄做過的**歷史面板 point-in-time 重建**（`research/panel/panel.parquet`
-   已回補至 2022-01，含 2022 空頭／2023 復甦／2024-25 多頭三 regime，`regime_labels.parquet`
-   ＋`delisted_2022.csv` 齊備——§1.4 擔心的 bull-only 假象**已解除**）。
-4. 正式因子檢驗：`factor_lab.evaluate()`（block-bootstrap CI、非重疊子抽樣、walk-forward
-   expanding+embargo）；裁決規則同 §1 硬門檻。
+   用 WS-C 對 rotation 欄做過的**歷史面板 point-in-time 重建**。本機面板為**就地重建**
+   （F1 底帳同型的本機資料斷層）：價格 `make backfill-daily-history`（MI_INDEX bulk）＋
+   法人 `make backfill-institutional-history`（新指令，T86 逐日、不依賴 latest 錨點）→
+   `make regime-history` → `make build-panel`（2022-01-03～2026-07-20、749k 列、核價 100% PASS）。
+   **歷史段 TPEX 上櫃回查為 no-op → 實質上市宇宙檢驗，OTC 2022-24 永久斷供**（誠實揭露）。
+4. 正式因子檢驗：新 `make contrarian-efficacy`（[backtest/contrarian_efficacy.py](../src/tw_screener/backtest/contrarian_efficacy.py)，
+   重用 analysis/contrarian.py 純函式）——**桶 lift** block-bootstrap CI＋walk-forward＋
+   regime 切片；裁決規則同 §1 硬門檻。
 
 **開工三行（研究軌紀律 playbook/20 §6）**：
 - 唯一問題：「賣壓熄（轉買）× 貼近結構低」兩條件同時成立的桶，前瞻報酬是否顯著優於
@@ -91,6 +94,36 @@ excluded 行為。**
 - 裁決判準：CI 排 0 ＋ |效應量| 達底線 ＋ ≥4/5 walk-forward 同號 ＋ 跨 ≥2 regime。
 - 答完即停：過 → 交 F1 拍板升 Phase 3 機會層 gate；未過 → 記否證、`contrarian_base`
   永久描述欄（如 flow_turn）。
+
+**量尺修正（跑之前踩到、記下）**：面板 `alpha{h}=r−當日中位`，報酬右偏 → 全宇宙 alpha
+**均值 > 0**（r+20 全體 +2.26%）。故「桶 alpha 均值 > 0」不是「打敗市場」的檢定（隨機桶
+均值就 >0，大樣本必顯著＝§6.5 陷阱）。正確量尺＝**lift{h}＝alpha{h} − 當日全宇宙 alpha
+均值**（零假設才是 0）。初版 gate 誤用 pooled iid CI＋桶 alpha vs 0，會**假陽性放行**；
+讀數字時抓到並改為 lift＋moving-block CI＋防禦硬化，結論才誠實。
+
+## 3.1 結果與裁決（2026-07-22・**否證**）
+
+面板週快照 **201 週**（2022-01-07～2026-07-20，上市宇宙）；焦點桶（轉買×貼近低）命中
+**2,477 股×週**。**三門檻全數未過 → `contrarian_base` 定案為描述欄（同 flow_turn）、
+永不升 Phase 3、不寫入 picks。**
+
+| §1 門檻 | 結果 | 判定 |
+|---|---|---|
+| block-bootstrap CI 排 0 且**正** | 全樣本 lift(r+20)＝**−2.30%**，CI95 **[−3.52, −1.26]**（n_dates=174，整段在 0 以下） | ✗ 桶**顯著落後**宇宙 |
+| ≥4/5 walk-forward 段 lift 為正 | **1/5**（段 lift −1.43／+0.10／−4.86／−3.71／−8.20%，近段惡化） | ✗ |
+| 跨 ≥2 regime 且**含 2022 空頭**為正 | 進攻 **−3.15%** [−5.35,−1.55]、中性 **−1.94%** [−3.61,−0.60] 皆顯著**負**；防禦（2022 空頭）n_dates=25 樣本不足、CI [−1.67,+0.80] 跨 0 | ✗ 0 個可判且正切片；防禦不可判 |
+
+**解讀**：flow×base 分解格證實 lift 集中在 **高檔（延伸）** cell（+5% 級・動能）、而焦點
+的「轉買×在低/貼低」是**全格最弱之一**（轉買×在低 +0.63%／貼低 +0.58%，遠低於全體 +2.26%）。
+「賣壓熄（外資轉買）→ 貼低可承接」直覺**沒有前瞻 edge、反而系統性落後**；報酬集中在動能延伸
+股，與逢低承接相反。此因子與 `flow_turn`（docs/22 §2）同進否證檔案。
+
+**誠實殘餘**：防禦（2022 空頭）僅 25 個 point-in-time 快照日、樣本不足 → 空頭年**單獨**不可
+下定論；但在樣本充足的進攻/中性 regime，桶皆**顯著落後**，且無任一 regime 有正 edge → 依 §1
+「三缺一即維持描述欄」與 §5「未過空頭前不得升」，裁決為**否證、維持描述欄**。若日後 OTC 歷史
+或空頭樣本變厚，可重跑 `make contrarian-efficacy` 複核，但**舉證責任在證明有 edge**，非相反。
+
+產物：`research/contrarian_efficacy/contrarian_efficacy_20260722.md`（gitignore 本地研究產物）。
 
 ## 4. 回歸測試 ground-truth（2026-07-20 資料）
 

@@ -186,11 +186,13 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make factor-lab`                                      | 因子實驗台驗收：機器等價＋docs/19 對表＋面板首驗（docs/22 WS-B） | 面板重建後                           |
 | `make rotation-efficacy`                               | 輪動欄效度：歷史重建→生產對表→forward basket IC/lift（docs/22 WS-C；`backtest rotation-efficacy --membership official` 出官方產業別 robustness 版） | 每季                                 |
 | `make laggard-grid`                                    | 族群強弱×領先落後×位階 forward 報酬格（docs/22 WS-D；`--membership official` 同上） | 每季                                 |
+| `make contrarian-efficacy`                             | 底部左側聯合桶（轉買×貼近低）forward alpha 檢驗＋§1 硬門檻裁決（docs/24 M-BR1 Phase 2） | 面板重建後／樣本變厚後重驗           |
 | `make flow-inflection`                                 | 資金流 inflection 因子族首驗（docs/22 WS-E）          | 樣本變厚後重驗                       |
 | `make margin-factors`                                  | 融資減肥/大戶 WoW/margin_to_vol 三籌碼因子首驗（預註冊 docs/23 §3） | 面板重建後                    |
 | `make regime-history`                                  | regime 標籤歷史化：V2 引擎逐日 as-of 重算（2022-01 起，docs/23 WS-H.3） | 面板延伸前（先產標籤）        |
 | `make snapshot-week`                                    | point-in-time 週快照：凍結 concepts/宇宙/持股到 data/snapshots/（docs/23 WS-J.1） | week 已內含，可單獨重跑     |
 | `make backfill-daily-history START=… END=…`         | bulk 逐日全市場歷史（TWSE MI_INDEX，一日一請求；上櫃無 bulk 走逐檔） | 面板延伸冷啟動（比逐檔快）    |
+| `make backfill-institutional-history START=… END=…` | 逐日上市法人歷史（TWSE T86，一日一請求；顯式起迄不依賴 latest 錨點） | 面板法人冷啟動（build-panel 前）|
 | `make doctor`                                          | Goodinfo 健康檢查（week 已內含，可單獨重跑）         | 懷疑被擋/改版時                      |
 | `make fetch-tdcc`                                      | TDCC 集保大戶持股比（week 已內含）                   | 大戶欄空值時單獨補                   |
 | `make fetch-twse`                                      | 增量抓日線/法人/月營收                               | 通常不必單獨跑（week 含）            |
@@ -514,7 +516,7 @@ make typecheck   # mypy
 | [`docs/21-etf-holdings-integration.md`](./docs/21-etf-holdings-integration.md)               | ETF 持股整合：holdings ETF 輕量列（asset_type/報酬追蹤）＋組合曝險手標 etf_exposure；ETF 不進個股 alpha 框架  |
 | [`docs/22-factor-lab-w28.md`](./docs/22-factor-lab-w28.md)                                   | W28 統一因子實驗台（WS-A~G 收官）：trend_score 唯一存活、inflection 族/ΔRank/退潮全否證、宇宙效應方法論        |
 | [`docs/23-backtest-r2-w28.md`](./docs/23-backtest-r2-w28.md)                                 | W28 回測二輪（WS-H~L 收官）：推論硬化 Fisher-z→moving-block bootstrap＋晉升鐵則；補 docs/22 §7 四洞；trend_score 升雙 robustness、★/ambush 升級、WS-K 籌碼三因子無證據/樣本不足 |
-| [`docs/24-contrarian-base-detection.md`](./docs/24-contrarian-base-detection.md)             | 底部左側偵測 M-BR1：賣壓熄火×基本面完好×貼近結構低——描述→驗證→gate 三階紀律；Phase 1 揭露欄已實作、Phase 2 面板重建驗證待跑 |
+| [`docs/24-contrarian-base-detection.md`](./docs/24-contrarian-base-detection.md)             | 底部左側偵測 M-BR1：賣壓熄火×基本面完好×貼近結構低——描述→驗證→gate 三階紀律；Phase 1 揭露欄已實作、**Phase 2 面板檢驗已否證**（桶 lift 顯著落後宇宙，`contrarian_base` 定案描述欄・§3.1） |
 | [`docs/proposals/`](./docs/proposals/00-index.md)                                            | 審查改善規劃書 01–05（效能技債/資料韌性/量化驗證閉環/架構瘦身/**選股有效性總改造 F1–F5**，皆已收官）        |
 | [`docs/99-troubleshooting.md`](./docs/99-troubleshooting.md)                                 | 常見問題與解法                                                                                                      |
 

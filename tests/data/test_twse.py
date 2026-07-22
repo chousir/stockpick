@@ -294,6 +294,30 @@ def test_parse_institutional_empty():
     assert "date" in df.columns
 
 
+def test_fetch_institutional_as_of_cache_hit(tmp_path: Path) -> None:
+    """as_of 歷史路徑：快取存在即讀、無視 ttl、不打網（歷史資料不變；面板法人冷啟動用）。"""
+    client = TWSEClient(
+        base_url="https://example.invalid",  # 若走網路必失敗 → 讀到快取即證分支正確
+        cache_dir=tmp_path,
+        ttl_hours=0.0,  # ttl=0：即時路徑會判過期；as_of 路徑須無視 ttl 仍讀快取
+        user_agent="test",
+        interval_sec=0.0,
+    )
+    d = date(2022, 6, 15)
+    fixture = pl.DataFrame(
+        {
+            "date": [d], "stock_id": ["2330"], "stock_name": ["台積電"],
+            "foreign_net": [1000], "trust_net": [200], "dealer_net": [50],
+            "total_net": [1250],
+        }
+    )
+    save_parquet(fixture, tmp_path / f"institutional_{d:%Y%m%d}.parquet")
+    out = client.fetch_institutional(as_of=d)
+    assert out.height == 1
+    assert out["date"][0] == d
+    assert out["stock_id"][0] == "2330"
+
+
 def test_parse_stock_day():
     with open(FIXTURE_DIR / "stock_day_sample.json") as f:
         data = json.load(f)

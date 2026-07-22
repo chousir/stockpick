@@ -376,6 +376,15 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     rs_window: 20                # rs_subind 回看窗（個股 vs 次產業籃報酬差）
     n_boot: 1000
     output_dir: research/laggard_grid
+  contrarian_efficacy:       # M-BR1 Phase 2 底部左側聯合桶檢驗（make contrarian-efficacy）
+    horizons_td: [5, 10, 20, 40] # forward alpha 窗（交易日）
+    focal_horizon: 20            # 焦點窗（§4 ground-truth 用 r+20；裁決以此窗）
+    n_splits: 5                  # walk-forward 段數（§1「≥4/5 同號」）
+    min_train_frac: 0.4
+    wf_min_frac: 0.8             # walk-forward 同號門檻比例（4/5=0.8）
+    weekly_snapshot: true        # 週快照抽樣（同 WS-C/WS-D，降前瞻窗重疊）
+    n_boot: 1000
+    output_dir: research/contrarian_efficacy
   flow_inflection:           # WS-E 資金流 inflection 因子族（make flow-inflection）
     horizons_td: [10, 20]        # 評估窗（交易日）
     n_splits: 4

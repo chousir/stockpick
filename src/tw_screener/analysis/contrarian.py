@@ -5,8 +5,13 @@
 存在意義：docs/22 §2 已證 flow_turn（退潮/資金回流）三窗 CI 全跨 0、無前瞻證據，
 「退潮→降級」舊讀法作廢。「賣壓熄→可逢低」直覺同屬未證實類——本模組把它做成
 **可被回測證偽的欄位**，而不是再加一條沒證據的門檻（重蹈 flow_turn 覆轍是本規格
-最要避免的失敗）。升 gate 的唯一開關＝docs/24 §3 因子檢驗（≥4/5 walk-forward 同號
-＋block-bootstrap CI 排 0＋跨 ≥2 regime），未過前 `contrarian_base` 恆為描述 tag。
+最要避免的失敗）。
+
+**Phase 2 已否證（docs/24 §3.1・2026-07-22）**：面板 point-in-time 重建（201 週上市
+宇宙）測「轉買×貼近低」聯合桶，桶 **lift（打敗當日全宇宙均值）r+20 = −2.30%**、CI95
+[−3.52,−1.26]、walk-forward 1/5 為正、進攻/中性 regime 皆顯著負——三門檻全未過。故
+`contrarian_base` **定案為描述 tag、永不升 gate、不寫入 picks**（同 flow_turn 進否證檔）。
+四欄仍保留供人工觀察與未來複核，但舉證責任在證明有 edge。
 
 與 grouping.near_flow_state 的分工（docs/24 §2.2）：`flow_state` 結構上是**買方旗標**
 （要求 20 日淨買超 ≥ min_shares，20 日為負時回 None，天生表達不了「由賣轉買」）；

@@ -1451,13 +1451,16 @@ class TWSEClient:
             logger.info("MI_INDEX {} 無資料（非交易日 / 未發布），略過", date_str)
         return df
 
-    def fetch_institutional(self) -> pl.DataFrame:
+    def fetch_institutional(self, as_of: date | None = None) -> pl.DataFrame:
         """
-        抓三大法人（legacy T86）。query date 與檔名都以 latest_trading_date() 為錨點。
+        抓三大法人（legacy T86）。query date 與檔名以 as_of 為錨點；as_of=None（預設）
+        對齊 latest_trading_date()。
 
-        非交易日跑會自動對齊上一個交易日，避免空查詢與檔名混亂。
+        as_of 給定時＝歷史回補路徑：直接查該日 T86（T86 端點支援任意歷史交易日，
+        docs/02），已有快取直接讀（歷史資料不再變動、不受 ttl 影響）；非交易日回空。
+        as_of=None＝即時路徑：對齊上一個交易日並走 ttl 判斷快取新鮮度。
         """
-        trading_date = self.latest_trading_date()
+        trading_date = as_of if as_of is not None else self.latest_trading_date()
         if trading_date is None:
             logger.warning("fetch_institutional: 無法取得 trading_date，跳過 T86 抓取")
             return pl.DataFrame(
@@ -1474,7 +1477,8 @@ class TWSEClient:
 
         date_str = trading_date.strftime("%Y%m%d")
         cache_file = self.cache_dir / f"institutional_{date_str}.parquet"
-        if is_fresh(cache_file, self.ttl_hours):
+        # 歷史回補（as_of 給定）：快取存在即用（資料不變）；即時路徑：走 ttl 新鮮度
+        if cache_file.exists() and (as_of is not None or is_fresh(cache_file, self.ttl_hours)):
             logger.info(f"命中快取 {cache_file}")
             return load_parquet(cache_file)
 
