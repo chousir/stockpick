@@ -71,6 +71,8 @@
 | `src/tw_screener/report/data_fetcher.py` | 個股報告資料打包（OHLCV + 營收 + 法人 + 族群資訊） | polars |
 | `src/tw_screener/report/builder.py` | 個股報告 builder（API 模式 / 草稿模式） | anthropic, jinja2 |
 | `src/tw_screener/backtest/` | 策略勝率回測（骨架，2026-08 後實作） | polars |
+| `src/tw_screener/data/fred.py` | FRED 官方 API 抓取＋24h快取（總經序列） | httpx |
+| `src/tw_screener/analysis/macro_regime.py` | 總經燈號：BAA10Y 單訊號計分＋揭露面板（docs/25 M-Macro1） | polars |
 | `src/tw_screener/cli.py` | CLI 入口（Typer） | typer |
 
 ## 為什麼這樣分層
