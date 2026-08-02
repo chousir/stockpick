@@ -320,7 +320,10 @@ def load_prev_color(history_path: Path) -> str | None:
 def append_history(history_path: Path, light: MacroLight) -> None:
     """把本次 MacroLight 結果 append 一列進 history.parquet（point-in-time）。
 
-    供 Phase 2 as-of 回放使用。
+    供 Phase 2 as-of 回放使用。冪等：同一 `as_of` 已存在則跳過，不重複寫入
+    （`make macro`/`make week` 同一天可能因重試或手動多跑一次；沒有這道檢查
+    會在累積序列裡埋進同日重複列，往後的 as-of 回放/敏感度分析會被悄悄污染，
+    見 `data/valuation_history.append_valuation_history` 同一冪等模式）。
     """
     row = {
         "as_of": light.as_of,
@@ -333,6 +336,9 @@ def append_history(history_path: Path, light: MacroLight) -> None:
     history_path.parent.mkdir(parents=True, exist_ok=True)
     if history_path.exists():
         existing = pl.read_parquet(history_path)
+        if not existing.is_empty() and (existing["as_of"] == light.as_of).any():
+            logger.info(f"macro_regime history 已有 {light.as_of} 這天，跳過重複 append")
+            return
         combined = pl.concat([existing, new_row], how="diagonal_relaxed")
     else:
         combined = new_row

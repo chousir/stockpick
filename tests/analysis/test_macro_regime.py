@@ -245,15 +245,24 @@ def test_to_detail_frame_row_count() -> None:
 
 def test_append_history_and_load_prev_color(tmp_path: Path) -> None:
     hpath = tmp_path / "macro_regime" / "history.parquet"
+    series = _series(120, 100.0, 1.0)
     light = compute_macro_light(
-        {"BAA10Y": _series(60, 100.0, 1.0)}, CFG, D0 + timedelta(days=59), prev_color=None
+        {"BAA10Y": series}, CFG, D0 + timedelta(days=59), prev_color=None
     )
     assert load_prev_color(hpath) is None  # 尚未寫入
 
     append_history(hpath, light)
     assert load_prev_color(hpath) == light.color
 
-    # 再 append 一次（模擬下週再跑），應累積成 2 列
+    # 同一天重跑（模擬手動重試/CLI 多跑一次）：冪等，不應重複寫入
     append_history(hpath, light)
+    df = pl.read_parquet(hpath)
+    assert df.height == 1
+
+    # 不同一天（模擬下週再跑）：才是真的累積成 2 列
+    light_next = compute_macro_light(
+        {"BAA10Y": series}, CFG, D0 + timedelta(days=66), prev_color=light.color
+    )
+    append_history(hpath, light_next)
     df = pl.read_parquet(hpath)
     assert df.height == 2
