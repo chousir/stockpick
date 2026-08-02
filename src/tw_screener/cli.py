@@ -1160,6 +1160,16 @@ def backtest_contrarian_efficacy_cmd(
     run_contrarian_efficacy(settings, out_dir)
 
 
+@backtest_app.command("macro-regime-validate")
+def backtest_macro_regime_validate_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """M-Macro2（docs/25 §6 Phase 2）：as-of 回放驗證＋門檻敏感度＋DEXJPUS tail-event 重測。"""
+    from tw_screener.backtest.macro_regime_validate_runner import run_macro_regime_validate
+
+    run_macro_regime_validate(settings)
+
+
 @backtest_app.command("flow-inflection")
 def backtest_flow_inflection_cmd(
     out_dir: Path | None = typer.Option(

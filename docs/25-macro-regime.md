@@ -125,13 +125,18 @@ v1 用「候選清單＋權重」設計，v2 改成三層——因為 round 3 �
 | Brent 原油 | 與 WTI 相關性 ~0.98，重複計分，未單獨測試 |
 | Fed 基準利率（FEDFUNDS） | 月頻、政策落後量，未進入本次篩選候選池 |
 
-### 2.4 台股估值資料源（v2 仍未定案——本次研究沒有測到）
+### 2.4 台股估值資料源（Phase 2 已決策：A 排除、B 原則接受，實作延後）
 
-三輪研究全部聚焦 FRED 候選池，**沒有觸及台股估值這條線**，Phase 1 §2.2 的問題原封不動：
-- **A（優先驗證）**：TWSE 月頻「市場本益比/殖利率/淨值比」統計。歷史長、官方口徑，OpenAPI 是否有對應端點**未驗證**。
+三輪研究全部聚焦 FRED 候選池，沒有觸及台股估值這條線，留給 Phase 1/2 查證：
+- **A（優先驗證）**：TWSE 月頻「市場本益比/殖利率/淨值比」統計。**Phase 1 已查證排除**——官方
+  OpenAPI 只有個股日 PE/PBR（`BWIBBU_d`），沒有市場整體統計端點。
 - **B（fallback）**：沿用既有 `BWIBBU_d` 個股日 PE/PB 快取，取全市場中位數自建序列，百分位窗要養 2-3 年。
-
-這條線要收進燈號，需要先走一輪跟 BAA10Y 同等規格的實測驗證，不能因為其他指標有數據就直接放行。
+  **Phase 2 決策：原則接受，實作延後**——A 已排除，B 是唯一剩下的路徑；但收進燈號前，
+  §2.4 原文的前提沒有變：需要先走一輪跟 BAA10Y 同等規格的實測驗證（block-bootstrap
+  lift/CI 對 NASDAQCOM 或台股事件目標），不能因為「只剩這條路」就跳過驗證直接放行。
+  這輪驗證的資料建置量（逐日全市場中位數、養 2-3 年百分位窗）比 Phase 2 其餘三項工作
+  大一個量級，本次 Phase 2 只做決策、不動工，留給後續一個獨立 milestone（暫定 M-Macro2b
+  或併入 Phase 3 前置）處理。
 
 ### 2.5 更新頻率與時效揭露（沿用 v1）
 
@@ -254,7 +259,7 @@ speed_pct 或 dual_risk/as-of/來源）供你在週報階段跟 Claude Code 互�
 
 驗收：`make test` 綠（新增：fred 解析 fixture、單訊號評分純函式、揭露面板純函式、stale 降級、Section 0 渲染/降級）；ruff/mypy 零淨增；`make macro` 離線（快取命中）可重跑；斷網時 `make week` 主流程不受影響。
 
-### Phase 2 — M-Macro2：as-of 回放驗證＋補完開放項
+### Phase 2 — M-Macro2：as-of 回放驗證＋補完開放項（✅ 已完成，2026-08-02）
 
 範圍：
 - 用 `research/macro_regime_screening/raw/BAA10Y.parquet`（已有 1986 年至今全歷史）逐週 as-of 重算燈色序列（比照 `regime_history` 形狀），驗證**整條 production pipeline**（不是研究腳本）的 lift 數字跟研究階段一致——這是研究結果轉正式生產前的最後一道把關,防止「研究用的計算邏輯」跟「production 用的計算邏輯」有微妙落差。
@@ -263,6 +268,18 @@ speed_pct 或 dual_risk/as-of/來源）供你在週報階段跟 Claude Code 互�
 - 紅/黃門檻切點（80/60）與遲滯帶寬度（±3）的敏感度測試，用累積的 history.parquet 或 BAA10Y 全歷史回放。
 
 驗收：as-of 回放的 lift 數字與研究階段（round1/2 report）在誤差範圍內一致；台股估值決策落地；DEXJPUS 重測結論記入 research/。
+
+**結果（`tw-screener backtest macro-regime-validate` → `research/macro_regime_screening/report_2026-08-01_round4.md`）**：
+- **as-of 回放＝一致**：直接重用 production `compute_level_pct`（未重寫）逐日重放 BAA10Y，headline lift
+  **2.24〔1.58–3.03〕**，對照研究階段 2.26〔1.61–3.06〕——點估計差距 0.02、CI 大幅重疊，判定**通過**。
+  production pipeline 與研究階段計算邏輯等價，Phase 2 最後把關過關。
+- **門檻敏感度**：quintile 0.75/0.80/0.85 → lift 2.00/2.24/2.47，**單調上升**（門檻越窄訊號越強，
+  樣本數同步下降 2560→2150→1773）。現象記錄，**不擅自改 settings 門檻**（80/60/±3 仍是未校準先驗，
+  是否收緊留使用者裁決）。
+- **DEXJPUS tail-event 重測＝維持無證據**：quintile 0.80/0.90/0.95/0.98（top 20%/10%/5%/2%）
+  lift 1.23/1.02/1.08/1.30，CI 全部跨 1（含收到 top 2% 仍未過）。docs/25「稀釋假說」本輪未被證實；
+  DEXJPUS 繼續留揭露面板、不計分，round1 判定不變。
+- **台股估值決策**：見 §2.4——A 已排除、B 原則接受但實作延後（另開 milestone）。
 
 ### Phase 3 — M-Macro3：燈號 vs V2 regime 共振讀法的實測驗證（研究軌，走 playbook/20 §6）
 
@@ -277,7 +294,7 @@ speed_pct 或 dual_risk/as-of/來源）供你在週報階段跟 Claude Code 互�
 | # | 問題 | 狀態 |
 |---|---|---|
 | Q1 | FRED 走 fredgraph.csv 還是官方 API？ | **已定案**：官方 API，key 在 `.env`（§1） |
-| Q2 | 台股估值資料源 A/B？ | **仍開放**——本次研究沒有觸及，Phase 1 驗證 A，不可用退 B（§2.4） |
+| Q2 | 台股估值資料源 A/B？ | **已定案**：A 排除（無市場整體端點）、B 原則接受、實作延後另開 milestone（§2.4，Phase 2） |
 | Q3 | DGS2 替代 Fed 基準利率入計分？ | **已否決**——實測無證據（§2.3），FEDFUNDS 本來就沒進候選池 |
 | Q4 | Brent 刪除，只留 WTI？ | **已定案**：接受，維持排除 |
 | Q5 | 權重/門檻先驗值先上線，Phase 3 才校準？ | **已改變性質**：v2 沒有權重了（單訊號設計），問題變成「紅/黃門檻切點（80/60）要不要先上線」——建議先上線並標〔未校準〕，Phase 2 用 BAA10Y 全歷史做敏感度測試（§6 Phase 2） |

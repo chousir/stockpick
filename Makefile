@@ -156,6 +156,9 @@ laggard-grid:  ## WS-D 族群內強弱：2×2×位階 forward 報酬格（產 re
 contrarian-efficacy:  ## M-BR1 Phase 2 底部左側聯合桶（轉買×貼近低）forward alpha 檢驗＋§1 硬門檻裁決（產 research/contrarian_efficacy/）
 	uv run tw-screener backtest contrarian-efficacy
 
+macro-regime-validate:  ## M-Macro2 as-of 回放驗證＋門檻敏感度＋DEXJPUS tail-event 重測（需先跑過三輪研究，產 research/macro_regime_screening/round4）
+	uv run tw-screener backtest macro-regime-validate
+
 flow-inflection:  ## WS-E 資金流 inflection 因子族首驗（產 research/flow_inflection/）
 	uv run tw-screener backtest flow-inflection
 

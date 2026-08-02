@@ -876,4 +876,21 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **已查證未實作**：docs/25 §2.4 台股估值資料源——TWSE OpenAPI 只有個股日 PE/PBR（`BWIBBU_d`），無市場整體統計端點；維持 fallback B（`BWIBBU_d` 中位數自建）開放狀態，留 Phase 2。
 - 驗收：`make test` 940 綠、ruff/mypy 零淨增、`market macro` 真實跑通（FRED 官方 API）、斷網情境驗證 `fetch_all` 連錯 3 次停＋CLI 非零 exit code。
 
-**下一步（規劃書 §6）**：Phase 2（M-Macro2）as-of 回放驗證整條 production pipeline、台股估值源 A/B 決策、DEXJPUS tail-event 重測、門檻敏感度測試；Phase 3（M-Macro3，研究軌）驗證燈號 vs V2 regime 共振讀法的實際 lift。分支待 merge 進 main（鐵律 3，待使用者拍板）。
+**已 merge 進 main（2026-08-02，commit 8e8375a，使用者已拍板同意）**，`feat/macro-regime-phase1` 分支已刪除。下一步見 M-Macro2。
+
+---
+
+## M-Macro2：總經避險層 Phase 2——as-of 回放驗證＋門檻敏感度＋DEXJPUS tail-event 重測（規劃書 25・分支 `feat/macro-regime-phase2`）
+
+> 對應規劃書 [docs/25-macro-regime.md](25-macro-regime.md) §6 Phase 2。研究結果轉正式生產前的最後一道把關——驗證「研究用計算邏輯」跟「production 用計算邏輯」有無微妙落差，加上補完 Phase 1 遺留的三個開放項（台股估值源決策、DEXJPUS tail-event 重測、門檻敏感度）。
+
+- **`backtest/macro_regime_validate.py`**（純函式）：`build_level_pct_series`／`build_dual_risk_series` 直接呼叫 production `analysis/macro_regime.compute_level_pct`／`compute_dual_risk`（不重寫百分位公式）逐日 as-of 重放；`compute_event_labels`（N=60/X=15% NASDAQCOM 跌幅事件，尾端不足不補零）；`high_risk_lift`（quintile 高風險判定＋block bootstrap CI，重用 `factor_lab.moving_block_bootstrap_ci`，未另寫 bootstrap 邏輯）。
+- **`backtest/macro_regime_validate_runner.py`**＋CLI `backtest macro-regime-validate`＋`make macro-regime-validate`：讀 `research/macro_regime_screening/raw/`（三輪研究產出，gitignored）→ 產 `research/macro_regime_screening/report_2026-08-01_round4.md`（研究軌一次性驗證，不掛 `make week`）。
+- **as-of 回放驗證＝一致**：headline lift **2.24〔1.58–3.03〕** vs 研究階段 **2.26〔1.61–3.06〕**（點估計差距 0.02、CI 大幅重疊）——production pipeline 與研究階段計算邏輯等價，通過把關。
+- **門檻敏感度**：quintile 0.75/0.80/0.85 → lift 2.00/2.24/2.47，單調上升（門檻越窄訊號越強）；現象記錄，**不擅自改 settings 門檻**（80/60/±3 仍未校準先驗，是否收緊留使用者裁決）。
+- **DEXJPUS tail-event 重測＝維持無證據**：quintile 0.80/0.90/0.95/0.98（top 20%/10%/5%/2%）lift 1.02–1.30，CI 全部跨 1（含 top 2% 仍未過）——docs/25「稀釋假說」本輪未被證實，DEXJPUS 繼續留揭露面板不計分，round1 判定不變（未擅自升級為計分訊號，v2 §0「不合成」設計原則守住）。
+- **台股估值資料源（§2.4）已定案**：A（TWSE 市場整體估值統計端點）已排除（Phase 1 查證無此端點）；B（`BWIBBU_d` 中位數自建）原則接受、**實作延後**——收進燈號前須先走一輪跟 BAA10Y 同等規格的實測驗證，建置量比本輪其餘三項工作大一個量級，留待後續獨立 milestone。
+- `config/settings.yaml` 新增 `backtest.macro_regime_validate:` 區塊（raw_dir/事件參數/門檻網格/bootstrap 參數全進 settings，零寫死）。
+- 驗收：`make test` 945 綠（+5：合成資料測 warmup／event 前視保護／構造訊號偵測／獨立樣本無誤判／空輸入）；ruff/mypy 零淨增（對照 main 分支確認 47 條 mypy 既有錯誤與本次無關的 pre-existing debt，本次零新增）；`make macro-regime-validate` 真實跑通（讀本地 research/ raw parquet，不打網）。
+
+**下一步（規劃書 §6）**：Phase 3（M-Macro3，研究軌，走 playbook/20 §6）驗證燈號 vs V2 regime 共振讀法的實際 lift；台股估值 B 方案的完整實測驗證（獨立 milestone，範圍未定名）。分支待 merge 進 main（鐵律 3，待使用者拍板）。
