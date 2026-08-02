@@ -1353,6 +1353,44 @@ def market_regime_cmd(
     )
 
 
+@market_app.command("macro")
+def market_macro_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+    refresh: bool = typer.Option(False, "--refresh", help="略過快取，強制重抓 FRED 序列"),
+) -> None:
+    """docs/25 v2 總經燈號：印主訊號（BAA10Y）燈色＋揭露面板全部指標＋各序列 as-of。"""
+    from tw_screener.analysis.macro_regime import run_macro
+
+    light = run_macro(settings_path=settings, force_refresh=refresh)
+    if light.as_of is None:
+        console.print("[red]主訊號無資料——先確認 .env 有設 fred_api，或檢查網路[/red]")
+        raise typer.Exit(1)
+
+    color = {"綠": "green", "黃": "yellow", "紅": "red", "資料不足": "white"}.get(
+        light.color, "white"
+    )
+    score_str = f"{light.risk_score:.0f}/100" if light.risk_score is not None else "—"
+    console.print(
+        f"\n[bold {color}]總經燈號：{light.color} {score_str}[/bold {color}]"
+        f"（主訊號 {light.primary.series_id}，as-of {light.as_of}）〔實測篩選,門檻未校準〕"
+    )
+    if light.primary.raw_value is not None:
+        pct = f"（p{light.primary.score * 100:.0f}）" if light.primary.score is not None else ""
+        console.print(f"  {light.primary.series_id}：{light.primary.raw_value}{pct}")
+    console.print("\n  揭露面板（不計分）：")
+    for d in light.disclosure:
+        if d.stale or d.raw_value is None:
+            console.print(f"    {d.series_id}：未取得")
+            continue
+        pct = f"（p{d.score * 100:.0f}）" if d.score is not None else ""
+        console.print(
+            f"    {d.series_id}（{d.transform}）：{d.raw_value}{pct}〔{d.observed_date}〕"
+        )
+    console.print(
+        "\n[dim]定位＝風險水位揭露，非交易訊號；紅＝評估分批降低曝險，最終由人決策。[/dim]"
+    )
+
+
 def _resolve_week_dir(cfg: dict, week: str) -> "Path | None":
     """解析 --week：空＝最新一週目錄；否則取 reports/<week>。找不到回 None。"""
     rdir = Path(cfg["paths"]["reports_dir"])

@@ -235,6 +235,33 @@ def run_group_analysis(settings: Path) -> None:
     regime = describe_regime(regime_result)
     console.print(f"  {regime['line']}")
 
+    # 總經燈號（docs/25 v2）：讀 make macro 最新一列 history.parquet；讀不到/過期 → 不渲染該段。
+    macro_light: dict | None = None
+    _macro_result = None  # MacroLight｜None；渲染完摘要後重用於逐指標明細 CSV，避免重算
+    _macro_history_path = Path(cfg["paths"]["data_dir"]) / "macro_regime" / "history.parquet"
+    if _macro_history_path.exists():
+        from tw_screener.analysis.macro_regime import compute_market_macro, describe_macro_light
+
+        _mr_cfg = cfg.get("macro_regime", {})
+        _mr_df = _pl.read_parquet(_macro_history_path)
+        _mr_stale_days = int(_mr_cfg.get("stale_days", 10))
+        if not _mr_df.is_empty():
+            _latest_row = _mr_df.sort("as_of").tail(1)
+            _latest_as_of = _latest_row["as_of"].item()
+            if _latest_as_of is not None and (_date.today() - _latest_as_of).days <= _mr_stale_days:
+                # 重跑 compute_market_macro 拿完整 MacroLight（history.parquet 只存摘要欄位，
+                # 揭露面板明細需重算；FRED 24h 快取命中，不會真的打網）
+                try:
+                    _macro_result = compute_market_macro(
+                        cfg, settings, history_path=_macro_history_path
+                    )
+                    macro_light = describe_macro_light(_macro_result)
+                    console.print(f"  {macro_light['line']}")
+                except Exception as exc:  # noqa: BLE001 — 總經燈號非主流程關鍵路徑，壞了不擋報告
+                    console.print(f"[yellow]  總經燈號讀取失敗，Section 0 略過該段：{exc}[/yellow]")
+                    macro_light = None
+                    _macro_result = None
+
     # 組合層風控（規劃書 03 V3）：持股標籤集中度＋因子簇曝險（價格無關、render 期即可得）。
     # 報酬相關簇需全市場日線，留給 `portfolio check` CLI；報告段只揭露集中度/因子簇。
     portfolio = _portfolio_section_for_report(cfg, industry_df, themes_long)
@@ -245,8 +272,19 @@ def run_group_analysis(settings: Path) -> None:
         dividend_events=dividends, themes_long=themes_long, macro_events=macro_events,
         radar_cfg=ga_cfg.get("radar"),
         density_note=data_density_note(_hist_days),
-        regime=regime, portfolio=portfolio,
+        regime=regime, portfolio=portfolio, macro_light=macro_light,
     )
+
+    # 總經燈號逐指標明細落地（docs/25 v2 §4.2）：週報正文只放摘要，明細供互動深挖。
+    if _macro_result is not None:
+        from tw_screener.analysis.macro_regime import to_detail_frame
+
+        try:
+            to_detail_frame(_macro_result).write_csv(output_path.parent / "macro_regime.csv")
+        except OSError as exc:  # 明細落地失敗不擋主報告（已渲染完成）
+            console.print(
+                f"[yellow]  macro_regime.csv 落地失敗（不影響已產出的報告）：{exc}[/yellow]"
+            )
 
     from tw_screener.report.group_report import write_candidates_enriched_csv
 
