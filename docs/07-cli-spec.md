@@ -137,6 +137,9 @@ tw-screener picks outcome [--diff]
 # market / portfolio — 大盤 regime 與組合體檢（規劃書 03 V2、V3）
 tw-screener market regime
 tw-screener portfolio check [--include-candidates]
+
+# market macro — 總經燈號：外生風險水位（docs/25 M-Macro1）
+tw-screener market macro [--refresh]   # ＝ make macro；--refresh 略過快取強抓 FRED
 ```
 
 每個指令都有 `--help` 顯示參數。

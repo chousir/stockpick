@@ -861,3 +861,19 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **WS-F 組合對照賽**：無條件存活＝1（<3）→ **不足以組合、維持 rule-tier**（不硬建 composite；開賽門檻＝個股層存活 ≥3 且跨 ≥2 regime）。
 - **WS-G 提案（2026-07-10 F1 裁決三案全採納，紀錄 docs/22 §6.1）**：① rotation.min_members 5→4（晶圓代工制度性榜外）＝**已套用**；② docs/11 三欄讀法降級＝**已套用**；③ F2 15% 明確不收緊（維持季度協議）＝零變更僅記錄。
 - 驗收：`make test` 綠（+25：panel 11/factor_lab 11+/rotation_efficacy 6/laggard 3/flow 5）；ruff/mypy 零淨增；核價/複現/全 cell/零 gate/brief 五項委託驗收全過。
+
+---
+
+## M-Macro1：總經避險層 Phase 1——BAA10Y 單訊號＋揭露面板總經燈號（規劃書 25・分支 `feat/macro-regime-phase1`）
+
+> 對應規劃書 [docs/25-macro-regime.md](25-macro-regime.md) §6 Phase 1。委託＝新增「由上而下」外生總經風險燈號，與既有內生 V2 regime 並列不合成。v1 拍腦袋候選＋加權合成設計，經三輪研究（`research/macro_regime_screening/`，block-bootstrap lift/CI）否證——BAA10Y 是唯一全格通過的指標，加權合成本身稀釋訊號——v2 改單一主訊號決定燈色、其餘指標降為揭露面板不計分。
+
+- **`data/fred.py`**：FRED 官方 API（`series/observations`）抓取＋per-series 24h 快取，key 讀 `.env`（`fred_api`，不進 git）；抓取合規比照鐵律 1 精神外推（間隔 ≥1 秒、concurrency=1、連錯 3 次停），已補進 docs/02。
+- **`analysis/macro_regime.py`**：BAA10Y `level_pct`（3 年滾動窗、嚴格因果）單訊號決定燈色（遲滯帶 ±3、綠<60≤黃<80≤紅）；DGS20/VIXCLS/DCOILWTICO/STLFSI4/DGS10/DEXTAUS/DEXJPUS 七條降為揭露面板（各自 level_pct/speed_pct/dual_risk，不進計分）；主訊號 stale（>10 日曆日）→ 燈號整體降級「資料不足」。
+- **整合**：`make macro`／`market macro` CLI／`make week` 容錯掛入（`rotation` 後、`group` 前）；`group_runner.py` 讀 `data/macro_regime/history.parquet` 最新一列傳入 Section 0；讀不到 → 該段不渲染（優雅降級同 V2 regime）。
+- **讀法**（docs/11 已補一段）：外生紅＋內生防禦＝強共振；外生紅＋內生進攻＝背離，人工細看；燈號紅但揭露面板全平靜＝可能是單一序列雜訊。此讀法尚未實測驗證（見 Phase 3）。
+- **`config/settings.yaml` `macro_regime:` 區塊**：序列、窗長（756 日）、門檻（80/60）、遲滯帶（±3）全參數化，零寫死；門檻本身未校準（先驗），報表標籤照實反映。
+- **已查證未實作**：docs/25 §2.4 台股估值資料源——TWSE OpenAPI 只有個股日 PE/PBR（`BWIBBU_d`），無市場整體統計端點；維持 fallback B（`BWIBBU_d` 中位數自建）開放狀態，留 Phase 2。
+- 驗收：`make test` 940 綠、ruff/mypy 零淨增、`market macro` 真實跑通（FRED 官方 API）、斷網情境驗證 `fetch_all` 連錯 3 次停＋CLI 非零 exit code。
+
+**下一步（規劃書 §6）**：Phase 2（M-Macro2）as-of 回放驗證整條 production pipeline、台股估值源 A/B 決策、DEXJPUS tail-event 重測、門檻敏感度測試；Phase 3（M-Macro3，研究軌）驗證燈號 vs V2 regime 共振讀法的實際 lift。分支待 merge 進 main（鐵律 3，待使用者拍板）。

@@ -433,6 +433,34 @@ regime:                        # 規劃書 03 V2 大盤 regime 總控閘門（ma
     attack: 0.33               # ≥ 此值＝進攻
     defense: -0.33             # ≤ 此值＝防禦；之間＝中性
 
+macro_regime:                  # docs/25 v2 總經避險層（M-Macro1）：單一主訊號＋揭露面板，不合成
+                               # BAA10Y 三輪 block-bootstrap 篩選為唯一穩健指標（headline lift
+                               # 2.26〔1.61–3.06〕），單獨決定燈色；其餘指標降級揭露不計分。
+  primary_series: BAA10Y       # 唯一計分序列（Moody's Baa 公司債對 10 年公債利差）
+  primary_transform: level_pct # 三輪研究裡 BAA10Y 最強的轉換（headline ci_lo 1.606 > speed 1.085）
+  disclosure_series:            # 揭露面板：不計分，只顯示脈絡（docs/25 §2.2）
+    DGS20: level_pct
+    VIXCLS: speed_pct
+    DCOILWTICO: dual_risk
+    STLFSI4: level_pct
+    DGS10: raw                 # 未通過驗證，僅揭露原始值
+    DEXTAUS: raw               # v1 誤植 DEXTAIUS，正確代碼 DEXTAUS（已用 curl 驗證）
+    DEXJPUS: raw               # 無證據，可能是 2024/08 單一事件敘事，非普遍規律
+  lookback_days: 756           # ≈3 年觀測數，水位/變速百分位窗（causal，不看未來）
+  delta_days: 20               # 變速分量的變化窗（speed_pct／dual_risk 用）
+  stale_days: 10               # 主訊號最後觀測日距今 > 此 → 燈號降級「資料不足」
+  thresholds:                   # risk_score = level_pct×100 ∈ [0,100]；門檻未校準先驗
+    green_max: 60               # < 60 綠
+    red_min: 80                 # ≥ 80 紅（對應三輪研究實際檢驗過的「前20分位=高風險」）
+  hysteresis: 3                 # 換色需突破門檻 ±3 分（黃→紅需≥83，紅→黃需<77），防閃爍
+  fetch:
+    base_url: "https://api.stlouisfed.org/fred/series/observations"
+    user_agent: "tw-stock-screener/0.1"
+    request_interval_sec: 1     # 序列間隔 ≥1 秒（鐵律1精神外推）
+    cache_ttl_hours: 24
+    max_retries: 2              # 連錯 3 次（含首次）停
+    timeout_sec: 30
+
 portfolio:                     # 規劃書 03 V3 組合層風控（portfolio check）
                                # 對持股（holdings_enriched，可選併入候選）算 標籤集中度／
                                # 近 N 日報酬相關簇／預定義因子簇曝險。定位＝風險揭露，非硬約束

@@ -739,6 +739,7 @@ def render_group_report(
     density_note: str = "",
     regime: dict | None = None,
     portfolio: dict | None = None,
+    macro_light: dict | None = None,
 ) -> None:
     """Render group_analysis.md to output_path using Jinja2 template.
 
@@ -748,6 +749,8 @@ def render_group_report(
     regime: regime.describe_regime() 的顯示 dict（規劃書 03 V2）；None 則不渲染大盤姿態段。
     portfolio: portfolio.describe_portfolio_check() 的顯示 dict（規劃書 03 V3）；
         None 則不渲染組合體檢段。
+    macro_light: macro_regime.describe_macro_light() 的顯示 dict（docs/25 v2）；
+        None 則不渲染總經燈號段（優雅降級，同 regime）。
     """
     context = _build_context(
         groups,
@@ -765,6 +768,7 @@ def render_group_report(
     context["density_note"] = density_note
     context["regime"] = regime
     context["portfolio"] = portfolio
+    context["macro_light"] = macro_light
 
     env = Environment(
         loader=FileSystemLoader(str(_TEMPLATE_DIR)),

@@ -10,6 +10,7 @@
 | TWSE Legacy (`www.twse.com.tw`) | 歷史 OHLCV (`STOCK_DAY`)、三大法人 (`T86`) | REST API（response=json） | 完全合法 |
 | TWSE ISIN (`isin.twse.com.tw/isin/C_public.jsp?strMode=4`) | 上櫃公司產業分類 | HTML（MS950 編碼） | 完全合法 |
 | Yahoo 股市 (`tw.stock.yahoo.com`) | 概念股/趨勢主題成分（多標籤主題） | 爬蟲（合規限速；**只爬概念股**） | 灰色，需自律 |
+| FRED (`api.stlouisfed.org/fred/series/observations`) | 總經指標（BAA10Y 主訊號＋揭露面板，docs/25 M-Macro1） | 官方 REST API（免費 key） | 完全合法 |
 
 ## Goodinfo 爬蟲規範（重要，違反會被擋）
 
@@ -255,6 +256,34 @@ Cache 命名共用 `stock_day_{stock_id}_{YYYYMM}.parquet`，下游 `load_candid
 - **自身歷史百分位**：逐日累積數月後可算（本期僅當日橫斷面，明標未取得）。
 - 進 `make fetch-twse`（緊接 fundamentals 後一步）；`cp candidates`/`cp valuation` 讀
   `load_latest_valuation_ratios()` 最新一份做橫斷面。
+
+---
+
+## FRED 官方 API（總經指標，2026-08 新增，docs/25 M-Macro1）
+
+`analysis/macro_regime.py` 的資料源，非個股資料，與上方 Goodinfo/TWSE 資料流平行、互不依賴。
+
+### 端點與 key
+`https://api.stlouisfed.org/fred/series/observations`（JSON，`series_id`+`api_key`+`file_type=json`）。
+key 免費註冊（`https://fred.stlouisfed.org/docs/api/api_key.html`），存 `.env` 的 `fred_api=<key>`
+（不進 git，不印出／不 log；讀取見 `_load_fred_api_key`，同時容許 `FRED_API_KEY` 環境變數）。
+
+### 抓取合規（鐵律 1 精神外推；比照 Goodinfo 但門檻更鬆，官方開放資料）
+```yaml
+# config/settings.yaml → macro_regime.fetch
+request_interval_sec: 1     # 序列間隔 ≥1 秒
+cache_ttl_hours: 24         # 同序列 24h 快取（per-series parquet，data/cache/fred/）
+max_retries: 2              # 連錯 3 次（含首次）即停（fetch_all 逐序列累計，見 FREDClient.fetch_all）
+concurrency: 1              # 嚴格序列（fetch_all 依序抓，非並發）
+user_agent: "tw-stock-screener/0.1"  # 可設定
+timeout_sec: 30
+```
+每次請求回傳序列**全歷史**（非增量），故快取粒度是 per-series 整檔覆蓋，不是逐日累積。
+
+### 已知風險
+FRED 序列的公開歷史範圍可能被**追溯限縮**（非端點失效）——`BAMLH0A0HYM2` 於 2026/4 起被限縮到僅
+約 3 年歷史，直接導致原設計的 3 年滾動窗無法計分，已改用 `BAA10Y` 取代。抓取失敗或歷史長度不足
+須明確報錯／降級「資料不足」，不可靜默假裝有值（docs/25 §5 風險 10）。
 
 ---
 

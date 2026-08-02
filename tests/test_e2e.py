@@ -325,6 +325,58 @@ def test_e2e_render_report_no_forbidden_words(tmp_path: Path):
         assert word not in content, f"forbidden word found: {word}"
 
 
+def test_e2e_render_report_macro_light_none_degrades_gracefully(tmp_path: Path):
+    """macro_light=None（docs/25 v2）→ 總經燈號段整段不渲染，其餘報告照常產出。"""
+    results = {"a_breakout": _SCREENER_A}
+    groups, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2
+    )
+    ranked = rank_within_groups(members, pl.DataFrame(), pl.DataFrame())
+    output = tmp_path / "group_analysis.md"
+    render_group_report(groups, ranked, results, "2026-W21", output, macro_light=None)
+    content = output.read_text(encoding="utf-8")
+    assert "總經燈號" not in content
+
+
+def test_e2e_render_report_macro_light_renders_when_present(tmp_path: Path):
+    results = {"a_breakout": _SCREENER_A}
+    groups, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2
+    )
+    ranked = rank_within_groups(members, pl.DataFrame(), pl.DataFrame())
+    output = tmp_path / "group_analysis.md"
+    macro_light = {
+        "color": "黃",
+        "risk_score": 68.0,
+        "as_of": "2026-07-30",
+        "primary": {
+            "series_id": "BAA10Y", "transform": "level_pct", "as_of": "2026-07-30",
+            "raw_value": 2.14, "score_pct": 68.0, "stale": False,
+        },
+        "disclosure": [
+            {
+                "series_id": "DGS20", "transform": "level_pct", "as_of": "2026-07-30",
+                "raw_value": 4.71, "score_pct": 61.0, "stale": False,
+            },
+            {
+                "series_id": "DGS10", "transform": "raw", "as_of": None,
+                "raw_value": None, "score_pct": None, "stale": True,
+            },
+        ],
+        "prev_color": "綠",
+        "change_line": "綠 → 黃",
+        "advice": "風險水位中等，維持觀察，無需立即調整。",
+        "line": "總經燈號：黃 68/100",
+    }
+    render_group_report(groups, ranked, results, "2026-W21", output, macro_light=macro_light)
+    content = output.read_text(encoding="utf-8")
+    assert "總經燈號" in content
+    assert "BAA10Y" in content
+    assert "綠 → 黃" in content
+    for word in ("目標價", "強烈建議", "飆股", "絕對"):
+        assert word not in content, f"forbidden word found in macro section: {word}"
+
+
 # ─── E2E: candidates_enriched.csv ─────────────────────────────────────────────
 
 
