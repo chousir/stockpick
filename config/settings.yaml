@@ -385,6 +385,24 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     weekly_snapshot: true        # 週快照抽樣（同 WS-C/WS-D，降前瞻窗重疊）
     n_boot: 1000
     output_dir: research/contrarian_efficacy
+  macro_regime_validate:     # docs/25 §6 Phase 2（M-Macro2）as-of 回放驗證＋門檻敏感度＋DEXJPUS tail-event 重測
+                              # 讀 research/macro_regime_screening/raw/（三輪研究產出，gitignored，先跑過三輪研究才有這批 parquet）
+    raw_dir: research/macro_regime_screening/raw
+    event_target: NASDAQCOM.parquet    # 沿用 round1 Pass 1 事件目標（唯一有數十年歷史的權益指數，見 docs/25 §6 Phase 2）
+    event_n_days: 60            # headline 格＝N=60（熊市級，對齊 round1/2 report）
+    event_drawdown_pct: 0.15    # X=15%
+    primary_series_file: BAA10Y.parquet
+    lookback_days: 756          # 對齊 macro_regime.lookback_days（production 同一口徑）
+    min_obs: 30
+    quintile: 0.80               # headline 高風險門檻（對齊 red_min=80 → level_pct≥0.80）
+    threshold_grid: [0.75, 0.80, 0.85]  # 門檻敏感度：red_min 75/80/85 對應的 quintile
+    dexjpus_file: DEXJPUS.parquet
+    dexjpus_delta_days: 20       # 對齊 macro_regime.delta_days
+    dexjpus_tail_grid: [0.80, 0.90, 0.95, 0.98]  # round1 quintile(0.80)＋更窄尾端門檻（top 10%/5%/2%）
+    block_len: 60                # CI block bootstrap 區塊長度（對齊 headline N=60）
+    n_boot: 1000
+    seed: 42
+    output_dir: research/macro_regime_screening
   flow_inflection:           # WS-E 資金流 inflection 因子族（make flow-inflection）
     horizons_td: [10, 20]        # 評估窗（交易日）
     n_splits: 4

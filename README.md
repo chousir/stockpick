@@ -188,6 +188,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make rotation-efficacy`                               | 輪動欄效度：歷史重建→生產對表→forward basket IC/lift（docs/22 WS-C；`backtest rotation-efficacy --membership official` 出官方產業別 robustness 版） | 每季                                 |
 | `make laggard-grid`                                    | 族群強弱×領先落後×位階 forward 報酬格（docs/22 WS-D；`--membership official` 同上） | 每季                                 |
 | `make contrarian-efficacy`                             | 底部左側聯合桶（轉買×貼近低）forward alpha 檢驗＋§1 硬門檻裁決（docs/24 M-BR1 Phase 2） | 面板重建後／樣本變厚後重驗           |
+| `make macro-regime-validate`                           | 總經燈號 as-of 回放驗證＋門檻敏感度＋DEXJPUS tail-event 重測（docs/25 M-Macro2；讀 research/ raw，需先跑過三輪篩選研究） | 一次性驗證（Phase 2 已跑過）    |
 | `make flow-inflection`                                 | 資金流 inflection 因子族首驗（docs/22 WS-E）          | 樣本變厚後重驗                       |
 | `make margin-factors`                                  | 融資減肥/大戶 WoW/margin_to_vol 三籌碼因子首驗（預註冊 docs/23 §3） | 面板重建後                    |
 | `make regime-history`                                  | regime 標籤歷史化：V2 引擎逐日 as-of 重算（2022-01 起，docs/23 WS-H.3） | 面板延伸前（先產標籤）        |
@@ -518,7 +519,7 @@ make typecheck   # mypy
 | [`docs/22-factor-lab-w28.md`](./docs/22-factor-lab-w28.md)                                   | W28 統一因子實驗台（WS-A~G 收官）：trend_score 唯一存活、inflection 族/ΔRank/退潮全否證、宇宙效應方法論        |
 | [`docs/23-backtest-r2-w28.md`](./docs/23-backtest-r2-w28.md)                                 | W28 回測二輪（WS-H~L 收官）：推論硬化 Fisher-z→moving-block bootstrap＋晉升鐵則；補 docs/22 §7 四洞；trend_score 升雙 robustness、★/ambush 升級、WS-K 籌碼三因子無證據/樣本不足 |
 | [`docs/24-contrarian-base-detection.md`](./docs/24-contrarian-base-detection.md)             | 底部左側偵測 M-BR1：賣壓熄火×基本面完好×貼近結構低——描述→驗證→gate 三階紀律；Phase 1 揭露欄已實作、**Phase 2 面板檢驗已否證**（桶 lift 顯著落後宇宙，`contrarian_base` 定案描述欄・§3.1） |
-| [`docs/25-macro-regime.md`](./docs/25-macro-regime.md)                                       | MacroRegime 總經避險層（外生風險燈號，與內生 V2 regime 並列不合成）：三輪 block-bootstrap 篩出 BAA10Y 為唯一穩健主訊號，v2 改單訊號決定燈色＋揭露面板；**Phase 1（M-Macro1）已上線**，Phase 2 as-of 回放驗證／Phase 3 共振讀法實測待排 |
+| [`docs/25-macro-regime.md`](./docs/25-macro-regime.md)                                       | MacroRegime 總經避險層（外生風險燈號，與內生 V2 regime 並列不合成）：三輪 block-bootstrap 篩出 BAA10Y 為唯一穩健主訊號，v2 改單訊號決定燈色＋揭露面板；**Phase 1（M-Macro1）已上線、Phase 2（M-Macro2）as-of 回放驗證通過**，Phase 3 共振讀法實測待排 |
 | [`docs/proposals/`](./docs/proposals/00-index.md)                                            | 審查改善規劃書 01–05（效能技債/資料韌性/量化驗證閉環/架構瘦身/**選股有效性總改造 F1–F5**，皆已收官）        |
 | [`docs/99-troubleshooting.md`](./docs/99-troubleshooting.md)                                 | 常見問題與解法                                                                                                      |
 
