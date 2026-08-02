@@ -909,3 +909,20 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - 驗收：`make test` 954 綠（+9：null 排除中位數／整欄全缺誠實 None／空快照不產列／冪等 append／跨日期累積不覆蓋既有列／深度訊息不洩漏任何百分位字樣）；ruff/mypy 零淨增；對真實本機快取乾跑（18 份快照檔，因一份重複日期被冪等機制擋下→實得 17 個交易日，`median_pe` 19.97、`n_pe`=1470 一切正常）。
 
 **下一步**：等累積達 ~750 個交易日（≈3 年）後，再開一個獨立 milestone 走跟 BAA10Y 同規格的 block-bootstrap 驗證；在那之前這條線維持「累積中、未驗證、不影響燈號」狀態，任何人不得因為「資料已經有了」就跳過驗證直接放行。分支待 merge 進 main（鐵律 3，待使用者拍板）。
+
+---
+
+## M-Macro3：燈號 vs V2 regime 共振/背離讀法實測驗證（規劃書 25 §6 Phase 3・研究軌・分支 `feat/macro-regime-phase3`）
+
+> 對應規劃書 [docs/25-macro-regime.md](25-macro-regime.md) §6 Phase 3。round 3 指出「外生燈號 vs 內生 V2 regime 共振/背離」讀法（docs/11「姿態一行」段）只有敘事邏輯、沒有 lift 數字，這個 Phase 走 playbook/20 §6 研究軌判準把它實測驗證。
+
+- **`backtest/macro_regime_validate.py` 擴充**：新增 `build_light_color_series`（逐日重放**生產燈色**，直接呼叫 production `compute_level_pct`＋`classify_light`、含遲滯帶跨日記憶——不是 Phase 2 那種可獨立重算的單日 quintile 門檻近似，遲滯帶本身是「昨天的顏色」這個狀態，必須逐日 carry `prev_color` 才重放得出使用者實際會看到的顏色）；`bucket_lift`（任意布林條件的 lift＋CI，`high_risk_lift` 已改為委派呼叫其上的 quintile 特例，兩者數字一致有回歸測試覆蓋，不重寫 bootstrap 邏輯）。
+- **`backtest/macro_regime_validate_runner.py`** 新增 `run_macro_regime_resonance`＋CLI `backtest macro-regime-resonance`＋`make macro-regime-resonance`：讀 `research/panel/regime_labels.parquet`（`make regime-history` 產出）＋BAA10Y／台股等權指數 raw parquet → 產 `research/macro_regime_screening/report_2026-08-01_round5.md`。
+- **結果＝結構性無法檢驗（不是否證，第三種誠實結局）**：V2 regime 標籤只在 2022-01～2026-07 連續可信（本地全市場日線快取 2018-2020 整整三年空白，已實際嘗試延伸 `regime_history.start` 到 2016-01 驗證這點，2016/2017 僅零星殘檔不可用，延伸沒帶來額外可用樣本）。此窗內 BAA10Y 燈色＝紅只出現 **2 天**（2026-03-16/17，皆為進攻非防禦），「紅∧防禦」共振桶樣本數＝**0**，連 lift 都算不出——不是測了沒訊號，是這個條件在現有資料裡從未發生過。背離桶（紅∧進攻）n=2 同樣不足以估計。
+- **單獨訊號基準線**（供對照，未採納進計分）：BAA10Y 紅 alone lift=0.00（n=2 不可靠）；V2 防禦 alone lift=2.40〔1.99–CI 上界不可得〕（n=152）；V2 進攻 alone lift=0.45〔0.00–0.47〕（n=344，CI 乾淨 <1，可能是獨立訊號但本輪不擅自採納）。
+- **docs/11 同步降級**：「姿態一行」共振/背離讀法段的避險句從「尚未實測驗證」加強為「純屬敘事、無任何實測支持，比『尚未驗證』更弱」，附上 n=0 具體數字與回補路徑（`make backfill-daily-history`／`make backfill-universe-history` 補 2018-2020 缺口，約 8-12 小時一次性冷啟動，本輪不代為決定是否要做）。
+- **明確不動**：`analysis/macro_regime.py` 計分邏輯、`config/settings.yaml` 之 `macro_regime:` 區塊——本輪是讀法驗證不是計分引擎變更；webapp dashboard 燈號卡片（docs/25 選配項）本輪未做。
+- `config/settings.yaml` 的 `backtest.macro_regime_validate:` 區塊新增 `tw_index_file` 一個 key（Phase 3 事件目標改用台股等權指數，不是 Phase 2 的 NASDAQCOM——測的是台股表現，事件目標要對得上問題本身）。
+- 驗收：`make test` 958 綠（+4：遲滯帶跨日記憶重放／任意布林桶 planted 訊號偵測／`high_risk_lift`↔`bucket_lift` 重構回歸保護）；ruff/mypy 零淨增；`make macro-regime-resonance` 真實跑通並可重現 round5 報告全部數字（已獨立重跑驗證一致）。
+
+**下一步**：docs/25 §6 三個 Phase 全部收官（Phase 1/2/3 皆完成）；剩餘開放項＝台股估值 B 方案完整驗證（M-Macro2b 的下一步，另一個未定名獨立 milestone）、以及是否要投入 8-12 小時回補 2018-2020 本地日線快取以重新打開 M-Macro3 的驗證可能性（使用者裁決，不代為決定）。分支待 merge 進 main（鐵律 3，待使用者拍板）。

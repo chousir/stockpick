@@ -1185,6 +1185,16 @@ def backtest_macro_regime_validate_cmd(
     run_macro_regime_validate(settings)
 
 
+@backtest_app.command("macro-regime-resonance")
+def backtest_macro_regime_resonance_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """M-Macro3（docs/25 §6 Phase 3）：燈號 vs V2 regime 共振/背離讀法實測驗證。"""
+    from tw_screener.backtest.macro_regime_validate_runner import run_macro_regime_resonance
+
+    run_macro_regime_resonance(settings)
+
+
 @backtest_app.command("flow-inflection")
 def backtest_flow_inflection_cmd(
     out_dir: Path | None = typer.Option(
