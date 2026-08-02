@@ -287,11 +287,20 @@ speed_pct 或 dual_risk/as-of/來源）供你在週報階段跟 Claude Code 互�
   DEXJPUS 繼續留揭露面板、不計分，round1 判定不變。
 - **台股估值決策**：見 §2.4——A 已排除、B 原則接受但實作延後（另開 milestone）。
 
-### Phase 3 — M-Macro3：燈號 vs V2 regime 共振讀法的實測驗證（研究軌，走 playbook/20 §6）
+### Phase 3 — M-Macro3：燈號 vs V2 regime 共振讀法的實測驗證（研究軌，走 playbook/20 §6・✅ 已完成 2026-08-02）
 
-範圍：round 3 已經指出「內層揭露面板交叉檢視」與「外層燈號 vs V2 regime 共振/背離」是兩個未經實測驗證的讀法假設（只有敘事邏輯，沒有 lift 數字）。這個 Phase 用 `regime_history.py` 已有的 V2 regime 逐日標籤，對照 BAA10Y 燈色歷史，測「外生紅＋內生防禦」共振情境的實際 lift 是否顯著優於任一單獨訊號。選配：webapp dashboard 燈號卡片。
+範圍：round 3 已經指出「內層揭露面板交叉檢視」與「外層燈號 vs V2 regime 共振/背離」是兩個未經實測驗證的讀法假設（只有敘事邏輯，沒有 lift 數字）。這個 Phase 用 `regime_history.py` 已有的 V2 regime 逐日標籤，對照 BAA10Y 燈色歷史，測「外生紅＋內生防禦」共振情境的實際 lift 是否顯著優於任一單獨訊號。選配：webapp dashboard 燈號卡片（本輪未做，維持選配）。
 
 驗收：research/ 產出共振讀法驗證報告；若否證（共振沒有比單看 BAA10Y 更準），docs/11 的讀法說明要降級為「僅供人工參考的敘事」，不能暗示有預測力。
+
+**結果（`tw-screener backtest macro-regime-resonance` → `research/macro_regime_screening/report_2026-08-01_round5.md`）**：
+- **結構性無法檢驗（不是否證，是第三種誠實結局）**：V2 regime 逐日標籤只在 2022-01～2026-07 這個窗口連續可信（本地全市場日線快取 2018-2020 整整三年空白，2016/2017 僅零星殘檔，不可用；已嘗試把 `regime_history` 的 `start` 延伸到 2016-01 驗證這件事，結論是延伸沒有帶來額外可用樣本）。在這個唯一可信賴的窗口裡，**BAA10Y 燈色＝紅只出現 2 天**（2026-03-16／17，且兩天皆為 V2 regime=進攻），「紅∧防禦」共振條件**一次都沒發生過**（n=0），沒有任何 lift/CI 可算——這不是「測了沒訊號」，是「這個條件在目前資料裡根本不存在」，跟 playbook/20 §6.6 講的否證不是同一件事，必須分開誠實記錄。
+- **背離桶（紅∧進攻）**：n=2，同樣不足以估計。
+- **單獨訊號基準線（供對照，非本輪裁決標的）**：BAA10Y 紅 alone lift=0.00（n=2，樣本太小不可靠）；V2 防禦 alone lift=2.40〔1.99–CI 上界不可得〕（n=152，相對穩健）；V2 進攻 alone lift=0.45〔0.00–0.47〕（n=344，CI 乾淨落在 1 以下）。**v2_attack_alone 這個乾淨的負向結果本身可能是另一個值得關注的訊號，但本輪範圍只做讀法驗證、不擅自採納進計分邏輯**，留待使用者另行評估是否值得開新一輪研究。
+- **要真正測到這個讀法**：需要先補齊 2018-2020 本地全市場日線快取（`make backfill-daily-history`／`make backfill-universe-history`，約 8-12 小時一次性冷啟動）才碰得到 BAA10Y 真正紅燈的年份（2008／2015-16／2020）——這是一個獨立、規模遠大於本 Phase 的資料工程決定，本輪不代為決定。
+- **docs/11 已同步降級**：「姿態一行」的共振/背離讀法段，避險句從「尚未實測驗證」加強為「純屬敘事、無任何實測支持，比『尚未驗證』更弱」，並附上本輪的 n=0 具體數字與回補路徑說明。
+- **不動** `analysis/macro_regime.py` 計分邏輯與 `config/settings.yaml` 之 `macro_regime:` 區塊——本輪是讀法驗證，不是計分引擎變更。
+- 新增可重用純函式 `build_light_color_series`（逐日重放*生產*燈色，含遲滯帶跨日記憶，非 Phase 2 那種可獨立重算的單日門檻近似）與 `bucket_lift`（任意布林條件的 lift＋CI，`high_risk_lift` 已改為委派呼叫其上的 quintile 特例，兩者數字一致有回歸測試覆蓋）；`make macro-regime-resonance` 可重現全部數字（前提：`make regime-history` 已跑過）。
 
 ---
 
