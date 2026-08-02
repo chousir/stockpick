@@ -479,6 +479,12 @@ macro_regime:                  # docs/25 v2 總經避險層（M-Macro1）：單�
     max_retries: 2              # 連錯 3 次（含首次）停
     timeout_sec: 30
 
+tw_valuation_history:          # docs/25 §2.4 fallback B 前置：全市場估值中位數逐日累積
+                               # （只做累積、不做驗證/計分——BWIBBU_d 不可回補，須等資料自然養夠）
+  history_path: data/macro_regime/tw_valuation_history.parquet  # 刻意在 data/cache/ 之外，
+                               # 不受 cache.retention.valuation_days 清理（見模組 docstring）
+  validation_target_trading_days: 750  # ≈3 年交易日，對齊 macro_regime.lookback_days=756 同規格門檻
+
 portfolio:                     # 規劃書 03 V3 組合層風控（portfolio check）
                                # 對持股（holdings_enriched，可選併入候選）算 標籤集中度／
                                # 近 N 日報酬相關簇／預定義因子簇曝險。定位＝風險揭露，非硬約束

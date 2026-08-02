@@ -137,6 +137,12 @@ v1 用「候選清單＋權重」設計，v2 改成三層——因為 round 3 �
   這輪驗證的資料建置量（逐日全市場中位數、養 2-3 年百分位窗）比 Phase 2 其餘三項工作
   大一個量級，本次 Phase 2 只做決策、不動工，留給後續一個獨立 milestone（暫定 M-Macro2b
   或併入 Phase 3 前置）處理。
+  **累積管線已於後續 milestone 上線（`src/tw_screener/data/valuation_history.py`，
+  `fetch-twse` 每次自動 append 一列全市場 PE/PBR/殖利率中位數，落地
+  `data/macro_regime/tw_valuation_history.parquet`，見 docs/08 對應條目）——但這只是
+  「不要讓累積起點浪費掉」，本身不是驗證、不算計分、不影響燈號。`data/cache/twse/
+  valuation_ratios_*.parquet` 從 2026-06-12 才開始有資料，且官方端點不可回補
+  （只回最新一交易日），驗證要等累積到 ~750 個交易日（≈3 年）才有意義，沒有捷徑。**
 
 ### 2.5 更新頻率與時效揭露（沿用 v1）
 

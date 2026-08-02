@@ -893,4 +893,19 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - `config/settings.yaml` 新增 `backtest.macro_regime_validate:` 區塊（raw_dir/事件參數/門檻網格/bootstrap 參數全進 settings，零寫死）。
 - 驗收：`make test` 945 綠（+5：合成資料測 warmup／event 前視保護／構造訊號偵測／獨立樣本無誤判／空輸入）；ruff/mypy 零淨增（對照 main 分支確認 47 條 mypy 既有錯誤與本次無關的 pre-existing debt，本次零新增）；`make macro-regime-validate` 真實跑通（讀本地 research/ raw parquet，不打網）。
 
-**下一步（規劃書 §6）**：Phase 3（M-Macro3，研究軌，走 playbook/20 §6）驗證燈號 vs V2 regime 共振讀法的實際 lift；台股估值 B 方案的完整實測驗證（獨立 milestone，範圍未定名）。分支待 merge 進 main（鐵律 3，待使用者拍板）。
+**已 merge 進 main（2026-08-02，commit b33d574，使用者已拍板同意）**，`feat/macro-regime-phase2` 分支已刪除。
+
+---
+
+## M-Macro2b：台股估值資料源累積管線（規劃書 25 §2.4・分支 `feat/macro-tw-valuation-accumulator`）
+
+> 對應規劃書 [docs/25-macro-regime.md](25-macro-regime.md) §2.4。M-Macro2 已把 §2.4 的 A/B 決策定案（A 排除、B 原則接受但驗證延後），但決策當下沒有動工。使用者確認後開了這個獨立 milestone——範圍**只有累積管線，不含任何驗證或計分**，因為現況根本無法驗證：`data/cache/twse/valuation_ratios_*.parquet` 只從 2026-06-12 開始有資料（~7 週），且 `BWIBBU_d`／`peratio_analysis` 兩官方端點皆「只回最新一交易日、不可回補」（docs/02）——BAA10Y 同規格驗證要 3 年滾動窗＋60 交易日 bootstrap 區塊，7 週連一個區塊都不夠，沒有捷徑，只能等自然累積。
+
+- **`src/tw_screener/data/valuation_history.py`**（新模組）：`daily_valuation_summary`（單日全市場 PE/PBR/殖利率中位數，null 排除不當 0，整天無資料才回 None、整欄全缺仍誠實產一列 median=None/n=0）；`append_valuation_history`（冪等 append——同一 `date` 已存在則跳過，防重跑污染序列；比照但修正了 `analysis/macro_regime.append_history` 現有的冪等缺口）；`accumulation_depth_message`（只報「養了幾天」，不算任何百分位/訊號）。
+- **落地位置刻意選在 `data/macro_regime/tw_valuation_history.parquet`**，不放 `data/cache/` 底下——後者受 `cache.retention.valuation_days`（現 400 天）管制，`prune-cache` 會依窗砍舊檔；這份資料上游不可回補，砍了就永遠拿不回來，獨立存放確保 3 年養成不會被將來一次 prune 腰斬。
+- **整合**：`cli.py` `data_fetch_twse`（`fetch-twse` 每次自動呼叫，`make week` 步驟①內含，零新增手動步驟）；印累積深度提示行，不印任何百分位/分數。
+- **明確排除**：不動 `analysis/macro_regime.py` 計分邏輯、不加揭露面板、不加報表段落、不加任何看起來像訊號的 CLI 輸出——這是本次唯一的裁決範圍，避免重蹈「資料不夠就先上一個低信心版本」的小樣本陷阱（playbook/20 §6.5 的鏡像：N 太小一樣是陷阱，不是只有 N 太大才是）。
+- `config/settings.yaml` 新增 `tw_valuation_history:` 區塊（`history_path`／`validation_target_trading_days=750`，零寫死）。
+- 驗收：`make test` 954 綠（+9：null 排除中位數／整欄全缺誠實 None／空快照不產列／冪等 append／跨日期累積不覆蓋既有列／深度訊息不洩漏任何百分位字樣）；ruff/mypy 零淨增；對真實本機快取乾跑（18 份快照檔，因一份重複日期被冪等機制擋下→實得 17 個交易日，`median_pe` 19.97、`n_pe`=1470 一切正常）。
+
+**下一步**：等累積達 ~750 個交易日（≈3 年）後，再開一個獨立 milestone 走跟 BAA10Y 同規格的 block-bootstrap 驗證；在那之前這條線維持「累積中、未驗證、不影響燈號」狀態，任何人不得因為「資料已經有了」就跳過驗證直接放行。分支待 merge 進 main（鐵律 3，待使用者拍板）。

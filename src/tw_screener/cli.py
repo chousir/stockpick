@@ -133,6 +133,21 @@ def data_fetch_twse(
     n_pe = df_val["pe"].drop_nulls().len() if len(df_val) else 0
     console.print(f"  估值比：{len(df_val)} 檔（有 PE {n_pe}）")
 
+    # docs/25 §2.4 fallback B 前置：全市場估值中位數累積（只累積不驗證，見模組 docstring）
+    import yaml
+
+    from tw_screener.data.valuation_history import (
+        accumulation_depth_message,
+        append_valuation_history,
+    )
+
+    with open(settings, encoding="utf-8") as f:
+        _val_cfg = yaml.safe_load(f)["tw_valuation_history"]
+    val_history = append_valuation_history(df_val, Path(_val_cfg["history_path"]))
+    console.print(
+        f"  {accumulation_depth_message(val_history, _val_cfg['validation_target_trading_days'])}"
+    )
+
     # 上市融資融券（MI_MARGN）；逐日累積供 margin_chg_5d（規劃書 02 D4）。上櫃為缺口（D6 backlog）。
     console.print("[bold]抓取上市融資融券（MI_MARGN）...[/bold]")
     df_margin = client.fetch_margin()
