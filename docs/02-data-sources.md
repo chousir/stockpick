@@ -256,6 +256,13 @@ Cache 命名共用 `stock_day_{stock_id}_{YYYYMM}.parquet`，下游 `load_candid
 - **自身歷史百分位**：逐日累積數月後可算（本期僅當日橫斷面，明標未取得）。
 - 進 `make fetch-twse`（緊接 fundamentals 後一步）；`cp candidates`/`cp valuation` 讀
   `load_latest_valuation_ratios()` 最新一份做橫斷面。
+- **全市場中位數累積（docs/25 §2.4 M-Macro2b，2026-08 新增）**：`fetch-twse` 同時呼叫
+  `data/valuation_history.py` 把當日全市場 PE/PBR/殖利率中位數 append 進
+  `data/macro_regime/tw_valuation_history.parquet`——**只累積、不驗證、不計分**。刻意不放
+  `data/cache/` 底下：本節開頭已提到 `BWIBBU_d`／`peratio_analysis` 兩端點只回最新一交易日、
+  不可回補，`data/cache/twse/valuation_ratios_*.parquet` 若被 `cache.retention.valuation_days`
+  （現 400 天）的 `prune-cache` 清理會永久遺失；獨立存放確保養 3 年（跟 BAA10Y 同規格驗證所需
+  的 756 個交易日）的過程不會被中途清一次快取就腰斬。快取本身從 2026-06-12 才開始有資料。
 
 ---
 
