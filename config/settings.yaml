@@ -116,9 +116,10 @@ tpex:
 report:
   default_top_n: 10
   llm:                            # 規劃書 04 A7：個股報告 LLM 配置（builder 讀取，不寫死）
-    model: claude-opus-4-8        # 深度個股報告品質優先；省成本可改 claude-sonnet-4-6
+    model: claude-opus-5          # 深度個股報告品質優先，用當前最新 Opus；省成本可改 claude-sonnet-5
+                                  # Anthropic 出新版 Opus 時記得手動升級此值（無自動追新別名）；
+                                  # Opus 4.7+ 系列不接受 temperature 參數，故本設定不提供該欄位
     max_tokens: 4000              # 10 段框架＋多空各 3-5 點，避免截斷（原 2500 易截）
-    temperature: 0.3              # 事實導向分析，降低變異
   artifact_check:                 # 規劃書 05 F4：make week 尾段產物完整性檢查（缺者 WARNING、不擋流程）
     machine:                      # make week 機器產物——只查最新週，缺＝該步驟無聲失敗
                                   # （cp_candidates.md 曾 W25–W27 連三週斷供無人知，即本清單動機）

@@ -187,14 +187,16 @@ A/B/C 已 legacy（README 載明），但 `config/strategies/` 仍有 `a_breakou
 ## A7 — 報告層配置化（builder 模型／長度）
 
 ### 問題
-[builder.py:35](../../src/tw_screener/report/builder.py#L35) `_call_claude` 寫死
+[builder.py:55](../../src/tw_screener/report/builder.py#L55) `_call_claude` 原本寫死
 `model="claude-sonnet-4-6"`、`max_tokens=2500`。10 段框架＋多空各 3–5 點易**截斷**；
-模型也該可配置（深度個股報告值得用 Opus 4.8）。
+模型也該可配置（深度個股報告值得用最新 Opus）。
 
 ### 方案
-1. `settings.yaml` 加 `report.llm`：`model` / `max_tokens` / `temperature`，builder 讀取、不寫死。
-2. `max_tokens` 預設提高（如 4000+）避免截斷；`model` 預設可採最新 Opus（深度報告品質優先）。
+1. `settings.yaml` 加 `report.llm`：`model` / `max_tokens`，builder 讀取、不寫死。
+2. `max_tokens` 預設提高（如 4000+）避免截斷；`model` 預設可採最新 Opus（深度報告品質優先），
+   需人工追新版（無自動追新別名），Anthropic 出新版時記得手動升級 settings.yaml 的值。
 3. 加「輸出疑似截斷」檢查（結尾無「資料來源」段 → warning）。
+4. 不提供 `temperature`：Claude Opus 5 起（含整個 Opus 4.7+ 系列）不接受此參數，會 400。
 
 ### 成功標準
 - [ ] builder 從 settings 讀模型/長度，無寫死。
