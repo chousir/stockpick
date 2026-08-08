@@ -1394,9 +1394,9 @@ def market_macro_cmd(
     refresh: bool = typer.Option(False, "--refresh", help="略過快取，強制重抓 FRED 序列"),
 ) -> None:
     """docs/25 v2 總經燈號：印主訊號（BAA10Y）燈色＋揭露面板全部指標＋各序列 as-of。"""
-    from tw_screener.analysis.macro_regime import run_macro
+    from tw_screener.analysis.macro_regime import NO_PREV, run_macro
 
-    light = run_macro(settings_path=settings, force_refresh=refresh)
+    light, deltas = run_macro(settings_path=settings, force_refresh=refresh)
     if light.as_of is None:
         console.print("[red]主訊號無資料——先確認 .env 有設 fred_api，或檢查網路[/red]")
         raise typer.Exit(1)
@@ -1409,9 +1409,25 @@ def market_macro_cmd(
         f"\n[bold {color}]總經燈號：{light.color} {score_str}[/bold {color}]"
         f"（主訊號 {light.primary.series_id}，as-of {light.as_of}）〔實測篩選,門檻未校準〕"
     )
+    def _delta_str(series_id: str) -> str:
+        """docs/26 A案：較上次的變化欄（純揭露；無前次＝老實留白，不用單輪硬算）。"""
+        d = deltas.get(series_id)
+        if d is None or d.arrow == NO_PREV:
+            return "　較上次 —"
+        if d.delta_score_pct is not None:
+            amount = f" {d.delta_score_pct:+.1f}p"  # 1 位小數：避免 -0.3p 被印成醜且失真的 -0p
+        elif d.delta_raw_value is not None:
+            amount = f" {d.delta_raw_value:+.4g}"
+        else:
+            amount = ""
+        return f"　較上次 {d.arrow}{amount}〔前次 {d.prev_as_of}〕"
+
     if light.primary.raw_value is not None:
         pct = f"（p{light.primary.score * 100:.0f}）" if light.primary.score is not None else ""
-        console.print(f"  {light.primary.series_id}：{light.primary.raw_value}{pct}")
+        console.print(
+            f"  {light.primary.series_id}：{light.primary.raw_value}{pct}"
+            f"{_delta_str(light.primary.series_id)}"
+        )
     console.print("\n  揭露面板（不計分）：")
     for d in light.disclosure:
         if d.stale or d.raw_value is None:
@@ -1419,10 +1435,15 @@ def market_macro_cmd(
             continue
         pct = f"（p{d.score * 100:.0f}）" if d.score is not None else ""
         console.print(
-            f"    {d.series_id}（{d.transform}）：{d.raw_value}{pct}〔{d.observed_date}〕"
+            f"    {d.series_id}（{d.transform}）：{d.raw_value}{pct}"
+            f"〔{d.observed_date}〕{_delta_str(d.series_id)}"
         )
     console.print(
         "\n[dim]定位＝風險水位揭露，非交易訊號；紅＝評估分批降低曝險，最終由人決策。[/dim]"
+    )
+    console.print(
+        "[dim]水位百分位在單向趨勢序列上會常駐高位（docs/26 §5.1：DGS20 近兩年 34% 週次 ≥p90），"
+        "「水位高」鑑別力低、看「較上次」的變化更有資訊。[/dim]"
     )
 
 

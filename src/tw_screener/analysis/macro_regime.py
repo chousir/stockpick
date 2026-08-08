@@ -66,8 +66,50 @@ class MacroLight:
     prev_color: str | None
 
 
-def describe_macro_light(light: MacroLight) -> dict[str, object]:
-    """MacroLight → 報表/CLI 共用顯示 dict（docs/25 v2 §4.2 格式）。"""
+@dataclass(frozen=True)
+class PanelDelta:
+    """單一序列相對「上一次不同 run」的變化（docs/26 §7.1，純揭露、不進計分）。
+
+    arrow＝"↑"/"↓"/"→"/`NO_PREV`（無前次或本次未取得）。docs/26 §5.1 的動機：水位百分位在
+    趨勢序列上會常駐高位（DGS20 兩年內 34% 週次 ≥p90），「水位高」本身鑑別力低，
+    「水位在變」才有資訊——所以面板要能區分慢磨與急衝。
+    """
+
+    series_id: str
+    prev_run_as_of: date | None
+    prev_as_of: date | None
+    prev_raw_value: float | None
+    prev_score_pct: float | None
+    delta_raw_value: float | None
+    delta_score_pct: float | None
+    arrow: str
+
+
+# 無前次可比（首次跑／本次未取得）的箭頭佔位符——誠實顯示「不知道」，不用單列硬算變化。
+NO_PREV = "—"
+
+
+def describe_macro_light(
+    light: MacroLight, deltas: dict[str, PanelDelta] | None = None
+) -> dict[str, object]:
+    """MacroLight → 報表/CLI 共用顯示 dict（docs/25 v2 §4.2 格式）。
+
+    deltas 給定時（docs/26 A案）每個讀值附一個 `delta` 子 dict；None＝不顯示變化欄
+    （向後相容：panel_history 尚未累積或呼叫端不需要變化欄時的原行為）。
+    """
+
+    def _fmt_delta(series_id: str) -> dict[str, object] | None:
+        if deltas is None:
+            return None
+        d = deltas.get(series_id)
+        if d is None:
+            return {"arrow": NO_PREV, "prev_as_of": None, "score_pct": None, "raw_value": None}
+        return {
+            "arrow": d.arrow,
+            "prev_as_of": d.prev_as_of.isoformat() if d.prev_as_of else None,
+            "score_pct": round(d.delta_score_pct, 1) if d.delta_score_pct is not None else None,
+            "raw_value": round(d.delta_raw_value, 4) if d.delta_raw_value is not None else None,
+        }
 
     def _fmt_reading(r: IndicatorReading) -> dict[str, object]:
         return {
@@ -77,6 +119,7 @@ def describe_macro_light(light: MacroLight) -> dict[str, object]:
             "raw_value": round(r.raw_value, 4) if r.raw_value is not None else None,
             "score_pct": round(r.score * 100, 1) if r.score is not None else None,
             "stale": r.stale,
+            "delta": _fmt_delta(r.series_id),
         }
 
     score_str = f"{light.risk_score:.0f}/100" if light.risk_score is not None else "—"
@@ -304,6 +347,119 @@ def to_detail_frame(light: MacroLight) -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
+# panel_history.parquet 的欄位順序（long format，docs/26 §7.1）。
+# run_as_of＝本次計算的主訊號觀測日（等同 history.parquet 的 as_of，用來識別「哪一次跑」並做冪等）；
+# as_of＝該序列自身的最新觀測日（週頻/時滯序列會落後 run_as_of，這是兩個不同概念，刻意分兩欄）。
+_PANEL_HISTORY_COLUMNS = [
+    "run_as_of",
+    "role",
+    "series_id",
+    "transform",
+    "as_of",
+    "raw_value",
+    "score_pct",
+    "stale",
+]
+
+
+def to_panel_history_frame(light: MacroLight) -> pl.DataFrame:
+    """MacroLight → panel_history.parquet 的 long format 列（明細欄沿用 to_detail_frame）。"""
+    return (
+        to_detail_frame(light)
+        .drop("source")
+        .with_columns(pl.lit(light.as_of, dtype=pl.Date).alias("run_as_of"))
+        .select(_PANEL_HISTORY_COLUMNS)
+    )
+
+
+def compute_panel_deltas(
+    panel_history: pl.DataFrame,
+    light: MacroLight,
+    deadband_pct: float,
+    deadband_rel: float,
+) -> dict[str, PanelDelta]:
+    """本次面板 vs「上一次不同 run」的逐序列變化（純函式，docs/26 §7.1）。
+
+    比較基準＝panel_history 裡 `run_as_of` **嚴格早於** 本次 light.as_of 的最大那一輪——
+    嚴格早於才不會把本次自己當成前次（append 與本函式的呼叫順序因此不影響結果），
+    也不會拿更晚的重放列當基準。
+
+    箭頭優先用 score_pct（風險量尺本身）；raw transform 無 score 時退用相對變化。
+    deadband 內＝「→」（持平）；本次 stale／無前次／單位無從比較 → NO_PREV，不猜。
+    """
+    readings = [light.primary] + list(light.disclosure)
+    empty_result = {
+        r.series_id: PanelDelta(r.series_id, None, None, None, None, None, None, NO_PREV)
+        for r in readings
+    }
+    if light.as_of is None or panel_history.is_empty():
+        return empty_result
+    if not {"run_as_of", "series_id"}.issubset(panel_history.columns):
+        return empty_result
+
+    earlier = panel_history.filter(pl.col("run_as_of") < light.as_of)
+    if earlier.is_empty():
+        return empty_result
+    prev_run = earlier["run_as_of"].max()
+    if not isinstance(prev_run, date):  # 欄位型別意外（手改檔/舊格式）→ 不猜，當作無前次
+        return empty_result
+    prev_rows = {
+        row["series_id"]: row
+        for row in earlier.filter(pl.col("run_as_of") == prev_run).iter_rows(named=True)
+    }
+
+    result: dict[str, PanelDelta] = {}
+    for r in readings:
+        prev = prev_rows.get(r.series_id)
+        cur_score = r.score * 100 if r.score is not None else None
+        if prev is None or r.stale:
+            result[r.series_id] = empty_result[r.series_id]
+            continue
+        prev_score = prev.get("score_pct")
+        prev_raw = prev.get("raw_value")
+        d_score = (
+            cur_score - prev_score
+            if (cur_score is not None and prev_score is not None)
+            else None
+        )
+        d_raw = (
+            r.raw_value - prev_raw
+            if (r.raw_value is not None and prev_raw is not None)
+            else None
+        )
+        result[r.series_id] = PanelDelta(
+            series_id=r.series_id,
+            prev_run_as_of=prev_run,
+            prev_as_of=prev.get("as_of"),
+            prev_raw_value=prev_raw,
+            prev_score_pct=prev_score,
+            delta_raw_value=d_raw,
+            delta_score_pct=d_score,
+            arrow=_delta_arrow(d_score, d_raw, prev_raw, deadband_pct, deadband_rel),
+        )
+    return result
+
+
+def _delta_arrow(
+    d_score: float | None,
+    d_raw: float | None,
+    prev_raw: float | None,
+    deadband_pct: float,
+    deadband_rel: float,
+) -> str:
+    """變化 → 箭頭。score_pct 用絕對百分位點 deadband；raw 退用相對變化 deadband。"""
+    if d_score is not None:
+        if abs(d_score) < deadband_pct:
+            return "→"
+        return "↑" if d_score > 0 else "↓"
+    if d_raw is not None and prev_raw is not None and prev_raw != 0:
+        rel = d_raw / abs(prev_raw)
+        if abs(rel) < deadband_rel:
+            return "→"
+        return "↑" if d_raw > 0 else "↓"
+    return NO_PREV
+
+
 # ─── IO 便利包裝（比照 regime.py 的 compute_market_regime 形狀）───────────────────
 
 
@@ -346,6 +502,57 @@ def append_history(history_path: Path, light: MacroLight) -> None:
     logger.info(f"macro_regime history 寫入 {history_path}（{len(combined)} 列）")
 
 
+def append_panel_history(panel_history_path: Path, light: MacroLight) -> None:
+    """把本次面板（主訊號＋揭露面板）逐指標 append 進 panel_history.parquet（docs/26 A案）。
+
+    冪等：同一 `run_as_of` 已存在則整批跳過，比照 `append_history` 與
+    `data/valuation_history.append_valuation_history` 同一模式——沒有這道檢查，同日重跑會在
+    long format 裡埋進整組重複列，之後的變化追蹤會拿「本次 vs 本次」算出假持平。
+    """
+    if light.as_of is None:
+        logger.warning("macro_regime 主訊號無資料，不寫入 panel_history.parquet")
+        return
+    new_rows = to_panel_history_frame(light)
+    panel_history_path.parent.mkdir(parents=True, exist_ok=True)
+    if panel_history_path.exists():
+        existing = pl.read_parquet(panel_history_path)
+        if not existing.is_empty() and (existing["run_as_of"] == light.as_of).any():
+            logger.info(f"macro_regime panel_history 已有 {light.as_of} 這輪，跳過重複 append")
+            return
+        combined = pl.concat([existing, new_rows], how="diagonal_relaxed")
+    else:
+        combined = new_rows
+    combined.write_parquet(panel_history_path)
+    logger.info(
+        f"macro_regime panel_history 寫入 {panel_history_path}"
+        f"（{combined['run_as_of'].n_unique()} 輪／{len(combined)} 列）"
+    )
+
+
+def resolve_panel_history_path(cfg: dict) -> Path:
+    """settings 的 macro_regime.panel_history_path（缺 → data_dir 下的預設檔名）。"""
+    mr_cfg = cfg.get("macro_regime", {})
+    configured = mr_cfg.get("panel_history_path")
+    if configured:
+        return Path(str(configured))
+    return Path(cfg["paths"]["data_dir"]) / "macro_regime" / "panel_history.parquet"
+
+
+def load_panel_deltas(
+    panel_history_path: Path, light: MacroLight, cfg: dict
+) -> dict[str, PanelDelta]:
+    """IO 便利包裝：讀 panel_history.parquet → compute_panel_deltas。無檔＝全 NO_PREV。"""
+    mr_cfg = cfg.get("macro_regime", {})
+    deadband_pct = float(mr_cfg.get("delta_arrow_deadband_pct", 2.0))
+    deadband_rel = float(mr_cfg.get("delta_arrow_deadband_rel", 0.005))
+    history = (
+        pl.read_parquet(panel_history_path)
+        if panel_history_path.exists()
+        else pl.DataFrame(schema={"run_as_of": pl.Date, "series_id": pl.String})
+    )
+    return compute_panel_deltas(history, light, deadband_pct, deadband_rel)
+
+
 def compute_market_macro(
     cfg: dict,
     settings_path: Path,
@@ -374,16 +581,25 @@ def run_macro(
     settings_path: Path = Path("config/settings.yaml"),
     history_path: Path | None = None,
     force_refresh: bool = False,
-) -> MacroLight:
-    """IO 入口：抓序列→計分→append history.parquet。供 CLI／Makefile `make macro` 呼叫。"""
+    panel_history_path: Path | None = None,
+) -> tuple[MacroLight, dict[str, PanelDelta]]:
+    """IO 入口：抓序列→計分→append history/panel_history。供 CLI／Makefile `make macro` 呼叫。
+
+    回傳 (燈號, 逐序列變化)。變化在 append 之前算（本次尚未進 panel_history）——
+    `compute_panel_deltas` 本身也只看嚴格早於本次的輪次，兩道保險都指向同一件事：
+    比較基準必須是上一輪，不能是自己。
+    """
     with open(settings_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     hpath = history_path or Path(cfg["paths"]["data_dir"]) / "macro_regime" / "history.parquet"
+    ppath = panel_history_path or resolve_panel_history_path(cfg)
     light = compute_market_macro(
         cfg, settings_path, history_path=hpath, force_refresh=force_refresh
     )
+    deltas = load_panel_deltas(ppath, light, cfg)
     if light.as_of is not None:
         append_history(hpath, light)
+        append_panel_history(ppath, light)
     else:
         logger.warning("macro_regime 主訊號無資料，不寫入 history.parquet")
-    return light
+    return light, deltas

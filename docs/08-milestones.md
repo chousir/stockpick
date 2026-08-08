@@ -926,3 +926,38 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - 驗收：`make test` 958 綠（+4：遲滯帶跨日記憶重放／任意布林桶 planted 訊號偵測／`high_risk_lift`↔`bucket_lift` 重構回歸保護）；ruff/mypy 零淨增；`make macro-regime-resonance` 真實跑通並可重現 round5 報告全部數字（已獨立重跑驗證一致）。
 
 **下一步**：docs/25 §6 三個 Phase 全部收官（Phase 1/2/3 皆完成）；剩餘開放項＝台股估值 B 方案完整驗證（M-Macro2b 的下一步，另一個未定名獨立 milestone）、以及是否要投入 8-12 小時回補 2018-2020 本地日線快取以重新打開 M-Macro3 的驗證可能性（使用者裁決，不代為決定）。分支待 merge 進 main（鐵律 3，待使用者拍板）。
+
+---
+
+## M-Macro4：外部風險掃描整合＝面板變化追蹤 ＋ 人工掃描指令（規劃書 26・分支 `feat/macro-scan-integration`）
+
+> 對應規劃書 [docs/26-macro-scan-integration.md](26-macro-scan-integration.md)。使用者提供一份外部 AI prompt（17 項美股總經/情緒/籌碼指標的每日掃描＋7 條硬賣出觸發），問能否在本專案實現。評估結論＝**17 項指標不進 pipeline**，但吸收其中兩個機制。全部依據落在 docs/26，避免將來忘記為什麼剔掉 14 項。
+
+**評估（docs/26 §1–§4，這是本 milestone 的主要產出）**
+- **17 項對帳**：1 已覆蓋（VIX＝`VIXCLS`）／2 已被本專案實測裁決（`T10Y2Y` 無證據、`BAMLH0A0HYM2` 被 FRED 追溯限縮為滾動 3 年，實測 observation_start=2023-08-08）／2 結構性死（LEI 的免費替代 `USSLIND` 2020-02 已停更；Buffett 指標分母 `GDP` 季頻且落後 4 個月＝週對週資訊量 0）／4 可爬但月頻或脆弱／6+1 程式上不可得（AAII×2、NAAIM 已訂閱制、Renaissance IPO、GuruFocus 擋爬、BofA B&B 僅媒體轉載、NYSE A/D 需付費源）。**真正「新增＋可靠＋頻率對得上」的只有 CBOE Put/Call 一項。**
+- **7 條硬觸發只有 2 條可自動化**（VIX>25、HY OAS>4.5% 的絕對值；後者百分位不可用但絕對門檻只需當前值）→「同時觸發 ≥3 項才減倉」在本 repo 實際算的是「3-of-2」。**分母不完整比未校準嚴重一級：未校準是門檻可能不準，分母不完整是規則無法被求值。** 這是不進 pipeline 最硬的理由。
+- **方法論精確表述**：docx 的「3+ 二元投票」是**未測、先驗不利**，**不是**已被 round 3 否證（round 3 否證的是連續分數加權平均，函數形式不同；M-Macro3 的 `v2_attack_alone` lift 0.45 說明條件式組合並非全死）。更關鍵的是**17 項對台股目標一項都沒測過**——docs/25 §2.1 記載連 BAA10Y 在台股確認段 `level_pct` 方向都不一致。
+- **紀律移植逐條判定**：採納 #3（不准用當週敘事重新解釋既定門檻）→ 已寫進 `playbook/60` 禁止事項；#4 收窄為只約束觸發判定（全收會與「多空並陳」衝突）；**#5「該說減倉 15% 就說減倉 15%」明文剔除**（直接違反鐵律 2）；#1/#2/#6/#7/#8 本專案已有或本次實作。
+
+**回頭查到的兩個現有系統缺口（docs/26 §5，附實測數字）**
+- **`DGS20` 的 `level_pct` 量尺失去鑑別力**：用 production `compute_level_pct` 回放近兩年（每 5 個交易日取樣，n=100），DGS20 **34% 的取樣點 ≥p90、56% ≥p80、一次都沒 ≤p10**；對照 BAA10Y 0%/1%/15%、`dual_risk` 14%、`speed_pct` 16%（後兩者落在設計預期的尾部率）。問題出在 level_pct 遇上單向趨勢序列，正是 docs/25 §5 風險 #3 記載但未量化過的偏誤。**衍生決策：明確不做「面板極端項計數」**——DGS20 會讓它三分之一週次常態亮燈，製造誤報疲勞。
+- **面板沒有變化追蹤**：`history.parquet` 只存主訊號 5 欄，面板明細只散在各週 `reports/Wxx/macro_regime.csv`（當時累積 2 週），慢磨與急衝在報表上長得一樣。
+
+**A 案實作（面板變化追蹤，純揭露）**
+- `analysis/macro_regime.py`：新增 `PanelDelta`／`to_panel_history_frame`／`append_panel_history`（同 `run_as_of` 整批冪等）／`compute_panel_deltas`（純函式，比較基準＝**嚴格早於**本輪的最近一輪，故 append 與計算的順序不影響結果）／`_delta_arrow`（score_pct 用絕對 deadband、raw 序列退用相對 deadband——單位各異，絕對值無意義）／`resolve_panel_history_path`／`load_panel_deltas`；`describe_macro_light(light, deltas=None)` 的 deltas 為選配（不傳＝原行為，向後相容）。
+- **落地在新檔 `data/macro_regime/panel_history.parquet`（long format），刻意不動 `history.parquet` 的 schema**——後者有三個既有讀者（`load_prev_color`／`group_runner.py`／`backtest/macro_regime_validate`），加寬會擴大迴歸面；long format 對 `disclosure_series` 增減也天然免疫。
+- 渲染：`group_analysis.md.j2` Section 0 面板表加「較上次」欄（jinja macro 共用，主訊號行同樣帶）＋讀法補**「主訊號綠/黃但面板多格急變」**這個對稱情境與 DGS20 但書；`market macro` CLI 同步印。`group_runner` 只讀不寫（append 是 `make macro` 的職責）。
+- `config/settings.yaml` 新增 `macro_regime.panel_history_path`／`delta_arrow_deadband_pct: 2.0`／`delta_arrow_deadband_rel: 0.005`（零寫死；兩個 deadband 皆標未校準先驗、純顯示用）。
+- **明確不動**：`_ADVICE`、`classify_light`、燈色門檻與遲滯帶、任何 gate 或排序——比照 `near_flow`／`contrarian_base`／`trajectory` 的「揭露非 gate」pattern。
+
+**B 案實作（人工觸發掃描，不進 pipeline）**
+- `.claude/commands/macro-scan.md`：slash command，人工觸發、走 WebSearch，輸出落 `research/macro_scan/<YYYY-MM-DD>.md`（gitignored）。**不加 make target**（需網路搜尋，make 跑不了；結果未驗證不該進主流程）。
+- 五項強制改造：刪紀律 #5、收窄 #4、**已有序列一律從 `reports/<週>/macro_regime.csv` 讀不重抓**（否則同一指標會在兩份文件出現兩個值）、標頭強制寫「不合成/不影響燈色排序剔除」、觸發統計只能寫「已求值 N 項中觸發 M 項＋另有 K 項無法求值」不得寫成 M/7。觸發表加**第三種狀態 ⬜無法求值**。
+
+**驗收**
+- `make test` **968 綠**（+10：panel history long format 形狀／同輪冪等＋跨輪累積（含「只推 today 不等於新一輪」的斷言）／空歷史與「歷史只有本輪自己」皆判無前次／↑↓→ 三態與 deadband 邊界／raw 相對 deadband／本次 stale 不拿舊值算變化／`describe_macro_light` 不傳 deltas 時向後相容／模板有無前次兩態渲染）；ruff 淨、mypy 零淨增。
+- 真實跑通：`market macro` 對本機 FRED 快取跑出變化欄；`analysis group` 重生 `reports/2026-W32/group_analysis.md`，**diff 25 行全部落在總經燈號段內**（其餘報告內容逐字不變）。
+- **一次性種子**：`panel_history.parquet` 從既有 `reports/2026-W31/macro_regime.csv` 種了 2026-07-30 那一輪（同一條 production 路徑產出、schema 相容，只缺 `run_as_of`），W32 那輪由真跑產生——目的是讓變化欄立刻可用可驗，不必等兩週。種子腳本是一次性的、未進 repo。
+- **首跑就抓到兩件舊面板看不見的事**：`STLFSI4` 金融壓力 **p3 → p39（↑+35.8p）**、`DEXJPUS` 163.71 → 159.16（**↓-4.55**，日圓一週走強約 2.8%）；同時 `DGS20` 維持 p99 但**變化是「→ -0.3p」**，正是 §5.1 說的高原而非急衝。
+
+**下一步 / 明確不做**：C 案（Put/Call＋FINRA＋CAPE 爬蟲進面板）**不排期**，解凍條件寫在 docs/26 §6.3（A 案累積 ≥ 半年、一次只加一項、若日後要升級為計分訊號必須先過 BAA10Y 同規格 block-bootstrap）。Q1 開放項：`DGS20` 要不要換 transform 或移出面板——本輪不動，等面板歷史累積後再判（改揭露面板設計依 docs/25 前例應有實測依據）。分支待 merge 進 main（鐵律 3，待使用者拍板）。

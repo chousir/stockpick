@@ -475,6 +475,12 @@ macro_regime:                  # docs/25 v2 總經避險層（M-Macro1）：單�
     green_max: 60               # < 60 綠
     red_min: 80                 # ≥ 80 紅（對應三輪研究實際檢驗過的「前20分位=高風險」）
   hysteresis: 3                 # 換色需突破門檻 ±3 分（黃→紅需≥83，紅→黃需<77），防閃爍
+  panel_history_path: data/macro_regime/panel_history.parquet   # docs/26 A案：面板逐指標歷史
+                               # （long format，刻意與 history.parquet 分檔——後者有三個既有讀者，
+                               #  加寬 schema 會擴大迴歸面；long format 對 disclosure_series 增減免疫）
+  delta_arrow_deadband_pct: 2.0  # score_pct（百分位點）變化 < 此 → 箭頭「→」持平，防微幅雜訊亂標
+  delta_arrow_deadband_rel: 0.005  # raw 揭露序列（DGS10/DEX*）相對變化 < 此 → 箭頭「→」
+                               # 兩個 deadband 皆為未校準先驗，純顯示用、不進任何計分或門檻判定
   fetch:
     base_url: "https://api.stlouisfed.org/fred/series/observations"
     user_agent: "tw-stock-screener/0.1"

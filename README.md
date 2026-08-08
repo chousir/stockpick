@@ -180,7 +180,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make backtest-strategies`                             | 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤            | 每季（規劃書 03 V1）                 |
 | `make diagnose`                                        | 抓太晚＋漏起漲診斷（研究軌）：延伸度曲線/漏抓五態雷達（docs/19） | 每季／窗變厚後重跑                   |
 | `uv run tw-screener market regime`                     | 大盤 regime 姿態：進攻/中性/防禦（規劃書 03 V2）     | 盤後看大盤閘門                       |
-| `make macro`（＝`uv run tw-screener market macro`） | 總經燈號：BAA10Y 單訊號＋揭露面板（外生風險，docs/25 M-Macro1） | week 已容錯內含，可單獨重跑；`--refresh` 強抓 |
+| `make macro`（＝`uv run tw-screener market macro`） | 總經燈號：BAA10Y 單訊號＋揭露面板＋各指標「較上次」變化（外生風險，docs/25 M-Macro1／M-Macro4） | week 已容錯內含，可單獨重跑；`--refresh` 強抓 |
 | `uv run tw-screener portfolio check`                   | 組合層風控體檢：標籤/因子簇集中度（規劃書 03 V3）    | 持股變動後                           |
 | `make week-check`                                      | 產物完整性檢查（week 已內含，可單獨重跑）            | 懷疑某步無聲失敗時                   |
 | `make build-panel`                                     | ground-truth 面板 parquet：前瞻報酬/位階/法人/量比＋核價（docs/22 WS-A） | 研究軌任何因子驗證前                 |
@@ -520,6 +520,7 @@ make typecheck   # mypy
 | [`docs/23-backtest-r2-w28.md`](./docs/23-backtest-r2-w28.md)                                 | W28 回測二輪（WS-H~L 收官）：推論硬化 Fisher-z→moving-block bootstrap＋晉升鐵則；補 docs/22 §7 四洞；trend_score 升雙 robustness、★/ambush 升級、WS-K 籌碼三因子無證據/樣本不足 |
 | [`docs/24-contrarian-base-detection.md`](./docs/24-contrarian-base-detection.md)             | 底部左側偵測 M-BR1：賣壓熄火×基本面完好×貼近結構低——描述→驗證→gate 三階紀律；Phase 1 揭露欄已實作、**Phase 2 面板檢驗已否證**（桶 lift 顯著落後宇宙，`contrarian_base` 定案描述欄・§3.1） |
 | [`docs/25-macro-regime.md`](./docs/25-macro-regime.md)                                       | MacroRegime 總經避險層（外生風險燈號，與內生 V2 regime 並列不合成）：三輪 block-bootstrap 篩出 BAA10Y 為唯一穩健主訊號，v2 改單訊號決定燈色＋揭露面板；**Phase 1（M-Macro1）已上線、Phase 2（M-Macro2）as-of 回放驗證通過**，Phase 3 共振讀法實測待排 |
+| [`docs/26-macro-scan-integration.md`](./docs/26-macro-scan-integration.md)                   | 外部總經風險掃描整合評估（M-Macro4）：17 項美股情緒/籌碼指標逐項可得性對帳＋為何**不進 pipeline**（7 條硬觸發只有 2 條可求值）；採納 A 案面板「較上次」變化追蹤＋B 案人工掃描指令 `/macro-scan` |
 | [`docs/proposals/`](./docs/proposals/00-index.md)                                            | 審查改善規劃書 01–05（效能技債/資料韌性/量化驗證閉環/架構瘦身/**選股有效性總改造 F1–F5**，皆已收官）        |
 | [`docs/99-troubleshooting.md`](./docs/99-troubleshooting.md)                                 | 常見問題與解法                                                                                                      |
 

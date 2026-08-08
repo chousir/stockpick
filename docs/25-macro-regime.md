@@ -55,6 +55,8 @@ src/tw_screener/
 config/settings.yaml            # 新增 macro_regime: 區塊（序列、窗、主訊號門檻、揭露清單全在此，零寫死）
 data/cache/fred/                # 序列快取（parquet，per-series，24h TTL 沿用 cache.is_fresh）
 data/macro_regime/history.parquet  # 每次計算 append 一列（point-in-time，供 Phase 2 as-of 回放驗證）
+data/macro_regime/panel_history.parquet  # M-Macro4／docs/26 A案：面板逐指標歷史（long format，
+                                   # 供「較上次」變化欄；與 history.parquet 分檔，後者 schema 不動）
 reports/2026-Wxx/macro_regime.csv  # 當週指標明細落地（週報正文只放摘要）
 tests/fixtures/fred/*.csv       # 離線 fixture，測試不打真站（工程速查慣例）
 Makefile                        # 新增 `make macro`；`make week` 容錯掛入（比照 rotation 的 `-$(MAKE)`）
@@ -204,21 +206,34 @@ risk_score = level_pct × 100  ∈ [0, 100]
 ```markdown
 ### 總經燈號（外生風險）：🟡 黃 68/100（主訊號 BAA10Y，as-of 2026-07-30）〔實測篩選,門檻未校準〕
 
-主訊號：Baa公司債利差 2.14%（p68，20日+8bp）〔2026-07-30・FRED BAA10Y〕
+主訊號：Baa公司債利差 2.14%（p68，20日+8bp）〔2026-07-30・FRED BAA10Y〕　較上次 ↑ +14.0p〔前次 2026-07-23〕
 
 輔助揭露面板（不計分，供交叉參考）：
-| 指標 | 現況 | 揭露 |
-|---|---|---|
-| DGS20（20年期殖利率） | 4.71%（p61） | 〔2026-07-30・FRED DGS20〕 |
-| VIXCLS（VIX 變速） | 20日 +6.2pt（speed p71） | 〔2026-07-30・FRED VIXCLS〕 |
-| DCOILWTICO（油價急動） | 20日 −9.1%（dual_risk p58） | 〔2026-07-30・FRED DCOILWTICO〕 |
-| STLFSI4（金融壓力指數） | 0.31（p55） | 〔2026-07-24・FRED STLFSI4，週頻〕 |
-| DGS10（10年期殖利率，未通過驗證僅供參考） | 4.82%（p85） | 〔2026-07-30・FRED DGS10〕 |
+| 指標 | 現況 | 較上次 | 揭露 |
+|---|---|---|---|
+| DGS20（20年期殖利率） | 4.71%（p61） | → -0.3p〔前次 2026-07-23〕 | 〔2026-07-30・FRED DGS20〕 |
+| VIXCLS（VIX 變速） | 20日 +6.2pt（speed p71） | ↑ +22.1p〔前次 2026-07-23〕 | 〔2026-07-30・FRED VIXCLS〕 |
+| DCOILWTICO（油價急動） | 20日 −9.1%（dual_risk p58） | ↓ -2.9p〔前次 2026-07-20〕 | 〔2026-07-30・FRED DCOILWTICO〕 |
+| STLFSI4（金融壓力指數） | 0.31（p55） | ↑ +35.8p〔前次 2026-07-17〕 | 〔2026-07-24・FRED STLFSI4，週頻〕 |
+| DGS10（10年期殖利率，未通過驗證僅供參考） | 4.82%（p85） | → +0.01〔前次 2026-07-23〕 | 〔2026-07-30・FRED DGS10〕 |
 
-- 讀法：主訊號黃，揭露面板普遍溫和偏高但未過半極端——弱共振，維持觀察不升級。
+- 讀法（燈色）：主訊號黃，揭露面板普遍溫和偏高但未過半極端——弱共振，維持觀察不升級。
+- 讀法（變化・M-Macro4／docs/26）：看「較上次」不要只看水位——水位百分位在單向趨勢序列上會
+  常駐高位（實測 DGS20 近兩年 34% 取樣點 ≥p90），p99 本身鑑別力低，同一格急衝才是資訊；
+  主訊號綠/黃但面板多格同時急變＝燈色公式看不到的情境，值得人工細看。
 - 與上方大盤姿態（內生 V2 regime）並列對照——同紅＝強共振；背離＝人工細看（外層讀法，見 docs/11）。
 - 顏色較上週：綠 → 黃（BAA10Y level_pct 54 → 68）。
 ```
+
+「較上次」＝與**上一輪 `make macro`** 的同序列讀數相比（間距非固定 7 天，前次資料日期附在格內）；
+deadband 內顯示「→」、無前次顯示「—」；**純揭露，不進計分、不改燈色、不影響排序或剔除**。
+
+**箭頭語意分兩種，報表已標警語**：`level_pct`／`speed_pct`／`dual_risk` 的 ↑＝風險升高；
+`raw` 三列（DGS10／DEXTAUS／DEXJPUS）無風險分數，箭頭只是數值方向——**DEXJPUS ↓（日圓走強）**
+才是 carry unwind 的警戒方向（§2.2 留它的理由）、DEXTAUS ↑（台幣走弱）才是外資流出方向。
+不把 raw 列的方向硬轉成「風險方向」是刻意的：DEXJPUS 的 dual_risk 框架三輪研究皆無證據
+（§2.2、Phase 2 tail-event 重測），程式沒有立場說哪邊是風險，只能把方向攤開讓人讀。
+明細落地 `reports/2026-Wxx/macro_regime.csv` 不變；歷史累積在 `data/macro_regime/panel_history.parquet`。
 
 搭配落地：`reports/2026-Wxx/macro_regime.csv`（主訊號＋揭露面板全部指標明細：原值/level_pct 或
 speed_pct 或 dual_risk/as-of/來源）供你在週報階段跟 Claude Code 互動深挖。
@@ -232,7 +247,8 @@ speed_pct 或 dual_risk/as-of/來源）供你在週報階段跟 Claude Code 互�
 ### 4.4 CLI
 
 `tw-screener market macro`（掛在既有 market app 下，與 `market regime` 並肩）：
-印當前燈號（主訊號）＋揭露面板全部指標＋各序列 as-of；`--refresh` 略過快取強抓。
+印當前燈號（主訊號）＋揭露面板全部指標＋各序列 as-of＋「較上次」變化（M-Macro4）；
+`--refresh` 略過快取強抓。
 
 ---
 

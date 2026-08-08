@@ -240,7 +240,12 @@ def run_group_analysis(settings: Path) -> None:
     _macro_result = None  # MacroLight｜None；渲染完摘要後重用於逐指標明細 CSV，避免重算
     _macro_history_path = Path(cfg["paths"]["data_dir"]) / "macro_regime" / "history.parquet"
     if _macro_history_path.exists():
-        from tw_screener.analysis.macro_regime import compute_market_macro, describe_macro_light
+        from tw_screener.analysis.macro_regime import (
+            compute_market_macro,
+            describe_macro_light,
+            load_panel_deltas,
+            resolve_panel_history_path,
+        )
 
         _mr_cfg = cfg.get("macro_regime", {})
         _mr_df = _pl.read_parquet(_macro_history_path)
@@ -255,7 +260,12 @@ def run_group_analysis(settings: Path) -> None:
                     _macro_result = compute_market_macro(
                         cfg, settings, history_path=_macro_history_path
                     )
-                    macro_light = describe_macro_light(_macro_result)
+                    # docs/26 A案：面板變化欄（讀 panel_history，只讀不寫——append 是
+                    # `make macro` 的職責，報告渲染不該產生新的歷史列）
+                    _macro_deltas = load_panel_deltas(
+                        resolve_panel_history_path(cfg), _macro_result, cfg
+                    )
+                    macro_light = describe_macro_light(_macro_result, _macro_deltas)
                     console.print(f"  {macro_light['line']}")
                 except Exception as exc:  # noqa: BLE001 — 總經燈號非主流程關鍵路徑，壞了不擋報告
                     console.print(f"[yellow]  總經燈號讀取失敗，Section 0 略過該段：{exc}[/yellow]")
