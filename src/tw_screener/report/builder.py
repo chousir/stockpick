@@ -16,9 +16,8 @@ _PROMPT_DIR = Path(__file__).parent / "prompts"
 # 規劃書 04 A7：LLM 配置預設值。實際值由 settings.yaml 的 report.llm 覆寫，
 # 這裡只是 settings 缺該段時的向後相容回退。
 _DEFAULT_LLM = {
-    "model": "claude-opus-4-8",
+    "model": "claude-opus-5",
     "max_tokens": 4000,
-    "temperature": 0.3,
 }
 
 _SYSTEM_PROMPT = """\
@@ -60,7 +59,6 @@ def _call_claude(prompt: str, api_key: str, llm_cfg: dict) -> str:
     message = client.messages.create(
         model=llm_cfg["model"],
         max_tokens=llm_cfg["max_tokens"],
-        temperature=llm_cfg["temperature"],
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
     )

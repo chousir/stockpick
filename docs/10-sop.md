@@ -207,5 +207,5 @@ export ANTHROPIC_API_KEY=sk-ant-...   # 加到 ~/.zshrc 或 ~/.bashrc 永久生�
 make report STOCK_ID=2330
 ```
 
-`make report` 會直接呼叫 Claude API（claude-sonnet-4-6），產出完整報告，
+`make report` 會直接呼叫 Claude API（config/settings.yaml 設定，目前預設 claude-opus-5），產出完整報告，
 不需要本 SOP 的 Step 4-5。
