@@ -28,6 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from typing import cast
 
 import polars as pl
 from loguru import logger
@@ -145,7 +146,7 @@ def margin_capitulation(
         latest = d5[col].tail(1).item()
         if mu is None or sd is None or not sd or latest is None:
             return None
-        return (float(latest) - float(mu)) / float(sd)
+        return (float(cast(float, latest)) - float(cast(float, mu))) / float(cast(float, sd))
 
     parts: list[str] = []
     zs: list[float] = []
@@ -280,10 +281,10 @@ def index_deep_deviation(
         return SubSignal(HIT_INDEX, False, None, max_dist_pct, "insufficient_data",
                          f"指數序列 {idx.len()} 日 < MA{ma_window}")
     ma = idx.tail(ma_window).mean()
-    latest = float(idx.tail(1).item())
-    if ma is None or float(ma) <= 0:
+    latest = float(cast(float, idx.tail(1).item()))
+    if ma is None or float(cast(float, ma)) <= 0:
         return SubSignal(HIT_INDEX, False, None, max_dist_pct, "insufficient_data", "MA 不可用")
-    dist = (latest / float(ma) - 1.0) * 100.0
+    dist = (latest / float(cast(float, ma)) - 1.0) * 100.0
     return SubSignal(
         HIT_INDEX, dist < max_dist_pct, round(dist, 2), max_dist_pct, "ok",
         f"等權指數距 MA{ma_window} {dist:+.2f}%（等權口徑、非加權 TAIEX）",
@@ -393,8 +394,10 @@ def compute_market_washout(
     market_index = compute_market_index(
         dense, clip_daily_return_pct=float(rcfg.get("clip_daily_return_pct", 10.0))
     )
-    latest_dense = dense["date"].max() if not dense.is_empty() else None
-    latest_any = price_history["date"].max() if not price_history.is_empty() else None
+    latest_dense = cast("date | None", dense["date"].max() if not dense.is_empty() else None)
+    latest_any = cast(
+        "date | None", price_history["date"].max() if not price_history.is_empty() else None
+    )
     if latest_dense is None or latest_dense != latest_any:
         sub_index = SubSignal(
             HIT_INDEX, False, None, float(icfg.get("max_dist_pct", -7.0)), "insufficient_data",
