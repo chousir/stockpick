@@ -10,19 +10,23 @@ import polars as pl
 from tw_screener.analysis.macro_regime import (
     GREEN,
     INSUFFICIENT,
+    NO_PREV,
     RED,
     YELLOW,
     append_history,
+    append_panel_history,
     classify_light,
     compute_dual_risk,
     compute_indicator_reading,
     compute_level_pct,
     compute_macro_light,
+    compute_panel_deltas,
     compute_speed_pct,
     describe_macro_light,
     latest_value,
     load_prev_color,
     to_detail_frame,
+    to_panel_history_frame,
 )
 
 D0 = date(2026, 1, 1)
@@ -266,3 +270,170 @@ def test_append_history_and_load_prev_color(tmp_path: Path) -> None:
     append_history(hpath, light_next)
     df = pl.read_parquet(hpath)
     assert df.height == 2
+
+
+# ── panel_history + 變化追蹤（docs/26 A案）─────────────────────────────────────
+
+_PANEL_SERIES = {
+    "BAA10Y": _series(120, 100.0, 1.0),  # level_pct=1.0 → score_pct=100
+    "DGS10": _series(120, 4.0, 0.01),  # raw transform（不計分，退用相對變化）
+}
+_PANEL_TODAY = D0 + timedelta(days=119)
+
+
+def _panel_light(prev_color: str | None = None) -> object:
+    return compute_macro_light(_PANEL_SERIES, CFG, _PANEL_TODAY, prev_color=prev_color)
+
+
+def _prev_panel_row(
+    run_as_of: date,
+    series_id: str,
+    transform: str,
+    raw_value: float | None,
+    score_pct: float | None,
+) -> dict:
+    return {
+        "run_as_of": run_as_of,
+        "role": "primary" if series_id == CFG["primary_series"] else "disclosure",
+        "series_id": series_id,
+        "transform": transform,
+        "as_of": run_as_of,
+        "raw_value": raw_value,
+        "score_pct": score_pct,
+        "stale": False,
+    }
+
+
+def test_to_panel_history_frame_shape() -> None:
+    light = _panel_light()
+    frame = to_panel_history_frame(light)
+    assert frame.height == 1 + len(CFG["disclosure_series"])
+    assert "run_as_of" in frame.columns
+    assert "source" not in frame.columns  # 明細 CSV 才需要來源欄，歷史檔不重複存常數
+    assert frame["run_as_of"].unique().to_list() == [light.as_of]
+
+
+def test_append_panel_history_idempotent_then_accumulates(tmp_path: Path) -> None:
+    ppath = tmp_path / "macro_regime" / "panel_history.parquet"
+    light = _panel_light()
+    n_rows = 1 + len(CFG["disclosure_series"])
+
+    append_panel_history(ppath, light)
+    assert pl.read_parquet(ppath).height == n_rows
+
+    # 同一輪重跑（make macro 手動多跑一次）：整批跳過，不得埋進重複列
+    append_panel_history(ppath, light)
+    assert pl.read_parquet(ppath).height == n_rows
+
+    # 下一輪（序列真的有新觀測日）：才真的累積。注意只把 today 往後推是不夠的——
+    # 沒有新觀測就是同一個 run_as_of，仍會被冪等擋下（這是刻意的：沒有新資料就不該新增一列）
+    light_next = compute_macro_light(
+        {"BAA10Y": _series(127, 100.0, 1.0), "DGS10": _series(127, 4.0, 0.01)},
+        CFG,
+        _PANEL_TODAY + timedelta(days=7),
+        prev_color=light.color,
+    )
+    assert light_next.as_of != light.as_of
+    append_panel_history(ppath, light_next)
+    df = pl.read_parquet(ppath)
+    assert df.height == 2 * n_rows
+    assert df["run_as_of"].n_unique() == 2
+
+
+def test_compute_panel_deltas_empty_history_is_no_prev() -> None:
+    light = _panel_light()
+    deltas = compute_panel_deltas(pl.DataFrame(), light, deadband_pct=2.0, deadband_rel=0.005)
+    assert deltas["BAA10Y"].arrow == NO_PREV
+    assert deltas["BAA10Y"].delta_score_pct is None
+
+
+def test_compute_panel_deltas_ignores_own_run() -> None:
+    """歷史裡只有本輪自己 → 仍是無前次（嚴格早於才算基準，append 順序不影響結果）。"""
+    light = _panel_light()
+    history = to_panel_history_frame(light)
+    deltas = compute_panel_deltas(history, light, deadband_pct=2.0, deadband_rel=0.005)
+    assert deltas["BAA10Y"].arrow == NO_PREV
+
+
+def test_compute_panel_deltas_score_arrow_up_and_deadband() -> None:
+    light = _panel_light()
+    prev_run = _PANEL_TODAY - timedelta(days=7)
+
+    rising = pl.DataFrame(
+        [_prev_panel_row(prev_run, "BAA10Y", "level_pct", 200.0, 90.0)]
+    )
+    d = compute_panel_deltas(rising, light, deadband_pct=2.0, deadband_rel=0.005)["BAA10Y"]
+    assert d.arrow == "↑"
+    assert d.delta_score_pct == 10.0  # 90 → 100
+    assert d.prev_as_of == prev_run
+
+    flat = pl.DataFrame([_prev_panel_row(prev_run, "BAA10Y", "level_pct", 218.0, 99.0)])
+    assert (
+        compute_panel_deltas(flat, light, deadband_pct=2.0, deadband_rel=0.005)["BAA10Y"].arrow
+        == "→"
+    )  # Δ+1p 在 deadband 內＝持平，不亂標箭頭
+
+    # ↓：本次水位低（遞減序列 → 當前值是窗內最小）而前次高
+    light_low = compute_macro_light(
+        {"BAA10Y": _series(120, 200.0, -1.0)}, CFG, _PANEL_TODAY, prev_color=None
+    )
+    assert light_low.risk_score is not None and light_low.risk_score < 5
+    falling = pl.DataFrame([_prev_panel_row(prev_run, "BAA10Y", "level_pct", 150.0, 50.0)])
+    assert (
+        compute_panel_deltas(falling, light_low, deadband_pct=2.0, deadband_rel=0.005)[
+            "BAA10Y"
+        ].arrow
+        == "↓"
+    )
+
+
+def test_compute_panel_deltas_raw_transform_uses_relative_deadband() -> None:
+    """raw 揭露序列（無 score_pct）退用相對變化：單位各異，絕對 deadband 無意義。"""
+    light = _panel_light()
+    prev_run = _PANEL_TODAY - timedelta(days=7)
+    cur_raw = next(d for d in light.disclosure if d.series_id == "DGS10").raw_value
+    assert cur_raw is not None
+
+    moved = pl.DataFrame([_prev_panel_row(prev_run, "DGS10", "raw", cur_raw * 0.9, None)])
+    assert (
+        compute_panel_deltas(moved, light, deadband_pct=2.0, deadband_rel=0.005)["DGS10"].arrow
+        == "↑"
+    )
+
+    barely = pl.DataFrame([_prev_panel_row(prev_run, "DGS10", "raw", cur_raw * 0.999, None)])
+    assert (
+        compute_panel_deltas(barely, light, deadband_pct=2.0, deadband_rel=0.005)["DGS10"].arrow
+        == "→"
+    )
+
+
+def test_compute_panel_deltas_stale_current_reading_is_no_prev() -> None:
+    """本次未取得 → 不拿舊值算變化（鐵律 2：寧缺勿假）。"""
+    light = compute_macro_light(_PANEL_SERIES, CFG, _PANEL_TODAY, prev_color=None)
+    vix = next(d for d in light.disclosure if d.series_id == "VIXCLS")
+    assert vix.stale is True  # VIXCLS 未在 _PANEL_SERIES 提供
+    prev_run = _PANEL_TODAY - timedelta(days=7)
+    history = pl.DataFrame([_prev_panel_row(prev_run, "VIXCLS", "speed_pct", 20.0, 30.0)])
+    deltas = compute_panel_deltas(history, light, deadband_pct=2.0, deadband_rel=0.005)
+    assert deltas["VIXCLS"].arrow == NO_PREV
+    assert deltas["VIXCLS"].delta_score_pct is None
+
+
+def test_describe_macro_light_delta_absent_when_not_supplied() -> None:
+    """向後相容：不傳 deltas → 每個讀值的 delta 為 None，模板不渲染變化欄。"""
+    desc = describe_macro_light(_panel_light())
+    assert desc["primary"]["delta"] is None
+    assert all(d["delta"] is None for d in desc["disclosure"])
+
+
+def test_describe_macro_light_delta_rendered_fields() -> None:
+    light = _panel_light()
+    prev_run = _PANEL_TODAY - timedelta(days=7)
+    history = pl.DataFrame([_prev_panel_row(prev_run, "BAA10Y", "level_pct", 200.0, 90.0)])
+    deltas = compute_panel_deltas(history, light, deadband_pct=2.0, deadband_rel=0.005)
+    desc = describe_macro_light(light, deltas)
+    assert desc["primary"]["delta"]["arrow"] == "↑"
+    assert desc["primary"]["delta"]["score_pct"] == 10.0
+    assert desc["primary"]["delta"]["prev_as_of"] == prev_run.isoformat()
+    # 揭露面板缺前次 → 老實顯示無前次，不用主訊號的基準去套
+    assert desc["disclosure"][0]["delta"]["arrow"] == NO_PREV

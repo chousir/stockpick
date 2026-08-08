@@ -373,8 +373,60 @@ def test_e2e_render_report_macro_light_renders_when_present(tmp_path: Path):
     assert "總經燈號" in content
     assert "BAA10Y" in content
     assert "綠 → 黃" in content
+    assert "較上次" in content  # docs/26 A案：欄位常在，無 delta 資料時格內顯示「—」
     for word in ("目標價", "強烈建議", "飆股", "絕對"):
         assert word not in content, f"forbidden word found in macro section: {word}"
+
+
+def test_e2e_render_report_macro_panel_delta_arrows(tmp_path: Path):
+    """docs/26 A案：面板變化欄——有前次印箭頭＋Δ＋前次日期，無前次印「—」不硬算。"""
+    results = {"a_breakout": _SCREENER_A}
+    groups, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2
+    )
+    ranked = rank_within_groups(members, pl.DataFrame(), pl.DataFrame())
+    output = tmp_path / "group_analysis.md"
+    macro_light = {
+        "color": "綠",
+        "risk_score": 44.0,
+        "as_of": "2026-08-06",
+        "primary": {
+            "series_id": "BAA10Y", "transform": "level_pct", "as_of": "2026-08-06",
+            "raw_value": 1.61, "score_pct": 39.3, "stale": False,
+            "delta": {
+                "arrow": "↓", "prev_as_of": "2026-07-30", "score_pct": -5.0, "raw_value": -0.03,
+            },
+        },
+        "disclosure": [
+            {
+                "series_id": "DGS20", "transform": "level_pct", "as_of": "2026-08-06",
+                "raw_value": 5.22, "score_pct": 99.3, "stale": False,
+                "delta": {
+                    "arrow": "↑", "prev_as_of": "2026-07-30", "score_pct": 12.0,
+                    "raw_value": 0.14,
+                },
+            },
+            {
+                "series_id": "DEXJPUS", "transform": "raw", "as_of": "2026-07-31",
+                "raw_value": 159.16, "score_pct": None, "stale": False,
+                "delta": {
+                    "arrow": "—", "prev_as_of": None, "score_pct": None, "raw_value": None,
+                },
+            },
+        ],
+        "prev_color": "綠",
+        "change_line": None,
+        "advice": "風險水位偏低，維持標準流程。",
+        "line": "總經燈號：綠 44/100",
+    }
+    render_group_report(groups, ranked, results, "2026-W21", output, macro_light=macro_light)
+    content = output.read_text(encoding="utf-8")
+    assert "| 指標 | 轉換 | 現況 | 較上次 | as-of |" in content
+    assert "↑ +12.0p〔前次 2026-07-30〕" in content  # 有前次＝印變化與比較基準
+    assert "↓ -5.0p〔前次 2026-07-30〕" in content  # 主訊號行同樣帶變化
+    assert "| — |" in content  # 無前次＝老實留白
+    # 變化欄是揭露，不得暗示它會改燈色或影響排序
+    assert "純揭露，不進計分、不改燈色" in content
 
 
 # ─── E2E: candidates_enriched.csv ─────────────────────────────────────────────
