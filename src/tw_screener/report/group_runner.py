@@ -235,6 +235,38 @@ def run_group_analysis(settings: Path) -> None:
     regime = describe_regime(regime_result)
     console.print(f"  {regime['line']}")
 
+    # M2 投降洗盤 flag（委託書 M2）：**反向訊號**，獨立於 regime 分數、不改燈色/排序。
+    # 容錯：任何一步壞掉都只是這段不渲染，不擋週報主流程（同總經燈號的處理）。
+    try:
+        from tw_screener.analysis.washout import (
+            append_washout_history,
+            compute_market_washout,
+            render_washout_block,
+        )
+
+        # 不傳 price_history：本函式的 price_history 是**候選股**日線（load_candidate_history，
+        # ~百檔），不是全市場。等權指數必須用 load_market_history 的全市場宇宙，
+        # 口徑才與 regime 一致；讓 compute_market_washout 自己載。
+        washout_result = compute_market_washout(cfg, settings, regime_result)
+        regime["washout_lines"] = render_washout_block(washout_result)
+        regime["washout_triggered"] = washout_result.triggered
+        if washout_result.triggered:
+            regime["washout_posture"] = washout_result.posture_note
+        console.print(
+            f"  投降洗盤 flag：{'觸發' if washout_result.triggered else '未觸發'}"
+            f"（已求值 {washout_result.n_evaluable} 項中觸發 {washout_result.n_hit} 項）"
+        )
+        if washout_result.as_of is not None:
+            append_washout_history(
+                Path(cfg.get("washout", {}).get(
+                    "history_path", "data/washout/washout_history.parquet"
+                )),
+                washout_result,
+                washout_result.as_of,
+            )
+    except Exception as exc:  # noqa: BLE001 — 投降偵測非主流程關鍵路徑，壞了不擋報告
+        console.print(f"[yellow]  投降洗盤 flag 計算失敗，Section 0 略過該段：{exc}[/yellow]")
+
     # 總經燈號（docs/25 v2）：讀 make macro 最新一列 history.parquet；讀不到/過期 → 不渲染該段。
     macro_light: dict | None = None
     _macro_result = None  # MacroLight｜None；渲染完摘要後重用於逐指標明細 CSV，避免重算

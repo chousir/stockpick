@@ -12,6 +12,19 @@
 > 姿態建議：{{ regime.advice }}
 > 趨勢＝等權全市場指數 vs MA20/60/120 多空排列；廣度＝個股站上 MA60 比例＋指數自身位階；資金＝全市場三大法人日均淨流方向。分數區間 [−1, 1]，達進攻門檻＝進攻、達防禦門檻＝防禦。
 > **定位＝輔助姿態揭露，非硬性 gate 掉訊號；防禦期請降低總曝險、嚴設停損，最終由人決策。**
+{% if regime.washout_lines %}
+
+### 投降洗盤偵測（market_washout・委託書 M2）
+
+> **反向訊號**：regime 在洗盤底部三分項全深負 → 姿態恰在最該警戒反轉時喊最防禦。本 flag 獨立計算、
+> **不進 regime 分數、不改燈色、不改排序**——極端負讀數是「接近落底」的證據，語意與線性加權相反。
+{% if regime.washout_posture %}
+> 🔻 **姿態改印：{{ regime.washout_posture }}**
+{% endif %}
+
+{% for line in regime.washout_lines %}{{ line }}
+{% endfor %}
+{% endif %}
 
 {% endif %}
 {% if macro_light %}

@@ -180,6 +180,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make backtest-strategies`                             | 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤            | 每季（規劃書 03 V1）                 |
 | `make diagnose`                                        | 抓太晚＋漏起漲診斷（研究軌）：延伸度曲線/漏抓五態雷達（docs/19） | 每季／窗變厚後重跑                   |
 | `uv run tw-screener market regime`                     | 大盤 regime 姿態：進攻/中性/防禦（規劃書 03 V2）     | 盤後看大盤閘門                       |
+| `uv run tw-screener market washout [--save]`           | M2 投降洗盤偵測：融資投降/廣度washout/資金極端/指數深負乖離四子項＋是否觸發（**反向 flag**、不改燈色排序；門檻未校準、前 4 週僅描述） | 洗盤疑似落底時單獨看；`make week` 已內含 |
 | `make macro`（＝`uv run tw-screener market macro`） | 總經燈號：BAA10Y 單訊號＋揭露面板＋各指標「較上次」變化（外生風險，docs/25 M-Macro1／M-Macro4） | week 已容錯內含，可單獨重跑；`--refresh` 強抓 |
 | `uv run tw-screener portfolio check`                   | 組合層風控體檢：標籤/因子簇集中度（規劃書 03 V3）    | 持股變動後                           |
 | `make week-check`                                      | 產物完整性檢查（week 已內含，可單獨重跑）            | 懷疑某步無聲失敗時                   |

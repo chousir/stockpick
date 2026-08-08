@@ -1664,6 +1664,36 @@ class TWSEClient:
             .sort(["date", "stock_id"])
         )
 
+    def load_margin_frame(self, n_days: int = 250) -> pl.DataFrame:
+        """純讀近 n_days 個交易日 margin_*.parquet，回**多日長表**（不打網）。
+
+        與 `load_margin_signals`（只回最新日每股）的分工：那個是報表 join 用的橫斷面，
+        本函式是 M2 投降偵測要的**時間序列**（全市場逐日加總前的原料）。共用同一組
+        schema 過濾——排除舊版 `margin_otc_*` 與缺本版欄位的廢棄格式快取。
+
+        Returns:
+            (date, stock_id, stock_name, margin_balance, margin_chg, short_balance,
+            short_chg, note)，依日期升冪、(date, stock_id) 去重；無快取回空表。
+        """
+        empty = pl.DataFrame(schema=_MARGIN_SCHEMA)
+        files = sorted(
+            f
+            for f in self.cache_dir.glob("margin_*.parquet")
+            if not f.name.startswith("margin_otc_")
+        )
+        if not files:
+            return empty
+        files = select_recent_cache_files(files, n_days)
+        required = list(_MARGIN_SCHEMA.keys())
+        frames = [
+            df.select(required)
+            for f in files
+            if set(required).issubset((df := pl.read_parquet(f)).columns)
+        ]
+        if not frames:
+            return empty
+        return pl.concat(frames).unique(subset=["date", "stock_id"]).sort("date")
+
     def load_margin_signals(self, n_days: int = 6) -> pl.DataFrame:
         """純讀近 n_days 個交易日 margin_*.parquet，回最新日每股融資融券＋margin_chg_5d（不打網）。
 

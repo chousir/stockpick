@@ -138,6 +138,10 @@ tw-screener picks outcome [--diff]
 tw-screener market regime
 tw-screener portfolio check [--include-candidates]
 
+# market washout — M2 投降洗盤偵測（docs/27 §1）：反向 flag，不進 regime 分數、不改燈色/排序
+tw-screener market washout            # 印四子項讀數＋「已求值 N 項中觸發 M 項」
+tw-screener market washout --save     # 另 append 一列進 washout_history.parquet（同日冪等）
+
 # market macro — 總經燈號：外生風險水位（docs/25 M-Macro1）
 tw-screener market macro [--refresh]   # ＝ make macro；--refresh 略過快取強抓 FRED
 ```

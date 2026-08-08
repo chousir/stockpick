@@ -1388,6 +1388,44 @@ def market_regime_cmd(
     )
 
 
+@market_app.command("washout")
+def market_washout_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+    save: bool = typer.Option(False, "--save", help="append 一列進 washout_history（同日冪等）"),
+) -> None:
+    """M2 投降洗盤偵測：四子項讀數＋是否觸發 market_washout（反向 flag、不改燈色/排序）。"""
+    import yaml
+
+    from tw_screener.analysis.regime import compute_market_regime
+    from tw_screener.analysis.washout import (
+        append_washout_history,
+        compute_market_washout,
+        render_washout_block,
+    )
+
+    with open(settings, encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh)
+
+    regime_result = compute_market_regime(cfg, settings)
+    result = compute_market_washout(cfg, settings, regime_result)
+    head = "🔻 觸發" if result.triggered else "未觸發"
+    color = "red" if result.triggered else "green"
+    console.print(f"\n[bold {color}]投降洗盤 flag：{head}[/bold {color}]  （截至 {result.as_of}）")
+    for line in render_washout_block(result):
+        console.print(line)
+    if save:
+        if result.as_of is None:
+            console.print("[yellow]無 as_of（日線快取缺）——不落檔[/yellow]")
+        else:
+            append_washout_history(
+                Path(cfg.get("washout", {}).get(
+                    "history_path", "data/washout/washout_history.parquet"
+                )),
+                result,
+                result.as_of,
+            )
+
+
 @market_app.command("macro")
 def market_macro_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),

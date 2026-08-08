@@ -473,6 +473,30 @@ regime:                        # 規劃書 03 V2 大盤 regime 總控閘門（ma
     attack: 0.33               # ≥ 此值＝進攻
     defense: -0.33             # ≤ 此值＝防禦；之間＝中性
 
+washout:                       # 委託書 M2 投降洗盤偵測（market_washout）——**反向 flag**、獨立於 regime
+                               # 不進 regime_score、不改燈色、不改排序（併進線性加權會與 regime 互相抵銷）。
+                               # ⚠️ 門檻**未校準**：歷史只有一次 530 億級投降樣本（2026-07-30），
+                               #    這批是先驗值。依 M2.2，上線前 4 週只描述、不判勝負；調門檻走本檔 diff。
+  min_hits: 2                  # ≥ 此數量子項同時成立 → 觸發（共 4 子項；分母只算 status=ok 者）
+  descriptive_weeks: 4         # 前 N 週僅描述、報表印「未校準」警語（M2.2 括號要求）
+  margin:                      # 子項1 融資投降。**張數口徑、僅上市**——新聞的「530億」是金額，不同口徑
+    z_threshold: -2.0          # 單日/5日減幅 z 取較極端者 < 此 → 命中
+    lookback_days: 250         # 算 z 的回看列數（＝可得交易日數）
+    min_samples: 60            # 變化量有效樣本低於此 → 該窗不評（不用薄樣本算 z）
+    window_5d_max_calendar_days: 9  # 尾端 5 列橫跨超過此日曆天＝快取有缺日 → 5 日窗誠實棄用
+  breadth:                     # 子項2 廣度 washout（重用 regime 廣度依據的 frac_above_ma，不重算）
+    max_frac_above_ma: 0.20    # 全宇宙站上 MA60 比率低於此 → 命中
+  flow:                        # 子項3 資金分項極端持續（讀 make regime-history 的 as-of 逐日產物）
+    max_flow_score: -0.9       # regime 資金子分低於此＝極端
+    min_weeks: 3               # 且**尾端連續**達此週數（中間任一日回到門檻上即中斷）
+    trading_days_per_week: 5
+  index:                       # 子項4 指數深負乖離。**等權指數**（口徑同 regime），非加權 TAIEX
+    ma_window: 60
+    max_dist_pct: -7.0         # 距自身 MA60 深於此 → 命中
+    min_priced: 200            # 當日有報價個股數低於此＝薄快取日，不進指數（對齊 regime.breadth.min_priced）
+                               # 實測 2026-07-27~30 每天只有 10 檔快取，不濾會造出 −20% 級假乖離
+  history_path: data/washout/washout_history.parquet  # flag 落檔（同日冪等），供未來回測驗證偵測本身
+
 macro_regime:                  # docs/25 v2 總經避險層（M-Macro1）：單一主訊號＋揭露面板，不合成
                                # BAA10Y 三輪 block-bootstrap 篩選為唯一穩健指標（headline lift
                                # 2.26〔1.61–3.06〕），單獨決定燈色；其餘指標降級揭露不計分。
