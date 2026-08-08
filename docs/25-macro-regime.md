@@ -227,6 +227,12 @@ risk_score = level_pct × 100  ∈ [0, 100]
 
 「較上次」＝與**上一輪 `make macro`** 的同序列讀數相比（間距非固定 7 天，前次資料日期附在格內）；
 deadband 內顯示「→」、無前次顯示「—」；**純揭露，不進計分、不改燈色、不影響排序或剔除**。
+
+**箭頭語意分兩種，報表已標警語**：`level_pct`／`speed_pct`／`dual_risk` 的 ↑＝風險升高；
+`raw` 三列（DGS10／DEXTAUS／DEXJPUS）無風險分數，箭頭只是數值方向——**DEXJPUS ↓（日圓走強）**
+才是 carry unwind 的警戒方向（§2.2 留它的理由）、DEXTAUS ↑（台幣走弱）才是外資流出方向。
+不把 raw 列的方向硬轉成「風險方向」是刻意的：DEXJPUS 的 dual_risk 框架三輪研究皆無證據
+（§2.2、Phase 2 tail-event 重測），程式沒有立場說哪邊是風險，只能把方向攤開讓人讀。
 明細落地 `reports/2026-Wxx/macro_regime.csv` 不變；歷史累積在 `data/macro_regime/panel_history.parquet`。
 
 搭配落地：`reports/2026-Wxx/macro_regime.csv`（主訊號＋揭露面板全部指標明細：原值/level_pct 或

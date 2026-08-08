@@ -427,6 +427,9 @@ def test_e2e_render_report_macro_panel_delta_arrows(tmp_path: Path):
     assert "| — |" in content  # 無前次＝老實留白
     # 變化欄是揭露，不得暗示它會改燈色或影響排序
     assert "純揭露，不進計分、不改燈色" in content
+    # raw 列的箭頭是數值方向不是風險方向（DEXJPUS ↓ 才是警戒向）——必須明標，否則會被反讀
+    assert "箭頭語意分兩種" in content
+    assert "DEXJPUS ↓（日圓走強）" in content
 
 
 # ─── E2E: candidates_enriched.csv ─────────────────────────────────────────────

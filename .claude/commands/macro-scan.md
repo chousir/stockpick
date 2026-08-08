@@ -19,9 +19,13 @@ allowed-tools: WebSearch, WebFetch, Read, Write, Bash, Glob, Grep
 
 1. **不重抓本專案已有的序列**。VIX／BAA10Y／DGS20／WTI 油價／STLFSI4／DGS10／USD-TWD／USD-JPY
    一律從 `reports/<週次>/macro_regime.csv` 讀（欄位：role, series_id, transform, as_of,
-   raw_value, score_pct, stale, source）。`$1` 給了週次就用它，沒給就用 `reports/` 下最新一週。
-   讀不到就在報告裡寫「未取得（`make macro` 尚未跑過本週）」，**不要改用網路數字替代**——那會讓
-   同一個指標在兩份文件裡出現兩個不同的值。
+   raw_value, score_pct, stale, source）。`$ARGUMENTS` 給了週次就用它，沒給就用 `reports/` 下
+   最新一週。讀不到就在報告裡寫「未取得（`make macro` 尚未跑過本週）」，**不要改用網路數字替代**
+   ——那會讓同一個指標在兩份文件裡出現兩個不同的值。
+   **同理，FRED 上有的序列一律走 FRED API 不走網搜**（key 在 `.env` 的 `fred_api`，端點
+   `https://api.stlouisfed.org/fred/series/observations?series_id=<ID>&api_key=<KEY>&file_type=json&sort_order=desc&limit=3`）
+   ——本清單裡的 `BAMLH0A0HYM2`（高收益債利差）與 `T10Y2Y`（殖利率曲線）屬此類，
+   媒體轉述的數字會跟本 repo 自己算的漂移。
 2. **不編數字**。找不到就寫「數據滯後至 <具體日期>」或「未找到」。絕不用訓練資料或推測值填充。
    最容易抓不到的是 BofA Bull & Bear（只在美銀週報，靠媒體轉載）與 Insider Buy/Sell
    （GuruFocus 常擋爬蟲）——**抓不到就老實說滯後幾週，不接受一個「看起來很合理」的數字**。
@@ -62,15 +66,16 @@ USD/TWD、USD/JPY。
 7. Renaissance IPO 發行量（當季件數＋募資總額）— renaissancecapital.com/IPO-Center/Stats
 8. Insider Buy/Sell Ratio（GuruFocus USA Overall Market）
 9. BofA Bull & Bear Indicator（搜「BofA Bull Bear Indicator <當前月份>」，多搜幾次交叉驗證）
-10. ICE BofA US High Yield OAS（FRED `BAMLH0A0HYM2`；**只取當前絕對值**——FRED 對此序列
-    只公開滾動 3 年歷史，任何百分位/歷史位階說法都不成立，見 docs/26 §1.2）
+10. ICE BofA US High Yield OAS —— **走 FRED API 抓 `BAMLH0A0HYM2`，不要網搜**；
+    **只取當前絕對值**：FRED 對此序列只公開滾動 3 年歷史，任何百分位/歷史位階說法都不成立
+    （docs/26 §1.2）
 11. NYSE Advance/Decline Line 是否與 S&P 500 頂背離
 
 🔴 長期（月－年，結構性週期頂）
 12. Buffett 指標（總市值/GDP）— currentmarketvaluation.com
     （**註明分母 GDP 為季頻且落後約一季**，週對週不會變）
 13. Shiller CAPE / PE10 — multpl.com/shiller-pe
-14. 10Y-2Y 殖利率曲線（FRED `T10Y2Y`）—
+14. 10Y-2Y 殖利率曲線 —— **走 FRED API 抓 `T10Y2Y`，不要網搜**；
     **本專案已實測此指標對本地目標無預測力（docs/26 §1.2），只列讀數當脈絡，不可寫成訊號**
 15. Conference Board US LEI（最新月值＋6 個月變化率）—
     **FRED 的免費替代 `USSLIND` 已於 2020-02 停更**，本體付費；抓不到就標未取得
