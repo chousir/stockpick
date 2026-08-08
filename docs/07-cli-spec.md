@@ -60,7 +60,7 @@ weekend GROUP=defg: ## week ＋ git commit/push 結果（無新檔跳過 commit�
 
 # ─── 回測 / 研究軌 ───────────────────────────────
 backtest-strategies: ## 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤（規劃書 03 V1）
-pick-outcome:        ## pick 閉環：分層命中率×α＋偽陰性帳（規劃書 05 F1）
+pick-outcome:        ## pick 閉環：分層命中率×α＋偽陰性帳＋停損延遲帳（規劃書 05 F1、委託書 M3.1）
 rotation:            ## 次產業資金輪動報表（docs/12）
 rotation-calib:      ## R2 起漲點回測校準（研究軌，docs/12 §2.4）
 cp-value-candidates: ## B3 個股 CP 補漲候選（生產軌，docs/13）
@@ -170,7 +170,7 @@ make report STOCK_ID=2330
 
 ```bash
 make backtest-strategies       # 策略層：D/E/F/G 勝率/報酬/回撤 → research/strategy_backtest/
-make pick-outcome              # pick 層：分層命中率×α＋偽陰性帳 → research/pick_outcome/
+make pick-outcome              # pick 層：分層命中率×α＋偽陰性帳＋停損延遲帳 → research/pick_outcome/
 make rotation-calib            # 輪動訊號門檻重校準 → research/rotation/
 make cp-value-calib            # 個股起漲事件回測 → research/cp_value/
 ```

@@ -388,3 +388,144 @@ def test_run_picks_brief_invalid_week_exits(tmp_path):
     settings, _reports = _build_reports_and_cache(tmp_path)
     with pytest.raises(typer.Exit):
         run_picks_brief(settings, week="2026-W99")
+
+
+# ── M3.1 停損延遲帳（委託書 M3）────────────────────────────────────────────
+
+
+def test_parse_stop_price_handles_real_ledger_wordings():
+    """底帳實際四種寫法都要抽對——MA60/low60 標籤數字不得被當成停損價。"""
+    from tw_screener.backtest.picks_outcome import parse_stop_price
+
+    assert parse_stop_price("收盤跌破41.5(MA60)、隔日未收復出場") == 41.5
+    assert parse_stop_price("收盤確認跌破 MA60 20.35、隔日未收復出場") == 20.35
+    assert parse_stop_price("MA60 10.29 高於收盤不可用→收盤跌破 low60 9.90") == 9.90
+    assert (
+        parse_stop_price("收盤跌破 215.0、隔日未收復出場（MA60 236.87 高於收盤不可用）")
+        == 215.0
+    )
+    assert parse_stop_price("收盤破21.1") == 21.1
+
+
+def test_parse_stop_price_returns_none_when_no_absolute_price():
+    """沒有絕對價（只寫「跌破季線」）＝抽不到，回 None 不猜——M7 patch-2 要修的正是這型。"""
+    from tw_screener.backtest.picks_outcome import parse_stop_price
+
+    assert parse_stop_price("跌破季線停損") is None
+    assert parse_stop_price("") is None
+    assert parse_stop_price(None) is None
+    # 純百分比/天數不算絕對價
+    assert parse_stop_price("回檔破 5% 出場") is None
+
+
+def _px(rows: list[tuple[str, date, float]]) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "stock_id": [r[0] for r in rows],
+            "date": [r[1] for r in rows],
+            "close": [r[2] for r in rows],
+        }
+    )
+
+
+def test_stop_delay_ledger_measures_weekly_review_cost():
+    """訊號日掛條件單 vs 等下週報覆核——延遲成本＝兩個執行價的差。"""
+    from tw_screener.backtest.picks_outcome import stop_delay_ledger
+
+    picks = pl.DataFrame(
+        {
+            "week": ["2026-W19", "2026-W20"],
+            "data_date": [date(2026, 6, 1), date(2026, 6, 8)],
+            "stock_id": ["1101", "1102"],
+            "name": ["甲", "乙"],
+            "layer": ["core", "core"],
+            "stop": ["收盤跌破 95.0、隔日未收復出場", "收盤跌破 90.0、隔日未收復出場"],
+        }
+    )
+    # 1101：6/2 進場 100；6/3 收 94 觸發（<95）；6/4 條件單執行 92；
+    #       下一個覆核資料日＝6/8（W20 data_date），其次一交易日 6/9 執行 80 → 延遲成本 −13.04%
+    px = _px(
+        [
+            ("1101", date(2026, 6, 1), 101.0),
+            ("1101", date(2026, 6, 2), 100.0),
+            ("1101", date(2026, 6, 3), 94.0),
+            ("1101", date(2026, 6, 4), 92.0),
+            ("1101", date(2026, 6, 5), 88.0),
+            ("1101", date(2026, 6, 8), 84.0),
+            ("1101", date(2026, 6, 9), 80.0),
+            # 1102：從未跌破 90 → not_triggered
+            ("1102", date(2026, 6, 8), 100.0),
+            ("1102", date(2026, 6, 9), 99.0),
+            ("1102", date(2026, 6, 10), 98.0),
+        ]
+    )
+    led = stop_delay_ledger(picks, px)
+    a = led.filter(pl.col("stock_id") == "1101").row(0, named=True)
+    assert a["status"] == "measured"
+    assert a["stop_price"] == 95.0
+    assert a["signal_date"] == date(2026, 6, 3)
+    assert a["cond_exec_date"] == date(2026, 6, 4)
+    assert a["cond_exec_price"] == 92.0
+    assert a["review_date"] == date(2026, 6, 8)
+    assert a["weekly_exec_date"] == date(2026, 6, 9)
+    assert a["delay_cost_pct"] == pytest.approx((80.0 / 92.0 - 1) * 100, abs=1e-6)
+    assert a["delay_td"] == 3
+
+    b = led.filter(pl.col("stock_id") == "1102").row(0, named=True)
+    assert b["status"] == "not_triggered"
+    assert b["delay_cost_pct"] is None
+
+
+def test_stop_delay_ledger_marks_unparsed_and_implausible():
+    """抽不到價、或抽到高於進場價的不合理值 → unparsed，不算假帳。"""
+    from tw_screener.backtest.picks_outcome import stop_delay_ledger
+
+    picks = pl.DataFrame(
+        {
+            "week": ["2026-W19", "2026-W19"],
+            "data_date": [date(2026, 6, 1), date(2026, 6, 1)],
+            "stock_id": ["1101", "1102"],
+            "name": ["甲", "乙"],
+            "layer": ["core", "core"],
+            "stop": ["跌破季線停損", "收盤跌破 999.0"],  # 後者遠高於進場價 100
+        }
+    )
+    px = _px(
+        [
+            ("1101", date(2026, 6, 2), 100.0),
+            ("1101", date(2026, 6, 3), 90.0),
+            ("1102", date(2026, 6, 2), 100.0),
+            ("1102", date(2026, 6, 3), 90.0),
+        ]
+    )
+    led = stop_delay_ledger(picks, px)
+    assert set(led["status"].to_list()) == {"unparsed"}
+    assert led.filter(pl.col("stock_id") == "1102").row(0, named=True)["stop_price"] is None
+
+
+def test_stop_delay_summary_and_section_render_without_samples():
+    """無可量測樣本時：成本欄 None（不印 0%）、報表段仍印出 status 計數。"""
+    from tw_screener.backtest.picks_outcome import (
+        render_stop_delay_section,
+        stop_delay_ledger,
+        stop_delay_summary,
+    )
+
+    picks = pl.DataFrame(
+        {
+            "week": ["2026-W19"],
+            "data_date": [date(2026, 6, 1)],
+            "stock_id": ["1101"],
+            "name": ["甲"],
+            "layer": ["core"],
+            "stop": ["跌破季線停損"],
+        }
+    )
+    px = _px([("1101", date(2026, 6, 2), 100.0)])
+    s = stop_delay_summary(stop_delay_ledger(picks, px))
+    assert s["n_measured"] == 0
+    assert s["avg_cost_pct"] is None
+    assert s["counts"]["unparsed"] == 1
+    body = "\n".join(render_stop_delay_section(stop_delay_ledger(picks, px)))
+    assert "停損延遲帳" in body
+    assert "停損價無法解析 1" in body

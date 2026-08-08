@@ -6,6 +6,7 @@ research/pick_outcome/ 報告與 CSV。CLI 只保留參數解析。
 
 from datetime import date
 from pathlib import Path
+from typing import cast
 
 import typer
 from rich.console import Console
@@ -32,6 +33,8 @@ def run_picks_outcome(
         counterfactual_summary,
         layer_summary,
         render_outcome_report,
+        stop_delay_ledger,
+        stop_delay_summary,
         week_over_week_diff,
         weekly_layer_table,
     )
@@ -126,16 +129,22 @@ def run_picks_outcome(
                     console.print(f"[yellow]讀 {p} 失敗（{e}），該週訊號留空[/yellow]")
         diff_df = week_over_week_diff(picks, enriched_by_week)
 
+    # M3.1 停損延遲帳：條件單語意 vs 週頻覆核的執行價差
+    stop_delay = stop_delay_ledger(picks, market)
+
     data_range = (market["date"].min(), market["date"].max())
     report = render_outcome_report(
         todate, layers, weekly_core, hold_summary, counterfactual, excluded_todate,
         missing, cut, data_range, diff=diff_df, min_sample_warn=min_sample_warn,
+        stop_delay=stop_delay,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     tag = _date.today().strftime("%Y%m%d")
     md_path = out_dir / f"outcome_{tag}.md"
     md_path.write_text(report, encoding="utf-8")
     todate.write_csv(out_dir / f"picks_returns_{tag}.csv")
+    if not stop_delay.is_empty():
+        stop_delay.write_csv(out_dir / f"stop_delay_{tag}.csv")
     if not excluded_todate.is_empty():
         excluded_todate.write_csv(out_dir / f"excluded_returns_{tag}.csv")
     if diff_df is not None and not diff_df.is_empty():
@@ -163,6 +172,19 @@ def run_picks_outcome(
         )
     if diff_df is not None:
         console.print(f"  翻轉解剖：{diff_df.height} 筆降級（詳報告 §5）")
+    sd = stop_delay_summary(stop_delay)
+    if sd["n_measured"]:
+        console.print(
+            f"  [bold]停損延遲帳[/bold]：可量測 {sd['n_measured']} 筆・"
+            f"平均延遲成本 {float(cast(float, sd['avg_cost_pct'])):+.2f}%・"
+            f"最痛 {sd['worst_stock']} {float(cast(float, sd['worst_cost_pct'])):+.2f}%"
+        )
+    else:
+        counts = cast(dict, sd["counts"])
+        console.print(
+            f"  停損延遲帳：無可量測樣本（未觸發 {counts['not_triggered']}／"
+            f"未到覆核點 {counts['pending_review']}／停損價無法解析 {counts['unparsed']}）"
+        )
 
 
 def run_picks_brief(settings: Path, week: str | None = None) -> None:

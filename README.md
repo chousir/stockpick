@@ -126,7 +126,7 @@ make week GROUP=defg                              # ①~⑫ 一鍵跑完（尾�
 # → 套 docs/11 範本 prompt → 得 pick.md（首屏 ≤60 行一頁決策卡＋尾端機器可讀區塊）
 uv run tw-screener picks sync --week 2026-Www     # pick.md 定稿後整批寫底帳（閉環輸入，§10；單檔補記用 picks record）
 make report STOCK_ID=2330                         # 對 picks 選出的每檔產個股深度報告（5-10 秒）
-make pick-outcome                                 # （每季）pick 閉環：分層命中率×α＋偽陰性帳 → research/pick_outcome/
+make pick-outcome                                 # （每季）pick 閉環：分層命中率×α＋偽陰性帳＋停損延遲帳 → research/pick_outcome/
 make dash-dev                                     # （選配）把本週報告開成可視化儀表板瀏覽（首次先 make dash-install）→ §13
 ```
 
@@ -160,7 +160,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | 指令                                                     | 做什麼                                               | 何時用                               |
 | -------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------ |
 | `make week GROUP=defg`                                 | 完整週流程 ①~⑫                                     | **每週一次（主入口）**         |
-| `make pick-outcome`                                    | pick 閉環：分層命中率×α（vs 大盤＋族群）＋偽陰性帳 | 每季（pick 底帳變厚後）              |
+| `make pick-outcome`                                    | pick 閉環：分層命中率×α（vs 大盤＋族群）＋偽陰性帳＋**停損延遲帳（M3.1）** | 每季（pick 底帳變厚後）              |
 | `make dash-dev`                                        | 起 dashboard 開發伺服器（FastAPI:8000＋Vite:5173）   | 視覺化瀏覽本週報告（§13）           |
 
 ### 進階（偶爾手動跑；均保留可用，`make help` 不列）
@@ -338,6 +338,9 @@ FOMC/CPI/台股結算/法說等市場級事件 → `group_analysis.md` Section 0
   （core/opportunity/pool 分層）與**被旗標剔除股**寫進 `reports/<week>/picks.csv`／`excluded.csv` 底帳；
   `make pick-outcome` 算分層命中率×α（**同列 vs 大盤、vs 所屬次產業兩個超額**）＋**偽陰性帳**
   （被剔除股同窗報酬——過熱/土洋對作等旗標第一次有績效裁判）→ `research/pick_outcome/`；
+  另含**停損延遲帳（M3.1）**——「訊號日掛條件單」vs「等下週報覆核」的執行價差，
+  量測週頻節奏的**制度性最小延遲**成本（不含連續多週續抱的行為延遲；停損欄未寫絕對價者
+  記 `unparsed`，該計數即 M7 patch-2「停損一律印可掛單絕對價」的達成率指標）；
   `uv run tw-screener picks outcome --diff` 附翻轉解剖（週對週降級標的＋翻轉前訊號）。
   樣本隨週數變厚，建議每季重算，並以結果校準 F2 位階門檻。
 
