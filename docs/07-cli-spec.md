@@ -142,6 +142,11 @@ tw-screener portfolio check [--include-candidates]
 tw-screener market washout            # 印四子項讀數＋「已求值 N 項中觸發 M 項」
 tw-screener market washout --save     # 另 append 一列進 washout_history.parquet（同日冪等）
 
+# market macro-risk — M8 宏觀窄橋（docs/27 §2）：讀輸入包的 macro_risk_latest.yaml
+tw-screener market macro-risk                  # 最新週；印三態＋patch-6 消費結論＋披露 yaml 片段
+tw-screener market macro-risk --week 2026-W32  # 指定週
+# 三態：ok（依 gate 影響姿態/新倉）／missing／stale／invalid（後三者一律降級為註記、不擋流程）
+
 # market macro — 總經燈號：外生風險水位（docs/25 M-Macro1）
 tw-screener market macro [--refresh]   # ＝ make macro；--refresh 略過快取強抓 FRED
 ```

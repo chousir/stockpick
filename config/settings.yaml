@@ -473,6 +473,16 @@ regime:                        # 規劃書 03 V2 大盤 regime 總控閘門（ma
     attack: 0.33               # ≥ 此值＝進攻
     defense: -0.33             # ≤ 此值＝防禦；之間＝中性
 
+macro_risk:                    # 委託書 M8 宏觀窄橋（裁決 D）：消費每日美股風險掃描的機器摘要
+                               # **只影響倉位節奏（姿態降級／新倉上限），不影響選股**（不改排序/剔除/燈色）。
+                               # 檔案由人工從掃描 project（M9）貼進輸入包，缺席合法；三態容錯見 docs/27 §2。
+  filename: macro_risk_latest.yaml  # 放在 reports/<週次>/ 下（週報輸入包的一員）
+  stale_trading_days: 5        # 掃描日落後超過此平日數 → stale、降級為註記不當 gate（委託書 M8）
+  gate_min_hits: 3             # triggers_hit ≥ 此 → 姿態降一級、新倉封 new_position_cap（patch-6）
+  new_position_cap: "1/3"      # 觸發時的新倉上限（與事件閘門的 ⅓ 同語意，兩者同時成立取更嚴）
+  min_coverage: 5              # **已求值**項數低於此時，「0–2 觸發」的註記必須帶 coverage 警語
+                               # （docs/26 §2「分母不完整」圍欄：未求值只會少算，不可讀成風險已清）
+
 washout:                       # 委託書 M2 投降洗盤偵測（market_washout）——**反向 flag**、獨立於 regime
                                # 不進 regime_score、不改燈色、不改排序（併進線性加權會與 regime 互相抵銷）。
                                # ⚠️ 門檻**未校準**：歷史只有一次 530 億級投降樣本（2026-07-30），

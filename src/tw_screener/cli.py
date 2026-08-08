@@ -1426,6 +1426,68 @@ def market_washout_cmd(
             )
 
 
+@market_app.command("macro-risk")
+def market_macro_risk_cmd(
+    week: str = typer.Option(None, help="週次目錄名（如 2026-W32）；預設最新週"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """M8 宏觀窄橋：讀輸入包的 macro_risk_latest.yaml，印三態＋patch-6 消費結論。
+
+    只影響倉位節奏（姿態降級／新倉上限），**不影響選股**。檔缺席/過期/格式錯一律降級
+    為註記、不擋流程（exit 0）。
+    """
+    from datetime import date as _date
+
+    import yaml
+
+    from tw_screener.analysis.macro_risk import (
+        DEFAULT_FILENAME,
+        STATUS_OK,
+        describe_macro_risk,
+        load_macro_risk,
+        macro_risk_gate,
+        to_disclosure,
+    )
+    from tw_screener.report.pick_store import week_dirs
+
+    with open(settings, encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh)
+    reports_dir = Path(cfg["paths"]["reports_dir"])
+    if week:
+        week_dir = reports_dir / week
+        if not week_dir.is_dir():
+            console.print(f"[red]{week_dir} 不存在[/red]")
+            raise typer.Exit(1)
+    else:
+        dirs = week_dirs(reports_dir)
+        if not dirs:
+            console.print("[yellow]reports/ 下無週次目錄——先跑 make week[/yellow]")
+            return
+        week_dir = dirs[-1]
+
+    mcfg = cfg.get("macro_risk", {}) or {}
+    risk = load_macro_risk(
+        week_dir / str(mcfg.get("filename", DEFAULT_FILENAME)),
+        _date.today(),
+        stale_trading_days=int(mcfg.get("stale_trading_days", 5)),
+    )
+    gate = macro_risk_gate(
+        risk,
+        min_hits=int(mcfg.get("gate_min_hits", 3)),
+        min_coverage=int(mcfg.get("min_coverage", 5)),
+        cap=str(mcfg.get("new_position_cap", "1/3")),
+    )
+    desc = describe_macro_risk(risk, gate)
+    color = "red" if gate.downgrade_posture else ("green" if risk.status == STATUS_OK else "yellow")
+    console.print(f"\n[bold]{week_dir.name} 宏觀窄橋（M8）[/bold]")
+    console.print(f"  [{color}]{desc['line']}[/{color}]")
+    console.print("\n[dim]資料品質披露 yaml 用（貼進 pick.md 的披露區塊）：[/dim]")
+    console.print(f"  macro_risk: {to_disclosure(risk)}")
+    console.print(
+        "\n[dim]定位：只影響倉位節奏，不改排序/剔除/燈色（裁決 D 局部覆寫 docs/26 §6.2(4)）。[/dim]"
+    )
+
+
 @market_app.command("macro")
 def market_macro_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),

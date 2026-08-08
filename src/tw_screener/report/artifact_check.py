@@ -112,6 +112,39 @@ def run_artifact_check(settings: Path) -> ArtifactReport:
             f"[dim]⏳ 提醒：{report.latest_week} 尚無 {name}"
             "（分析師定稿後跑 picks record 補齊）[/dim]"
         )
+    _report_macro_risk(cfg, Path(cfg["paths"]["reports_dir"]) / report.latest_week)
     if not report.has_warnings and not report.pending_analyst:
         console.print("[green]✓ 產物齊全（機器產物＋歷週 pick 底帳）[/green]")
     return report
+
+
+def _report_macro_risk(cfg: dict, week_dir: Path) -> None:
+    """M8 宏觀窄橋的三態提示（可選檔，**永遠不擋流程**）。
+
+    `macro_risk_latest.yaml` 是人工從每日掃描 project 貼進輸入包的，不是 make week 產的
+    ——所以缺席是**合法狀態**（同 excluded.csv 的自願制），只印提醒讓人知道本週有沒有
+    這個 gate 可用，不列進 missing_machine。
+    """
+    from datetime import date as _date
+
+    from tw_screener.analysis.macro_risk import (
+        DEFAULT_FILENAME,
+        STATUS_OK,
+        load_macro_risk,
+        macro_risk_gate,
+    )
+
+    mcfg = cfg.get("macro_risk", {}) or {}
+    path = week_dir / str(mcfg.get("filename", DEFAULT_FILENAME))
+    risk = load_macro_risk(
+        path, _date.today(), stale_trading_days=int(mcfg.get("stale_trading_days", 5))
+    )
+    gate = macro_risk_gate(
+        risk,
+        min_hits=int(mcfg.get("gate_min_hits", 3)),
+        min_coverage=int(mcfg.get("min_coverage", 5)),
+        cap=str(mcfg.get("new_position_cap", "1/3")),
+    )
+    style = "yellow" if gate.downgrade_posture else ("dim" if risk.status != STATUS_OK else "")
+    prefix = "🌐 宏觀窄橋（M8）："
+    console.print(f"[{style}]{prefix}{gate.note}[/{style}]" if style else f"{prefix}{gate.note}")
