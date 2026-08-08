@@ -146,3 +146,46 @@ class TestContrarianBase:
 
     def test_null_inflection_false(self):
         assert is_contrarian_base("強化", None, "在低") is False
+
+
+# ── 委託書 M1.1 防接刀補強（2026-08-08 裁決 A 人工解禁）──────────────────
+
+
+def test_trailing_buy_streak_days_counts_from_latest():
+    """由最新日往回數連續買超天數；最新日非買超＝0；空序列＝None（不記 0）。"""
+    from tw_screener.analysis.contrarian import trailing_buy_streak_days
+
+    assert trailing_buy_streak_days([-500, -300, 100, 200, 300]) == 3
+    assert trailing_buy_streak_days([100, 200, -50]) == 0      # 最新日在賣
+    assert trailing_buy_streak_days([100, 200, 300]) == 3
+    assert trailing_buy_streak_days([-100, 0, 200]) == 1       # 0 不算買超
+    assert trailing_buy_streak_days([100, None, 300]) == 1     # None 視為中斷、不猜
+    assert trailing_buy_streak_days([]) is None
+
+
+def test_contrarian_entry_ready_requires_streak_and_no_new_low():
+    """三條件 tag 成立仍不夠——連買天數不足或正在破新低者一律不合格。"""
+    from tw_screener.analysis.contrarian import contrarian_entry_ready
+
+    # 合格：tag True ＋ 連買 2 日 ＋ 距 60 日低 +3.2%（未破新低）
+    assert contrarian_entry_ready(True, 2, 3.2) is True
+    # 單日翻買就接刀 → 擋下
+    assert contrarian_entry_ready(True, 1, 3.2) is False
+    # 當日收盤就是 60 日新低（dist=0，low_60d 窗含當日）→ 仍在破底、擋下
+    assert contrarian_entry_ready(True, 3, 0.0) is False
+    # 法人資料缺（streak=None）→ 缺資料不放行
+    assert contrarian_entry_ready(True, None, 3.2) is False
+    # 位階不明 → 不放行
+    assert contrarian_entry_ready(True, 3, None) is False
+    # tag 本身不成立 → 前面條件再好也不合格
+    assert contrarian_entry_ready(False, 5, 3.2) is False
+
+
+def test_contrarian_entry_ready_thresholds_are_configurable():
+    """門檻走 settings（鐵律 5），不寫死在程式裡。"""
+    from tw_screener.analysis.contrarian import contrarian_entry_ready
+
+    assert contrarian_entry_ready(True, 2, 3.2, min_buy_streak_days=3) is False
+    assert contrarian_entry_ready(True, 3, 3.2, min_buy_streak_days=3) is True
+    assert contrarian_entry_ready(True, 3, 0.5, new_low_eps_pct=1.0) is False
+    assert contrarian_entry_ready(True, 3, 1.5, new_low_eps_pct=1.0) is True

@@ -476,6 +476,37 @@ def group_stocks(
     else:
         stock_df = stock_df.with_columns([pl.lit(0.0).alias(c) for c in _near_out])
 
+    # 委託書 M1.1 防接刀／M4.1：外資尾端連續買超天數（由最新日往回數）。同一欄服務兩處——
+    # M1 用「連 ≥2 日」擋住「單日翻買就接刀」，M4 用「1–5 日」抓法人剛轉買的早段。
+    # 逐股取日序列後套 contrarian.trailing_buy_streak_days（單一定義，不在此另寫一套邏輯）。
+    if (
+        institutional is not None
+        and not institutional.is_empty()
+        and {"date", "stock_id", "foreign_net"}.issubset(institutional.columns)
+    ):
+        from tw_screener.analysis.contrarian import trailing_buy_streak_days
+
+        seq = (
+            institutional.select("date", "stock_id", "foreign_net")
+            .sort(["stock_id", "date"])
+            .group_by("stock_id", maintain_order=True)
+            .agg(pl.col("foreign_net").alias("_nets"))
+        )
+        streak_map = {
+            str(r["stock_id"]): trailing_buy_streak_days(r["_nets"])
+            for r in seq.iter_rows(named=True)
+        }
+        stock_df = stock_df.with_columns(
+            pl.col("stock_id")
+            .replace_strict(streak_map, default=None, return_dtype=pl.Int64)
+            .alias("foreign_inflection_days")
+        )
+    else:
+        # 誠實 null：沒有逐日法人序列就不知道連買幾天，不記 0（0 的語意是「最新日沒買」）
+        stock_df = stock_df.with_columns(
+            pl.lit(None, dtype=pl.Int64).alias("foreign_inflection_days")
+        )
+
     # MA20 / MA60 距離 + MA60 斜率（% 偏離最新收盤價 / 季線上揚率）—— 不足則 null
     g_params = {**_DEFAULT_G_PULLBACK, **(g_pullback or {})}
     ma_dist_df = _compute_ma_dist(

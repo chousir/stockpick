@@ -529,3 +529,81 @@ def test_stop_delay_summary_and_section_render_without_samples():
     body = "\n".join(render_stop_delay_section(stop_delay_ledger(picks, px)))
     assert "停損延遲帳" in body
     assert "停損價無法解析 1" in body
+
+
+# ── M1.6 左側解禁回收條款（委託書 M1.6）──────────────────────────────────
+
+
+def _recall_picks() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "week": ["2026-W31", "2026-W31", "2026-W32"],
+            "stock_id": ["1101", "1102", "1103"],
+            "layer": ["opportunity", "opportunity", "core"],
+            "thesis_tag": ["左側M-BR1 賣壓熄＋貼低", "外資三窗同買", "D+E 主升"],
+        }
+    )
+
+
+def _recall_returns(left_alpha: float, gen_alpha: float, left_ret: float) -> pl.DataFrame:
+    """兩筆 opportunity：1101＝左側票、1102＝一般機會層。"""
+    return pl.DataFrame(
+        {
+            "week_tag": ["2026-W31", "2026-W31"],
+            "stock_id": ["1101", "1102"],
+            "strategy_id": ["opportunity", "opportunity"],
+            "status": ["matured", "matured"],
+            "return_pct": [left_ret, 5.0],
+            "excess_return_pct": [left_alpha, gen_alpha],
+        }
+    )
+
+
+def test_contrarian_recall_warns_only_when_alpha_and_winrate_both_worse():
+    from tw_screener.backtest.picks_outcome import contrarian_recall_check
+
+    by_hold = {2: _recall_returns(-4.0, 3.0, -6.0), 4: _recall_returns(-5.0, 2.0, -8.0)}
+    # 門檻用 min_picks=1 逼到 eligible；α 與勝率皆較差 → 警告
+    chk = contrarian_recall_check(_recall_picks(), by_hold, min_picks=1)
+    assert chk["n_left"] == 1
+    assert chk["eligible"] is True
+    assert chk["warn"] is True
+
+    # α 較差但勝率不差（左側票也是正報酬）→ 不警告（兩者須同時劣化）
+    by_hold_win = {2: _recall_returns(-4.0, 3.0, 2.0), 4: _recall_returns(-5.0, 2.0, 1.0)}
+    assert contrarian_recall_check(_recall_picks(), by_hold_win, min_picks=1)["warn"] is False
+
+
+def test_contrarian_recall_not_eligible_below_threshold():
+    """未達 10 筆／12 週門檻 → 即使數字難看也不宣告回收（避免小樣本亂殺）。"""
+    from tw_screener.backtest.picks_outcome import contrarian_recall_check
+
+    by_hold = {2: _recall_returns(-4.0, 3.0, -6.0)}
+    chk = contrarian_recall_check(_recall_picks(), by_hold, min_picks=10, min_weeks=12)
+    assert chk["eligible"] is False
+    assert chk["warn"] is False
+
+
+def test_contrarian_recall_does_not_judge_on_empty_group():
+    """一般機會層無到期樣本 → 不判定，不用空集合宣告左側劣化。"""
+    from tw_screener.backtest.picks_outcome import (
+        contrarian_recall_check,
+        render_contrarian_recall_section,
+    )
+
+    only_left = pl.DataFrame(
+        {
+            "week_tag": ["2026-W31"],
+            "stock_id": ["1101"],
+            "strategy_id": ["opportunity"],
+            "status": ["matured"],
+            "return_pct": [-9.0],
+            "excess_return_pct": [-9.0],
+        }
+    )
+    chk = contrarian_recall_check(_recall_picks(), {2: only_left}, min_picks=1)
+    assert chk["warn"] is False
+    assert "不判定" in str(chk["note"])
+    body = "\n".join(render_contrarian_recall_section(chk))
+    assert "兩條件桶" in body  # 證據狀態必須印在報表上，不得寫成「未驗證」
+    assert "未驗證" not in body

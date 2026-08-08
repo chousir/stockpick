@@ -1,17 +1,27 @@
-"""M-BR1 底部左側偵測揭露欄（規劃書 24）——賣壓熄火 × 基本面完好 × 貼近結構低。
+"""M-BR1 底部左側偵測（規劃書 24）——賣壓熄火 × 基本面完好 × 貼近結構低。
 
-四個純函式對應規格 §2 的三欄與 §4.1 的組合 tag，全部**純揭露非 gate**。
+純函式對應規格 §2 的三欄、§4.1 的組合 tag，以及委託書 M1.1 的防接刀補強
+（`trailing_buy_streak_days` / `contrarian_entry_ready`）。
 
 存在意義：docs/22 §2 已證 flow_turn（退潮/資金回流）三窗 CI 全跨 0、無前瞻證據，
 「退潮→降級」舊讀法作廢。「賣壓熄→可逢低」直覺同屬未證實類——本模組把它做成
 **可被回測證偽的欄位**，而不是再加一條沒證據的門檻（重蹈 flow_turn 覆轍是本規格
 最要避免的失敗）。
 
-**Phase 2 已否證（docs/24 §3.1・2026-07-22）**：面板 point-in-time 重建（201 週上市
-宇宙）測「轉買×貼近低」聯合桶，桶 **lift（打敗當日全宇宙均值）r+20 = −2.30%**、CI95
-[−3.52,−1.26]、walk-forward 1/5 為正、進攻/中性 regime 皆顯著負——三門檻全未過。故
-`contrarian_base` **定案為描述 tag、永不升 gate、不寫入 picks**（同 flow_turn 進否證檔）。
-四欄仍保留供人工觀察與未來複核，但舉證責任在證明有 edge。
+**Phase 2 已否證（docs/24 §3.1・2026-07-22）——這筆紀錄不因後續解禁而失效**：
+面板 point-in-time 重建（201 週上市宇宙、命中 2,477 股×週）測「轉買 × 貼近低」
+**兩條件**聯合桶，桶 **lift（打敗當日全宇宙均值）r+20 = −2.30%**、CI95
+[−3.52,−1.26]、walk-forward 1/5 為正、進攻/中性 regime 皆顯著負——三門檻全未過。
+
+**2026-08-08 人工解禁（Steven 裁決 A，docs/24 §6）**：合格左側票（＝三條件 tag ＋
+防接刀兩條，見 `contrarian_entry_ready`）以**小注進機會層、永不核心**。這是
+**人工裁決、不是新證據**——被否證的是兩條件桶，委託書口徑的三條件桶（再加
+`fundamental_health`）因該欄無歷史而**從未被直接檢驗**。正確表述恆為
+**「兩條件桶已否證；三條件桶未測，且先驗不利」**，任何產物都不得寫成「未驗證」
+或「回測完成前」。解禁對價＝M1.6 自動回收條款（pick_outcome 對 thesis 前綴
+「左側M-BR1」分層記帳，劣化即印回收警告）；回退＝
+`settings.contrarian_base.picks_unblocked: false` 一行，不刪碼。
+**舉證責任仍在證明有 edge，不在證明沒有。**
 
 與 grouping.near_flow_state 的分工（docs/24 §2.2）：`flow_state` 結構上是**買方旗標**
 （要求 20 日淨買超 ≥ min_shares，20 日為負時回 None，天生表達不了「由賣轉買」）；
@@ -21,6 +31,8 @@
 """
 
 from __future__ import annotations
+
+from collections.abc import Sequence
 
 # flow_inflection 值域（docs/24 §2.2）：買賣方向由近 5 日淨額正負決定，
 # 「加速 vs 轉向/熄火」由近 5 日日均相對 20 日日均的步調決定。
@@ -192,14 +204,86 @@ def is_contrarian_base(
     inflection: str | None,
     proximity: str | None,
 ) -> bool:
-    """M-BR1 §4.1：三條件同時成立＝底部左側候選（**描述 tag，Phase 2 通過前不進 picks**）。
+    """M-BR1 §4.1：三條件同時成立＝底部左側候選（**描述 tag**）。
 
     基本面 ∈ {強化,穩健} ∧ 流向＝轉買（賣壓熄）∧ 位階 ∈ {在低,貼低}。
     負例保護（docs/24 §6 回歸測試意圖）：京元電子（20 日買超但近端加速賣）與
     聯發科（跌深但 YoY +2.8%＝減速）**必須為 False**——證明分類器沒退化成「跌深就接」。
+
+    本欄本身**仍只是描述 tag**；能不能進 picks 由 `contrarian_entry_ready`（加防接刀
+    兩條）＋ settings 解禁開關決定，見該函式 docstring 與 docs/24 §6。
     """
     return (
         health in _CONTRARIAN_HEALTH
         and inflection == FLOW_TURN_BUY
         and proximity in _CONTRARIAN_PROXIMITY
     )
+
+
+def trailing_buy_streak_days(daily_nets: Sequence[float | None]) -> int | None:
+    """尾端連續買超天數＝由最新日往回數，連續幾天淨額 > 0。
+
+    同時服務兩處（同一個欄，不重複定義）：
+      - M1.1 防接刀：`外資近5日轉買且連 ≥2 交易日` 的「連 ≥2」由此計。
+      - M4.1 `foreign_inflection_days`：外資由賣轉買後連續買超天數（1–3＝剛轉折、
+        數字大＝已買一段＝尾段）。
+
+    Args:
+        daily_nets: 逐日淨買賣超（股），**由舊到新排序**。None 值視為中斷（不猜）。
+
+    Returns:
+        連續天數（最新日非買超 → 0）；序列為空 → None（無資料，不記 0）。
+    """
+    if not daily_nets:
+        return None
+    streak = 0
+    for net in reversed(daily_nets):
+        if net is None or net <= 0:
+            break
+        streak += 1
+    return streak
+
+
+def contrarian_entry_ready(
+    contrarian: bool,
+    buy_streak_days: int | None,
+    dist_low_60d_pct: float | None,
+    min_buy_streak_days: int = 2,
+    new_low_eps_pct: float = 0.0,
+) -> bool:
+    """M1.1 防接刀補強：`contrarian_base` ＋兩條硬條件＝可進機會層的左側票。
+
+    委託書 M1.1 第二段：`不破 low_60d 新低` ∧ `外資近5日轉買且連 ≥2 交易日`；
+    任一不成立 → 留描述 tag、不進 picks。
+
+    **證據狀態（讀這欄前必看，docs/24 §3.1／§6）**：`轉買 × 貼低` 這個**兩條件桶**
+    已在 2026-07-22 的面板重建檢驗中**被否證**（201 週上市宇宙、命中 2,477 股×週，
+    lift(r+20) = −2.30%、CI95 [−3.52,−1.26]、walk-forward 1/5 為正、進攻與中性
+    regime 皆顯著負）。本函式判定的是它的**真子集**（再加基本面完好＋連買≥2 日＋
+    不破新低），而 `fundamental_health` 因 `revenue_*.parquet` 只有 3 個報告月、
+    **無歷史可回測**，故三條件桶**未被直接檢驗**。誠實表述＝
+    **「兩條件桶已否證；三條件桶未測，且先驗不利（其父集合顯著落後宇宙）」**——
+    不得寫成「未驗證」或「回測完成前」。
+
+    上線依據是 **2026-08-08 Steven 的人工裁決 A**（非統計證據），對價是 M1.6 自動
+    回收條款；`settings.contrarian_base.picks_unblocked: false` 一行即回退為描述 tag。
+
+    Args:
+        contrarian: `is_contrarian_base` 的結果（三條件描述 tag）。
+        buy_streak_days: 外資尾端連續買超天數（`trailing_buy_streak_days`）；
+            None＝法人資料缺 → 不合格（缺資料不放行）。
+        dist_low_60d_pct: 距 60 日低%；None＝位階不明 → 不合格。
+        min_buy_streak_days: 連續買超天數下限（settings，預設 2）。
+        new_low_eps_pct: 距 60 日低須 **>** 此值才算「未破新低」（settings，預設 0）。
+            `low_60d` 的窗含當日，故 dist=0 ＝當日收盤就是 60 日新低＝仍在破底。
+
+    Returns:
+        True＝合格左側票（機會層小注、永不核心）。
+    """
+    if not contrarian:
+        return False
+    if buy_streak_days is None or buy_streak_days < min_buy_streak_days:
+        return False
+    if dist_low_60d_pct is None or dist_low_60d_pct <= new_low_eps_pct:
+        return False
+    return True

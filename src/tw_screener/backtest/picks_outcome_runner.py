@@ -29,7 +29,9 @@ def run_picks_outcome(
     from tw_screener.analysis.rotation import load_market_history
     from tw_screener.analysis.sector_universe import list_subindustries
     from tw_screener.backtest.picks_outcome import (
+        _CONTRARIAN_RECALL_HORIZONS,
         compute_todate_returns,
+        contrarian_recall_check,
         counterfactual_summary,
         layer_summary,
         render_outcome_report,
@@ -105,14 +107,14 @@ def run_picks_outcome(
         "name",
         pl.col("layer").alias("strategy_id"),
     )
-    frames = [
-        compute_forward_returns(
+    def _forward(w: int) -> pl.DataFrame:
+        return compute_forward_returns(
             screens_like, market, hold_weeks=w, dividends=dividends,
             trading_days_per_week=tdpw, clip_daily_return_pct=clip,
         )
-        for w in weeks
-    ]
-    frames = [f for f in frames if not f.is_empty()]
+
+    by_hold = {w: _forward(w) for w in sorted(set(weeks) | set(_CONTRARIAN_RECALL_HORIZONS))}
+    frames = [by_hold[w] for w in weeks if not by_hold[w].is_empty()]
     hold_summary = strategy_summary(pl.concat(frames) if frames else pl.DataFrame())
 
     diff_df = None
@@ -132,11 +134,26 @@ def run_picks_outcome(
     # M3.1 停損延遲帳：條件單語意 vs 週頻覆核的執行價差
     stop_delay = stop_delay_ledger(picks, market)
 
+    # M1.6 左側解禁回收條款：左側票 vs 一般機會層的 r+10/r+20 α 與勝率
+    cb = cfg.get("contrarian_base", {}) or {}
+    since_raw = cb.get("recall_unblocked_since")
+    recall = contrarian_recall_check(
+        picks, by_hold,
+        prefix=str(cb.get("thesis_prefix", "左側M-BR1")),
+        min_picks=int(cb.get("recall_min_picks", 10)),
+        min_weeks=int(cb.get("recall_min_weeks", 12)),
+        unblocked_since=(
+            since_raw if isinstance(since_raw, _date)
+            else _date.fromisoformat(str(since_raw)) if since_raw else None
+        ),
+        as_of=cut,
+    )
+
     data_range = (market["date"].min(), market["date"].max())
     report = render_outcome_report(
         todate, layers, weekly_core, hold_summary, counterfactual, excluded_todate,
         missing, cut, data_range, diff=diff_df, min_sample_warn=min_sample_warn,
-        stop_delay=stop_delay,
+        stop_delay=stop_delay, contrarian_recall=recall,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     tag = _date.today().strftime("%Y%m%d")
@@ -185,6 +202,13 @@ def run_picks_outcome(
             f"  停損延遲帳：無可量測樣本（未觸發 {counts['not_triggered']}／"
             f"未到覆核點 {counts['pending_review']}／停損價無法解析 {counts['unparsed']}）"
         )
+    if recall["warn"]:
+        console.print(
+            "  [bold red]🔴 左側解禁回收警告[/bold red]：α 與勝率同時劣於一般機會層"
+            "（詳報告 §7）——回退＝settings.contrarian_base.picks_unblocked: false"
+        )
+    else:
+        console.print(f"  左側解禁記帳：{recall['n_left']} 筆（詳報告 §7）")
 
 
 def run_picks_brief(settings: Path, week: str | None = None) -> None:

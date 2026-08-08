@@ -220,3 +220,22 @@ def test_load_legacy_csv_without_late_entry_column_backfills_false(tmp_path):
     assert out.row(0, named=True)["late_entry"] is False
     # load_all_picks 也要能吃舊檔不爆炸
     assert load_all_picks(tmp_path).height == 1
+
+
+# ── M1.5 左側票 F2 行為鎖測（委託書 M1.5）────────────────────────────────
+
+
+def test_f2_passes_negative_ma60_dist_for_contrarian_picks():
+    """左側票 ma60_dist 天然為負（趨勢仍破）——F2 只擋「延伸太遠」那側，須自動通過。
+
+    委託書 M1.5 的兩條要求逐條鎖住，防日後有人把 F2 改成雙側門檻而悄悄封死左側腿。
+    """
+    for ext in (-0.4, -6.0, -24.9, -40.0):
+        assert core_extension_violation("core", ext, 15.0) is None
+        assert core_extension_violation("opportunity", ext, 15.0) is None
+
+
+def test_f2_missing_ma60_dist_never_blocks_write():
+    """乖離缺值不得擋寫（M1.5）——由呼叫端警告「位階無法查核」後如實記錄。"""
+    assert core_extension_violation("core", None, 15.0) is None
+    assert core_extension_violation("opportunity", None, 15.0) is None

@@ -867,6 +867,7 @@ def _build_enriched_rows(
         return []
     from tw_screener.analysis.contrarian import (
         base_proximity,
+        contrarian_entry_ready,
         dist_to_low_pct,
         flow_inflection,
         fundamental_health,
@@ -930,6 +931,11 @@ def _build_enriched_rows(
     cb_weak_yoy = float(cb.get("weak_yoy_pct", 5))
     cb_decel_deep = float(cb.get("decel_deep_pct", -30))
     cb_thin_margin = float(cb.get("thin_margin_pct", 5))
+    # 委託書 M1（裁決 A・2026-08-08 人工解禁）：contrarian_ready 是唯一會影響 picks 的欄，
+    # picks_unblocked 一行改 false 即整欄恆 False、回退成純描述（不刪碼，docs/24 §6）。
+    cb_unblocked = bool(cb.get("picks_unblocked", False))
+    cb_min_streak = int(cb.get("min_buy_streak_days", 2))
+    cb_new_low_eps = float(cb.get("new_low_eps_pct", 0.0))
 
     def _num(v: object, nd: int = 1) -> float | None:
         if v is None or (isinstance(v, float) and v != v):
@@ -1103,6 +1109,15 @@ def _build_enriched_rows(
             dist_low_60, at_low_pct=cb_at_low, near_low_pct=cb_near_low, mid_pct=cb_mid
         )
         contrarian = is_contrarian_base(fund_health, foreign_infl, proximity)
+        # 委託書 M1.1 防接刀補強：三條件 tag ＋「外資連 ≥N 日買」＋「未破 60 日新低」
+        # ＝可進機會層的合格左側票（小注、永不核心）。settings 一行可回退（picks_unblocked）。
+        # 證據狀態＝兩條件桶已否證、三條件桶未測（docs/24 §3.1/§6），不得寫成「未驗證」。
+        fid = r.get("foreign_inflection_days")
+        foreign_streak = int(fid) if fid is not None else None
+        contrarian_ready = cb_unblocked and contrarian_entry_ready(
+            contrarian, foreign_streak, dist_low_60,
+            min_buy_streak_days=cb_min_streak, new_low_eps_pct=cb_new_low_eps,
+        )
 
         # 除息還原：5 日視窗內現金股利已加回 momentum_5d（修假負）；標旗供人工查證
         ex_div_cash = _num(r.get("ex_div_cash"), 2)
@@ -1185,8 +1200,8 @@ def _build_enriched_rows(
                 # M-WS5a 揭露欄（純揭露非 gate、獨立於 flags 排雷欄）
                 "base_zone": base_zone,          # WS5-①：貼底（距季線 ≤ 門檻＝起漲 base 位階）／空
                 "sector_flag_note": "",          # WS5-②：sector-wide 旗標覆蓋度註記（post-pass 填）
-                # M-BR1 底部左側揭露欄（規劃書 24）：純揭露非 gate、未過 docs/24 §3 因子檢驗
-                # 前 contrarian_base 恆為描述 tag、不進 picks（避免 sync 當成建倉結論）
+                # M-BR1 底部左側欄（規劃書 24）：contrarian_base 及其上游四欄**恆為描述 tag**；
+                # 唯一會影響 picks 的是 contrarian_ready（委託書 M1・2026-08-08 人工解禁）
                 "rev_yoy_delta": _num(yoy_delta, 1),   # 本月 YoY − 上月 YoY（動能二階導）；缺月＝空
                 "fundamental_health": fund_health,     # 強化/穩健/減速/轉差/待查（水準×加速度拆開）
                 # 轉買/熄火/加速賣/轉賣/加速買/平穩；null＝兩窗量皆小或法人缺漏
@@ -1197,6 +1212,11 @@ def _build_enriched_rows(
                 "dist_low_60d_pct": dist_low_60,   # 距 60 日低%——把「跌深」與「跌到結構」區分開
                 "base_proximity": proximity,       # 在低(≤2%)/貼低(≤5%)/中段/高檔
                 "contrarian_base": contrarian,     # 三條件同時成立＝底部左側候選（描述 tag）
+                # M1.1／M4.1 共用欄：外資尾端連續買超天數（1–3＝剛轉折、大＝已買一段＝尾段）
+                "foreign_inflection_days": foreign_streak,
+                # M1 合格左側票＝contrarian_base ∧ 連買≥N日 ∧ 未破 60 日新低 ∧ 已解禁。
+                # True＝可進「機會層・左側M-BR1 小注」子表（永不核心）；證據狀態見 docs/24 §6
+                "contrarian_ready": contrarian_ready,
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
             }
         )
@@ -1310,6 +1330,8 @@ _CANONICAL_REUSE_FIELDS = (
     "dist_low_60d_pct",
     "base_proximity",
     "contrarian_base",
+    "foreign_inflection_days",
+    "contrarian_ready",
 )
 
 

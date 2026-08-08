@@ -606,6 +606,152 @@ def render_stop_delay_section(ledger: pl.DataFrame) -> list[str]:
     return lines
 
 
+# ── M1.6 左側解禁自動回收條款（委託書 M1.6・裁決 A 的必要對價）──────────────
+#
+# 裁決 A 是**人工覆寫**，不是新證據：被 docs/24 §3.1 否證的是「轉買 × 貼低」兩條件桶
+# （201 週、2,477 股×週、lift r+20 −2.30%），委託版三條件桶未被直接檢驗。這本帳就是
+# 對價——左側票單獨記帳，α 與勝率同時劣於一般機會層即印回收警告。
+#
+# 統計效力誠實話：門檻是 10 筆／12 週，對上已否證的 2,477 樣本**極不對稱**。這本帳
+# 能抓到的是「明顯很糟」，抓不到「小幅為負」；它是煞車，不是裁決依據。
+_CONTRARIAN_RECALL_HORIZONS = (2, 4)  # hold_weeks → 對應 r+10 / r+20（tdpw=5）
+
+
+def contrarian_recall_check(
+    picks: pl.DataFrame,
+    returns_by_hold: dict[int, pl.DataFrame],
+    prefix: str = "左側M-BR1",
+    min_picks: int = 10,
+    min_weeks: int = 12,
+    unblocked_since: date | None = None,
+    as_of: date | None = None,
+) -> dict[str, object]:
+    """M1.6：左側票（thesis 前綴）vs 一般機會層的 r+10/r+20 α 與勝率對照。
+
+    Args:
+        picks: pick_store 底帳（需 week／stock_id／layer／thesis_tag）。
+        returns_by_hold: {hold_weeks: compute_forward_returns 輸出}（strategy_id＝layer）。
+        prefix: 左側票的 thesis 前綴（settings.contrarian_base.thesis_prefix）。
+        min_picks / min_weeks: 任一達標即進入判定（委託書 M1.6）。
+        unblocked_since: 解禁日，用來算已過週數。
+        as_of: 判定基準日（預設今天）。
+
+    Returns:
+        dict：n_left／weeks_elapsed／eligible／warn／rows（逐窗對照）／note。
+        **warn 只在「已達判定門檻 ∧ 兩組皆有樣本 ∧ α 與勝率同時較差」時為 True**——
+        任一組樣本為空 → 不判（不用空集合宣告劣化）。
+    """
+    out: dict[str, object] = {
+        "n_left": 0, "weeks_elapsed": None, "eligible": False,
+        "warn": False, "rows": [], "note": "",
+    }
+    if picks.is_empty() or not {"layer", "thesis_tag", "week", "stock_id"} <= set(picks.columns):
+        out["note"] = "底帳缺 layer／thesis_tag 欄——無法分層記帳"
+        return out
+
+    left = picks.filter(
+        (pl.col("layer") == "opportunity")
+        & pl.col("thesis_tag").is_not_null()
+        & pl.col("thesis_tag").str.starts_with(prefix)
+    )
+    left_keys = {(str(r["week"]), str(r["stock_id"])) for r in left.iter_rows(named=True)}
+    out["n_left"] = len(left_keys)
+
+    if unblocked_since is not None:
+        ref = as_of or date.today()
+        out["weeks_elapsed"] = max((ref - unblocked_since).days // 7, 0)
+    weeks_elapsed = cast(int | None, out["weeks_elapsed"])
+    out["eligible"] = len(left_keys) >= min_picks or (
+        weeks_elapsed is not None and weeks_elapsed >= min_weeks
+    )
+
+    rows: list[dict[str, object]] = []
+    worse_alpha = worse_win = True
+    comparable = 0
+    for hold in _CONTRARIAN_RECALL_HORIZONS:
+        df = returns_by_hold.get(hold)
+        if df is None or df.is_empty():
+            continue
+        valid = df.filter(
+            (pl.col("status") == "matured")
+            & pl.col("return_pct").is_not_null()
+            & (pl.col("strategy_id") == "opportunity")
+        )
+        if valid.is_empty():
+            continue
+        is_left = pl.struct("week_tag", "stock_id").map_elements(
+            lambda s: (str(s["week_tag"]), str(s["stock_id"])) in left_keys,
+            return_dtype=pl.Boolean,
+        )
+        tagged = valid.with_columns(is_left.alias("_left"))
+        for label, sub in (
+            ("左側M-BR1", tagged.filter(pl.col("_left"))),
+            ("一般機會層", tagged.filter(~pl.col("_left"))),
+        ):
+            rows.append({
+                "horizon_td": hold * 5,
+                "group": label,
+                "n": sub.height,
+                "alpha_pct": (
+                    float(cast(float, sub["excess_return_pct"].mean()))
+                    if sub.height and sub["excess_return_pct"].null_count() < sub.height
+                    else None
+                ),
+                "win_rate": (
+                    float(cast(float, (sub["return_pct"] > 0).mean())) if sub.height else None
+                ),
+            })
+        lf, gf = rows[-2], rows[-1]
+        if lf["n"] and gf["n"] and lf["alpha_pct"] is not None and gf["alpha_pct"] is not None:
+            comparable += 1
+            worse_alpha &= cast(float, lf["alpha_pct"]) < cast(float, gf["alpha_pct"])
+            worse_win &= cast(float, lf["win_rate"]) < cast(float, gf["win_rate"])
+    out["rows"] = rows
+    if not comparable:
+        out["note"] = "兩組尚無可對照的到期樣本——不判定（不用空集合宣告劣化）"
+        return out
+    out["warn"] = bool(out["eligible"] and worse_alpha and worse_win)
+    return out
+
+
+def render_contrarian_recall_section(check: dict[str, object]) -> list[str]:
+    """M1.6 回收條款的報表段（render_outcome_report §7）。"""
+    lines = [
+        "## 7. 左側解禁記帳（M1.6 回收條款）",
+        "",
+        "> 2026-08-08 裁決 A 以**人工覆寫**解禁 M-BR1 左側票進機會層（小注、永不核心）。"
+        "被 docs/24 §3.1 否證的是「轉買 × 貼低」**兩條件桶**（201 週、2,477 股×週、",
+        "> lift r+20 −2.30%、CI95 [−3.52,−1.26]）；委託版**三條件桶未測、且先驗不利**。"
+        "本段是解禁的對價——α 與勝率同時劣於一般機會層即印回收警告。",
+        "> ⚠️ **統計效力不對稱**：判定門檻 10 筆／12 週 vs 已否證的 2,477 樣本。"
+        "本帳是煞車，抓得到「明顯很糟」，抓不到「小幅為負」。",
+        "",
+        f"- 左側票累積 **{check['n_left']}** 筆"
+        + (f"；解禁後 {check['weeks_elapsed']} 週" if check["weeks_elapsed"] is not None else "")
+        + f"；判定門檻{'已' if check['eligible'] else '未'}達成",
+    ]
+    rows = cast(list[dict[str, object]], check["rows"])
+    if not rows:
+        lines += ["", f"> {check['note'] or '尚無到期樣本——本段僅佔位。'}", ""]
+        return lines
+    lines += ["", "| 窗 | 組 | n | α vs 大盤 | 勝率 |", "|---|---|---|---|---|"]
+    for r in rows:
+        a = f"{cast(float, r['alpha_pct']):+.2f}pp" if r["alpha_pct"] is not None else "—"
+        w = f"{cast(float, r['win_rate']):.0%}" if r["win_rate"] is not None else "—"
+        lines.append(f"| r+{r['horizon_td']} | {r['group']} | {r['n']} | {a} | {w} |")
+    if check["warn"]:
+        lines += [
+            "",
+            "> 🔴 **左側解禁回收警告**：α 與勝率在所有可對照窗皆劣於一般機會層，且已達判定"
+            "門檻。依 M1.6，週報必印本警告；回退動作＝把 "
+            "`settings.contrarian_base.picks_unblocked` 改 `false`（一行，不刪碼）。",
+        ]
+    elif check["note"]:
+        lines += ["", f"> {check['note']}"]
+    lines.append("")
+    return lines
+
+
 def week_over_week_diff(
     picks: pl.DataFrame, enriched_by_week: dict[str, pl.DataFrame] | None = None
 ) -> pl.DataFrame:
@@ -701,8 +847,10 @@ def render_outcome_report(
     diff: pl.DataFrame | None = None,
     min_sample_warn: int = 20,
     stop_delay: pl.DataFrame | None = None,
+    contrarian_recall: dict[str, object] | None = None,
 ) -> str:
-    """pick 閉環 markdown 報告（PO2 快照＋持有窗、PO4 偽陰性、PO3 翻轉解剖、M3.1 停損延遲）。"""
+    """pick 閉環 markdown 報告（PO2 快照＋持有窗、PO4 偽陰性、PO3 翻轉解剖、M3.1 停損延遲、
+    M1.6 左側解禁記帳）。"""
     d0, d1 = data_range
     n_weeks = todate["week"].n_unique() if not todate.is_empty() else 0
     lines = [
@@ -831,6 +979,8 @@ def render_outcome_report(
 
     if stop_delay is not None:
         lines += ["", *render_stop_delay_section(stop_delay)]
+    if contrarian_recall is not None:
+        lines += ["", *render_contrarian_recall_section(contrarian_recall)]
 
     return "\n".join(lines)
 
