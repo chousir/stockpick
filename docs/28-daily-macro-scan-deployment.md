@@ -2,6 +2,12 @@
 
 > 對應委託書 `propicks_完整規劃委託書_FINAL_20260808.md` M9。**文件交付，不寫進本 repo 程式**。
 > 上游規格：docs/27 §2（M8 宏觀窄橋）、docs/26（外部掃描不進 pipeline 的理由）。
+>
+> **⚠️ 2026-08-09 起，本檔描述的「獨立網頁 project」方案已被 `/macro-scan`＋`/daily-picks`
+> 取代為預設路徑**（見 docs/26 §9 Q2、docs/11 Step B、`.claude/commands/daily-picks.md`）。
+> 掃描直接在 Claude Code CLI 內跑、輸出的 YAML 自動落地成 `macro_risk_latest.yaml`，不必再
+> 另開網頁 project 手動複製貼上。**本檔內容保留不刪**，作為「手邊沒有 CLI、只能用手機/瀏覽器
+> 開 claude.ai 跑掃描」時的手動替代做法；§2 的 YAML schema 與三態容錯規則兩邊共用，沒有分岔。
 
 ## 0. 為什麼要「雙軌」而不是把 17 項指標接進 pipeline
 

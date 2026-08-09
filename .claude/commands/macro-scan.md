@@ -116,9 +116,42 @@ USD/TWD、USD/JPY。
 - **與本專案燈號的並列對照**：一句話說明「本掃描的姿態」vs「`make macro` 燈色」是同向還是背離；
   背離時**只描述背離事實與可能原因，不裁決誰對**（docs/25 §0 不合成鐵則）。
 
+### 7. 機器摘要（供 `/daily-picks` 消費，選配）
+
+若這次掃描是 `/daily-picks` 呼叫的（或你自己想順手產一份），在報告最後**再加一段**——
+不是取代前面六段，是多附一個 fenced code block，直接複用第 5 段「賣出觸發狀態追蹤」已經
+算出來的 `triggers_hit`／`hits`／已求值項數，序列化成：
+
+```yaml
+macro_risk:
+  date: YYYY-MM-DD        # 本次掃描依據的資料基準日（不是你回答的日期）
+  triggers_hit: 2          # 第 5 段 7 項硬閾值中，判定為已觸發的項數
+  of: 5                    # 7 項中實際判定得出的項數（抓不到的不算進來）
+  hits: [HY_spread, margin_debt_mom]   # 已觸發者，固定代號：
+                            # VIX / margin_debt_mom / HY_spread / fng_rollover
+                            # / ad_divergence / bofa_bull_bear / insider_ratio
+  vix: 18.3                # VIX 當前值；未取得寫 null
+  fng: 41                  # CNN Fear & Greed 當前值；未取得寫 null
+```
+
+規則（跟本檔規則 2/7 一致，不是新東西）：
+1. `triggers_hit` 必須與第 5 段表格計數一致，不得另算。
+2. **`of` 是「已求值項數」，不是常數 7**——7 項裡通常有 1–2 項抓不到，那些不計入
+   `triggers_hit`，也不計入 `of`。`of` 誠實寫小，下游（`analysis/macro_risk.py` 的
+   coverage 警語）才會正確出現；寫死 7 會讓「0–2 觸發」被誤讀成「風險已清」。
+3. `hits` 只用上面列的固定代號，不要自創。
+4. 找不到就寫 `null`，不接受推測值。
+5. 只輸出這 6 個鍵，不加 `conclusion`／`action`／建議句——這段是給機器讀的數字搬運，
+   不是給人看的結論（結論在前面六段）。
+6. **這仍然是 `research/macro_scan/<日期>.md` 這份檔案裡的一段，不是新檔案**——沒有違反
+   規則 8。要不要把它寫進 `reports/<週次>/macro_risk_latest.yaml` 是呼叫方（`/daily-picks`
+   或你自己）的事，不是這個指令的職責。
+
 ## 節奏建議
 
-與週報同節奏（每週一次）即可，急變時人工加跑。**不設自動排程、不掛 `make week`**
-（需要網路搜尋，make 跑不了；且掃描結果未經驗證，不該進主流程）。
+預設透過 `/daily-picks` 每日觸發（它會在跑完 `make week` 之後呼叫這個程序一次）。
+你也可以隨時單獨手動跑 `/macro-scan`，跟 `/daily-picks` 的呼叫互不影響、想多久跑一次都可以；
+急變時加跑同理。**仍然不設自動排程、不掛進 `make` 的任何 target**（需要網路搜尋，
+make 跑不了；且掃描結果未經驗證，不該進主流程本身）。
 第一次跑沒有歷史基準，變化箭頭只能用各指標自己的近期序列推——跑滿幾輪後對比才有意義，
 所以每次都要落檔（同一天重跑就覆蓋同一個檔名，不要產生多份）。
