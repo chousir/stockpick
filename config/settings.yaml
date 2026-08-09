@@ -361,6 +361,10 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     min_sample_warn: 20          # 樣本低於此 → 報表標「僅供方向性、未達顯著」
     min_subind_members: 3        # 次產業同窗有價成員低於此 → 族群超額標 null（樣本太小）
     brief_filename: pick_outcome_brief.md  # WS-A3 上週 r+5 brief 檔名（寫進最新週報目錄）
+    # 委託書 M6 excluded 分桶回饋帳的前瞻窗（交易日）。r+5 一窗判不出「剔除是不是錯了」
+    # ——裁決 B 的持有週期是 2–6 週，r+20 才貼近實際持有期，故兩窗並列。
+    # 每窗都並排同窗 picks 平均當基準（沒有基準的桶平均會在多頭週製造偽陰性錯覺）。
+    brief_bucket_horizons_td: [5, 20]
     output_dir: research/pick_outcome
   panel:                     # WS-A2 ground-truth 面板（make build-panel）：因子實驗台資料底盤
     history_days: 1220           # 載入日線快取的回看交易日數（W28 二輪：≈2021-08 起載入，含指標暖身）

@@ -991,6 +991,9 @@ def render_weekly_brief(
     week: str,
     data_date: date | None,
     horizon_td: int = 5,
+    bucket_ledger: pl.DataFrame | None = None,
+    stop_summary: dict[str, object] | None = None,
+    bucket_horizons: tuple[int, ...] = (5, 20),
 ) -> str:
     """WS-A3 一頁 brief：上週 picks r+{h}／α／勝率＋excluded 偽陰性（進下週輸入包）。
 
@@ -1007,15 +1010,20 @@ def render_weekly_brief(
         "- 用途：下週選股輸入包的「上週結果回饋」一頁；完整分層/反事實帳見季度 "
         "`make pick-outcome`。",
         "",
+        # M6：決策卡固定一行。放最上面＝週報 prompt 抄一行就好，不必讀完整頁。
+        weekly_ledger_line(
+            picks_r, bucket_ledger if bucket_ledger is not None else pl.DataFrame(),
+            stop_summary, horizon_td,
+        ),
+        "",
     ]
-    valid = (
-        picks_r.filter((pl.col("status") == "matured") & pl.col("return_pct").is_not_null())
-        if not picks_r.is_empty()
-        else pl.DataFrame()
+    bucket_lines = render_excluded_buckets(
+        bucket_ledger if bucket_ledger is not None else pl.DataFrame(), bucket_horizons
     )
+    valid = _matured(picks_r)
     if valid.is_empty():
         lines.append("> picks r+5 尚無到期樣本（快取未跨窗）——本頁僅佔位，資料到齊自動補。")
-        return "\n".join(lines)
+        return "\n".join(lines + bucket_lines)
 
     def _fmean(df: pl.DataFrame, col: str) -> float:
         v = df[col].mean()
@@ -1085,4 +1093,192 @@ def render_weekly_brief(
                     )
                 ],
             ]
-    return "\n".join(lines)
+    return "\n".join(lines + bucket_lines)
+
+
+# ── M6 偽陰性帳上決策卡（委託書 M6）─────────────────────────────────────────
+
+_BUCKET_SCHEMA: dict[str, type[pl.DataType]] = {
+    "reason": pl.Utf8,
+    "horizon_td": pl.Int64,
+    "n": pl.Int64,
+    "n_beat_market": pl.Int64,
+    "avg_return_pct": pl.Float64,
+    "picks_avg_return_pct": pl.Float64,
+    "gap_pp": pl.Float64,
+}
+
+
+def excluded_bucket_ledger(
+    returns_by_horizon: dict[int, tuple[pl.DataFrame, pl.DataFrame]],
+) -> pl.DataFrame:
+    """M6 每個 excluded `reason` 桶 × 各前瞻窗的報酬，並排同窗 picks 平均。
+
+    Args:
+        returns_by_horizon: {交易日窗: (picks_returns, excluded_returns)}——兩者皆
+            `compute_forward_returns` 輸出，`strategy_id` 分別承載 layer／剔除 reason。
+
+    Returns:
+        `_BUCKET_SCHEMA` 長表，每列＝(reason, horizon)。`gap_pp`＝該桶平均 − 同窗
+        picks 平均：**正值＝剔除掉的比選進來的還會漲**（偽陰性代價）。
+
+    為什麼要並排 picks 而不是只看桶內絕對報酬：整週大盤漲 3% 時，剔除桶 +2% 看起來
+    「漏掉了」，但同期 picks +5%——剔除其實是對的。沒有同窗基準的桶平均會系統性地
+    製造「早知道就別剔除」的錯覺（docs/22 §2 flow_turn 的同型錯誤）。
+
+    受控詞彙（docs/11）讓桶數收斂在 10 種內；詞彙自由發揮＝每桶 1–2 筆、統計碎裂。
+    """
+    rows: list[dict] = []
+    for h in sorted(returns_by_horizon):
+        picks_r, excl_r = returns_by_horizon[h]
+        pv = _matured(picks_r)
+        ev = _matured(excl_r)
+        if ev.is_empty():
+            continue
+        picks_avg = (
+            float(cast(float, pv["return_pct"].mean() or 0.0)) if not pv.is_empty() else None
+        )
+        grouped = ev.group_by("strategy_id").agg(
+            pl.len().alias("n"),
+            (pl.col("excess_return_pct") > 0).sum().alias("n_beat_market"),
+            pl.col("return_pct").mean().alias("avg_return_pct"),
+        )
+        for r in grouped.iter_rows(named=True):
+            avg = float(r["avg_return_pct"]) if r["avg_return_pct"] is not None else None
+            rows.append({
+                "reason": str(r["strategy_id"]),
+                "horizon_td": int(h),
+                "n": int(r["n"]),
+                "n_beat_market": int(r["n_beat_market"]),
+                "avg_return_pct": avg,
+                "picks_avg_return_pct": picks_avg,
+                "gap_pp": (
+                    round(avg - picks_avg, 2)
+                    if avg is not None and picks_avg is not None
+                    else None
+                ),
+            })
+    if not rows:
+        return pl.DataFrame(schema=_BUCKET_SCHEMA)
+    return pl.DataFrame(rows, schema=_BUCKET_SCHEMA).sort(
+        ["horizon_td", "gap_pp"], descending=[False, True], nulls_last=True
+    )
+
+
+def _matured(df: pl.DataFrame) -> pl.DataFrame:
+    if df.is_empty() or "status" not in df.columns:
+        return pl.DataFrame()
+    return df.filter(
+        (pl.col("status") == "matured") & pl.col("return_pct").is_not_null()
+    )
+
+
+def worst_bucket(ledger: pl.DataFrame, horizon_td: int = 5) -> dict[str, object] | None:
+    """該窗「最痛」的剔除桶＝`gap_pp` 最大者（剔除掉的比選進來的漲最多）。
+
+    回 None＝該窗沒有可判讀的桶（無到期樣本／picks 同窗無基準）。**不回傳「最痛桶
+    ＝空」的假象**：呼叫端要印「未取得」而不是印 0。
+    """
+    if ledger.is_empty():
+        return None
+    sub = ledger.filter(
+        (pl.col("horizon_td") == horizon_td) & pl.col("gap_pp").is_not_null()
+    ).sort("gap_pp", descending=True)
+    if sub.is_empty():
+        return None
+    return dict(sub.row(0, named=True))
+
+
+def weekly_ledger_line(
+    picks_returns: pl.DataFrame,
+    ledger: pl.DataFrame,
+    stop_summary: dict[str, object] | None = None,
+    horizon_td: int = 5,
+) -> str:
+    """M6 決策卡固定一行「上週帳」（委託書 M6／M7 patch-4）。
+
+    格式：`**上週帳**：picks r+5 中位 ○%｜excluded 最痛桶「○○」r+5 ○%（漏 N 檔）｜
+    停損延遲成本 ○%`。三格各自獨立降級為「未取得」——**任何一格缺資料都不編數字，
+    也不讓整行消失**（整行消失＝週報少一行沒人會發現；印「未取得」才會被追）。
+    """
+    pv = _matured(picks_returns)
+    if pv.is_empty():
+        picks_cell = f"picks r+{horizon_td} 中位 未取得"
+    else:
+        med = pv["return_pct"].median()
+        picks_cell = (
+            f"picks r+{horizon_td} 中位 {float(cast(float, med)):+.1f}%（n={pv.height}）"
+            if med is not None
+            else f"picks r+{horizon_td} 中位 未取得"
+        )
+
+    wb = worst_bucket(ledger, horizon_td)
+    if wb is None:
+        bucket_cell = "excluded 最痛桶 未取得（該窗無到期剔除樣本或無 picks 基準）"
+    else:
+        bucket_cell = (
+            f"excluded 最痛桶「{wb['reason']}」r+{horizon_td} "
+            f"{float(cast(float, wb['avg_return_pct'])):+.1f}%"
+            f"（vs picks {float(cast(float, wb['picks_avg_return_pct'])):+.1f}%、"
+            f"漏 {wb['n_beat_market']}/{wb['n']} 檔跑贏大盤）"
+        )
+
+    avg_cost = (stop_summary or {}).get("avg_cost_pct")
+    if avg_cost is None:
+        # 「未取得」要說得出為什麼——0 筆可量測多半是停損欄寫成「跌破季線」這類
+        # 抽不出絕對價的敘述（M3／patch-2 正是要修這件事），不寫出來就沒人會去改。
+        counts = cast("dict[str, int]", (stop_summary or {}).get("counts") or {})
+        n_all = sum(counts.values())
+        stop_cell = (
+            f"停損延遲成本 未取得（{n_all} 筆中 0 筆可量測）" if n_all
+            else "停損延遲成本 未取得"
+        )
+    else:
+        n_meas = (stop_summary or {}).get("n_measured", 0)
+        stop_cell = f"停損延遲成本 {float(cast(float, avg_cost)):+.2f}%（n={n_meas}）"
+
+    return f"**上週帳**：{picks_cell}｜{bucket_cell}｜{stop_cell}"
+
+
+def render_excluded_buckets(
+    ledger: pl.DataFrame, horizons: tuple[int, ...] = (5, 20)
+) -> list[str]:
+    """M6 brief 的「excluded 分桶回饋帳」段。無資料時印缺席原因，不省略整段。"""
+    lines = ["", "## excluded 分桶回饋帳（委託書 M6）", ""]
+    if ledger.is_empty():
+        lines.append(
+            "> **回饋帳缺席**：該週無 excluded 到期樣本（或底帳無 excluded 紀錄）。"
+            "本段不編數字。"
+        )
+        return lines
+    lines += [
+        "- `gap`＝該桶平均 − **同窗 picks 平均**：**正＝剔除掉的比選進來的還會漲**"
+        "（偽陰性代價）；負＝剔除是對的。只看桶內絕對報酬會在多頭週系統性製造"
+        "「早知道就別剔除」的錯覺，故一律並排基準。",
+        "- 樣本量小（多數桶個位數）＝**趨勢參考、非統計結論**；受控詞彙見 docs/11。",
+        "",
+        "| 窗 | 剔除理由 | n | 跑贏大盤 | 桶平均 | 同窗 picks | gap |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    missing: list[int] = []
+    for h in horizons:
+        sub = ledger.filter(pl.col("horizon_td") == h)
+        if sub.is_empty():
+            missing.append(h)
+            continue
+        for r in sub.iter_rows(named=True):
+            lines.append(
+                f"| r+{h} | {r['reason']} | {r['n']} | {r['n_beat_market']} "
+                f"| {_pct(r['avg_return_pct'])} | {_pct(r['picks_avg_return_pct'])} "
+                f"| {_pct(r['gap_pp'])} |"
+            )
+    if missing:
+        # 某窗整個消失＝沒人會發現的資料缺口。明寫比默默少一段誠實。
+        lines += [
+            "",
+            "> **"
+            + "／".join(f"r+{h}" for h in missing)
+            + " 該窗尚無到期樣本**（日線快取未跨到該窗終點）——非「無偽陰性」，"
+            "是**還沒到期**，資料到齊會自動補上。",
+        ]
+    return lines

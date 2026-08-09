@@ -224,7 +224,12 @@ def run_picks_brief(settings: Path, week: str | None = None) -> None:
     import yaml
 
     from tw_screener.analysis.rotation import load_market_history
-    from tw_screener.backtest.picks_outcome import render_weekly_brief
+    from tw_screener.backtest.picks_outcome import (
+        excluded_bucket_ledger,
+        render_weekly_brief,
+        stop_delay_ledger,
+        stop_delay_summary,
+    )
     from tw_screener.backtest.strategies import compute_forward_returns
     from tw_screener.data.twse import load_recent_dividends
     from tw_screener.report.pick_store import load_all_excluded, load_all_picks, week_dirs
@@ -262,7 +267,7 @@ def run_picks_brief(settings: Path, week: str | None = None) -> None:
         load_recent_dividends(cache_dir, since) if isinstance(since, date) else pl.DataFrame()
     )
 
-    def _returns(rows: pl.DataFrame, tag_col: str) -> pl.DataFrame:
+    def _returns(rows: pl.DataFrame, tag_col: str, hold_weeks: int = 1) -> pl.DataFrame:
         if rows.is_empty():
             return pl.DataFrame()
         screens_like = rows.select(
@@ -273,7 +278,7 @@ def run_picks_brief(settings: Path, week: str | None = None) -> None:
             pl.col(tag_col).alias("strategy_id"),
         )
         return compute_forward_returns(
-            screens_like, market, hold_weeks=1, dividends=dividends,
+            screens_like, market, hold_weeks=hold_weeks, dividends=dividends,
             trading_days_per_week=tdpw, clip_daily_return_pct=clip,
         )
 
@@ -337,8 +342,37 @@ def run_picks_brief(settings: Path, week: str | None = None) -> None:
     picks_r = _attach_late_entry(picks_r, picks, target_week)
     excl_r = _attach_late_entry(excl_r, excluded_all, target_week)
 
-    dd = picks.filter(pl.col("week") == target_week)["data_date"]
+    # M6 分桶回饋帳（委託書 M6）：excluded 各 reason 桶 r+5／r+20 vs 同窗 picks。
+    # 裁決 B 的持有週期是 2–6 週，r+5 一窗判不出「剔除是不是錯了」——r+20 才貼近實際
+    # 持有期。兩窗都算，並在表上並排同窗 picks 基準（避免多頭週的偽陰性錯覺）。
+    week_picks = picks.filter(pl.col("week") == target_week)
+    week_excl = (
+        excluded_all.filter(pl.col("week") == target_week)
+        if not excluded_all.is_empty()
+        else pl.DataFrame()
+    )
+    bucket_horizons: tuple[int, ...] = tuple(
+        int(h) for h in pk.get("brief_bucket_horizons_td", [5, 20])
+    )
+    by_h: dict[int, tuple[pl.DataFrame, pl.DataFrame]] = {}
+    for h_td in bucket_horizons:
+        hw = max(1, round(h_td / tdpw))
+        by_h[h_td] = (
+            _returns(week_picks, "layer", hold_weeks=hw),
+            _returns(week_excl, "reason", hold_weeks=hw),
+        )
+    bucket_ledger = excluded_bucket_ledger(by_h)
+
+    # M3.1 停損延遲帳的一行摘要＝「上週帳」第三格。只算本週 picks（brief 是週頻回饋，
+    # 全期帳在季度 make pick-outcome 的 §6）。
+    stop_sum = stop_delay_summary(stop_delay_ledger(week_picks, market))
+
+    dd = week_picks["data_date"]
     data_date = dd[0] if dd.len() else None
-    report = render_weekly_brief(picks_r, excl_r, target_week, data_date, horizon_td=tdpw)
+    report = render_weekly_brief(
+        picks_r, excl_r, target_week, data_date, horizon_td=tdpw,
+        bucket_ledger=bucket_ledger, stop_summary=stop_sum,
+        bucket_horizons=bucket_horizons,
+    )
     out_path.write_text(report, encoding="utf-8")
     console.print(f"[green]pick brief（{target_week}）→ {out_path}[/green]")
