@@ -961,3 +961,29 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **首跑就抓到兩件舊面板看不見的事**：`STLFSI4` 金融壓力 **p3 → p39（↑+35.8p）**、`DEXJPUS` 163.71 → 159.16（**↓-4.55**，日圓一週走強約 2.8%）；同時 `DGS20` 維持 p99 但**變化是「→ -0.3p」**，正是 §5.1 說的高原而非急衝。
 
 **下一步 / 明確不做**：C 案（Put/Call＋FINRA＋CAPE 爬蟲進面板）**不排期**，解凍條件寫在 docs/26 §6.3（A 案累積 ≥ 半年、一次只加一項、若日後要升級為計分訊號必須先過 BAA10Y 同規格 block-bootstrap）。Q1 開放項：`DGS20` 要不要換 transform 或移出面板——本輪不動，等面板歷史累積後再判（改揭露面板設計依 docs/25 前例應有實測依據）。分支待 merge 進 main（鐵律 3，待使用者拍板）。
+
+---
+
+## 強化 v3（委託書 FINAL_20260808・feat/enhance-v3）— 2026-08-09
+
+9 個 module（M3→M1→M2→M8→M4→M5→M6→M7→M9）依委託書順序落地，一 module 一 commit。
+**結案報告＝docs/29-強化v3實施報告.md**（含總驗收清單、差異清單、誠實帳）；
+M2/M8 的規格在 docs/27，M9 部署說明在 docs/28，M1 的人工解禁記錄在 docs/24 §6。
+
+- **M1** 左側逆勢 `contrarian_ready` 進機會層（裁決 A 人工解禁，**非統計證據**）＋M1.6 回收條款
+- **M2** 投降洗盤 `market_washout`（四子項反向 flag，2026-07-30 回放觸發驗收過）
+- **M3** 停損延遲帳（條件單語意 vs 週頻覆核的執行價差）→ `make pick-outcome` §6
+- **M4** 轉折早段三欄＋候選源 E `inflection_ambush.md`
+- **M5** 深值成長 tag `deep_value_growth`
+- **M6** excluded 分桶 r+5/r+20 ＋決策卡「上週帳」一行
+- **M7** 六個 patch 併入 docs/11 ProPicks prompt
+- **M8/M9** 宏觀窄橋 `macro_risk_latest.yaml` 三態容錯＋每日掃描 project 部署說明
+
+**驗收**：`pytest 1038 passed`、mypy 47＝main 基線零淨增、ruff 僅剩 1 個 pre-existing；
+`make week GROUP=defg` 全鏈實跑產出 M1/M2/M4/M5 產物，`make pick-outcome-brief` 產出 M6。
+
+**已知風險（未修，列下一輪候選）**：日線快取密度在 2026-07 那段每日成員數從 647 跳到
+6409，等權大盤基準因此失真——M2 內部已用 `dense_days()` 守門，但 `regime`／`rotation`
+／M6 的 α 欄仍承接該風險，讀 brief 的 α 與「跑贏大盤」時只看桶間相對比較。詳見 docs/29 §4-③。
+
+**分支待 merge 進 main（鐵律 3，待使用者拍板）。**
