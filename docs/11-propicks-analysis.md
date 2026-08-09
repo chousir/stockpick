@@ -36,6 +36,10 @@ reports/YYYY-Www/
   ├─ sector_rotation.md                    ← ★資金輪動地圖（全次產業資金流向/四象限/★訊號・對照 Section 2.8）
   ├─ candidates_enriched.csv               ← ★全候選股 × 完整技術/籌碼欄位（主要挑股宇宙）
   ├─ cp_candidates.md                      ← ★個股 CP 補漲候選＋C2 三重濾網（錢進＋沒漲＋相對便宜・對照 Section 6）
+  ├─ inflection_ambush.md                  ← ★轉折埋伏候選源 E（委託書 M4.2：法人剛開始買、價格仍在低位階）※零命中週也會產出
+  ├─ inflection_ambush.csv                 ← ⚙️ 同上合格清單機器檔（合格 0 檔時不產）・不必貼
+  ├─ inflection_ambush_near_miss.csv       ← ⚙️ 「只差一條」完整名單（md 只列前 15 檔）・不必貼
+  ├─ macro_risk_latest.yaml                ← ☆每日美股風險掃描摘要（裁決 D 窄橋・**人工貼進來**，非 make week 產；缺席合法，見 docs/27 §2）
   ├─ holdings_enriched.csv                 ← ★我的庫存（含買入價/報酬率，必分析・見任務 0）※有維護才產
   ├─ watchlist_enriched.csv                ← ★我的觀察清單（必分析・見任務 0）※有維護才產
   ├─ screen_result_d_quality_leader.csv    ← D 全部入選（原始）
@@ -54,7 +58,7 @@ reports/YYYY-Www/
 
 ### Step C：依序貼入檔案內容
 
-順序：先 prompt → 再 group_analysis.md → 再 **sector_rotation.md** → 再 **candidates_enriched.csv** → 再 **cp_candidates.md** → 再 **holdings/watchlist_enriched.csv（若有）** → 再 4 個 CSV（D/E/F/G）。
+順序：先 prompt → 再 group_analysis.md → 再 **sector_rotation.md** → 再 **candidates_enriched.csv** → 再 **cp_candidates.md** → 再 **inflection_ambush.md** → 再 **holdings/watchlist_enriched.csv（若有）** → 再 4 個 CSV（D/E/F/G）→ 最後 **macro_risk_latest.yaml（若當週有貼）**。
 
 ### Step D：等 Claude 回覆，存到本週目錄
 

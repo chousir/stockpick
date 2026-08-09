@@ -134,6 +134,7 @@ report:
       - trend_leaders.csv      # F3 趨勢領頭板（sector rotation 一併產出）
       - theme_strength.csv
       - cp_candidates.md
+      - inflection_ambush.md   # M4.2 候選源 E（委託書 M4）：零命中週也會產出，缺檔＝該步驟失敗
     analyst:                      # 分析師產物——往週缺＝斷供 WARNING（W26 型）；最新週缺＝提醒
       - pick.md                   # excluded.csv 不列：當週可能真無旗標剔除，缺檔合法
       - picks.csv
@@ -472,6 +473,21 @@ regime:                        # 規劃書 03 V2 大盤 regime 總控閘門（ma
   thresholds:                  # 連續分數 regime_score ∈ [-1, 1] 切三態
     attack: 0.33               # ≥ 此值＝進攻
     defense: -0.33             # ≤ 此值＝防禦；之間＝中性
+
+inflection:                    # 委託書 M4 主排序去落後化：轉折早段描述欄＋候選源 E「轉折埋伏」
+                               # 全部**純揭露非 gate**（沿 F5／M-WS5a／M-BR1 pattern）：
+                               # 不改排序、不改剔除、不自動進 picks；清單只 surfacing 給人逐檔過。
+  margin_slim_flat_pct: -1.0   # M4.1 融資減肥：融資近5日減 ∧ 近5日漲幅 ≥ 此%（「平或漲」的容忍下界）
+  ambush_near_low_pct: 10.0    # M4.2 位階：距 60 日低 ≤ 此% 算貼底（比 M1 左側的 ≤5% 寬——候選源非進場資格）
+  ambush_inflection_days: [1, 5]  # M4.2 外資尾端連買天數區間（數字大＝已買一段＝尾段，正是要避開的）
+  ambush_foreign_20d_small_positive_lots: 5000  # M4.2 20 日外資 ≤ 此張數（「≤0 或小正」的小正上界）
+  # M4.2 位階的第二條分支開關。⚠️ 本 repo 的 base_zone="貼底" ＝**距季線 MA60 ≤ +10%**
+  # （propicks_flags.base_zone_ma60_max_pct，docs/20 §WS5-①），量的是「未延伸／回到季線
+  # base」，**不是「貼近 60 日低點」**——2026-W32 實跑中 7610 距季線 +4.2%（貼底）但距
+  # 60 日低 +133.6%。委託書 M4.2 原式把兩者以「或」並聯，故照實作、不自行收緊；清單以
+  # `位階依據` 欄攤開兩型並讓距低型排前。若判定只要距低型，改 false 即可（不刪碼）。
+  ambush_allow_base_zone_branch: true
+  ambush_near_miss_md_limit: 15  # 「只差一條」段在 md 最多列幾檔（完整名單落 *_near_miss.csv）
 
 macro_risk:                    # 委託書 M8 宏觀窄橋（裁決 D）：消費每日美股風險掃描的機器摘要
                                # **只影響倉位節奏（姿態降級／新倉上限），不影響選股**（不改排序/剔除/燈色）。

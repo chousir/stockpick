@@ -851,6 +851,7 @@ def _build_enriched_rows(
     margin_map: dict | None = None,
     near_flow_cfg: dict | None = None,
     contrarian_cfg: dict | None = None,
+    inflection_cfg: dict | None = None,
     rev_yoy_delta_map: dict | None = None,
 ) -> list[dict]:
     """組「每檔 × 技術/籌碼/估值/基本面 + flags」列（candidates / 庫存 / 觀察 共用）。
@@ -874,6 +875,7 @@ def _build_enriched_rows(
         is_contrarian_base,
     )
     from tw_screener.analysis.grouping import classify_risk_kind, near_flow_state, rank_themes
+    from tw_screener.analysis.inflection import flow_diff_5_20, margin_slim
 
     themes_long = themes_long if themes_long is not None else pl.DataFrame()
     ranked = rank_themes(members, themes_long)
@@ -936,6 +938,8 @@ def _build_enriched_rows(
     cb_unblocked = bool(cb.get("picks_unblocked", False))
     cb_min_streak = int(cb.get("min_buy_streak_days", 2))
     cb_new_low_eps = float(cb.get("new_low_eps_pct", 0.0))
+    # 委託書 M4.1 轉折早段欄門檻（settings.inflection）
+    m4_slim_flat = float((inflection_cfg or {}).get("margin_slim_flat_pct", -1.0))
 
     def _num(v: object, nd: int = 1) -> float | None:
         if v is None or (isinstance(v, float) and v != v):
@@ -1114,6 +1118,13 @@ def _build_enriched_rows(
         # 證據狀態＝兩條件桶已否證、三條件桶未測（docs/24 §3.1/§6），不得寫成「未驗證」。
         fid = r.get("foreign_inflection_days")
         foreign_streak = int(fid) if fid is not None else None
+        # M4.1 轉折早段三欄（全描述性）：加速度 × 剛轉買天數 × 融資減肥。
+        # foreign_inflection_days 已在上面備妥（與 M1.1 防接刀共用同一欄，不重複定義）。
+        flow_diff = {
+            p: flow_diff_5_20(_lots(r.get(f"{p}_net_5d")), _lots(r.get(f"{p}_net")))
+            for p in ("foreign", "trust", "inst")
+        }
+        slim = margin_slim(margin_chg_5d_lots, mom, flat_pct=m4_slim_flat)
         contrarian_ready = cb_unblocked and contrarian_entry_ready(
             contrarian, foreign_streak, dist_low_60,
             min_buy_streak_days=cb_min_streak, new_low_eps_pct=cb_new_low_eps,
@@ -1214,6 +1225,13 @@ def _build_enriched_rows(
                 "contrarian_base": contrarian,     # 三條件同時成立＝底部左側候選（描述 tag）
                 # M1.1／M4.1 共用欄：外資尾端連續買超天數（1–3＝剛轉折、大＝已買一段＝尾段）
                 "foreign_inflection_days": foreign_streak,
+                # M4.1 轉折早段描述欄（純揭露非 gate）：近5日 −（20日/4）＝流入加速度。
+                # 正且放大＝早段；20 日大正但此欄負＝法人建倉尾段（主排序落後化的解藥）
+                "foreign_flow_diff_5_20": flow_diff["foreign"],
+                "trust_flow_diff_5_20": flow_diff["trust"],
+                "inst_flow_diff_5_20": flow_diff["inst"],
+                # 融資減肥：融資近5日減 ∧ 價格近5日平或漲＝籌碼洗清（上櫃無融資資料＝null）
+                "margin_slim": slim,
                 # M1 合格左側票＝contrarian_base ∧ 連買≥N日 ∧ 未破 60 日新低 ∧ 已解禁。
                 # True＝可進「機會層・左側M-BR1 小注」子表（永不核心）；證據狀態見 docs/24 §6
                 "contrarian_ready": contrarian_ready,
@@ -1242,6 +1260,7 @@ def write_candidates_enriched_csv(
     margin_map: dict | None = None,
     near_flow_cfg: dict | None = None,
     contrarian_cfg: dict | None = None,
+    inflection_cfg: dict | None = None,
     rev_yoy_delta_map: dict | None = None,
 ) -> list[dict]:
     """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
@@ -1256,7 +1275,8 @@ def write_candidates_enriched_csv(
         members, themes_long, screener_results, flags_cfg, rev_yoy_map,
         fundamentals_map, valuation_map, big_holder_map, margin_map,
         near_flow_cfg=near_flow_cfg,
-        contrarian_cfg=contrarian_cfg, rev_yoy_delta_map=rev_yoy_delta_map,
+        contrarian_cfg=contrarian_cfg, inflection_cfg=inflection_cfg,
+        rev_yoy_delta_map=rev_yoy_delta_map,
     )
     if not rows:
         return []
@@ -1332,6 +1352,11 @@ _CANONICAL_REUSE_FIELDS = (
     "contrarian_base",
     "foreign_inflection_days",
     "contrarian_ready",
+    # M4.1 轉折早段三欄：重疊股沿用 candidates 那筆，三份 CSV 讀數一致
+    "foreign_flow_diff_5_20",
+    "trust_flow_diff_5_20",
+    "inst_flow_diff_5_20",
+    "margin_slim",
 )
 
 
@@ -1351,6 +1376,7 @@ def write_named_list_csv(
     canonical_rows: dict[str, dict] | None = None,
     near_flow_cfg: dict | None = None,
     contrarian_cfg: dict | None = None,
+    inflection_cfg: dict | None = None,
     rev_yoy_delta_map: dict | None = None,
 ) -> int:
     """輸出庫存/觀察清單 enriched CSV（同 candidates 欄位）。
@@ -1364,7 +1390,8 @@ def write_named_list_csv(
         members, themes_long, screener_results, flags_cfg, rev_yoy_map,
         fundamentals_map, valuation_map, big_holder_map, margin_map,
         near_flow_cfg=near_flow_cfg,
-        contrarian_cfg=contrarian_cfg, rev_yoy_delta_map=rev_yoy_delta_map,
+        contrarian_cfg=contrarian_cfg, inflection_cfg=inflection_cfg,
+        rev_yoy_delta_map=rev_yoy_delta_map,
     )
     if not rows:
         return 0

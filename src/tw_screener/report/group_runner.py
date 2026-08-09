@@ -402,7 +402,8 @@ def run_group_analysis(settings: Path) -> None:
         fundamentals_map=fundamentals_map, valuation_map=valuation_map,
         big_holder_map=big_holder_map, margin_map=margin_map,
         near_flow_cfg=cfg.get("near_flow", {}),  # F5 近端籌碼揭露欄（沿舊 06 NF1）
-        contrarian_cfg=cfg.get("contrarian_base", {}),  # M-BR1 底部左側揭露欄（規劃書 24）
+        contrarian_cfg=cfg.get("contrarian_base", {}),  # M-BR1 底部左側欄（規劃書 24／委託書 M1）
+        inflection_cfg=cfg.get("inflection", {}),      # M4.1 轉折早段欄（委託書 M4）
         rev_yoy_delta_map=rev_yoy_delta_map,
     )
     # 重疊股重用：庫存/觀察清單同檔一律沿用 candidates 那筆，避免跨 CSV 量比/集中度/成交額分岔
@@ -411,6 +412,51 @@ def run_group_analysis(settings: Path) -> None:
 
     console.print(f"[green]報告輸出：{output_path}[/green]")
     console.print(f"  全候選股完整欄位 CSV：{csv_path}（{n_cand} 檔，供 ProPicks 全宇宙挑股）")
+
+    # M4.2 轉折埋伏候選源 E（委託書 M4.2）：法人剛開始買、價格還在底部。
+    # 必須在 enriched 之後跑（四個條件全依賴 enriched 欄）——這也是它沒能塞進
+    # cp_candidates.md 的原因（那步在 ⑧、早於本步 ⑨），見 report/inflection_ambush.py docstring。
+    try:
+        from tw_screener.report.inflection_ambush import (
+            build_inflection_ambush,
+            render_inflection_ambush,
+        )
+
+        icfg = cfg.get("inflection", {}) or {}
+        near_low = float(icfg.get("ambush_near_low_pct", 10.0))
+        days_rng = tuple(int(x) for x in icfg.get("ambush_inflection_days", [1, 5]))[:2]
+        small_pos = float(icfg.get("ambush_foreign_20d_small_positive_lots", 5000))
+        allow_bz = bool(icfg.get("ambush_allow_base_zone_branch", True))
+        nm_limit = int(icfg.get("ambush_near_miss_md_limit", 15))
+        qualified, near_miss = build_inflection_ambush(
+            _pl.DataFrame(cand_rows) if cand_rows else _pl.DataFrame(),
+            near_low_pct=near_low,
+            inflection_days_range=(days_rng[0], days_rng[1]),
+            small_positive_lots=small_pos,
+            allow_base_zone_branch=allow_bz,
+        )
+        amb_path = output_path.parent / "inflection_ambush.md"
+        amb_path.write_text(
+            render_inflection_ambush(
+                qualified, near_miss, week_tag, near_low,
+                (days_rng[0], days_rng[1]), small_pos,
+                near_miss_limit=nm_limit,
+            ),
+            encoding="utf-8",
+        )
+        if not qualified.is_empty():
+            qualified.write_csv(output_path.parent / "inflection_ambush.csv")
+        # md 截斷了 near_miss，完整名單只在 csv——不落檔就等於資料消失
+        if not near_miss.is_empty():
+            near_miss.write_csv(
+                output_path.parent / "inflection_ambush_near_miss.csv"
+            )
+        console.print(
+            f"  轉折埋伏候選（M4.2）：{amb_path}（合格 {qualified.height} 檔、"
+            f"只差一條 {near_miss.height} 檔）"
+        )
+    except Exception as exc:  # noqa: BLE001 — 候選源 E 非主流程關鍵路徑，壞了不擋週報
+        console.print(f"[yellow]  轉折埋伏清單產出失敗（不影響其他產物）：{exc}[/yellow]")
 
     # 庫存與觀察清單（必分析）→ enrich 成 reports 下 2 個 CSV
     from tw_screener.report.group_report import write_named_list_csv
@@ -443,7 +489,8 @@ def run_group_analysis(settings: Path) -> None:
             big_holder_map=big_holder_map, margin_map=margin_map,
             holdings_map=hmap, canonical_rows=canonical_rows,
             near_flow_cfg=cfg.get("near_flow", {}),
-            contrarian_cfg=cfg.get("contrarian_base", {}),  # M-BR1（規劃書 24）
+            contrarian_cfg=cfg.get("contrarian_base", {}),  # M-BR1（規劃書 24／委託書 M1）
+            inflection_cfg=cfg.get("inflection", {}),      # M4.1（委託書 M4）
             rev_yoy_delta_map=rev_yoy_delta_map,
         )
         console.print(f"[green]  {label}_enriched.csv：{n} 檔 → {out_csv}[/green]")
