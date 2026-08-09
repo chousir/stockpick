@@ -987,3 +987,30 @@ M2/M8 的規格在 docs/27，M9 部署說明在 docs/28，M1 的人工解禁記�
 ／M6 的 α 欄仍承接該風險，讀 brief 的 α 與「跑贏大盤」時只看桶間相對比較。詳見 docs/29 §4-③。
 
 **分支待 merge 進 main（鐵律 3，待使用者拍板）。**
+
+---
+
+## 週報系統覆盤 prompt（docs/30・分支 `feat/retro-review-prompt`）— 2026-08-09
+
+使用者要一份能反覆套用的「照 pick.md 買會不會賺、哪裡該改、漏抓了什麼賺錢股、停損政策合不
+合理、抓到起漲點還是尾聲」的覆盤 prompt——模型化 `research/pick_outcome/self_review_20260808.md`
+那次 ad hoc 覆盤，變成 docs/30 這份可重複跑的規格＋`/retro-review` slash command。
+
+- **docs/30-pick-outcome-retro-review.md**：唯一規格來源，9 個任務依序輸出（買了賺不賺／方
+  向判讀對不對／個股贏家輸家／偽陰性漏網之魚／停損政策／起漲點還是尾聲／流程缺口／改進建
+  議／信心分級小結）。**季頻**（跟 docs/08:832 既有的門檻校準三角同節奏，非週頻——r+20 一
+  個月才到期，週頻樣本量撐不起結論）。
+- **`playbook/60`「覆盤例外」段**：對已實現、可查核的過去判斷可下明確對/錯結論，不受
+  「不下單一結論、多空並陳」限制；forward-looking 報告仍受原規則約束。這是把
+  `self_review_20260808.md` 已經在做、但先前沒有規則依據的做法補上文字，不是新開先例。
+- **已知缺口，誠實列出、不假裝解決**：現有 `stop_delay_ledger` 只能比較「立即停損 vs 晚一
+  週停損」兩個近端出場價，**答不了「停損後有沒有反彈回本」**——這題本輪覆盤寫「未取得」，
+  要真的回答需要幫 `stop_delay_ledger` 加 `fwd_return_after_stop_pct` 欄位，列為**獨立小
+  milestone**，本輪不做。WS2「漏抓起漲」目錄凍結在 2026-06-09（`STOCK_DAY_ALL` 不可回補），
+  只能當背景案例，不可當本期新證據。
+- **`.claude/commands/retro-review.md`**：跑 `uv run tw-screener picks outcome --diff`＋
+  `make diagnose` 產底稿，委派 Opus 子代理依 docs/30 規格產出
+  `research/pick_outcome/retro_review_<日期>.md`（研究軌，不進 git）。
+
+**下一步**：使用者跑一次驗證輸出品質；`fwd_return_after_stop_pct` code 補強另案評估。分支
+待 merge 進 main（鐵律 3，待使用者拍板）。
