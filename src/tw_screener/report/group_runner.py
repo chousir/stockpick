@@ -404,6 +404,7 @@ def run_group_analysis(settings: Path) -> None:
         near_flow_cfg=cfg.get("near_flow", {}),  # F5 近端籌碼揭露欄（沿舊 06 NF1）
         contrarian_cfg=cfg.get("contrarian_base", {}),  # M-BR1 底部左側欄（規劃書 24／委託書 M1）
         inflection_cfg=cfg.get("inflection", {}),      # M4.1 轉折早段欄（委託書 M4）
+        deep_value_cfg=cfg.get("deep_value", {}),      # M5 深值成長 tag（委託書 M5）
         rev_yoy_delta_map=rev_yoy_delta_map,
     )
     # 重疊股重用：庫存/觀察清單同檔一律沿用 candidates 那筆，避免跨 CSV 量比/集中度/成交額分岔
@@ -491,6 +492,7 @@ def run_group_analysis(settings: Path) -> None:
             near_flow_cfg=cfg.get("near_flow", {}),
             contrarian_cfg=cfg.get("contrarian_base", {}),  # M-BR1（規劃書 24／委託書 M1）
             inflection_cfg=cfg.get("inflection", {}),      # M4.1（委託書 M4）
+            deep_value_cfg=cfg.get("deep_value", {}),      # M5（委託書 M5）
             rev_yoy_delta_map=rev_yoy_delta_map,
         )
         console.print(f"[green]  {label}_enriched.csv：{n} 檔 → {out_csv}[/green]")

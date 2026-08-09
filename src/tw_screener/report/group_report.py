@@ -852,6 +852,7 @@ def _build_enriched_rows(
     near_flow_cfg: dict | None = None,
     contrarian_cfg: dict | None = None,
     inflection_cfg: dict | None = None,
+    deep_value_cfg: dict | None = None,
     rev_yoy_delta_map: dict | None = None,
 ) -> list[dict]:
     """組「每檔 × 技術/籌碼/估值/基本面 + flags」列（candidates / 庫存 / 觀察 共用）。
@@ -876,6 +877,7 @@ def _build_enriched_rows(
     )
     from tw_screener.analysis.grouping import classify_risk_kind, near_flow_state, rank_themes
     from tw_screener.analysis.inflection import flow_diff_5_20, margin_slim
+    from tw_screener.analysis.valuation import deep_value_growth
 
     themes_long = themes_long if themes_long is not None else pl.DataFrame()
     ranked = rank_themes(members, themes_long)
@@ -940,6 +942,11 @@ def _build_enriched_rows(
     cb_new_low_eps = float(cb.get("new_low_eps_pct", 0.0))
     # 委託書 M4.1 轉折早段欄門檻（settings.inflection）
     m4_slim_flat = float((inflection_cfg or {}).get("margin_slim_flat_pct", -1.0))
+    # 委託書 M5 深值成長門檻（settings.deep_value）
+    dv = deep_value_cfg or {}
+    m5_max_pctile = float(dv.get("max_val_pctile", 20.0))
+    m5_min_yoy = float(dv.get("min_rev_yoy_pct", 30.0))
+    m5_min_gm = float(dv.get("min_gross_margin_pct", 25.0))
 
     def _num(v: object, nd: int = 1) -> float | None:
         if v is None or (isinstance(v, float) and v != v):
@@ -1129,6 +1136,13 @@ def _build_enriched_rows(
             contrarian, foreign_streak, dist_low_60,
             min_buy_streak_days=cb_min_streak, new_low_eps_pct=cb_new_low_eps,
         )
+        # M5 深值成長（委託書 M5）：便宜 ∧ 在成長 ∧ 有定價權 ∧ 位階未延伸。
+        # 純描述 tag——把「現制下累積最多排除旗標的那組合」正面標出來，交人逐檔過。
+        dvg = deep_value_growth(
+            val_pctile, ryoy, gross_margin, m60, base_zone,
+            max_pctile=m5_max_pctile, min_yoy_pct=m5_min_yoy,
+            min_gross_margin_pct=m5_min_gm,
+        )
 
         # 除息還原：5 日視窗內現金股利已加回 momentum_5d（修假負）；標旗供人工查證
         ex_div_cash = _num(r.get("ex_div_cash"), 2)
@@ -1232,6 +1246,9 @@ def _build_enriched_rows(
                 "inst_flow_diff_5_20": flow_diff["inst"],
                 # 融資減肥：融資近5日減 ∧ 價格近5日平或漲＝籌碼洗清（上櫃無融資資料＝null）
                 "margin_slim": slim,
+                # M5 深值成長：次位≤20% ∧ YoY≥30% ∧ 毛利≥25% ∧（距季線<0 或 貼底）。
+                # 純描述 tag——命中者進機會層評估段逐檔過（可判不進，不許不看），非 gate
+                "deep_value_growth": dvg,
                 # M1 合格左側票＝contrarian_base ∧ 連買≥N日 ∧ 未破 60 日新低 ∧ 已解禁。
                 # True＝可進「機會層・左側M-BR1 小注」子表（永不核心）；證據狀態見 docs/24 §6
                 "contrarian_ready": contrarian_ready,
@@ -1261,6 +1278,7 @@ def write_candidates_enriched_csv(
     near_flow_cfg: dict | None = None,
     contrarian_cfg: dict | None = None,
     inflection_cfg: dict | None = None,
+    deep_value_cfg: dict | None = None,
     rev_yoy_delta_map: dict | None = None,
 ) -> list[dict]:
     """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
@@ -1276,6 +1294,7 @@ def write_candidates_enriched_csv(
         fundamentals_map, valuation_map, big_holder_map, margin_map,
         near_flow_cfg=near_flow_cfg,
         contrarian_cfg=contrarian_cfg, inflection_cfg=inflection_cfg,
+        deep_value_cfg=deep_value_cfg,
         rev_yoy_delta_map=rev_yoy_delta_map,
     )
     if not rows:
@@ -1357,6 +1376,7 @@ _CANONICAL_REUSE_FIELDS = (
     "trust_flow_diff_5_20",
     "inst_flow_diff_5_20",
     "margin_slim",
+    "deep_value_growth",   # M5：估值/成長/毛利皆為當期橫斷面，重疊股讀數必須一致
 )
 
 
@@ -1377,6 +1397,7 @@ def write_named_list_csv(
     near_flow_cfg: dict | None = None,
     contrarian_cfg: dict | None = None,
     inflection_cfg: dict | None = None,
+    deep_value_cfg: dict | None = None,
     rev_yoy_delta_map: dict | None = None,
 ) -> int:
     """輸出庫存/觀察清單 enriched CSV（同 candidates 欄位）。
@@ -1391,6 +1412,7 @@ def write_named_list_csv(
         fundamentals_map, valuation_map, big_holder_map, margin_map,
         near_flow_cfg=near_flow_cfg,
         contrarian_cfg=contrarian_cfg, inflection_cfg=inflection_cfg,
+        deep_value_cfg=deep_value_cfg,
         rev_yoy_delta_map=rev_yoy_delta_map,
     )
     if not rows:

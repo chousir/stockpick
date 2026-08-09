@@ -218,3 +218,47 @@ def compute_valuation_meta(
         "relative_coverage_pct": round(100 * n_rel / n, 2) if n else 0.0,
         "notes": notes,
     }
+
+
+def deep_value_growth(
+    val_pctile: float | None,
+    rev_yoy_pct: float | None,
+    gross_margin_pct: float | None,
+    ma60_dist_pct: float | None,
+    base_zone: str | None,
+    max_pctile: float = 20.0,
+    min_yoy_pct: float = 30.0,
+    min_gross_margin_pct: float = 25.0,
+) -> bool:
+    """M5 深值成長 tag＝**便宜且在成長、且還沒漲上去**（委託書 M5）。
+
+    四條件同時成立：
+      1. `val_pctile ≤ max_pctile`——次產業內最便宜的一段（0＝同業最便宜）
+      2. `rev_yoy_pct ≥ min_yoy_pct`——確實在成長（不是衰退股的低估值陷阱）
+      3. `gross_margin_pct ≥ min_gross_margin_pct`——有定價權（薄毛利的便宜只是薄毛利）
+      4. `ma60_dist_pct < 0` **或** `base_zone=貼底`——位階還沒延伸
+
+    **要修的病**（委託書 §問題盤點）：現制把估值/成長只當排雷不當進攻——「PE 5–8 倍 ＋
+    YoY 三位數 ＋ 貼 60 日低」的組合在現制下累積最多**排除**旗標（`高PE` 反向、`價格已跌`、
+    `位階延伸` 等），等於系統性地把最便宜的成長股丟掉。本 tag 把這組合**正面**標出來。
+
+    ⚠️ **純描述 tag、非 gate**：不改排序、不改剔除、不自動進 picks。命中者 surfacing 到
+    機會層評估段**逐檔過**——可判不進，不許不看。條件 4 的 `base_zone=貼底`＝距季線
+    MA60 ≤+10%（未延伸），非距低點（語意見 `report/inflection_ambush.py` docstring）；
+    此處與 `ma60_dist_pct < 0` 並聯，兩條都是 MA60 口徑，故無 M4.2 的混用問題。
+
+    本 tag **未經前瞻檢驗**（沿 docs/22 §2 flow_turn、docs/24 §3.1 的教訓：直覺 ≠ 證據）。
+
+    Returns:
+        True＝命中深值成長。任一條缺值即 False（缺資料不放行，同 M1／M4）。
+    """
+    if val_pctile is None or float(val_pctile) > max_pctile:
+        return False
+    if rev_yoy_pct is None or float(rev_yoy_pct) < min_yoy_pct:
+        return False
+    if gross_margin_pct is None or float(gross_margin_pct) < min_gross_margin_pct:
+        return False
+    at_base = (ma60_dist_pct is not None and float(ma60_dist_pct) < 0) or (
+        base_zone == "貼底"
+    )
+    return at_base
