@@ -353,9 +353,18 @@ _STOP_DELAY_SCHEMA: dict[str, type[pl.DataType]] = {
     "weekly_exec_price": pl.Float64,
     "delay_td": pl.Int64,           # 條件單執行日→週頻執行日的交易日數
     "delay_cost_pct": pl.Float64,   # 週頻執行價 / 條件單執行價 − 1（負＝延遲多賠）
+    "fwd_r5_date": pl.Date,         # 條件單執行日後 5 個交易日（停損後有沒有反彈回本用）
+    "fwd_r5_pct": pl.Float64,       # 該日收盤 / 條件單執行價 − 1；正＝停損後反彈、負＝續跌
+    "fwd_r20_date": pl.Date,        # 同上，20 個交易日
+    "fwd_r20_pct": pl.Float64,
     "status": pl.Utf8,              # measured|not_triggered|pending_review|unparsed|no_price
     "stop_text": pl.Utf8,
 }
+
+# 停損後前瞻報酬的量測窗（交易日）——docs/30 任務 5 要問的「停損後有沒有反彈回本」，
+# 跟 delay_cost_pct（比較「立即停損」vs「晚一週停損」兩個近端出場價）是不同的問題：
+# 這裡固定以「條件單執行價」（最早的出場點）為基準往後看，不依賴週頻覆核日是否存在。
+_STOP_FWD_HORIZONS_TD: tuple[int, ...] = (5, 20)
 
 # 停損文字裡的「非價格數字」token（MA60／low20／近5日／−5%／T1…）先遮蔽，
 # 免得「跌破 MA60 20.35」把 60 當成停損價。遮蔽字元刻意不含數字。
@@ -407,6 +416,12 @@ def stop_delay_ledger(
         **除息未還原**：延遲窗通常 ≤10 個交易日，但窗內遇除息會把價差誇大成負——
         renderer 一併標註，季度覆盤時以個案剔除，不在此靜默加回（加回會與
         compute_todate_returns 的口徑混淆）。
+
+        `fwd_r5_pct`／`fwd_r20_pct`：條件單執行價之後 5／20 個交易日的前瞻報酬
+        （docs/30 任務 5 要問的「停損後有沒有反彈回本」，不是延遲成本）。**只要
+        `cond_exec_date` 存在且快取有夠長的後續資料就會算**，不受 status 是否
+        為 measured 影響（不依賴週頻覆核日）；快取不夠長（還沒到期）→ 留 None，
+        不假裝算出來。同樣未還原除息。
     """
     if picks.is_empty() or price_history.is_empty():
         return pl.DataFrame(schema=_STOP_DELAY_SCHEMA)
@@ -452,6 +467,10 @@ def stop_delay_ledger(
             "weekly_exec_price": None,
             "delay_td": None,
             "delay_cost_pct": None,
+            "fwd_r5_date": None,
+            "fwd_r5_pct": None,
+            "fwd_r20_date": None,
+            "fwd_r20_pct": None,
             "status": "unparsed",
             "stop_text": r.get("stop"),
         }
@@ -491,8 +510,22 @@ def stop_delay_ledger(
             base["status"] = "pending_review"  # 訊號日就是快取最後一天，還沒得執行
             rows.append(base)
             continue
-        base["cond_exec_date"] = dates[sig_i + 1]
-        base["cond_exec_price"] = closes[sig_i + 1]
+        cond_i = sig_i + 1
+        cond_exec_price = closes[cond_i]
+        base["cond_exec_date"] = dates[cond_i]
+        base["cond_exec_price"] = cond_exec_price
+
+        # 停損後前瞻報酬——獨立於下面的週頻覆核分支，不依賴 review_dates 是否存在
+        # （回答的是「停損之後有沒有反彈回本」，不是「延遲一週貴不貴」）。
+        for horizon_td, price_key, date_key in (
+            (_STOP_FWD_HORIZONS_TD[0], "fwd_r5_pct", "fwd_r5_date"),
+            (_STOP_FWD_HORIZONS_TD[1], "fwd_r20_pct", "fwd_r20_date"),
+        ):
+            target_i = cond_i + horizon_td
+            if target_i < len(closes) and cond_exec_price > 0:
+                base[date_key] = dates[target_i]
+                base[price_key] = (closes[target_i] / cond_exec_price - 1.0) * 100.0
+            # 否則留 None：可能是還沒到期（快取只到某天），不可假裝算出來
 
         review = next((d for d in review_dates if d > dates[sig_i]), None)
         if review is None:
@@ -507,9 +540,10 @@ def stop_delay_ledger(
             continue
         base["weekly_exec_date"] = dates[wk_i]
         base["weekly_exec_price"] = closes[wk_i]
-        base["delay_td"] = wk_i - (sig_i + 1)
-        cond = closes[sig_i + 1]
-        base["delay_cost_pct"] = (closes[wk_i] / cond - 1.0) * 100.0 if cond > 0 else None
+        base["delay_td"] = wk_i - cond_i
+        base["delay_cost_pct"] = (
+            (closes[wk_i] / cond_exec_price - 1.0) * 100.0 if cond_exec_price > 0 else None
+        )
         base["status"] = "measured" if base["delay_cost_pct"] is not None else "no_price"
         rows.append(base)
 
@@ -519,8 +553,11 @@ def stop_delay_ledger(
 def stop_delay_summary(ledger: pl.DataFrame) -> dict[str, object]:
     """停損延遲帳一行摘要（決策卡「上週帳」的第三格・M6 patch-4 消費）。
 
-    回 dict：n_measured／avg_cost_pct／median_cost_pct／worst_* ＋各 status 計數。
-    無可量測樣本 → n_measured=0、成本欄 None（呼叫端印「未取得」，不印 0%）。
+    回 dict：n_measured／avg_cost_pct／median_cost_pct／worst_* ＋各 status 計數，
+    外加 n_fwd_r5／avg_fwd_r5_pct／median_fwd_r5_pct（r20 同名）——停損後前瞻報酬
+    的母體是「`cond_exec_date` 存在且快取夠長」，**不是** status=="measured"（後者
+    另外要求週頻覆核日存在，兩者是獨立的資格條件，母體通常更大）。
+    無可量測樣本 → 對應欄位 None（呼叫端印「未取得」，不印 0%）。
     """
     counts = {s: 0 for s in ("measured", "not_triggered", "pending_review", "unparsed", "no_price")}
     if not ledger.is_empty():
@@ -539,8 +576,27 @@ def stop_delay_summary(ledger: pl.DataFrame) -> dict[str, object]:
         "median_cost_pct": None,
         "worst_stock": None,
         "worst_cost_pct": None,
+        "n_fwd_r5": 0,
+        "avg_fwd_r5_pct": None,
+        "median_fwd_r5_pct": None,
+        "n_fwd_r20": 0,
+        "avg_fwd_r20_pct": None,
+        "median_fwd_r20_pct": None,
         "counts": counts,
     }
+    for pct_col, n_key, avg_key, median_key in (
+        ("fwd_r5_pct", "n_fwd_r5", "avg_fwd_r5_pct", "median_fwd_r5_pct"),
+        ("fwd_r20_pct", "n_fwd_r20", "avg_fwd_r20_pct", "median_fwd_r20_pct"),
+    ):
+        fwd = (
+            ledger.filter(pl.col(pct_col).is_not_null())
+            if not ledger.is_empty()
+            else pl.DataFrame(schema=_STOP_DELAY_SCHEMA)
+        )
+        out[n_key] = fwd.height
+        if not fwd.is_empty():
+            out[avg_key] = float(cast(float, fwd[pct_col].mean() or 0.0))
+            out[median_key] = float(cast(float, fwd[pct_col].median() or 0.0))
     if measured.is_empty():
         return out
     out["avg_cost_pct"] = float(cast(float, measured["delay_cost_pct"].mean() or 0.0))
@@ -573,35 +629,95 @@ def render_stop_delay_section(ledger: pl.DataFrame) -> list[str]:
     ]
     if s["n_measured"] == 0:
         lines += ["", "> 尚無可量測樣本——本段僅佔位，樣本到齊自動補。", ""]
+    else:
+        lines += [
+            f"- **平均延遲成本 {cast(float, s['avg_cost_pct']):+.2f}%**"
+            f"（中位 {cast(float, s['median_cost_pct']):+.2f}%）"
+            f"；最痛 {s['worst_stock']} {cast(float, s['worst_cost_pct']):+.2f}%",
+            "",
+            "| 週 | 股票 | 停損價 | 訊號日收盤 | 條件單執行 | 週頻覆核執行 "
+            "| 延遲(交易日) | 延遲成本 |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+        measured = ledger.filter(pl.col("status") == "measured").sort("delay_cost_pct")
+        for r in measured.iter_rows(named=True):
+            lines.append(
+                f"| {r['week']} | {r['name'] or r['stock_id']} | {r['stop_price']:.2f} "
+                f"| {r['signal_date']} {r['signal_close']:.2f} "
+                f"| {r['cond_exec_date']} {r['cond_exec_price']:.2f} "
+                f"| {r['weekly_exec_date']} {r['weekly_exec_price']:.2f} "
+                f"| {r['delay_td']} | {r['delay_cost_pct']:+.2f}% |"
+            )
+        unparsed = ledger.filter(pl.col("status") == "unparsed")
+        if not unparsed.is_empty():
+            names = "、".join(
+                str(r["name"] or r["stock_id"]) for r in unparsed.head(8).iter_rows(named=True)
+            )
+            lines += [
+                "",
+                f"> 停損價無法解析 {unparsed.height} 筆（{names}）——`stop` 欄未寫成"
+                f"「收盤跌破 ○○.○」的絕對價形式。M7 patch-2 要求週報停損欄一律印可掛條件單的"
+                f"絕對價，這個計數就是該規則的達成率指標（應逐週趨近 0）。",
+            ]
+        lines.append("")
+
+    lines += _render_stop_fwd_return_subsection(ledger, s)
+    return lines
+
+
+def _render_stop_fwd_return_subsection(
+    ledger: pl.DataFrame, summary: dict[str, object]
+) -> list[str]:
+    """停損後前瞻報酬子段——回答「停損之後有沒有反彈回本」，跟延遲成本是不同問題。
+
+    母體＝`cond_exec_date` 存在且快取夠長，不要求 status=="measured"（不依賴週頻覆核
+    日是否存在），所以樣本數通常 ≥ 上面延遲成本表，不是同一批筆數，讀者不要混算。
+    """
+    lines = [
+        "### 6a. 停損後前瞻報酬（r+5／r+20，從條件單執行價起算）",
+        "",
+        "> 回答的是「停損之後股價有沒有反彈回本」，不是上面的延遲成本——正值＝停損後"
+        "續漲（可能錯過反彈）、負值＝停損後續跌（停損判斷事後看站得住腳）。母體是"
+        "「條件單已執行且快取有夠長的後續資料」，跟上面的「可量測」筆數不是同一批，"
+        "不可直接相減比較。",
+        "",
+    ]
+    n5, n20 = summary["n_fwd_r5"], summary["n_fwd_r20"]
+    if not n5 and not n20:
+        lines += ["> 尚無可量測樣本（訊號還沒觸發，或觸發日太新、還沒到 r+5）。", ""]
+        return lines
+    parts = []
+    if n5:
+        parts.append(
+            f"r+5：{n5} 筆，平均 {cast(float, summary['avg_fwd_r5_pct']):+.2f}%"
+            f"（中位 {cast(float, summary['median_fwd_r5_pct']):+.2f}%）"
+        )
+    else:
+        parts.append("r+5：尚無可量測樣本")
+    if n20:
+        parts.append(
+            f"r+20：{n20} 筆，平均 {cast(float, summary['avg_fwd_r20_pct']):+.2f}%"
+            f"（中位 {cast(float, summary['median_fwd_r20_pct']):+.2f}%）"
+        )
+    else:
+        parts.append("r+20：尚無可量測樣本")
+    lines += [f"- {'；'.join(parts)}", ""]
+    rows = ledger.filter(
+        pl.col("fwd_r5_pct").is_not_null() | pl.col("fwd_r20_pct").is_not_null()
+    ).sort("cond_exec_date")
+    if rows.is_empty():
         return lines
     lines += [
-        f"- **平均延遲成本 {cast(float, s['avg_cost_pct']):+.2f}%**"
-        f"（中位 {cast(float, s['median_cost_pct']):+.2f}%）"
-        f"；最痛 {s['worst_stock']} {cast(float, s['worst_cost_pct']):+.2f}%",
-        "",
-        "| 週 | 股票 | 停損價 | 訊號日收盤 | 條件單執行 | 週頻覆核執行 | 延遲(交易日) | 延遲成本 |",
-        "|---|---|---|---|---|---|---|---|",
+        "| 週 | 股票 | 條件單執行 | r+5 | r+20 |",
+        "|---|---|---|---|---|",
     ]
-    measured = ledger.filter(pl.col("status") == "measured").sort("delay_cost_pct")
-    for r in measured.iter_rows(named=True):
+    for r in rows.iter_rows(named=True):
+        r5 = f"{r['fwd_r5_pct']:+.2f}%" if r["fwd_r5_pct"] is not None else "未到期"
+        r20 = f"{r['fwd_r20_pct']:+.2f}%" if r["fwd_r20_pct"] is not None else "未到期"
         lines.append(
-            f"| {r['week']} | {r['name'] or r['stock_id']} | {r['stop_price']:.2f} "
-            f"| {r['signal_date']} {r['signal_close']:.2f} "
-            f"| {r['cond_exec_date']} {r['cond_exec_price']:.2f} "
-            f"| {r['weekly_exec_date']} {r['weekly_exec_price']:.2f} "
-            f"| {r['delay_td']} | {r['delay_cost_pct']:+.2f}% |"
+            f"| {r['week']} | {r['name'] or r['stock_id']} "
+            f"| {r['cond_exec_date']} {r['cond_exec_price']:.2f} | {r5} | {r20} |"
         )
-    unparsed = ledger.filter(pl.col("status") == "unparsed")
-    if not unparsed.is_empty():
-        names = "、".join(
-            str(r["name"] or r["stock_id"]) for r in unparsed.head(8).iter_rows(named=True)
-        )
-        lines += [
-            "",
-            f"> 停損價無法解析 {unparsed.height} 筆（{names}）——`stop` 欄未寫成"
-            f"「收盤跌破 ○○.○」的絕對價形式。M7 patch-2 要求週報停損欄一律印可掛條件單的"
-            f"絕對價，這個計數就是該規則的達成率指標（應逐週趨近 0）。",
-        ]
     lines.append("")
     return lines
 

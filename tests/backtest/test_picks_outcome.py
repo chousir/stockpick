@@ -531,6 +531,120 @@ def test_stop_delay_summary_and_section_render_without_samples():
     assert "停損價無法解析 1" in body
 
 
+def test_stop_delay_ledger_measures_fwd_return_after_stop():
+    """停損後前瞻報酬（r+5/r+20，從條件單執行價起算）——不依賴週頻覆核日是否存在。
+
+    只有一週的 picks 底帳 → 找不到「訊號日之後的下一份週報」→ status 停在
+    pending_review、delay_cost_pct 為 None；但 fwd_r5/fwd_r20 仍要算得出來，因為
+    這題問的是「停損後有沒有反彈」，跟「延遲一週貴不貴」是兩個獨立問題。
+    """
+    from tw_screener.backtest.picks_outcome import stop_delay_ledger
+
+    picks = pl.DataFrame(
+        {
+            "week": ["2026-W19"],
+            "data_date": [date(2026, 6, 1)],
+            "stock_id": ["1101"],
+            "name": ["甲"],
+            "layer": ["core"],
+            "stop": ["收盤跌破 95.0、隔日未收復出場"],
+        }
+    )
+    # 6/2 進場 100；6/3 收 94 觸發（<95）；6/4 條件單執行 92（cond_i）。
+    # 之後每天收盤 = 92 + 距 cond_i 的天數，方便算精確的 r+5/r+20。
+    rows = [
+        ("1101", date(2026, 6, 1), 101.0),
+        ("1101", date(2026, 6, 2), 100.0),
+        ("1101", date(2026, 6, 3), 94.0),
+        ("1101", date(2026, 6, 4), 92.0),
+    ]
+    for i in range(1, 26):
+        rows.append(("1101", date(2026, 6, 4) + _dt.timedelta(days=i), 92.0 + i))
+    px = _px(rows)
+    led = stop_delay_ledger(picks, px)
+    a = led.filter(pl.col("stock_id") == "1101").row(0, named=True)
+    assert a["status"] == "pending_review"
+    assert a["delay_cost_pct"] is None
+    assert a["cond_exec_date"] == date(2026, 6, 4)
+    assert a["cond_exec_price"] == 92.0
+    assert a["fwd_r5_date"] == date(2026, 6, 4) + _dt.timedelta(days=5)
+    assert a["fwd_r5_pct"] == pytest.approx((97.0 / 92.0 - 1) * 100, abs=1e-6)
+    assert a["fwd_r20_date"] == date(2026, 6, 4) + _dt.timedelta(days=20)
+    assert a["fwd_r20_pct"] == pytest.approx((112.0 / 92.0 - 1) * 100, abs=1e-6)
+
+
+def test_stop_delay_ledger_fwd_return_null_when_not_yet_matured():
+    """快取只到 cond_exec 後 2 個交易日 → r+5/r+20 都還沒到期，留 None 不假裝算出來。"""
+    from tw_screener.backtest.picks_outcome import stop_delay_ledger
+
+    picks = pl.DataFrame(
+        {
+            "week": ["2026-W19"],
+            "data_date": [date(2026, 6, 1)],
+            "stock_id": ["1101"],
+            "name": ["甲"],
+            "layer": ["core"],
+            "stop": ["收盤跌破 95.0、隔日未收復出場"],
+        }
+    )
+    px = _px(
+        [
+            ("1101", date(2026, 6, 1), 101.0),
+            ("1101", date(2026, 6, 2), 100.0),
+            ("1101", date(2026, 6, 3), 94.0),
+            ("1101", date(2026, 6, 4), 92.0),
+            ("1101", date(2026, 6, 5), 90.0),
+            ("1101", date(2026, 6, 6), 88.0),
+        ]
+    )
+    led = stop_delay_ledger(picks, px)
+    a = led.filter(pl.col("stock_id") == "1101").row(0, named=True)
+    assert a["cond_exec_price"] == 92.0
+    assert a["fwd_r5_pct"] is None
+    assert a["fwd_r5_date"] is None
+    assert a["fwd_r20_pct"] is None
+
+
+def test_stop_delay_summary_and_section_include_fwd_return():
+    """summary 的 n_fwd_r5/r20 母體獨立於 n_measured；render 段落含新子標題與正確格式。"""
+    from tw_screener.backtest.picks_outcome import (
+        render_stop_delay_section,
+        stop_delay_ledger,
+        stop_delay_summary,
+    )
+
+    picks = pl.DataFrame(
+        {
+            "week": ["2026-W19"],
+            "data_date": [date(2026, 6, 1)],
+            "stock_id": ["1101"],
+            "name": ["甲"],
+            "layer": ["core"],
+            "stop": ["收盤跌破 95.0、隔日未收復出場"],
+        }
+    )
+    rows = [
+        ("1101", date(2026, 6, 1), 101.0),
+        ("1101", date(2026, 6, 2), 100.0),
+        ("1101", date(2026, 6, 3), 94.0),
+        ("1101", date(2026, 6, 4), 92.0),
+    ]
+    for i in range(1, 26):
+        rows.append(("1101", date(2026, 6, 4) + _dt.timedelta(days=i), 92.0 + i))
+    px = _px(rows)
+    led = stop_delay_ledger(picks, px)
+    s = stop_delay_summary(led)
+    # 這批底帳沒有下週報，n_measured=0，但 fwd 母體不依賴這件事，仍應有 1 筆。
+    assert s["n_measured"] == 0
+    assert s["n_fwd_r5"] == 1
+    assert s["n_fwd_r20"] == 1
+    assert s["avg_fwd_r5_pct"] == pytest.approx((97.0 / 92.0 - 1) * 100, abs=1e-6)
+    body = "\n".join(render_stop_delay_section(led))
+    assert "停損後前瞻報酬" in body
+    assert "尚無可量測樣本——本段僅佔位" in body  # 延遲成本表：n_measured=0 走佔位
+    assert "r+5：1 筆" in body  # 前瞻報酬子段：n_fwd_r5=1 有數字，不是佔位
+
+
 # ── M1.6 左側解禁回收條款（委託書 M1.6）──────────────────────────────────
 
 
