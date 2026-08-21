@@ -445,7 +445,12 @@ def test_e2e_candidates_enriched_csv(tmp_path: Path):
     )
     ranked = rank_within_groups(members, pl.DataFrame(), pl.DataFrame())
     out = tmp_path / "candidates_enriched.csv"
-    rows = write_candidates_enriched_csv(ranked, pl.DataFrame(), results, out)
+    # 2330 close=1000.0（見 _SCREENER_A）；shares_outstanding 25,930,380,458 → 市值(億元)
+    rows = write_candidates_enriched_csv(
+        ranked, pl.DataFrame(), results, out,
+        cum_rev_yoy_map={"2330": 19.67},
+        shares_map={"2330": 25_930_380_458},
+    )
     assert out.exists()
     assert len(rows) == len(ranked)  # 現回傳已建立的列（供重疊股重用）
     df = pl.read_csv(out)
@@ -455,8 +460,15 @@ def test_e2e_candidates_enriched_csv(tmp_path: Path):
         "momentum_5d_pct", "close", "ma60_dist_pct", "ma20_price", "ma60_price",
         "amount_million", "pe_ratio", "pb_ratio", "rev_yoy_pct",
         "volume_lots_today", "inst_net_lots", "inst_pct20d", "flags", "goodinfo_url",
+        "cum_rev_yoy_pct", "market_cap_billion",
     ]:
         assert col in df.columns
+    row_2330 = df.filter(pl.col("stock_id") == 2330).to_dicts()[0]
+    assert row_2330["cum_rev_yoy_pct"] == pytest.approx(19.7)  # _num 四捨五入至 1 位小數
+    assert row_2330["market_cap_billion"] == pytest.approx(25_930_380_458 * 1000.0 / 1e8, rel=1e-6)
+    # 沒進 shares_map 的股票：市值誠實 None，不補值
+    row_2317 = df.filter(pl.col("stock_id") == 2317).to_dicts()[0]
+    assert row_2317["market_cap_billion"] is None
 
 
 def test_e2e_named_list_csv_holdings(tmp_path: Path):

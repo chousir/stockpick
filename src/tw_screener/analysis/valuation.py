@@ -220,6 +220,20 @@ def compute_valuation_meta(
     }
 
 
+def market_cap_billion(shares_outstanding: int | None, close: float | None) -> float | None:
+    """市值（億元）＝ 已發行股數 × 收盤價 / 1e8。任一輸入缺值即回 None（不猜）。
+
+    近似 Goodinfo「市值 (億元)」（策略 D/E/F/G 門檻用的口徑），但非精確等值：
+    - 已發行股數僅計普通股（`_parse_listed_shares`/`_parse_otc_shares` 語意），不含特別股。
+    - 股數月頻更新（TWSE/TPEX 公司基本資料），收盤價日頻——股本異動（增資/庫藏股）到反映
+      有月級延遲。
+    - TDR（存託憑證）已在股數來源排除（見 `twse._TDR_INDUSTRY_CODE`），不會算出失真市值。
+    """
+    if shares_outstanding is None or close is None:
+        return None
+    return shares_outstanding * close / 1e8
+
+
 def deep_value_growth(
     val_pctile: float | None,
     rev_yoy_pct: float | None,

@@ -332,6 +332,7 @@ def run_group_analysis(settings: Path) -> None:
 
     rev_df = client.fetch_revenue()
     rev_yoy_map: dict[str, object] = {}
+    cum_rev_yoy_map: dict[str, object] = {}
     name_map: dict[str, str] = {}
     if not rev_df.is_empty() and "stock_id" in rev_df.columns:
         rdf = rev_df
@@ -341,8 +342,20 @@ def run_group_analysis(settings: Path) -> None:
             sid = str(rr["stock_id"])
             if "yoy_pct" in rev_df.columns:
                 rev_yoy_map.setdefault(sid, rr.get("yoy_pct"))
+            if "cum_yoy_pct" in rev_df.columns:
+                cum_rev_yoy_map.setdefault(sid, rr.get("cum_yoy_pct"))
             if "company_name" in rev_df.columns:
                 name_map.setdefault(sid, str(rr.get("company_name") or ""))
+
+    # 市值（億元）＝已發行股數×收盤價/1e8：上市+上櫃股數合併，純讀快取（make fetch-twse 累積）。
+    listed_shares_df = client.fetch_listed_shares()
+    otc_shares_df = client.fetch_otc_shares()
+    shares_map: dict[str, object] = {}
+    for shares_df in (listed_shares_df, otc_shares_df):
+        if shares_df.is_empty() or "stock_id" not in shares_df.columns:
+            continue
+        for rr in shares_df.iter_rows(named=True):
+            shares_map[str(rr["stock_id"])] = rr.get("shares_outstanding")
 
     # M-BR1：月營收 YoY 二階導（本月 YoY − 上月 YoY）；純讀既有快取，不多打一次網。
     # 餵 fundamental_health 揭露欄——把「YoY 水準」與「加速度」拆開（sell-the-news 真因）。
@@ -406,6 +419,8 @@ def run_group_analysis(settings: Path) -> None:
         inflection_cfg=cfg.get("inflection", {}),      # M4.1 轉折早段欄（委託書 M4）
         deep_value_cfg=cfg.get("deep_value", {}),      # M5 深值成長 tag（委託書 M5）
         rev_yoy_delta_map=rev_yoy_delta_map,
+        cum_rev_yoy_map=cum_rev_yoy_map,
+        shares_map=shares_map,
     )
     # 重疊股重用：庫存/觀察清單同檔一律沿用 candidates 那筆，避免跨 CSV 量比/集中度/成交額分岔
     canonical_rows = {row["stock_id"]: row for row in cand_rows}
@@ -494,6 +509,8 @@ def run_group_analysis(settings: Path) -> None:
             inflection_cfg=cfg.get("inflection", {}),      # M4.1（委託書 M4）
             deep_value_cfg=cfg.get("deep_value", {}),      # M5（委託書 M5）
             rev_yoy_delta_map=rev_yoy_delta_map,
+            cum_rev_yoy_map=cum_rev_yoy_map,
+            shares_map=shares_map,
         )
         console.print(f"[green]  {label}_enriched.csv：{n} 檔 → {out_csv}[/green]")
 

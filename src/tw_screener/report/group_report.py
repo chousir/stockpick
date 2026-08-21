@@ -854,6 +854,8 @@ def _build_enriched_rows(
     inflection_cfg: dict | None = None,
     deep_value_cfg: dict | None = None,
     rev_yoy_delta_map: dict | None = None,
+    cum_rev_yoy_map: dict | None = None,
+    shares_map: dict | None = None,
 ) -> list[dict]:
     """組「每檔 × 技術/籌碼/估值/基本面 + flags」列（candidates / 庫存 / 觀察 共用）。
 
@@ -864,6 +866,15 @@ def _build_enriched_rows(
     fundamental_health/foreign_flow_inflection/base_proximity/contrarian_base 同屬
     **純揭露非 gate**——不改剔除、不改排序、不進 picks（docs/24 §1、§4.1）。
     rev_yoy_delta_map={stock_id: (delta, delta_prev)}，缺月＝None（不補零）。
+
+    cum_rev_yoy_map={stock_id: cum_yoy_pct}——累計（年初至今）營收年增率，TWSE/TPEX 官方
+    算好的口徑（`累計營業收入-前期比較增減(%)`），對應策略 E/F/G 的「累計月營收年增減率」
+    門檻（區別於 rev_yoy_map 的單月 YoY）。與 rev_yoy_map 分開傳（不共用同一 dict 的
+    scalar 型別），降低對既有呼叫點的影響面。
+
+    shares_map={stock_id: shares_outstanding}——已發行股數（上市+上櫃合併），供
+    `market_cap_billion()` 用（× close_map 的收盤價 / 1e8）。任一缺值 market_cap_billion 回
+    None（不猜）。
     """
     if members.is_empty():
         return []
@@ -877,7 +888,7 @@ def _build_enriched_rows(
     )
     from tw_screener.analysis.grouping import classify_risk_kind, near_flow_state, rank_themes
     from tw_screener.analysis.inflection import flow_diff_5_20, margin_slim
-    from tw_screener.analysis.valuation import deep_value_growth
+    from tw_screener.analysis.valuation import deep_value_growth, market_cap_billion
 
     themes_long = themes_long if themes_long is not None else pl.DataFrame()
     ranked = rank_themes(members, themes_long)
@@ -981,6 +992,11 @@ def _build_enriched_rows(
         low_60d = _num(r.get("low_60d"), 2)
         high_60d = _num(r.get("high_60d"), 2)
         ryoy = _num(rev_yoy_map.get(sid), 1) if rev_yoy_map else None
+        cum_ryoy = _num(cum_rev_yoy_map.get(sid), 1) if cum_rev_yoy_map else None
+        mkt_cap = market_cap_billion(
+            shares_map.get(sid) if shares_map else None, close
+        )
+        mkt_cap = round(mkt_cap, 1) if mkt_cap is not None else None
         fund = fundamentals_map.get(sid) if fundamentals_map else None
         gross_margin = _num(fund.get("gross_margin_pct"), 1) if fund else None
         eps_q = _num(fund.get("eps"), 2) if fund else None
@@ -1184,6 +1200,8 @@ def _build_enriched_rows(
                 "val_pctile": val_pctile,  # 次產業升冪百分位（0=同業最便宜；官方 trailing 橫斷面）
                 "cheap_flag": cheap_flag,  # 相對便宜 / 相對便宜(PB) / 空（同儕不足）
                 "rev_yoy_pct": ryoy,
+                "cum_rev_yoy_pct": cum_ryoy,  # 累計營收YoY（TWSE/TPEX官方口徑，策略E/F/G門檻用）
+                "market_cap_billion": mkt_cap,  # 市值（億元）＝股數×收盤價/1e8（近似Goodinfo口徑）
                 "gross_margin_pct": gross_margin,  # 最新單季毛利率（TWSE/TPEX OpenAPI）
                 "net_margin_pct": net_margin,      # 最新單季稅後純益率（%，D5 體質）
                 "eps_q": eps_q,                    # 最新單季 EPS（元）
@@ -1280,6 +1298,8 @@ def write_candidates_enriched_csv(
     inflection_cfg: dict | None = None,
     deep_value_cfg: dict | None = None,
     rev_yoy_delta_map: dict | None = None,
+    cum_rev_yoy_map: dict | None = None,
+    shares_map: dict | None = None,
 ) -> list[dict]:
     """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
 
@@ -1296,6 +1316,8 @@ def write_candidates_enriched_csv(
         contrarian_cfg=contrarian_cfg, inflection_cfg=inflection_cfg,
         deep_value_cfg=deep_value_cfg,
         rev_yoy_delta_map=rev_yoy_delta_map,
+        cum_rev_yoy_map=cum_rev_yoy_map,
+        shares_map=shares_map,
     )
     if not rows:
         return []
@@ -1377,6 +1399,8 @@ _CANONICAL_REUSE_FIELDS = (
     "inst_flow_diff_5_20",
     "margin_slim",
     "deep_value_growth",   # M5：估值/成長/毛利皆為當期橫斷面，重疊股讀數必須一致
+    "cum_rev_yoy_pct",      # 累計營收YoY：官方口徑，重疊股沿用 candidates 那筆
+    "market_cap_billion",   # 市值（億元）：股數月頻＋收盤價當期，重疊股沿用 candidates 那筆
 )
 
 
@@ -1399,6 +1423,8 @@ def write_named_list_csv(
     inflection_cfg: dict | None = None,
     deep_value_cfg: dict | None = None,
     rev_yoy_delta_map: dict | None = None,
+    cum_rev_yoy_map: dict | None = None,
+    shares_map: dict | None = None,
 ) -> int:
     """輸出庫存/觀察清單 enriched CSV（同 candidates 欄位）。
 
@@ -1414,6 +1440,8 @@ def write_named_list_csv(
         contrarian_cfg=contrarian_cfg, inflection_cfg=inflection_cfg,
         deep_value_cfg=deep_value_cfg,
         rev_yoy_delta_map=rev_yoy_delta_map,
+        cum_rev_yoy_map=cum_rev_yoy_map,
+        shares_map=shares_map,
     )
     if not rows:
         return 0

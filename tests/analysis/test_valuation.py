@@ -11,6 +11,7 @@ from tw_screener.analysis.valuation import (
     build_valuation,
     compute_subind_relative,
     compute_valuation_meta,
+    market_cap_billion,
 )
 
 
@@ -165,3 +166,15 @@ def test_empty_inputs() -> None:
     assert build_valuation(empty, _membership([("A", "a")])).is_empty()
     meta = compute_valuation_meta(empty)
     assert meta["n_stocks"] == 0 and meta["notes"]
+
+
+def test_market_cap_billion_basic() -> None:
+    # 台泥 1101：已發行股數 7,523,181,742、收盤價（假設）50 元 → 市值(億元) = 股數×價/1e8
+    got = market_cap_billion(7_523_181_742, 50.0)
+    assert got == 7_523_181_742 * 50.0 / 1e8
+
+
+def test_market_cap_billion_none_propagates() -> None:
+    assert market_cap_billion(None, 50.0) is None
+    assert market_cap_billion(1_000_000, None) is None
+    assert market_cap_billion(None, None) is None
