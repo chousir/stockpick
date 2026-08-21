@@ -11,7 +11,14 @@ import polars as pl
 import yaml
 from loguru import logger
 
-from .cache import find_latest, is_fresh, load_parquet, save_parquet, select_recent_cache_files
+from .cache import (
+    find_latest,
+    is_fresh,
+    is_fresh_with_columns,
+    load_parquet,
+    save_parquet,
+    select_recent_cache_files,
+)
 
 # ─── 字串轉換工具 ─────────────────────────────────────────────────────────────
 
@@ -456,6 +463,10 @@ _TPEX_DAILY_HIST_PATH = "/www/zh-tw/afterTrading/otc"
 # ⚠ TPEX 端點命名不一致（187ap17 無 t、t187ap14 有 t），2026-06-12 實測為準。
 _FUND_MARGIN_OTC_PATH = "/openapi/v1/mopsfin_187ap17_O"
 _FUND_EPS_OTC_PATH = "/openapi/v1/mopsfin_t187ap14_O"
+# 上櫃月營收（欄名與上市 t187ap05_L 完全相同，2026-08-21 實測為準，不需欄名對照表）。
+_REVENUE_OTC_PATH = "/openapi/v1/mopsfin_t187ap05_O"
+# 上櫃公司基本資料（市值用已發行股數 IssueShares，2026-08-21 實測為準）。
+_SHARES_OTC_PATH = "/openapi/v1/mopsfin_t187ap03_O"
 # D5 體質細項：簡式資產負債表（一般業）→ 負債比/流動比/每股淨值/單季ROE。
 # 上市 t187ap07_L_ci（OpenAPI base 下）+ 上櫃 mopsfin_t187ap07_O_ci，2026-06-27 實測為準。
 # ⚠ 上市欄名用「總額」、上櫃用「總計」；上櫃 key 用「年度/季別」（非 Year）。僅一般業（_ci）：
@@ -1050,23 +1061,36 @@ def _parse_stock_day(payload: dict[str, Any], stock_id: str) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=schema)
 
 
-def _parse_revenue(data: list[dict[str, Any]]) -> pl.DataFrame:
+_REVENUE_SCHEMA = {
+    "stock_id": pl.Utf8,
+    "company_name": pl.Utf8,
+    "year_month": pl.Utf8,
+    "revenue": pl.Int64,
+    "prev_year_revenue": pl.Int64,
+    "yoy_pct": pl.Float64,
+    "cum_revenue": pl.Int64,
+    "cum_prev_year_revenue": pl.Int64,
+    "cum_yoy_pct": pl.Float64,
+}
+
+
+def _parse_revenue(
+    data: list[dict[str, Any]], data_otc: list[dict[str, Any]] | None = None
+) -> pl.DataFrame:
     """
-    解析月營收（t187ap05_L）→ DataFrame。
+    解析月營收（t187ap05_L 上市 + mopsfin_t187ap05_O 上櫃，欄名相同）→ DataFrame。
     實際欄位名稱：「資料年月」、「營業收入-當月營收」等。
+
+    `cum_yoy_pct`（累計營業收入-前期比較增減(%)）＝ TWSE/MOPS 官方算好的累計（年初至今）
+    營收年增率——策略 E/F/G 用的「累計月營收年增減率」即此口徑（區別於單月 `yoy_pct`），
+    2026-08 前 parser 未取用此欄，market_cap/cum_yoy 落地時一併補上（見 docs/02、playbook/90）。
     """
-    schema = {
-        "stock_id": pl.Utf8,
-        "company_name": pl.Utf8,
-        "year_month": pl.Utf8,
-        "revenue": pl.Int64,
-        "prev_year_revenue": pl.Int64,
-        "yoy_pct": pl.Float64,
-    }
     rows = []
-    for r in data:
+    for r in list(data) + list(data_otc or []):
         try:
             prev_raw = r.get("營業收入-去年當月營收", "")
+            cum_rev_raw = r.get("累計營業收入-當月累計營收", "")
+            cum_prev_raw = r.get("累計營業收入-去年累計營收", "")
             rows.append(
                 {
                     "stock_id": r["公司代號"].strip(),
@@ -1075,11 +1099,16 @@ def _parse_revenue(data: list[dict[str, Any]]) -> pl.DataFrame:
                     "revenue": _clean_int(r["營業收入-當月營收"]),
                     "prev_year_revenue": _clean_int(prev_raw) if prev_raw.strip() else None,
                     "yoy_pct": _clean_float(r.get("營業收入-去年同月增減(%)", "")),
+                    "cum_revenue": _clean_int(cum_rev_raw) if cum_rev_raw.strip() else None,
+                    "cum_prev_year_revenue": (
+                        _clean_int(cum_prev_raw) if cum_prev_raw.strip() else None
+                    ),
+                    "cum_yoy_pct": _clean_float(r.get("累計營業收入-前期比較增減(%)", "")),
                 }
             )
         except (KeyError, ValueError) as e:
             logger.warning(f"略過無效營收資料：{r.get('公司代號', '?')} — {e}")
-    return pl.DataFrame(rows, schema=schema)
+    return pl.DataFrame(rows, schema=_REVENUE_SCHEMA)
 
 
 def _parse_dividend_calendar(data: list[dict[str, Any]]) -> pl.DataFrame:
@@ -1138,6 +1167,63 @@ def _parse_listed_industry(data: list[dict[str, Any]]) -> pl.DataFrame:
         except (KeyError, ValueError) as e:
             logger.warning(f"略過無效產業資料：{r.get('公司代號', '?')} — {e}")
     return pl.DataFrame(rows, schema=schema)
+
+
+# TDR（存託憑證）：t187ap03_L 的「已發行普通股數或TDR原股發行股數」欄對這類股語意是
+# 海外母公司原股股數，非台股實際流通股數，計市值須排除，否則嚴重失真。
+_TDR_INDUSTRY_CODE = "91"
+
+_SHARES_SCHEMA = {
+    "stock_id": pl.Utf8,
+    "stock_name": pl.Utf8,
+    "shares_outstanding": pl.Int64,
+}
+
+
+def _parse_listed_shares(data: list[dict[str, Any]]) -> pl.DataFrame:
+    """解析 t187ap03_L（上市公司基本資料）→ stock_id / shares_outstanding（已發行普通股數）。
+
+    市值（億元）＝ shares_outstanding × close / 1e8，見 analysis/valuation.py::market_cap_billion。
+    排除產業別 91（TDR，見上）；欄位缺值或無法轉數字者 shares_outstanding 回 None（不猜）。
+    """
+    rows = []
+    for r in data:
+        try:
+            code = r.get("產業別", "").strip()
+            if code == _TDR_INDUSTRY_CODE:
+                continue
+            shares_raw = r.get("已發行普通股數或TDR原股發行股數", "")
+            rows.append(
+                {
+                    "stock_id": r["公司代號"].strip(),
+                    "stock_name": r["公司名稱"].strip(),
+                    "shares_outstanding": _clean_int(shares_raw) if shares_raw.strip() else None,
+                }
+            )
+        except (KeyError, ValueError) as e:
+            logger.warning(f"略過無效股數資料：{r.get('公司代號', '?')} — {e}")
+    return pl.DataFrame(rows, schema=_SHARES_SCHEMA)
+
+
+def _parse_otc_shares(data: list[dict[str, Any]]) -> pl.DataFrame:
+    """解析 mopsfin_t187ap03_O（上櫃公司基本資料）→ stock_id / shares_outstanding。
+
+    欄位 `IssueShares`（單位：股，與上市 t187ap03_L 一致，未 ×1000；2026-08-21 實測為準）。
+    """
+    rows = []
+    for r in data:
+        try:
+            shares_raw = r.get("IssueShares", "")
+            rows.append(
+                {
+                    "stock_id": r["SecuritiesCompanyCode"].strip(),
+                    "stock_name": r["CompanyName"].strip(),
+                    "shares_outstanding": _clean_int(shares_raw) if shares_raw.strip() else None,
+                }
+            )
+        except (KeyError, ValueError) as e:
+            logger.warning(f"略過無效上櫃股數資料：{r.get('SecuritiesCompanyCode', '?')} — {e}")
+    return pl.DataFrame(rows, schema=_SHARES_SCHEMA)
 
 
 # OTC industry names from ISIN → (code, canonical_name)
@@ -1986,7 +2072,9 @@ class TWSEClient:
         if not files:
             return {}
         frames = [pl.read_parquet(f) for f in files]
-        df = pl.concat(frames)
+        # diagonal_relaxed：新舊 schema 混跑（如加了累計營收欄位後，舊快取仍缺該欄）
+        # 也能合併，缺的欄位補 null，不因 schema 對不齊而整批炸掉。
+        df = pl.concat(frames, how="diagonal_relaxed")
         if df.is_empty() or "year_month" not in df.columns or "yoy_pct" not in df.columns:
             return {}
         # 同一報告月可能出現在多個抓取檔中，去重後每檔取最近 3 個報告月
@@ -2103,14 +2191,21 @@ class TWSEClient:
         return df["date"].max()
 
     def fetch_revenue(self) -> pl.DataFrame:
-        """抓月營收（全市場），快取到 revenue_YYYYMM.parquet。"""
+        """抓月營收（上市+上櫃），快取到 revenue_YYYYMM.parquet。
+
+        含累計營收 YoY（`cum_yoy_pct`，策略 E/F/G 用的「累計月營收年增減率」口徑）——
+        改 schema 後用 `is_fresh_with_columns` 擋舊快取（缺此欄視為 stale，強制重抓）。
+        """
         ym = date.today().strftime("%Y%m")
         cache_file = self.cache_dir / f"revenue_{ym}.parquet"
-        if is_fresh(cache_file, self.ttl_hours):
+        if is_fresh_with_columns(cache_file, self.ttl_hours, list(_REVENUE_SCHEMA)):
             logger.info(f"命中快取 {cache_file}")
             return load_parquet(cache_file)
         data = self._get("/opendata/t187ap05_L")
-        df = _parse_revenue(data)
+        data_otc = self._get_openapi_json(
+            f"{self.tpex_base_url}{_REVENUE_OTC_PATH}", "上櫃月營收"
+        )
+        df = _parse_revenue(data, data_otc)
         if not df.is_empty():
             save_parquet(df, cache_file)
         return df
@@ -2176,6 +2271,41 @@ class TWSEClient:
             logger.info(f"上櫃產業別：{len(df)} 檔")
         else:
             logger.warning("ISIN 上櫃一覽表解析結果為空")
+        return df
+
+    def fetch_listed_shares(self) -> pl.DataFrame:
+        """抓上市公司已發行股數（市值用），快取到 listed_shares_YYYYMM.parquet（月更新）。
+
+        獨立於 fetch_listed_industry 的 industry_*.parquet（同一 t187ap03_L 端點但另開一次
+        請求、另存一份快取）——避免動到既有 industry frame schema，牽動 data_fetcher.py 既有
+        的 listed/OTC industry frame `pl.concat`（見 playbook/90 市值落地教訓）。
+        """
+        ym = date.today().strftime("%Y%m")
+        cache_file = self.cache_dir / f"listed_shares_{ym}.parquet"
+        if is_fresh(cache_file, self.ttl_hours * 30):  # 30 倍 TTL ≈ 每月更新
+            logger.info(f"命中快取 {cache_file}")
+            return load_parquet(cache_file)
+        data = self._get("/opendata/t187ap03_L")
+        df = _parse_listed_shares(data)
+        if not df.is_empty():
+            save_parquet(df, cache_file)
+        else:
+            logger.warning("t187ap03_L 回傳空資料，上市股數無法取得")
+        return df
+
+    def fetch_otc_shares(self) -> pl.DataFrame:
+        """抓上櫃公司已發行股數（市值用），快取到 otc_shares_YYYYMM.parquet（月更新）。"""
+        ym = date.today().strftime("%Y%m")
+        cache_file = self.cache_dir / f"otc_shares_{ym}.parquet"
+        if is_fresh(cache_file, self.ttl_hours * 30):
+            logger.info(f"命中快取 {cache_file}")
+            return load_parquet(cache_file)
+        data = self._get_openapi_json(f"{self.tpex_base_url}{_SHARES_OTC_PATH}", "上櫃公司基本資料")
+        df = _parse_otc_shares(data)
+        if not df.is_empty():
+            save_parquet(df, cache_file)
+        else:
+            logger.warning("mopsfin_t187ap03_O 回傳空資料，上櫃股數無法取得")
         return df
 
     def fetch_stock_history(

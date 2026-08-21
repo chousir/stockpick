@@ -14,7 +14,12 @@ from pathlib import Path
 
 import polars as pl
 
-from tw_screener.data.cache import select_prune_candidates, select_recent_cache_files
+from tw_screener.data.cache import (
+    is_fresh_with_columns,
+    save_parquet,
+    select_prune_candidates,
+    select_recent_cache_files,
+)
 from tw_screener.data.twse import _INSTITUTIONAL_SCHEMA, TWSEClient
 
 
@@ -244,3 +249,26 @@ def test_prune_stock_day_when_keep_all_false(tmp_path: Path) -> None:
     old = _touch(tmp_path, "stock_day_2330_202001.parquet")         # 早於 cutoff → 刪
     pruned = select_prune_candidates(tmp_path, retention)
     assert old in pruned
+
+
+# ── is_fresh_with_columns ────────────────────────────────────────────────────
+
+
+def test_is_fresh_with_columns_missing_column_is_stale(tmp_path: Path) -> None:
+    """缺必要欄位＝視為 stale，即使還在 TTL 內（防 schema 改版後舊快取被誤判新鮮）。"""
+    path = tmp_path / "revenue_202608.parquet"
+    save_parquet(pl.DataFrame({"stock_id": ["2330"], "yoy_pct": [20.34]}), path)
+    assert not is_fresh_with_columns(path, ttl_hours=24.0, required_columns=["cum_yoy_pct"])
+
+
+def test_is_fresh_with_columns_present_is_fresh(tmp_path: Path) -> None:
+    path = tmp_path / "revenue_202608.parquet"
+    save_parquet(
+        pl.DataFrame({"stock_id": ["2330"], "yoy_pct": [20.34], "cum_yoy_pct": [19.67]}), path
+    )
+    assert is_fresh_with_columns(path, ttl_hours=24.0, required_columns=["cum_yoy_pct"])
+
+
+def test_is_fresh_with_columns_missing_file_is_stale(tmp_path: Path) -> None:
+    path = tmp_path / "does_not_exist.parquet"
+    assert not is_fresh_with_columns(path, ttl_hours=24.0, required_columns=["cum_yoy_pct"])

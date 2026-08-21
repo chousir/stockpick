@@ -115,6 +115,22 @@ def is_fresh(path: Path, ttl_hours: float) -> bool:
     return age < timedelta(hours=ttl_hours)
 
 
+def is_fresh_with_columns(path: Path, ttl_hours: float, required_columns: list[str]) -> bool:
+    """`is_fresh()` 之外，再檢查快取是否含 `required_columns`（只讀 schema、不讀整檔）。
+
+    防「改 parser 加欄位後，TTL 內的舊 schema 快取被誤判新鮮、新欄位永遠不出現」——
+    缺欄位一律視為 stale，強制重抓（見 playbook 90-lessons：市值/累計YoY 落地時的教訓）。
+    """
+    if not is_fresh(path, ttl_hours):
+        return False
+    try:
+        schema_cols = pl.read_parquet_schema(path).keys()
+    except Exception as e:  # noqa: BLE001 — schema 讀取失敗一律視為 stale，強制重抓
+        logger.warning(f"讀快取 schema 失敗 {path}，視為 stale：{e}")
+        return False
+    return set(required_columns).issubset(schema_cols)
+
+
 def save_parquet(df: pl.DataFrame, path: Path) -> None:
     """儲存 DataFrame 到 parquet，自動建立父目錄。"""
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -21,8 +21,10 @@ from tw_screener.data.twse import (
     _parse_dividend_calendar,
     _parse_institutional,
     _parse_listed_industry,
+    _parse_listed_shares,
     _parse_margin,
     _parse_margin_legacy,
+    _parse_otc_shares,
     _parse_revenue,
     _parse_stock_day,
     _parse_tpex_institutional,
@@ -340,12 +342,30 @@ def test_parse_revenue():
     assert "202604" in df_2330["year_month"].to_list()
     assert df_2330["revenue"][0] == 260040059
     assert df_2330["yoy_pct"][0] == pytest.approx(20.34)
+    # 累計營收 YoY（策略 E/F/G 用的「累計月營收年增減率」口徑，區別於單月 yoy_pct）
+    row_202604 = df_2330.filter(pl.col("year_month") == "202604")
+    assert row_202604["cum_revenue"][0] == 521428777
+    assert row_202604["cum_prev_year_revenue"][0] == 435736403
+    assert row_202604["cum_yoy_pct"][0] == pytest.approx(19.67)
+
+
+def test_parse_revenue_otc_merge():
+    """data_otc 參數：上市+上櫃合併進同一張表（欄名相同，直接合併不用對照表）。"""
+    with open(FIXTURE_DIR / "revenue_sample.json") as f:
+        listed = json.load(f)
+    otc_row = dict(listed[0])
+    otc_row["公司代號"] = "6488"
+    otc_row["公司名稱"] = "環球晶"
+    df = _parse_revenue(listed, [otc_row])
+    assert len(df) == len(listed) + 1
+    assert "6488" in df["stock_id"].to_list()
 
 
 def test_parse_revenue_empty():
     df = _parse_revenue([])
     assert df.is_empty()
     assert "stock_id" in df.columns
+    assert "cum_yoy_pct" in df.columns
 
 
 def test_parse_listed_industry():
@@ -373,6 +393,73 @@ def test_parse_listed_industry_empty():
 
 def test_twse_industry_names_has_semiconductor():
     assert _TWSE_INDUSTRY_NAMES["24"] == "半導體業"
+
+
+def test_parse_listed_shares():
+    data = [
+        {
+            "公司代號": "1101", "公司名稱": "台泥", "產業別": "01",
+            "已發行普通股數或TDR原股發行股數": "7523181742",
+        },
+        {
+            "公司代號": "2330", "公司名稱": "台積電", "產業別": "24",
+            "已發行普通股數或TDR原股發行股數": "25930380458",
+        },
+    ]
+    df = _parse_listed_shares(data)
+    assert len(df) == 2
+    row_1101 = df.filter(pl.col("stock_id") == "1101").to_dicts()[0]
+    assert row_1101["shares_outstanding"] == 7523181742
+
+
+def test_parse_listed_shares_excludes_tdr():
+    """產業別 91（TDR）：欄位語意是海外原股股數，非台股流通股數，市值會失真，須排除。"""
+    data = [
+        {
+            "公司代號": "9188", "公司名稱": "測試TDR", "產業別": "91",
+            "已發行普通股數或TDR原股發行股數": "999999999",
+        },
+        {
+            "公司代號": "2330", "公司名稱": "台積電", "產業別": "24",
+            "已發行普通股數或TDR原股發行股數": "25930380458",
+        },
+    ]
+    df = _parse_listed_shares(data)
+    assert len(df) == 1
+    assert "9188" not in df["stock_id"].to_list()
+
+
+def test_parse_listed_shares_missing_field():
+    """欄位缺值 → shares_outstanding None（不猜），該列仍保留其他欄位。"""
+    data = [{"公司代號": "1234", "公司名稱": "測試股", "產業別": "24"}]
+    df = _parse_listed_shares(data)
+    assert len(df) == 1
+    assert df["shares_outstanding"][0] is None
+
+
+def test_parse_listed_shares_empty():
+    df = _parse_listed_shares([])
+    assert df.is_empty()
+    assert "shares_outstanding" in df.columns
+
+
+def test_parse_otc_shares():
+    data = [
+        {
+            "SecuritiesCompanyCode": "1240", "CompanyName": "茂生農經",
+            "IssueShares": "44232373",
+        },
+    ]
+    df = _parse_otc_shares(data)
+    assert len(df) == 1
+    assert df["stock_id"][0] == "1240"
+    assert df["shares_outstanding"][0] == 44232373
+
+
+def test_parse_otc_shares_empty():
+    df = _parse_otc_shares([])
+    assert df.is_empty()
+    assert "shares_outstanding" in df.columns
 
 
 # ─── Cache 工具 ──────────────────────────────────────────────────────────────
@@ -854,15 +941,105 @@ def test_fetch_revenue_cache_hit(tmp_path: Path):
             "revenue": [260040059],
             "prev_year_revenue": [216087780],
             "yoy_pct": [20.34],
+            "cum_revenue": [1000000000],
+            "cum_prev_year_revenue": [900000000],
+            "cum_yoy_pct": [11.11],
         }
+    )
+    save_parquet(sample, cache_file)
+
+    get_calls: list[str] = []
+    openapi_calls: list[str] = []
+    client._get = lambda ep: get_calls.append(ep) or []  # type: ignore[method-assign]
+    client._get_openapi_json = (  # type: ignore[method-assign]
+        lambda url, label: openapi_calls.append(url) or []
+    )
+
+    df = client.fetch_revenue()
+    assert len(get_calls) == 0
+    assert len(openapi_calls) == 0
+    assert len(df) == 1
+
+
+def test_fetch_revenue_stale_schema_refetches(tmp_path: Path):
+    """舊 schema（缺累計營收欄）快取即使在 TTL 內也視為 stale，強制重抓（不打真網）。"""
+    client = TWSEClient(
+        base_url="https://test.invalid",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+    ym = date.today().strftime("%Y%m")
+    cache_file = tmp_path / f"revenue_{ym}.parquet"
+    old_schema_sample = pl.DataFrame(
+        {
+            "stock_id": ["2330"],
+            "company_name": ["台積電"],
+            "year_month": ["202504"],
+            "revenue": [260040059],
+            "prev_year_revenue": [216087780],
+            "yoy_pct": [20.34],
+        }
+    )
+    save_parquet(old_schema_sample, cache_file)
+
+    get_calls: list[str] = []
+    client._get = lambda ep: get_calls.append(ep) or []  # type: ignore[method-assign]
+    client._get_openapi_json = (  # type: ignore[method-assign]
+        lambda url, label: []
+    )
+
+    df = client.fetch_revenue()
+    assert len(get_calls) == 1
+    assert df.is_empty()  # mocked _get 回空 list，符合「重抓但這次沒資料」情境
+
+
+def test_fetch_listed_shares_cache_hit(tmp_path: Path):
+    client = TWSEClient(
+        base_url="https://test.invalid",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+    ym = date.today().strftime("%Y%m")
+    cache_file = tmp_path / f"listed_shares_{ym}.parquet"
+    sample = pl.DataFrame(
+        {"stock_id": ["2330"], "stock_name": ["台積電"], "shares_outstanding": [25930380458]}
     )
     save_parquet(sample, cache_file)
 
     get_calls: list[str] = []
     client._get = lambda ep: get_calls.append(ep) or []  # type: ignore[method-assign]
 
-    df = client.fetch_revenue()
+    df = client.fetch_listed_shares()
     assert len(get_calls) == 0
+    assert len(df) == 1
+
+
+def test_fetch_otc_shares_cache_hit(tmp_path: Path):
+    client = TWSEClient(
+        base_url="https://test.invalid",
+        cache_dir=tmp_path,
+        ttl_hours=6.0,
+        user_agent="test",
+        interval_sec=0.0,
+    )
+    ym = date.today().strftime("%Y%m")
+    cache_file = tmp_path / f"otc_shares_{ym}.parquet"
+    sample = pl.DataFrame(
+        {"stock_id": ["1240"], "stock_name": ["茂生農經"], "shares_outstanding": [44232373]}
+    )
+    save_parquet(sample, cache_file)
+
+    openapi_calls: list[str] = []
+    client._get_openapi_json = (  # type: ignore[method-assign]
+        lambda url, label: openapi_calls.append(url) or []
+    )
+
+    df = client.fetch_otc_shares()
+    assert len(openapi_calls) == 0
     assert len(df) == 1
 
 
