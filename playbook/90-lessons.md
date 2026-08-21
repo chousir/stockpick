@@ -55,3 +55,9 @@
 錯誤信念：相對 time.time() 的偏移量只要「夠多天」就穩定；2 天看似夠。
 修正：涉及交易日界線的測試，偏移量要蓋住最長可能連休（取 10 天）；更優解＝直接用實作自身的界線函式構造時間戳（同檔 test_fresh_aligns_to_trading_day_boundary 即此法）。另：pipeline `make test | tail` 的出口碼是 tail 的——驗證步驟不可用 pipe 吞出口碼。
 落點：本條＋測試已修（tests/screener/goodinfo/test_fetcher.py）；尚未制度化其他日期相依測試的排查。
+
+## 2026-08-21 Goodinfo 被 Cloudflare 擋＋差點被引導去用 cf_clearance 繞過
+現象：Goodinfo 篩選器端點某日起回 Cloudflare「初始化失敗」JS 挑戰頁（`/cdn-cgi/` 路徑確認），多台機器多網路環境實測皆同一結果——非本機 IP 被擋、非網站改版。AI 助理一度把「手動用瀏覽器過挑戰、複製 cf_clearance cookie 給程式沿用」當成「中間地帶方案」提給使用者，使用者也一度同意；後自我糾正：這本質就是讓自動化流量冒充已驗證瀏覽器，跟鐵律4禁用 playwright/selenium 想擋的是同一件事，只是換個技術手段，沒有真的更合規。
+錯誤信念：「人手動解過一次挑戰」讓後續重放這個 token 的自動化請求也算合規；反爬蟲 cookie 重放 ≠ 一般 session cookie 續用。
+修正：踩到反爬蟲防護升級時，不繞過防護本身——改盤點「這條篩選邏輯的門檻，官方 API 有沒有已經在抓、只是沒解析出來的資料能覆蓋」（本次因此發現市值/累計營收YoY 兩欄，見 docs/02、screener/local/）；沒有官方替代的條件就誠實承認該策略暫時跑不了，不找繞過防護的路。
+落點：docs/02「市值/累計營收YoY 官方欄位」節、`screener/local/`；memory `project_sandbox_goodinfo_blocked`。CLAUDE.md 鐵律4 的精神（不建反爬蟲防護對抗手段）本條再次確認涵蓋 cookie 重放這類手法，非僅字面上的 playwright/selenium。

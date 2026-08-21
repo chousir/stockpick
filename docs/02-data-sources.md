@@ -111,12 +111,15 @@ data/cache/goodinfo/
 
 | 用途 | 端點 | 備註 |
 |---|---|---|
-| 上市公司產業 | OpenAPI `/v1/opendata/t187ap03_L` | 只含上市股 |
-| 上櫃公司產業 | ISIN `isin.twse.com.tw/isin/C_public.jsp?strMode=4` | MS950 編碼，需 HTML 解析 |
+| 上市公司產業 | OpenAPI `/v1/opendata/t187ap03_L` | 只含上市股；同一 payload 亦含已發行股數（市值用，見下方「市值/累計營收YoY」節）|
+| 上櫃公司產業 | ISIN `isin.twse.com.tw/isin/C_public.jsp?strMode=4` | MS950 編碼，需 HTML 解析；**不含股數**，股數另打 `mopsfin_t187ap03_O` |
+| 上市公司已發行股數 | OpenAPI `/v1/opendata/t187ap03_L`（`fetch_listed_shares()` 另打一次同端點） | 欄位「已發行普通股數或TDR原股發行股數」；**排除產業別 91（TDR）**——該欄對 TDR 語意是海外原股股數，非台股流通股數 |
+| 上櫃公司已發行股數 | TPEX OpenAPI `/openapi/v1/mopsfin_t187ap03_O` | 欄位 `IssueShares`（股，未 ×1000）；2026-08-21 新增 |
 | 全市場當日 OHLCV | OpenAPI `/v1/exchangeReport/STOCK_DAY_ALL` | **`date` 參數被無視，永遠回今天 → 只能往未來累積、過去補不回**（同 `otc_daily_all`）|
 | 單檔月份 OHLCV | Legacy `www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=YYYYMM01&stockNo=XXXX` | 支援歷史，**可回補**；冷啟動歷史密度靠它（`backfill-universe-history` 對次產業全成員逐檔補，D2）|
 | 三大法人買賣超 | Legacy `www.twse.com.tw/fund/T86?response=json&date=YYYYMMDD&selectType=ALLBUT0999` | OpenAPI 版已失效（回 HTML）|
-| 個股月營收 | OpenAPI `/v1/opendata/t187ap05_L` | |
+| 個股月營收（上市） | OpenAPI `/v1/opendata/t187ap05_L` | 含單月與**累計（年初至今）**營收/YoY 兩組欄位，2026-08-21 起累計欄一併解析（`cum_yoy_pct`，策略 E/F/G 用的「累計月營收年增減率」口徑）|
+| 個股月營收（上櫃） | TPEX OpenAPI `/openapi/v1/mopsfin_t187ap05_O` | 欄名與上市完全相同（2026-08-21 實測為準），直接合併不用對照表；2026-08-21 新增 |
 | 融資融券餘額 | OpenAPI `/v1/exchangeReport/MI_MARGN` | |
 | 上市官方日估值比 | OpenAPI `/v1/exchangeReport/BWIBBU_d` | 官方 trailing 本益比/殖利率/股價淨值比；只回最新交易日（逐日累積）|
 | 上櫃官方日估值比 | TPEX OpenAPI `/openapi/v1/tpex_mainboard_peratio_analysis` | 同上（上櫃）；只回最新交易日 |
@@ -263,6 +266,44 @@ Cache 命名共用 `stock_day_{stock_id}_{YYYYMM}.parquet`，下游 `load_candid
   不可回補，`data/cache/twse/valuation_ratios_*.parquet` 若被 `cache.retention.valuation_days`
   （現 400 天）的 `prune-cache` 清理會永久遺失；獨立存放確保養 3 年（跟 BAA10Y 同規格驗證所需
   的 756 個交易日）的過程不會被中途清一次快取就腰斬。快取本身從 2026-06-12 才開始有資料。
+
+---
+
+## 市值/累計營收YoY 官方欄位 + 本地篩選（2026-08-21 新增）
+
+**背景**：Goodinfo 篩選器端點（`StockList.asp`）某日起被 Cloudflare 擋下（回應為「初始化失敗」
+JS/Cookie 挑戰頁，`/cdn-cgi/` 路徑確認為 Cloudflare），多台機器、多個網路環境實測皆同一結果——
+不是網站改版、不是本機 IP 被擋，是網站端真的加了防護。策略 D/E/F/G 的篩選 100% 由 Goodinfo
+伺服器端完成（本地只解析已篩好的 HTML 表格，見 `screener/goodinfo/parser.py` 的 `_COL_MAP`
+完全不含 ROE/股利/營收YoY 等篩選用欄位），Goodinfo 斷線＝四策略全部抓不到候選股。
+
+盤點發現：**市值**與**累計營收YoY**這兩個 Goodinfo 篩選條件，其實已經躺在本專案每月/每次都在
+抓的官方 API payload 裡，只是 parser 沒解析——不需新爬蟲、不需等時間累積：
+
+- **市值**：`t187ap03_L`（上市，`fetch_listed_shares()`）與 `mopsfin_t187ap03_O`（上櫃，
+  `fetch_otc_shares()`）帶已發行股數，× 收盤價 / 1e8 即 `市值 (億元)`（`analysis/valuation.py::market_cap_billion()`）。TDR（產業別 91）排除，股數月頻更新、收盤價日頻，故為近似值非精確值。
+- **累計營收YoY**：`t187ap05_L`／`mopsfin_t187ap05_O` 帶 `累計營業收入-前期比較增減(%)`——
+  TWSE/MOPS 官方算好的累計口徑，對應 Goodinfo「累計月營收年增減率(%)」，`_parse_revenue()`
+  的 `cum_yoy_pct` 欄。
+- PE（`本益比 (PER)`）、殖利率（`成交價現金殖利率 (%)`）已由官方日估值比（上節 BWIBBU）覆蓋，
+  不用新增。
+
+四個欄位合起來，剛好讓 **F（價值反彈）策略**四條件全部可由官方資料覆蓋，其餘策略仍卡：D 的
+近四季ROE、股利連續配發次數，E/G 的單季淨利連增，官方 API 皆**只回最新一季/無歷史查詢**，
+物理上無法回補，非本輪範圍。
+
+### 本地篩選路徑
+`screener/local/`（跟 `screener/goodinfo/` 平行）：`field_map.py` 是 Goodinfo `FL_ITEM`
+字串 → 本地欄名的單一對照表（門檻只在策略 yaml 改一次，兩條路徑不會漂移；條件對不到欄位＝
+直接拒跑，不悄悄漏篩）；`universe.py::build_local_universe()` 純讀快取拼全市場寬表；
+`filter.py::apply_local_filters()` 純 Polars 函式套門檻。CLI：
+
+```bash
+uv run tw-screener screen run-local f_value_rebound   # 不打 Goodinfo，輸出 screen_result_f_value_rebound.csv（source=local）
+```
+
+**是否接進 `make week` 預設流程**（取代 Goodinfo、或 doctor 偵測到 `GoodinfoBlockedError` 時
+自動 fallback）尚未決定——目前僅為手動指令，見 playbook/90 對應條目。
 
 ---
 
