@@ -879,6 +879,90 @@ def screen_run_all(
     console.print(f"\n[bold]報告目錄：reports/{week_tag}/[/bold]")
 
 
+@screen_app.command("run-local")
+def screen_run_local(
+    strategy: str = typer.Argument(
+        help="策略 ID，如 f_value_rebound（僅門檻可完全由官方資料覆蓋的策略可跑）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """不打 Goodinfo，純用 TWSE/TPEX 官方快取跑策略篩選（Goodinfo 被 Cloudflare 擋下時的
+    替代路徑，見 playbook/90）。
+
+    僅門檻可完全由官方資料覆蓋的策略可跑（目前僅 f_value_rebound：市值/PE/殖利率/累計營收YoY
+    皆已有官方來源）。含官方缺欄位條件（如 d_quality_leader 的近四季ROE、股利連續配發次數）
+    的策略會直接報錯拒跑，不會悄悄漏篩——見 screener/local/field_map.py 對照表。
+
+    輸出 reports/YYYY-Www/screen_result_{strategy}.csv，欄位對齊 Goodinfo 路徑產出，
+    多一欄 source=local，供之後週報／pick-outcome 辨識資料來源（本地口徑與 Goodinfo
+    篩選器存在落差：市值股數月頻、PE/殖利率為官方 trailing 非 Goodinfo 自算，見 docs/02）。
+    """
+    import polars as pl
+    import yaml as _yaml
+
+    from tw_screener.data.twse import create_client
+    from tw_screener.screener.goodinfo.url_builder import load_strategy, stock_detail_url
+    from tw_screener.screener.local import (
+        UnsupportedLocalFilterError,
+        apply_local_filters,
+        build_local_universe,
+    )
+    from tw_screener.screener.runner import derive_week_tag
+
+    with open(settings, encoding="utf-8") as fh:
+        cfg = _yaml.safe_load(fh)
+
+    strategy_path = Path(cfg["paths"]["strategies_dir"]) / f"{strategy}.yaml"
+    if not strategy_path.exists():
+        console.print(f"[red]找不到策略檔：{strategy_path}[/red]")
+        raise typer.Exit(1)
+
+    strat = load_strategy(strategy_path)
+    client = create_client(settings)
+
+    console.print(f"[bold]本地篩選：{strat.name}（{strat.id}）[/bold]（不打 Goodinfo）")
+    universe = build_local_universe(client)
+    if universe.is_empty():
+        console.print(
+            "[red]本地候選宇宙為空（官方日線/股數/估值快取皆缺），請先跑 make fetch-twse[/red]"
+        )
+        raise typer.Exit(1)
+
+    try:
+        result = apply_local_filters(universe, strat)
+    except UnsupportedLocalFilterError as e:
+        console.print(f"[red]{e}[/red]")
+        console.print(
+            "[yellow]目前僅 f_value_rebound 四條件官方資料全覆蓋，"
+            "D/E/G 尚無法本地化（近四季ROE、股利連續配發次數等官方無歷史查詢）[/yellow]"
+        )
+        raise typer.Exit(1)
+
+    week_tag = derive_week_tag(settings)
+    screened_at = client.latest_trading_date()
+    out = result.with_columns(
+        [
+            pl.lit(strat.id).alias("strategy_id"),
+            pl.lit(screened_at).alias("screened_at"),
+            pl.col("stock_id").map_elements(stock_detail_url, return_dtype=pl.Utf8).alias(
+                "goodinfo_url"
+            ),
+            pl.lit("local").alias("source"),
+        ]
+    )
+
+    report_dir = Path(cfg["paths"]["reports_dir"]) / week_tag
+    report_dir.mkdir(parents=True, exist_ok=True)
+    out_path = report_dir / f"screen_result_{strat.id}.csv"
+    out.write_csv(out_path)
+
+    console.print(f"[green]本地篩出 {len(out)} 檔[/green]，結果存於 [bold]{out_path}[/bold]")
+    console.print(
+        "[yellow]source=local：資料來自官方 API 非 Goodinfo，"
+        "口徑落差見 docs/02、playbook/90[/yellow]"
+    )
+
+
 @screen_app.command("doctor")
 def screen_doctor(
     replay: bool = typer.Option(
