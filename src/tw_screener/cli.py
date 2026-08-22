@@ -1246,6 +1246,24 @@ def backtest_laggard_grid_cmd(
     run_laggard_grid(settings, out_dir, membership)
 
 
+@backtest_app.command("g3-grid")
+def backtest_g3_grid_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/g3_grid）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+    membership: str = typer.Option(
+        "concepts",
+        help="membership 來源：concepts（手標次產業，預設）｜official"
+        "（TWSE 官方產業別 robustness 版，輸出檔名加 _official 後綴）",
+    ),
+) -> None:
+    """docs/31 §9 milestone：G3候選filter驗證（族群前5×個股貼落後×未過熱×資金非負）。"""
+    from tw_screener.backtest.g3_grid_runner import run_g3_grid
+
+    run_g3_grid(settings, out_dir, membership)
+
+
 @backtest_app.command("contrarian-efficacy")
 def backtest_contrarian_efficacy_cmd(
     out_dir: Path | None = typer.Option(

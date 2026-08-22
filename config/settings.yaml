@@ -400,6 +400,18 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     rs_window: 20                # rs_subind 回看窗（個股 vs 次產業籃報酬差）
     n_boot: 1000
     output_dir: research/laggard_grid
+  g3_grid:                  # docs/31 G3 候選 filter 驗證（族群前5×個股貼落後×位階中段×資金非負）
+    horizons_td: [10, 20]        # forward 窗（交易日），與 laggard_grid 同窗才可比較
+    rs_window: 20                 # rs_subind 回看窗，同 laggard_grid 口徑
+    rs_range: [-15.0, 0.0]        # docs/31 G3：rs_subind_20d ∈ [-15,0]
+    ma60_range: [-10.0, 10.0]      # 2026-08-22修正：改雙邊區間，單邊≤10會混入破線股（opus複核）
+    top_n_groups: 5                # docs/31 G3：族群 trend_score 當日排名前5（次產業，非個股列）
+    flow_window: 20                # net_flow_{w}d 累加窗
+    flow_z_window: 60              # net_flow_z 滾動 z 視窗（同 stock_panel.py z_window 慣例）
+    flow_z_min_periods: 30         # z 暖機最低樣本（同 stock_panel.py 慣例）
+    snapshot_gap_td: 5             # 週頻快照間隔（交易日，近似值）→ CI block長度換算用
+    n_boot: 1000
+    output_dir: research/g3_grid
   contrarian_efficacy:       # M-BR1 Phase 2 底部左側聯合桶檢驗（make contrarian-efficacy）
     horizons_td: [5, 10, 20, 40] # forward alpha 窗（交易日）
     focal_horizon: 20            # 焦點窗（§4 ground-truth 用 r+20；裁決以此窗）
