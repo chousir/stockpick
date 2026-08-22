@@ -524,3 +524,46 @@ regime block bootstrap單位修正方法論，比原本`laggard_grid.py`更嚴�
   ⚠️ 此查核只證實`t187ap05_L`本身，**不等於**證實§8item1的`t187ap45_L`/`t187ap11_L`
   （不同端點，欄位/用途皆不同）也是快照限制——那兩個端點維持「待查」，不可用本條結果
   直接推論，只能當作「同一產品線傾向如此」的弱先驗，動工前仍需各自查證。
+
+### L6/G4 前瞻累積軌實作（2026-08-22，同分支，未merge）
+
+依§9item4搭建L6/G4共用的每週記錄機制——**本輪只做「記錄」，不做「裁決」**：現在的樣本量
+（0週）連判讀資格都沒有，硬跑統計檢定只會產出「樣本不足」的空殼，故只把記分板建起來。
+
+**新增**：`backtest/l6_g4_watch.py`（純函式）＋`backtest/l6_g4_watch_runner.py`（IO）＋CLI
+`tw-screener backtest l6-g4-watch`（設定見`settings.backtest.l6_g4_watch`）。每次執行：
+讀`screener.local.universe.build_local_universe()`（全市場市值/PE/累計YoY，非
+candidates_enriched.csv——後者只收族群leader子集，會系統性漏掉本研究要追的「零蹤跡」左側股，
+見§5.2的74.4%/82.8%零蹤跡發現）＋`client.fetch_revenue()`（單月YoY+報告月）＋
+`client.load_revenue_yoy_deltas()`（rev_yoy_delta，全市場、純讀本地快取）＋
+`client.load_institutional_history()`（投信近5日淨買超），算出當週命中`l6_2cond`/
+`l6_4cond`/`g4`三旗標的股票，upsert進`research/l6_g4_watch/ledger.csv`（以(week,stock_id)
+去重，同週重跑覆寫）。只記錄命中列，未命中股票不進底帳。
+
+**兩個刻意的設計決定（沿advisor複核）**：
+1. **只存「不可回補」的欄位，不存可回補的欄位**：`pe_ratio`/`cum_rev_yoy_pct`/
+   `rev_yoy_pct`/`rev_yoy_delta`/`trust_net_5d`五欄的資料源都是當下快照（§9item3已證實
+   `t187ap05_L`無歷史查詢），今天不記就永久遺失。「落難週」四維技術面（距MA60/距60日低/
+   前8週報酬）與「後4週報酬進同池前20%」結果標籤兩者皆為價格衍生欄，未來任何時間點都能
+   用日線快取重建，本輪不算、留給真正跑裁決的里程碑。
+2. **L6門檻兩讀法並存，不擅自二選一**：docs §4.2定義L6為四條件（YoY≥20∧PE≤25∧投信近5日
+   淨買>0∧市值≥100億），但§5.2實際做統計檢定的只有兩條件（YoY≥20∧PE≤25，n=55/41/42），
+   「投信近5日淨買>0」原表是獨立測的一列（n=89），從未跟YoY/PE聯集驗證過；§9item4字面
+   只寫兩條件。底帳同時存`l6_2cond`／`l6_4cond`兩旗標，把「用哪個口徑算命中率」的決定
+   留給未來重新登記檢定時做，不在記錄階段預先選邊。
+3. **前視偏誤旗標**：`revenue_preview_risk`——月營收公告日粗估為次月10日，若該報告月的
+   估計公告日晚於`data_date`即標記，供未來分窗（比照§5.2複核按PE來源分窗的做法）排除
+   受污染週。
+
+**⚠️ 兩個限制，需使用者知悉，不是我能單方面解決的**：
+- **這是手動指令，不掛在`make week`管線**（比照`picks record`既有慣例——本檔只讀快取、
+  不改動任何picks/報告輸出，非gating）。**這週沒手動跑，這週的快照就永久遺失、無法回頭
+  補**——累積軌的價值完全取決於「有沒有每週跑」，必須排進使用者自己的週報SOP。
+- **`research/`目錄本身gitignored，底帳不進版控**——跟`research/g3_grid/`同待遇，但G3是
+  一次性回測產物、丟了重跑成本是機器時間；這個底帳的核心價值就是「累積」，本地環境若清空
+  或搬遷，等於歸零重來，沒有git歷史可救。
+
+**已做**：`tests/backtest/test_l6_g4_watch.py`（10 tests，純函式合成資料，不打網、不碰真
+快取）涵蓋門檻邊界、preview_risk旗標、upsert冪等性。`make test`/ruff/mypy全綠。
+**未做（刻意）**：計分/裁決指令——依advisor建議，寫了也測不了（沒有累積資料），等真的
+累積到有意義的週數再另立里程碑設計，不在本輪預先寫死方法論。
