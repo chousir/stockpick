@@ -1185,3 +1185,127 @@ regime欄位確實會在需要的時候起作用，不是擺著好看**。
 全程保留每一步包含否定/邊際結果的誠實記錄。**仍然不是「取代Goodinfo的新策略」**
 ——目前只是`make week`裡的一個非gate揭露欄，是否要往候選生成/排序輸入的方向
 進一步生產化，留待使用者依累積下來的真實使用回饋另行拍板。
+
+---
+
+## 14. rank_velocity：提早卡位訊號預先登記（2026-08-23，使用者指示，執行前寫死）
+
+**動機**：使用者把§13.6的69%週轉率重新框架為「短期提早進場」訊號——但前提是要在
+族群**還沒排進前5之前**就抓到，不然「漲完才進場」訊號本身沒用。§10-13驗證的都是
+「已經進前5」這個狀態本身的forward報酬，是一個不同的假設；本節測試新維度：
+**尚未進前5、但排名正快速爬升**的個股，報酬是否優於同樣尚未進前5、但排名停滯/
+退步的個股——這才是「提早卡位」的訊號，不是重跑已驗證的發現。
+
+一個非正式的quick check（無CI/無regime切片/無walk-forward，純點估計）已顯示方向
+一致的正效應（fast-improving decile: mean alpha10 +1.33% vs flat/worsening +1.12%，
+alpha20 +2.18% vs +2.05%），弱於「已進前5」的效應（+2.13%/+3.82%）但方向正確——
+本節把它升級到跟§10/§13同一套嚴謹度（CI／regime切片／walk-forward）才能下結論，
+不能拿quick check的數字當定論。
+
+### 14.1 定義（執行前寫死，不得跑完再回頭調）
+
+- **沿用生產設定**，不重新調參數：手標46次產業、`build_hand_sector_membership`／
+  `build_hand_sector_baskets`（purity=0.5，跟§12/§13.3上線設定一致）、
+  `trend_score_series`算每個(date, sub_industry)的trend_score、族群排名`_rank`
+  （`rank(method="min", descending=True)`，1＝最強，同`official_group_rank_grid`
+  既有算法，程式碼裡抽成共用helper`_add_group_rank`不重寫）。
+- **rank_velocity** = `_rank`(t−2個快照) − `_rank`(t)（正值＝排名進步/爬升，負值＝
+  退步）。快照＝面板既有週頻率（同全案`snapshot_gap_td=5`慣例，2個快照≈2週）。
+  任一端缺該sub_industry在對應快照的排名（新掛牌/資料缺席/籃子history不足2週）
+  →該列直接不出現（inner join自然過濾），不外插、不用0填。
+- **母體限定**：只看當週`_rank > top_n_groups`（即尚未進前5）的(date, sub_industry)
+  列——已進前5的效應是§10-13的別的假設，本節不重複算，只留一個`top5`參照格對比。
+- **fast_improving切分**：在「尚未進前5」母體中，**逐日橫斷面**算rank_velocity的
+  90th百分位（`quantile(0.9)`，`.over("date")`），該日rank_velocity≥該日90分位
+  →`fast_improving=True`。**逐日算而非全樣本固定切點**——避免用到當下還不知道的
+  未來分布資訊（look-ahead），跟trend_score等既有欄位的橫斷面排名慣例一致。
+- **三個cell**（不重建多維格，同§10.3精神）：`top5`（參照，已進前5）／
+  `not_top5_fast`（未進前5且爬升快）／`not_top5_slow`（未進前5、其餘）。
+
+### 14.2 統計方法與升gate/否證門檻（原封抄自§10.3/§7.4，不另訂寬鬆或嚴格標準）
+
+- horizons：r+10/r+20/r+40（沿用panel既有`alpha10/20/40`欄，零新計算，同§13.1）。
+- CI：`moving_block_bootstrap_ci`對delta（cell當日均值−當日全樣本均值）算，
+  block長度沿用`_block_len_snapshots(h, snapshot_gap_td)`既有換算，同全案慣例。
+- regime切片：沿用`REGIME_LABELS`/`REGIME_MIN_N`既有機制。
+- **焦點格＝`not_top5_fast`**（這才是「提早卡位」假設本身）。裁決門檻：CI95不跨0
+  ＋跨regime同向≥2（尤其須含防禦或中性至少一項——§13.5已示範「已進前5」訊號
+  只在進攻regime有效，本節須誠實檢查`not_top5_fast`是否有同樣的regime依賴）
+  ＋前後半段同向，三缺一→「未過關」（效應不足以下結論，非否證）；CI排除0在下、
+  方向為負→「已否證」；三者皆過→才可進一步討論是否新增揭露欄位。
+- **`not_top5_fast`的delta_mean需同時大於`not_top5_slow`**（點估計比較，非正式diff
+  檢定——跟§10-13比較各cell的既有慣例一致，本案未對任何cell做過正式diff-of-diff
+  檢定，不在本節另立新標準）。
+- walk-forward：`walk_forward_splits`切n_splits=4段（跟§13.1同函式），**本節無需
+  選threshold**（fast_improving分位切點是逐日資料定義、非可調超參數，不像§10.9/
+  §13.1的purity門檻需要在train上選）——只需各段獨立算`not_top5_fast`格的
+  delta/CI，誠實列出每段結果（同§13.4精神：效應若集中在近期必須如實揭露，不可
+  只挑好看的段落）。
+
+### 14.3 生產化路徑（若過關）
+
+若`not_top5_fast`過關：比照§13.3既有`official_sector_top5`欄位注入模式，新增
+`official_sector_rising`（暫定欄名）純揭露欄位——「尚未進前5、但近2週排名爬升
+快於同儕90分位」的個股標記為True，同樣附上當週regime，不做為gate或排序輸入。
+若未過關：如實記錄「未過關」或「已否證」，本節到此為止，不追加生產化欄位。
+
+**全部重用§10/§12/§13既有函式**（`build_hand_sector_membership`／
+`build_hand_sector_baskets`／`trend_score_series`／`moving_block_bootstrap_ci`／
+`walk_forward_splits`／`REGIME_LABELS`），只新增「算rank_velocity＋逐日90分位
+切分＋3-cell delta/CI」這一個新函式，不建立新的驗證框架。
+
+### 14.4 結果——未過關，quick check的效應在delta化後消失
+
+`official_sector_grid.py`新增`compute_rank_velocity`/`rank_velocity_grid`/
+`rank_velocity_by_regime`/`walk_forward_rank_velocity`（`official_group_rank_grid`/
+`official_group_rank_by_regime`重構出共用`_add_group_rank` helper，行為不變、
+19個舊測試全綠）。實作過程抓到一個真bug：`_rank`欄是`pl.rank()`回傳的`UInt32`，
+`_rank_prev − _rank`在排名退步（結果為負）時無號整數相減會underflow成天文數字
+（`4294967294`而非`-2`）——測試`test_compute_rank_velocity_direction_and_lag`當場
+抓到，修法：算rank_velocity前先`cast(pl.Int64)`。29個新測試（含此regression test）
+全綠，ruff/mypy無新增錯誤。CLI新增`tw-screener backtest rank-velocity-grid`
+（`config.backtest.rank_velocity_grid`區塊，purity/fast_quantile/lag_snapshots等
+全部固定值，不重新調參）。
+
+**實跑2022-01~2026-07全期資料（233週快照、41個手標群組）**，`not_top5_fast`
+（焦點格）三個horizon**皆CI95跨0，未過關**（§14.2預先登記門檻，CI不跨0是三缺一
+不可的第一條）：
+
+| horizon | not_top5_fast delta_mean | CI95 | not_top5_slow delta_mean | CI95 |
+|---|---|---|---|---|
+| r+10 | -0.01% | [-0.23, +0.24] | -0.14% | [-0.20, -0.09] |
+| r+20 | -0.21% | [-0.50, +0.15] | -0.24% | [-0.33, -0.15] |
+| r+40 | -0.14% | [-0.82, +0.28] | -0.41% | [-0.58, -0.22] |
+
+**誠實解讀**：quick check（本節開頭引用的非正式點估計，fast +1.33%/+2.18% vs
+flat/worsening +1.12%/+2.05%）看到的差異，在delta化（扣掉當日全樣本均值，把
+「大盤同期普遍上漲」的成分濾掉）之後基本消失——`not_top5_fast`三個horizon的
+delta_mean都貼著0，CI95寬到把0整個包進去，**不能說「排名快速爬升」本身能提早
+預測出額外報酬**。真正有訊號的反而是`not_top5_slow`（排名停滯/退步、仍未進前5
+的族群）：三個horizon的CI95都**清楚排除0在下**（如實記錄，非否證這個格本身的
+存在——這裡是「排名停滯的族群顯著跑輸大盤」，不是本節假設要驗證的方向）。
+`not_top5_fast`的delta_mean雖然三個horizon都優於`not_top5_slow`（表格可見），
+但這只是「跌得比較少」，不是「顯著上漲」，跟原本想找的「提早卡位、之後補漲」
+訊號是兩回事。
+
+regime切片顯示`not_top5_fast`在三個regime本身多半也貼著0（進攻regime三個窗口
+反而是最弱的，中性/防禦window的CI也都跨0）——`regime_alignment_verdict`機械算出
+「跨regime穩健」（2/3同向）字面上為真，但「同向」在這裡指的是三個都貼近0、方向
+微弱一致，不是「三個regime都有顯著正效應」，機械裁決字面過關但實質沒有意義，
+需要人工判讀時特別注意這個陷阱（跟§10.3裁決規則「三者皆過→才可進一步討論」的
+精神一致——這裡只是流程走完後仍要人工判斷是否值得進一步討論，答案是否定的）。
+
+多段walk-forward（4段）更進一步印證「未過關」——`not_top5_fast`格delta_mean
+逐段變號（r+10：−0.23%／+0.32%／+0.30%／−0.11%；r+20/r+40同樣正負交錯），
+**沒有任何一段的CI95乾淨排除0**，不存在§13.4式「效應集中在近期」的模式，是
+均勻分布在0附近的雜訊，不是被稀釋的真效應。
+
+**結論：rank_velocity（「尚未進前5但排名快速爬升」）本節驗證未過關，不新增
+`official_sector_rising`揭露欄位**。這是誠實的否定結果，不是失敗的實作——
+§14的動機（把69%換手率重新框架成「提早卡位」訊號）本身仍然合理，但這一版
+「用2週排名爬升速度當提早訊號」的具體操作化方式，用§10/§13同一套嚴謹方法論
+檢驗後站不住腳。使用者原本設想的「提早抓到訊號」需求，目前**沒有找到**比
+「已進前5」（§10-13已驗證、但regime/時間依賴）更早、同樣站得住腳的替代訊號——
+如實記錄，不強行包裝成「有進展」。若未來想再嘗試，值得換一個操作化方式（如
+更長或更短的lag_snapshots、換一個排名爬升的量尺如相對trend_score變化量而非
+名次），但不在本輪範圍內。

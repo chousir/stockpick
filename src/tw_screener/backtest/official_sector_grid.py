@@ -264,6 +264,22 @@ def _block_len_snapshots(h: int, snapshot_gap_td: int) -> int:
     return max(1, math.ceil((h + 1) / max(1, snapshot_gap_td)))
 
 
+def _add_group_rank(base: pl.DataFrame) -> pl.DataFrame:
+    """(date, sub_industry, trend_score, ...) → 同一 frame 多加 `_rank` 欄（該日群組
+    trend_score 排名，1=最強）。`official_group_rank_grid`/`official_group_rank_by_regime`/
+    `rank_velocity_grid` 共用，避免三處各寫一份排名邏輯。
+    """
+    group_rank = (
+        base.select("date", "sub_industry", "trend_score")
+        .unique(subset=["date", "sub_industry"])
+        .with_columns(
+            pl.col("trend_score").rank(method="min", descending=True).over("date").alias("_rank")
+        )
+        .select("date", "sub_industry", "_rank")
+    )
+    return base.join(group_rank, on=["date", "sub_industry"], how="left")
+
+
 def official_group_rank_grid(
     stock_rows: pl.DataFrame,
     horizons: tuple[int, ...] = (10, 20),
@@ -295,15 +311,7 @@ def official_group_rank_grid(
     if base.is_empty():
         return pl.DataFrame(schema=schema)
 
-    group_rank = (
-        base.select("date", "sub_industry", "trend_score")
-        .unique(subset=["date", "sub_industry"])
-        .with_columns(
-            pl.col("trend_score").rank(method="min", descending=True).over("date").alias("_rank")
-        )
-        .select("date", "sub_industry", "_rank")
-    )
-    base = base.join(group_rank, on=["date", "sub_industry"], how="left").with_columns(
+    base = _add_group_rank(base).with_columns(
         (pl.col("_rank") <= top_n_groups).alias("group_top5")
     )
     mid_date = base["date"].median()
@@ -373,15 +381,7 @@ def official_group_rank_by_regime(
     base = stock_rows.drop_nulls(list(need))
     if base.is_empty():
         return pl.DataFrame(schema=schema)
-    group_rank = (
-        base.select("date", "sub_industry", "trend_score")
-        .unique(subset=["date", "sub_industry"])
-        .with_columns(
-            pl.col("trend_score").rank(method="min", descending=True).over("date").alias("_rank")
-        )
-        .select("date", "sub_industry", "_rank")
-    )
-    base = base.join(group_rank, on=["date", "sub_industry"], how="left")
+    base = _add_group_rank(base)
 
     rows: list[dict] = []
     for h in horizons:
@@ -538,3 +538,341 @@ def walk_forward_top5_grid(
                 }
             )
     return pl.DataFrame(rows, schema=_WF_SCHEMA)
+
+
+# ---------------------------------------------------------------------------
+# docs/31 §14：rank_velocity——尚未進前5、但排名快速爬升的「提早卡位」訊號
+# ---------------------------------------------------------------------------
+
+_RANK_VELOCITY_SCHEMA: dict[str, type[pl.DataType]] = {
+    "date": pl.Date, "sub_industry": pl.Utf8,
+    "rank_now": pl.Float64, "rank_velocity": pl.Float64,
+}
+
+RANK_VELOCITY_CELLS: tuple[str, ...] = ("top5", "not_top5_fast", "not_top5_slow")
+
+
+def compute_rank_velocity(stock_rows: pl.DataFrame, lag_snapshots: int = 2) -> pl.DataFrame:
+    """§14.1：`_rank`(t−lag_snapshots個快照) − `_rank`(t)，正值＝排名進步/爬升。
+
+    快照＝`stock_rows`裡實際出現的去重日期序列（呼叫端須先過濾成週頻，同全案
+    `snapshot_gap_td=5`慣例，本函式不自行判斷週頻，只按傳入的日期序列數第
+    lag_snapshots個）。任一端缺對應快照的排名（新掛牌/資料缺席）→ 該列不出現
+    （inner join自然過濾），不外插、不用0填。
+
+    Args:
+        stock_rows: 需含 date/sub_industry/trend_score（同`_add_group_rank`）。
+    """
+    need = {"date", "sub_industry", "trend_score"}
+    if stock_rows.is_empty() or not need.issubset(stock_rows.columns):
+        return pl.DataFrame(schema=_RANK_VELOCITY_SCHEMA)
+    base = stock_rows.drop_nulls(list(need))
+    if base.is_empty():
+        return pl.DataFrame(schema=_RANK_VELOCITY_SCHEMA)
+
+    ranked = (
+        _add_group_rank(base)
+        .select("date", "sub_industry", pl.col("_rank").cast(pl.Int64))
+        .unique(subset=["date", "sub_industry"])
+        .drop_nulls(["_rank"])
+    )
+    if ranked.is_empty():
+        return pl.DataFrame(schema=_RANK_VELOCITY_SCHEMA)
+
+    dates = sorted(ranked["date"].unique().to_list())
+    if len(dates) <= lag_snapshots:
+        return pl.DataFrame(schema=_RANK_VELOCITY_SCHEMA)
+    lag_df = pl.DataFrame(
+        {
+            "date": dates[lag_snapshots:],
+            "_prev_date": dates[: len(dates) - lag_snapshots],
+        }
+    )
+    prev = ranked.rename({"date": "_prev_date", "_rank": "_rank_prev"})
+    return (
+        ranked.join(lag_df, on="date", how="inner")
+        .join(prev, on=["_prev_date", "sub_industry"], how="inner")
+        .with_columns((pl.col("_rank_prev") - pl.col("_rank")).alias("rank_velocity"))
+        .select(
+            "date", "sub_industry",
+            pl.col("_rank").alias("rank_now"),
+            "rank_velocity",
+        )
+        .sort(["date", "sub_industry"])
+    )
+
+
+def _rank_velocity_cells(
+    stock_rows: pl.DataFrame,
+    top_n_groups: int,
+    fast_quantile: float,
+    lag_snapshots: int,
+) -> pl.DataFrame:
+    """§14.1：把 stock_rows 分成 top5／not_top5_fast／not_top5_slow 三個 cell。
+
+    fast_improving 用**逐日橫斷面**（僅未進前5母體）算 rank_velocity 的
+    `fast_quantile` 分位切點，避免用到當下還不知道的未來分布資訊。
+    """
+    base = _add_group_rank(stock_rows).with_columns(
+        (pl.col("_rank") <= top_n_groups).alias("group_top5")
+    )
+    velocity = compute_rank_velocity(stock_rows, lag_snapshots=lag_snapshots)
+    if velocity.is_empty():
+        return base.filter(pl.col("group_top5")).with_columns(
+            pl.lit("top5").alias("cell")
+        )
+
+    joined = base.join(
+        velocity.select("date", "sub_industry", "rank_velocity"),
+        on=["date", "sub_industry"], how="left",
+    )
+    not_top5 = joined.filter(~pl.col("group_top5") & pl.col("rank_velocity").is_not_null())
+    thresholds = (
+        not_top5.group_by("date")
+        .agg(pl.col("rank_velocity").quantile(fast_quantile).alias("_thr"))
+    )
+    not_top5_cell = (
+        not_top5.join(thresholds, on="date", how="left")
+        .with_columns(
+            pl.when(pl.col("rank_velocity") >= pl.col("_thr"))
+            .then(pl.lit("not_top5_fast"))
+            .otherwise(pl.lit("not_top5_slow"))
+            .alias("cell")
+        )
+        .drop("_thr")
+    )
+    top5_cell = joined.filter(pl.col("group_top5")).with_columns(pl.lit("top5").alias("cell"))
+    return pl.concat(
+        [top5_cell.drop("rank_velocity"), not_top5_cell.drop("rank_velocity")],
+        how="diagonal_relaxed",
+    )
+
+
+_RV_SCHEMA: dict[str, type[pl.DataType]] = {
+    "horizon": pl.Int64, "cell": pl.Utf8, "n": pl.UInt32, "n_dates": pl.UInt32,
+    "mean": pl.Float64, "median": pl.Float64, "win_rate": pl.Float64,
+    "delta_mean": pl.Float64, "ci_lo": pl.Float64, "ci_hi": pl.Float64,
+    "mean_h1": pl.Float64, "mean_h2": pl.Float64,
+}
+
+
+def rank_velocity_grid(
+    stock_rows: pl.DataFrame,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_n_groups: int = 5,
+    fast_quantile: float = 0.9,
+    lag_snapshots: int = 2,
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """docs/31 §14 預先登記：3個cell（top5參照／未進前5且爬升快／未進前5且不快）
+    forward 報酬對照。焦點格＝`not_top5_fast`——這才是「提早卡位」假設本身。
+
+    Args:
+        stock_rows: 需含 date/sub_industry/trend_score/alpha{h}（同
+            `official_group_rank_grid`）。
+    """
+    need = {"date", "sub_industry", "trend_score"}
+    if stock_rows.is_empty() or not need.issubset(stock_rows.columns):
+        return pl.DataFrame(schema=_RV_SCHEMA)
+    base = stock_rows.drop_nulls(list(need))
+    if base.is_empty():
+        return pl.DataFrame(schema=_RV_SCHEMA)
+
+    cells = _rank_velocity_cells(base, top_n_groups, fast_quantile, lag_snapshots)
+    return _aggregate_rank_velocity_cells(cells, horizons, n_boot, seed, snapshot_gap_td)
+
+
+def _aggregate_rank_velocity_cells(
+    cells: pl.DataFrame,
+    horizons: tuple[int, ...],
+    n_boot: int,
+    seed: int,
+    snapshot_gap_td: int,
+) -> pl.DataFrame:
+    """`_rank_velocity_cells` 輸出（含 `cell` 欄）→ 逐 horizon×cell 算 mean/CI（`rank_velocity_grid`
+    與 `walk_forward_rank_velocity` 共用，避免 walk-forward 每段重跑 `_rank_velocity_cells`
+    導致 `_rank`/`cell` 等中間欄跟`_add_group_rank`重算衝突。
+    """
+    if cells.is_empty():
+        return pl.DataFrame(schema=_RV_SCHEMA)
+    mid_date = cells["date"].median()
+
+    rows: list[dict] = []
+    for h in horizons:
+        tgt = f"alpha{h}"
+        if tgt not in cells.columns:
+            continue
+        sub = cells.drop_nulls([tgt])
+        pop_by_date = sub.group_by("date").agg(pl.col(tgt).mean().alias("_pop_mean"))
+        sub = sub.join(pop_by_date, on="date", how="left").with_columns(
+            (pl.col(tgt) - pl.col("_pop_mean")).alias("_delta")
+        )
+        block_len = _block_len_snapshots(h, snapshot_gap_td)
+        for cell_name in RANK_VELOCITY_CELLS:
+            g = sub.filter(pl.col("cell") == cell_name)
+            if g.is_empty():
+                continue
+            vals = [float(v) for v in g[tgt].to_list()]
+            h1 = g.filter(pl.col("date") <= mid_date)[tgt]
+            h2 = g.filter(pl.col("date") > mid_date)[tgt]
+            med = g[tgt].median()
+            daily_delta = (
+                g.group_by("date").agg(pl.col("_delta").mean().alias("_m")).sort("date")
+            )
+            delta_vals = [float(v) for v in daily_delta["_m"].to_list() if v is not None]
+            ci_lo, ci_hi = (
+                moving_block_bootstrap_ci(delta_vals, block_len=block_len, n_boot=n_boot, seed=seed)
+                if delta_vals else (None, None)
+            )
+            rows.append(
+                {
+                    "horizon": h, "cell": cell_name,
+                    "n": len(vals), "n_dates": len(delta_vals),
+                    "mean": sum(vals) / len(vals) if vals else None,
+                    "median": float(med) if isinstance(med, (int, float)) else None,
+                    "win_rate": sum(1 for v in vals if v > 0) / len(vals) if vals else None,
+                    "delta_mean": sum(delta_vals) / len(delta_vals) if delta_vals else None,
+                    "ci_lo": ci_lo, "ci_hi": ci_hi,
+                    "mean_h1": _smean(h1), "mean_h2": _smean(h2),
+                }
+            )
+    return pl.DataFrame(rows, schema=_RV_SCHEMA).sort(["horizon", "cell"])
+
+
+_RV_REGIME_SCHEMA: dict[str, type[pl.DataType]] = {
+    "horizon": pl.Int64, "cell": pl.Utf8, "regime": pl.Utf8, "n": pl.Int64,
+    "n_dates": pl.Int64, "mean": pl.Float64, "ci_lo": pl.Float64, "ci_hi": pl.Float64,
+    "thin": pl.Boolean,
+}
+
+
+def rank_velocity_by_regime(
+    stock_rows: pl.DataFrame,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_n_groups: int = 5,
+    fast_quantile: float = 0.9,
+    lag_snapshots: int = 2,
+    n_boot: int = 1000,
+    seed: int = 42,
+    regime_col: str = "regime",
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§14.2：`not_top5_fast`/`not_top5_slow`/`top5` 三格 × regime forward 報酬。"""
+    need = {"date", "sub_industry", "trend_score"}
+    if (
+        stock_rows.is_empty()
+        or not need.issubset(stock_rows.columns)
+        or regime_col not in stock_rows.columns
+        or stock_rows[regime_col].drop_nulls().is_empty()
+    ):
+        return pl.DataFrame(schema=_RV_REGIME_SCHEMA)
+    base = stock_rows.drop_nulls(list(need))
+    if base.is_empty():
+        return pl.DataFrame(schema=_RV_REGIME_SCHEMA)
+
+    cells = _rank_velocity_cells(base, top_n_groups, fast_quantile, lag_snapshots)
+    if cells.is_empty():
+        return pl.DataFrame(schema=_RV_REGIME_SCHEMA)
+
+    rows: list[dict] = []
+    for h in horizons:
+        tgt = f"alpha{h}"
+        if tgt not in cells.columns:
+            continue
+        sub = cells.drop_nulls([tgt])
+        pop_by_date = sub.group_by("date").agg(pl.col(tgt).mean().alias("_pop_mean"))
+        sub = sub.join(pop_by_date, on="date", how="left").with_columns(
+            (pl.col(tgt) - pl.col("_pop_mean")).alias("_delta")
+        )
+        block_len = _block_len_snapshots(h, snapshot_gap_td)
+        for cell_name in RANK_VELOCITY_CELLS:
+            cell_sub = sub.filter(pl.col("cell") == cell_name)
+            for reg in REGIME_LABELS:
+                g = cell_sub.filter(pl.col(regime_col) == reg)
+                daily = g.group_by("date").agg(pl.col("_delta").mean().alias("_m")).sort("date")
+                vals = [float(v) for v in daily["_m"].to_list() if v is not None]
+                lo_ci, hi_ci = (
+                    moving_block_bootstrap_ci(vals, block_len=block_len, n_boot=n_boot, seed=seed)
+                    if vals else (None, None)
+                )
+                rows.append(
+                    {
+                        "horizon": h, "cell": cell_name, "regime": reg,
+                        "n": g.height, "n_dates": len(vals),
+                        "mean": (sum(vals) / len(vals)) if vals else None,
+                        "ci_lo": lo_ci, "ci_hi": hi_ci, "thin": len(vals) < REGIME_MIN_N,
+                    }
+                )
+    return pl.DataFrame(rows, schema=_RV_REGIME_SCHEMA)
+
+
+_RV_WF_SCHEMA: dict[str, type[pl.DataType]] = {
+    "horizon": pl.Int64, "cell": pl.Utf8, "split_id": pl.Int64,
+    "test_start": pl.Date, "test_end": pl.Date,
+    "test_n": pl.UInt32, "test_n_dates": pl.UInt32,
+    "test_delta_mean": pl.Float64, "test_ci_lo": pl.Float64, "test_ci_hi": pl.Float64,
+}
+
+
+def walk_forward_rank_velocity(
+    stock_rows: pl.DataFrame,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_n_groups: int = 5,
+    fast_quantile: float = 0.9,
+    lag_snapshots: int = 2,
+    n_splits: int = 4,
+    min_train_frac: float = 0.4,
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§14.2 walk-forward：無需選threshold（fast_improving分位切點逐日資料定義，非
+    可調超參數，跟§10.9/§13.1的purity門檻不同）——只需各段獨立算三個cell的delta/CI，
+    誠實列出每段結果（同§13.4精神：效應若集中在近期必須如實揭露）。
+    """
+    need = {"date", "sub_industry", "trend_score"}
+    if stock_rows.is_empty() or not need.issubset(stock_rows.columns):
+        return pl.DataFrame(schema=_RV_WF_SCHEMA)
+    base = stock_rows.drop_nulls(list(need))
+    if base.is_empty():
+        return pl.DataFrame(schema=_RV_WF_SCHEMA)
+
+    cells = _rank_velocity_cells(base, top_n_groups, fast_quantile, lag_snapshots)
+    if cells.is_empty():
+        return pl.DataFrame(schema=_RV_WF_SCHEMA)
+
+    all_dates = sorted(cells["date"].unique().to_list())
+    rows: list[dict] = []
+    for h in horizons:
+        tgt = f"alpha{h}"
+        if tgt not in cells.columns:
+            continue
+        emb = h + 1
+        splits: list[Split] = walk_forward_splits(
+            all_dates, n_splits=n_splits, min_train_frac=min_train_frac, embargo_td=emb
+        )
+        for s in splits:
+            test_cells = cells.filter(
+                (pl.col("date") >= s.test_start) & (pl.col("date") <= s.test_end)
+            )
+            test_grid = _aggregate_rank_velocity_cells(
+                test_cells, horizons=(h,), n_boot=n_boot, seed=seed,
+                snapshot_gap_td=snapshot_gap_td,
+            )
+            for cell_name in RANK_VELOCITY_CELLS:
+                r_df = test_grid.filter(pl.col("cell") == cell_name)
+                if r_df.is_empty():
+                    continue
+                r = r_df.row(0, named=True)
+                rows.append(
+                    {
+                        "horizon": h, "cell": cell_name, "split_id": s.split_id,
+                        "test_start": s.test_start, "test_end": s.test_end,
+                        "test_n": r["n"], "test_n_dates": r["n_dates"],
+                        "test_delta_mean": r["delta_mean"],
+                        "test_ci_lo": r["ci_lo"], "test_ci_hi": r["ci_hi"],
+                    }
+                )
+    return pl.DataFrame(rows, schema=_RV_WF_SCHEMA)

@@ -443,6 +443,17 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     n_boot: 1000
     hand_min_purity: 0.7          # docs/31 §10.6：手標次產業→官方類別 majority-mapping門檻
     output_dir: research/official_sector_grid
+  rank_velocity_grid:        # docs/31 §14：提早卡位訊號（未進前5但排名快速爬升）預先登記
+    horizons_td: [10, 20, 40]    # 沿用panel既有alpha10/20/40欄，零新計算，同§13.1
+    top_n_groups: 5               # 與production一致，不重新調參
+    min_purity: 0.5                # 與§12/§13.3上線設定一致，不重新調參
+    fast_quantile: 0.9            # 逐日橫斷面90分位＝快速爬升門檻（§14.1，避免look-ahead）
+    lag_snapshots: 2              # rank_velocity回看快照數（≈2週）
+    snapshot_gap_td: 5
+    n_boot: 1000
+    n_splits: 4                    # 多段walk-forward，同§13.1
+    min_train_frac: 0.4
+    output_dir: research/rank_velocity_grid
   contrarian_efficacy:       # M-BR1 Phase 2 底部左側聯合桶檢驗（make contrarian-efficacy）
     horizons_td: [5, 10, 20, 40] # forward alpha 窗（交易日）
     focal_horizon: 20            # 焦點窗（§4 ground-truth 用 r+20；裁決以此窗）

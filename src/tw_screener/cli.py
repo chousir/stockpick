@@ -1344,6 +1344,19 @@ def backtest_official_sector_grid_cmd(
     run_official_sector_grid(settings, out_dir, group_source, hand_min_purity)
 
 
+@backtest_app.command("rank-velocity-grid")
+def backtest_rank_velocity_grid_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/rank_velocity_grid）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """docs/31 §14 milestone：rank_velocity提早卡位訊號（未進前5但排名快速爬升）驗證。"""
+    from tw_screener.backtest.rank_velocity_grid_runner import run_rank_velocity_grid
+
+    run_rank_velocity_grid(settings, out_dir)
+
+
 @backtest_app.command("l6-g4-watch")
 def backtest_l6_g4_watch_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),

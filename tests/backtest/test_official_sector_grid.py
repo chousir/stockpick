@@ -10,12 +10,17 @@ import pytest
 from tw_screener.backtest.official_sector_grid import (
     _INDUSTRY_TO_INDEX_ALIASES,
     _UNMAPPED_INDUSTRIES,
+    RANK_VELOCITY_CELLS,
     build_hand_sector_baskets,
     build_hand_sector_membership,
     build_official_sector_baskets,
     build_official_sector_membership,
+    compute_rank_velocity,
     compute_subindustry_purity,
     official_group_rank_grid,
+    rank_velocity_by_regime,
+    rank_velocity_grid,
+    walk_forward_rank_velocity,
     walk_forward_top5_grid,
 )
 
@@ -309,3 +314,114 @@ def test_walk_forward_top5_grid_too_few_weeks_returns_empty() -> None:
         purity_thresholds=(1.0,), horizons=(10,), n_splits=4, min_train_frac=0.4,
     )
     assert out.is_empty()
+
+
+# ─── rank_velocity（docs/31 §14：提早卡位訊號） ─────────────────────────────────
+
+
+def _rank_velocity_fixture() -> pl.DataFrame:
+    """3群組×6週：A排名從落後(3)在d2~d3之間急速爬升到第1，C同期急速下滑，B恆定第2——
+    可用來檢查 rank_velocity 的方向與lag=2快照的計算是否正確。"""
+    dates = [date(2026, 1, 5) + timedelta(weeks=i) for i in range(6)]
+    scores = {
+        "A": [10, 20, 30, 80, 90, 95],
+        "B": [50, 50, 50, 50, 50, 50],
+        "C": [100, 90, 80, 20, 10, 5],
+    }
+    rows = []
+    for i, d in enumerate(dates):
+        for sub, s in scores.items():
+            rows.append({"date": d, "sub_industry": sub, "trend_score": float(s[i])})
+    return pl.DataFrame(rows)
+
+
+def test_compute_rank_velocity_direction_and_lag() -> None:
+    base = _rank_velocity_fixture()
+    out = compute_rank_velocity(base, lag_snapshots=2)
+    dates = sorted(base["date"].unique().to_list())
+    # 前2個快照（d0/d1）沒有可比對的t-2快照，該drop不出現，不外插
+    assert set(out["date"].unique().to_list()) == set(dates[2:])
+    # A 在 d1(rank3) → d3(rank1)：velocity = 3-1 = +2（急速爬升）
+    a_d3 = out.filter((pl.col("date") == dates[3]) & (pl.col("sub_industry") == "A"))
+    assert a_d3.row(0, named=True)["rank_velocity"] == 2.0
+    # C 在 d1(rank1) → d3(rank3)：velocity = 1-3 = -2（急速下滑）
+    c_d3 = out.filter((pl.col("date") == dates[3]) & (pl.col("sub_industry") == "C"))
+    assert c_d3.row(0, named=True)["rank_velocity"] == -2.0
+    # B 恆定第2名：velocity 全程為 0
+    assert (out.filter(pl.col("sub_industry") == "B")["rank_velocity"] == 0.0).all()
+
+
+def test_compute_rank_velocity_empty_when_missing_columns() -> None:
+    assert compute_rank_velocity(pl.DataFrame({"date": [date(2026, 1, 1)]})).is_empty()
+
+
+def test_compute_rank_velocity_too_few_snapshots_returns_empty() -> None:
+    base = _rank_velocity_fixture().filter(pl.col("date") <= date(2026, 1, 12))  # 只2週
+    assert compute_rank_velocity(base, lag_snapshots=2).is_empty()
+
+
+def test_rank_velocity_grid_schema_and_cells() -> None:
+    base = _rank_velocity_fixture().with_columns(pl.lit(1.0).alias("alpha10"))
+    grid = rank_velocity_grid(base, horizons=(10,), top_n_groups=1, n_boot=20)
+    assert set(grid.columns) == {
+        "horizon", "cell", "n", "n_dates", "mean", "median", "win_rate",
+        "delta_mean", "ci_lo", "ci_hi", "mean_h1", "mean_h2",
+    }
+    assert set(grid["cell"].to_list()).issubset(set(RANK_VELOCITY_CELLS))
+    assert not grid.is_empty()
+
+
+def test_rank_velocity_grid_empty_when_missing_columns() -> None:
+    assert rank_velocity_grid(pl.DataFrame({"date": [date(2026, 1, 1)]})).is_empty()
+
+
+def test_rank_velocity_grid_empty_when_no_alpha_column() -> None:
+    grid = rank_velocity_grid(_rank_velocity_fixture(), horizons=(10,))
+    assert grid.is_empty()
+
+
+def test_rank_velocity_by_regime_runs() -> None:
+    base = _rank_velocity_fixture().with_columns(
+        pl.lit(1.0).alias("alpha10"), pl.lit("進攻").alias("regime")
+    )
+    out = rank_velocity_by_regime(base, horizons=(10,), top_n_groups=1, n_boot=20)
+    assert set(out.columns) == {
+        "horizon", "cell", "regime", "n", "n_dates", "mean", "ci_lo", "ci_hi", "thin",
+    }
+    assert not out.is_empty()
+
+
+def test_rank_velocity_by_regime_empty_without_regime_column() -> None:
+    base = _rank_velocity_fixture().with_columns(pl.lit(1.0).alias("alpha10"))
+    assert rank_velocity_by_regime(base, horizons=(10,)).is_empty()
+
+
+def _rank_velocity_long_fixture(n_weeks: int = 40) -> pl.DataFrame:
+    """40週合成資料，供walk_forward_rank_velocity結構性測試（同walk_forward_top5_grid
+    慣例：只確認流程/schema正確，不主張統計顯著）。"""
+    dates = [date(2023, 1, 2) + timedelta(weeks=i) for i in range(n_weeks)]
+    rows = []
+    for i, d in enumerate(dates):
+        # A/B/C排名逐週循環輪動，製造持續的rank_velocity變化
+        cyc = i % 3
+        order = ["A", "B", "C"][cyc:] + ["A", "B", "C"][:cyc]
+        for sub, s in zip(order, [90.0, 60.0, 30.0], strict=True):
+            rows.append(
+                {"date": d, "sub_industry": sub, "trend_score": s, "alpha10": 1.0}
+            )
+    return pl.DataFrame(rows)
+
+
+def test_walk_forward_rank_velocity_schema() -> None:
+    data = _rank_velocity_long_fixture(n_weeks=40)
+    out = walk_forward_rank_velocity(
+        data, horizons=(10,), top_n_groups=1, n_splits=2, min_train_frac=0.4, n_boot=20,
+    )
+    assert set(out.columns) == {
+        "horizon", "cell", "split_id", "test_start", "test_end",
+        "test_n", "test_n_dates", "test_delta_mean", "test_ci_lo", "test_ci_hi",
+    }
+
+
+def test_walk_forward_rank_velocity_empty_inputs() -> None:
+    assert walk_forward_rank_velocity(pl.DataFrame({"date": [date(2026, 1, 1)]})).is_empty()
