@@ -1320,6 +1320,19 @@ def backtest_g3_grid_cmd(
     run_g3_grid(settings, out_dir, membership)
 
 
+@backtest_app.command("official-sector-grid")
+def backtest_official_sector_grid_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/official_sector_grid）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """docs/31 §10 milestone：官方產業分類×MI_INDEX官方指數，重測G3「族群前5」。"""
+    from tw_screener.backtest.official_sector_grid_runner import run_official_sector_grid
+
+    run_official_sector_grid(settings, out_dir)
+
+
 @backtest_app.command("l6-g4-watch")
 def backtest_l6_g4_watch_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
