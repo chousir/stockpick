@@ -341,3 +341,23 @@ def deep_value_growth(
         base_zone == "貼底"
     )
     return at_base
+
+
+def peg_like_ratio(pe: float | None, rev_yoy_pct: float | None) -> float | None:
+    """docs/31 §18：PE 對月營收YoY成長率之比（PEG-like，非傳統EPS-based PEG）。
+
+    傳統PEG＝PE / EPS成長率，但本地無法算EPS YoY（`fundamentals`快取僅2季，
+    無去年同季可比），改用官方月營收YoY（`rev_yoy_pct`，TWSE自身算好的年增率，
+    已在candidates_enriched.csv使用）當成長替代——這是妥協，不是等價物，呼叫端
+    需標明「PE對營收成長比，非EPS-based PEG」。無利率調整（沒有台灣無風險利率
+    資料源，docs/31 §14.2已查核確認缺席）。
+
+    只在`pe>0`且`rev_yoy_pct>0`時有意義（虧損股無正PE；成長為負/零時比值方向
+    會反轉、不可比照「數字小＝便宜」的PEG直覺去讀）——任一條件不滿足回None，
+    不硬算、不給誤導性數字。
+    """
+    if pe is None or pe <= 0:
+        return None
+    if rev_yoy_pct is None or rev_yoy_pct <= 0:
+        return None
+    return round(pe / rev_yoy_pct, 2)

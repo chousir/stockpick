@@ -896,7 +896,11 @@ def _build_enriched_rows(
     )
     from tw_screener.analysis.grouping import classify_risk_kind, near_flow_state, rank_themes
     from tw_screener.analysis.inflection import flow_diff_5_20, margin_slim
-    from tw_screener.analysis.valuation import deep_value_growth, market_cap_billion
+    from tw_screener.analysis.valuation import (
+        deep_value_growth,
+        market_cap_billion,
+        peg_like_ratio,
+    )
 
     themes_long = themes_long if themes_long is not None else pl.DataFrame()
     ranked = rank_themes(members, themes_long)
@@ -1028,6 +1032,9 @@ def _build_enriched_rows(
         # 「相對便宜度」讀法，非公允價；無利率調整（本地無台灣無風險利率資料源）。
         pe_self_pctile = _num(vrow.get("pe_self_pctile"), 1) if vrow else None
         pe_self_n = vrow.get("pe_self_n") if vrow else None
+        # docs/31 §18：PEG-like（PE對月營收YoY成長比，非EPS-based classic PEG）——
+        # 只用官方PE（跟val_pctile/pe_self_pctile一致，不用Goodinfo兜底值算比值）。
+        peg_like = peg_like_ratio(_num(off_pe, 4), ryoy)
         fn = _num(r.get("foreign_net"), 0)
         tn = _num(r.get("trust_net"), 0)
         instn = _num(r.get("inst_net"), 0)
@@ -1224,6 +1231,10 @@ def _build_enriched_rows(
                 # （筆數越少越不穩，目前約10週深度）；筆數不足門檻→兩欄皆null（未取得）。
                 "pe_self_pctile": pe_self_pctile,
                 "pe_self_n": pe_self_n,
+                # docs/31 §18：PEG-like＝官方PE / 月營收YoY%（成長替代EPS成長率，因本地
+                # 無法算EPS YoY）——數字小＝相對成長便宜，但非傳統EPS-based PEG、無利率
+                # 調整；PE非正或YoY非正時留null（比值方向會反轉，不可解讀，不硬算）。
+                "peg_like_ratio": peg_like,
                 "rev_yoy_pct": ryoy,
                 "cum_rev_yoy_pct": cum_ryoy,  # 累計營收YoY（TWSE/TPEX官方口徑，策略E/F/G門檻用）
                 "market_cap_billion": mkt_cap,  # 市值（億元）＝股數×收盤價/1e8（近似Goodinfo口徑）
@@ -1390,6 +1401,7 @@ _CANONICAL_REUSE_FIELDS = (
     "cheap_flag",
     "pe_self_pctile",
     "pe_self_n",
+    "peg_like_ratio",
     "rev_yoy_pct",
     "gross_margin_pct",
     "net_margin_pct",

@@ -15,6 +15,7 @@ from tw_screener.analysis.valuation import (
     compute_subind_relative,
     compute_valuation_meta,
     market_cap_billion,
+    peg_like_ratio,
 )
 
 
@@ -238,3 +239,23 @@ def test_self_history_pctile_empty_input() -> None:
                 "pe": pl.Float64, "pbr": pl.Float64, "dividend_yield": pl.Float64}
     )
     assert compute_self_history_pctile(empty).is_empty()
+
+
+# ─── peg_like_ratio（docs/31 §18：PE對營收YoY成長比，非EPS-based PEG） ──────────
+
+
+def test_peg_like_ratio_basic() -> None:
+    assert peg_like_ratio(pe=20.0, rev_yoy_pct=40.0) == 0.5
+
+
+def test_peg_like_ratio_none_when_pe_missing_or_non_positive() -> None:
+    assert peg_like_ratio(pe=None, rev_yoy_pct=40.0) is None
+    assert peg_like_ratio(pe=0.0, rev_yoy_pct=40.0) is None
+    assert peg_like_ratio(pe=-5.0, rev_yoy_pct=40.0) is None
+
+
+def test_peg_like_ratio_none_when_growth_missing_or_non_positive() -> None:
+    """成長為負/零時比值方向會反轉、不可比照PEG直覺讀，寧可留null不硬算。"""
+    assert peg_like_ratio(pe=20.0, rev_yoy_pct=None) is None
+    assert peg_like_ratio(pe=20.0, rev_yoy_pct=0.0) is None
+    assert peg_like_ratio(pe=20.0, rev_yoy_pct=-10.0) is None

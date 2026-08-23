@@ -1415,3 +1415,96 @@ README有更新嗎」）**：`official-sector-watch`（§13）本來就已經內
 早就有這步（在`rotation`之後、`cp-value-candidates`之前）——README現已改成正確的
 「十五步」，`macro`補回、兩條新watch步驟加入，並註記⑪⑫產物在`research/`
 （gitignored，非`reports/`，不必貼給Claude）。
+
+---
+
+## 17. flow_trigger：換一個資料通道再試「提早卡位」（2026-08-23，使用者指示深思，執行前寫死）
+
+**動機**：§14 rank_velocity未過關，深入想過原因後判斷：`trend_score`（及其任何
+衍生量：排名、原始分數、兩者的變化率）有40%權重來自價格/MA距離（`_TREND_WEIGHTS_
+DEFAULT`，`rotation.py`），本質上是「現在有多強」的量尺——想從這個量尺的變化率
+偵測「快要變強」，等於試圖用一個近乎半有效率定價的量測自己領先自己，沒有理論
+基礎期待它能提早。**要找真正可能領先的訊號，需要換一個因果通道，不是換一個
+價格衍生指標的算法**。
+
+本專案已有一個資金流向（非價格衍生）的訊號、且**已局部驗證過領先性**：
+`config/settings.yaml`的`rotation.entry_signal`（★投信流校準，`trust_flow_20d`
+z分數>1.0∧`flow_momentum`>0，`docs/12-sector-rotation.md`§2.4校準，領先中位
+8-10日、lift 1.2-1.5倍）——但這個校準**只驗證過對「籃子突破事件」的precision/
+recall**，且**校準窗只有2025-05-28~2026-06-10（34個事件）**，從未測過「這個
+訊號能不能預測尚未進官方族群前5的次產業，接下來forward報酬是否較佳／較快進
+前5」——這是一個新問題，而且**跟§14不同、这次可以用2022-2026全期資料驗證**，
+因為輸入（`foreign_net`/`trust_net`/`dealer_net`）在panel裡有完整歷史，不像
+L6/G4/G1/G2/G5卡在snapshot-only端點（§16/§7.4補記已確認）。
+
+### 17.1 定義（執行前寫死）
+
+- **重用production同一組校準參數，不重新調參**：`signal_col=trust_flow_20d`、
+  `z_window=60`／`z_min_periods=30`（`rotation_calib.standardize_signals`預設，
+  同production慣例）、`threshold=1.0`、`require_momentum=True`、
+  `short_window=5`／`long_window=20`（`compute_fund_flows`預設）。
+- **重建歷史trigger序列**：`panel.parquet`的`foreign_net`/`trust_net`/`dealer_net`
+  逐日加總成`total_net`（三大法人買賣超股數的官方定義本就是三者加總，非新概念）
+  →`analysis.rotation.compute_fund_flows`（沿用§10/§14同一套手標46細分類
+  membership，purity=0.5）→`backtest.rotation_calib.standardize_signals`
+  （causal 60日滾動z，同production）→`backtest.rotation_calib.compute_triggers`
+  （向上穿越即觸發，同production）→ 逐日(sub_industry, date)觸發事件表。
+- **母體限定**：同§14，只看`_rank > top_n_groups`（尚未進前5）的(date, sub_industry)。
+- **「近期觸發」定義**：以**交易日索引**（非日曆天，避免週末/假日誤差）衡量——
+  觸發後`lookback_window`個交易日內（含觸發當日）算「近期觸發」，
+  `lookback_window=15`與production的`lead_window`同值，非新拍的數字。
+- **三個cell**（同§14精神，不重建多維格）：`top5`（參照）／
+  `not_top5_triggered`（尚未進前5、近期有★觸發）／`not_top5_untriggered`
+  （尚未進前5、近期無觸發）。
+
+### 17.2 統計方法與升gate/否證門檻（原封抄自§10.3/§14.2，不另訂寬鬆或嚴格標準）
+
+- horizons：r+10/r+20/r+40（沿用panel既有欄，同§13.1/§14）。
+- CI／regime切片／4段walk-forward：與§14.2完全同一套方法論（moving-block
+  bootstrap對delta、`REGIME_LABELS`切片、`walk_forward_splits`，本節同樣不需要
+  選threshold——trigger規則是production既有校準值，非本節新調參）。
+- **焦點格＝`not_top5_triggered`**。裁決門檻：CI95不跨0＋跨regime同向≥2（尤其
+  須含防禦或中性至少一項）＋前後半段同向＋delta_mean優於`not_top5_untriggered`，
+  三缺一→「未過關」；CI排除0在下、方向為負→「已否證」；三者皆過→才可討論新增
+  揭露欄位。**跟§14一樣不因為這是「深思後的新嘗試」就放寬門檻**，過不了就是
+  過不了，誠實記錄第二個否定結果也是有效產出。
+
+### 17.3 生產化路徑（若過關）
+
+若過關：新增`official_sector_flow_trigger`（暫定欄名）純揭露欄位，比照
+`official_sector_top5`/`pe_self_pctile`既有注入模式，非gate、非排序輸入。
+若未過關：如實記錄，本節到此為止。
+
+**全部重用既有函式**（`analysis.rotation.compute_fund_flows`／
+`backtest.rotation_calib.standardize_signals`／`compute_triggers`／
+`official_sector_grid._add_group_rank`／`moving_block_bootstrap_ci`／
+`walk_forward_splits`），只新增「重建歷史trigger序列＋標記近期觸發＋3-cell
+delta/CI」這一組新函式，不建立新的驗證框架、不重新設計已校準的trigger規則本身。
+
+---
+
+## 18. peg_like_ratio：PE對營收成長比揭露欄（2026-08-23，使用者指示：不用利率，改用成長）
+
+**動機**：使用者不堅持利率調整（§14.2已查核台灣無風險利率資料源缺席，短期解不了），
+改提議「用EPS未來可能成長跟本益比做考量」。查核：本地無法算EPS YoY——
+`fundamentals`快取每次只保留當期＋前一期共2季，沒有去年同季可比數字，算不出
+EPS年增率。**改用官方月營收YoY（`rev_yoy_pct`）當成長替代**——這是TWSE自己算好
+的年增率，已在`candidates_enriched.csv`裡（E/G策略門檻也在用），不需要新資料源、
+不需要等歷史累積。
+
+**設計**：`analysis/valuation.py`新增`peg_like_ratio(pe, rev_yoy_pct)`純函式——
+`peg_like_ratio = 官方PE / 月營收YoY%`，數字小＝相對成長便宜（PEG的直覺，但這是
+營收成長不是EPS成長，非傳統PEG，需標明）。只在`pe>0`（虧損股無正PE）且
+`rev_yoy_pct>0`（成長為負/零時比值方向會反轉、不可比照PEG直覺讀）時計算，否則
+回null，不硬算誤導性數字。`pe`固定用官方值（`vrow.get("pe")`），不用Goodinfo
+兜底值算比——跟`val_pctile`/`pe_self_pctile`同一慣例。無利率調整（沒有資料源，
+不假裝有）。
+
+**跟§15同樣的誠實邊界**：無法用2022-2026資料驗證這個比值本身是否真的有預測力
+（PE無歷史深度，同§15的blocker）——**這是揭露欄，不是驗證過的訊號**，跟
+`pe_self_pctile`定位完全一樣。5個新測試（`peg_like_ratio`基本案例/PE非正/成長
+非正各類＋`group_report.py`一類欄位注入覆蓋率測試）全綠，ruff/mypy零新增錯誤。
+**實跑`tw-screener analysis group`驗證（2026-W34，非模擬）**：87檔候選股中76檔
+`peg_like_ratio`有值，11檔因`rev_yoy_pct`缺席或非正留null，數字分布合理
+（如5515: PE 5.7／YoY 30.8%／peg 0.18；9945: PE 5.1／YoY 2.0%／peg 2.57——後者
+雖PE同樣便宜，但成長微弱，peg數字如實反映「便宜但不是靠成長撐」）。

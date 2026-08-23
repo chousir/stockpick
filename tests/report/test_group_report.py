@@ -378,6 +378,27 @@ def test_pe_self_history_pctile_populated_and_default_blank(tmp_path):
     assert by_id["2454"]["pe_self_n"] is None
 
 
+def test_peg_like_ratio_column_computed_and_null_when_growth_non_positive(tmp_path):
+    """docs/31 §18：PEG-like用官方PE(非Goodinfo兜底)×月營收YoY；成長非正時留null。"""
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    valuation_map = {
+        "2330": {"pe": 20.0},
+        "2454": {"pe": 15.0},
+    }
+    rev_yoy_map = {"2330": 40.0, "2454": -5.0}
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(
+        members, pl.DataFrame(), results, out,
+        valuation_map=valuation_map, rev_yoy_map=rev_yoy_map,
+    )
+    by_id = {str(r["stock_id"]): r for r in pl.read_csv(out).iter_rows(named=True)}
+    assert by_id["2330"]["peg_like_ratio"] == 0.5
+    assert by_id["2454"]["peg_like_ratio"] is None
+
+
 # ── 0.3 本週族群主軸 / Section 5 補位塊（問題3・M3）─────────────────────────
 
 
