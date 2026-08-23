@@ -33,6 +33,11 @@ from tw_screener.screener.goodinfo.url_builder import build_data_url, load_strat
 # Goodinfo 「篩選條件範圍過大」訊號（與 parser._TOO_MANY 同源語意）
 _TOO_MANY_MARKER = "篩選條件範圍過大"
 
+# Cloudflare 人機驗證挑戰頁（非 Goodinfo 自家的流量異常封鎖頁/JS init 頁，格式不同、
+# 2026-08-23 直接抓包確認過；不加這條會被 tblStockList 檢查誤判成 STRUCTURE_CHANGED
+# （像改版），實際上是被擋，見 docs/31 §19.3）
+_CLOUDFLARE_MARKER = "__CF$cv$params"
+
 # 解析成功時必須出現的關鍵中文欄名（parser._COL_MAP 的核心子集）。
 # 缺任一 → 視為欄位改名（parser 會默默回傳整欄 null、不會 raise，故 doctor 要顯式檢查）。
 _CRITICAL_HEADERS = ("代號", "名稱", "成交", "漲跌幅")
@@ -69,6 +74,12 @@ def diagnose_html(html: str) -> DoctorResult:
     """
     if GoodinfoFetcher._BLOCKED_MARKER in html:
         return DoctorResult(DoctorStatus.BLOCKED, "Goodinfo 回傳流量異常封鎖頁（您的瀏覽量異常）")
+
+    if _CLOUDFLARE_MARKER in html:
+        return DoctorResult(
+            DoctorStatus.BLOCKED,
+            "Goodinfo 回傳 Cloudflare 人機驗證頁（非 Goodinfo 自家封鎖頁，同屬連線被擋）",
+        )
 
     if GoodinfoFetcher._is_js_init_page(html):
         return DoctorResult(

@@ -1558,3 +1558,145 @@ EPS年增率。**改用官方月營收YoY（`rev_yoy_pct`）當成長替代**—
 `peg_like_ratio`有值，11檔因`rev_yoy_pct`缺席或非正留null，數字分布合理
 （如5515: PE 5.7／YoY 30.8%／peg 0.18；9945: PE 5.1／YoY 2.0%／peg 2.57——後者
 雖PE同樣便宜，但成長微弱，peg數字如實反映「便宜但不是靠成長撐」）。
+
+**§18.1 效益如何（2026-08-23，使用者追問後補記）**：誠實答案——**無法量化效益，
+因為結構上無法驗證**（同上一段），這不是「還沒測」，是「測不了」（PE無2022-2026
+歷史深度，等同§15的`pe_self_pctile`）。唯一能誠實評的是「代價」：這一輪
+（§14-§18）一次替`candidates_enriched.csv`加了5個`official_sector_*`欄＋
+`pe_self_pctile`/`pe_self_n`＋`peg_like_ratio`共8個新欄位，方向跟使用者原本
+「以前太多太雜、要簡化」的訴求相反——欄位數在往多走，不是往少走。這8欄目前全部
+標記非gate、純揭露，不影響篩選/排序，但「揭露欄堆多了」本身就是一種需要使用者
+拍板的取捨（多一個欄位＝多一份要看的資訊，即使不影響結論）。**建議**：不要把
+`peg_like_ratio`當成單獨保留/砍掉的決策，而是跟其他7個同批揭露欄一起，等下次
+使用者實際看幾週報表覺得「有用/沒用」後一次盤點取捨，比現在盲砍或盲留都更誠實。
+
+## 19. 使用者對§14/§17/§18/§13-16的四點追問（2026-08-23，逐條回覆，只讀不改碼，除非明列）
+
+### 19.1 提早卡位訊號——還有沒有漏掉的角度／某些情況下是否有效（回應項目1）
+
+**「某些情況下表現不錯」這個問題，§14/§17自己的regime切片其實已經直接回答過，
+沒有漏做**：`flow_trigger`（§17.4）三個regime全部同向或接近零，沒有一個是穩健正值——
+進攻regime三個horizon分別-0.37%/-0.60%/-0.86%（最負）；中性-0.01%/-0.17%/-0.23%；
+防禦-0.10%/-0.08%/+0.49%（唯一一個正值，但CI[-0.87,+0.93]整個跨0，不能算「有效」，
+只是噪音）。換句話說：不是「平均沒用、但某個regime有用」，是三個regime同向往負，
+沒有藏著一塊正值区间。`rank_velocity`（§14）當時的regime切片也是同樣結論
+（見§14.4），這裡不重複貼表。
+
+**曾經想過、判斷不該做的角度（記下來避免之後重蹈）**：把`not_top5_triggered`
+再拆成「有沒有真的成功卡位（後來真的進了top5）」vs「觸發了但沒進」——這個切法
+帶著前視偏誤（結果已知才回頭分類「成功」），跟本專案在§7.4/L6一貫否決的「用結果
+回頭挑樣本」是同一類錯誤，不能做。同理，把`lookback_window`（15個交易日）當超參數
+去調到CI轉正也不該做——那是在一個已經否證的訊號上調參數找假陽性，不是驗證。
+
+**目前唯一還沒測過、且不是參數微調而是換分析單位的角度**：§14和§17都是在
+「族群」層級量測（族群平均delta），沒有測過「個股」層級——同一個尚未進前5的族群裡，
+族群內部個股彼此的相對表現（例如族群內動能最強的1-2檔，是否比族群內其他成員更早
+反映後續進榜）。這是不同的分析單位，不是同一個假說換個門檻，值得算進「這是第3次
+在同一份母體/同一個結果變數上找訊號」的多重比較預算裡老實跟使用者說清楚，再由
+使用者決定要不要花這個預算——**這裡先不跑，留待使用者拍板**（若要跑會依§14.2/
+§17.2同樣的pre-registration紀律，先寫死定義與否證門檻再執行）。
+
+### 19.2 宏觀掃描如何做得更好（回應項目3）
+
+docs/25 Phase 5已經誠實記錄BAA10Y/VIX speed_pct兩個既有面板指標對同3次事件都測不出
+有用的領先性。**這裡查核了一個不在既有面板裡、但本地已有完整2022-2026歷史深度的
+候選指標**：`panel.parquet`裡的`margin_balance_lots`（全市場融資餘額，張數，僅上市）。
+先查`analysis/washout.py`（本地既有的、用同一份融資資料的模組）避免重做——確認
+該模組目前**只做底部偵測**（子項1「融資投降」：融資單日/5日減幅z<−2，抓的是恐慌性
+去槓桿），完全沒有頂部/過熱方向的指標，所以這不是重做，是補一個對稱缺口。
+
+**構想（尚未動工，僅記錄構想供使用者拍板是否排入下一個milestone）**：融資餘額
+持續走高、且相對自身歷史處於高檔（例如自身歷史百分位或z分數），在文獻與台股實務
+上常被當成散戶槓桿過熱、追高情緒的代理——docs/26 §5.1已經點名「情緒/籌碼型頭部」
+是目前外部總經燈號覆蓋不到的缺口，這個構想直接對準那個缺口，而且完全不需要新資料源
+（`margin_balance_lots`已在panel、已有2022-2026完整歷史，不像§14/§17卡在快照深度
+不夠）。**這是一個新的milestone候選，不是本輪順手做的小補丁**——需要先做docs/25
+同等級的3-事件timing查核（不能只看是否統計顯著，要先看有沒有真的領先，同§Phase5
+的查核標準），才能判斷有沒有用；**這裡先不開工，留待使用者決定是否排入下一輪**。
+
+### 19.3 為何`make week`還是執行失敗／Goodinfo是否已被取代（回應項目4，最關鍵）
+
+**直接答案：沒有，Goodinfo沒有被取代。本輪（§13-§18）所有研究都是在Goodinfo產出的
+候選名單「之上」做揭露欄與前瞻驗證，沒有一項替換掉Goodinfo本身的候選生成角色。**
+下面是逐項查證，不是猜測：
+
+**(a) `make week`現在真的會失敗，而且是可重現的即時事實，不是假設**——實際跑
+`uv run tw-screener screen doctor --force`（強制略過快取，走真連線）：`EXIT=1`，
+診斷碼`STRUCTURE_CHANGED`（「找不到結果表tblStockList」）。追查真正原因：直接把
+探針URL的原始HTML存下來看，抓到的是一個**Cloudflare Turnstile人機驗證頁**
+（`<title>初始化失敗</title>`＋`window.__CF$cv$params`＋要求「請開啟瀏覽器的
+JavaScript及Cookies功能」），**跟`playbook`記憶裡已知的「Goodinfo被Cloudflare擋」
+是同一個已知問題**，不是新的網站改版。順帶查到一個小的診斷分類落差：`doctor.py`
+的`_is_js_init_page()`只認舊版Goodinfo自家的JS轉址頁特徵
+（`window.location.replace`+`CLIENT_KEY`），認不出這個新的Cloudflare挑戰頁格式，
+所以誤分類成`STRUCTURE_CHANGED`（像是欄位改版）而不是`BLOCKED`/`JS_UNRESOLVED`
+（像是被擋）——這是一個小bug，會讓未來看診斷碼的人誤判成因，值得修，但不是本次
+`make week`失敗的根本原因，根本原因是Cloudflare擋，不是Goodinfo改版。
+
+再用`uv run tw-screener screen doctor --replay`（離線，吃既有fixture，不連網）驗證
+parser本身沒退化：`EXIT=0`，正常解析61檔——**證實問題完全在連線端（被擋），
+parser邏輯是好的**。
+
+`Makefile`的`week`目標裡，`$(MAKE) doctor`這一步**沒有`-`（非阻擋）前綴**——這是
+唯一一個會讓整條`make week`直接中止的步驟，會擋在`screen-all`/`group`/本輪新加的
+`l6-g4-watch`/`g1-g2-g5-watch`之前就整條失敗。**這證實了使用者的指控是對的**：
+上一輪我只用`make -n week`（純印出指令，沒真的跑）驗證wiring順序，沒有真的執行過
+一次`doctor`步驟，才會沒發現這個會導致整條pipeline失敗的阻擋點。
+
+**(b) 候選生成路徑逐行查證，確認完全未脫離Goodinfo**：`report/group_runner.py`的
+`run_group_analysis()`呼叫`analysis/watchlist.py`的`load_latest_screener_results()`，
+後者的作法是找最新一週報表夾底下的`screen_result_*.csv`並讀入——**這些檔案只由
+`screen-all`（打Goodinfo）產生，沒有其他生產路徑**。也就是說`group`／
+`candidates_enriched.csv`（本輪所有新欄位、G1-G5/L1-L6前瞻軌都建立在它之上）
+100%下游依賴Goodinfo成功跑完`screen-all`，沒有例外。
+
+**(c) 一條本來就存在、但沒人接上主流程的本地替代路徑**：`screener/local/universe.py`
+的`build_local_universe()`（純用TWSE/TPEX官方快取建全市場寬表：市值、PE、殖利率、
+累計月營收YoY）＋`screener/local/filter.py`的`apply_local_filters()`＋CLI指令
+`screen run-local <strategy>`——這條路徑**完全不打Goodinfo**，但`grep Makefile
+README.md`確認**零引用**，是一個寫好但沒接進`make week`、也沒寫進README的孤兒指令。
+而且它目前只有D/E/F/G四支策略裡的**F（`f_value_rebound`）能跑**——因為
+`field_map.py`的`GOODINFO_ITEM_TO_LOCAL_COL`只覆蓋4個欄位（市值/PE/殖利率/
+累計月營收YoY），F的4個篩選條件剛好全部落在這4欄內，D/E/G都至少有一條條件對不到
+本地欄位，`apply_local_filters`會直接`raise UnsupportedLocalFilterError`拒跑
+（程式碼註解寫明：「不得本地化執行，寧可拒跑，不悄悄漏篩」——這個設計是對的，
+沒有偷偷放水）。
+
+**(d) 逐策略查了卡住的確切條件、以及是否有解**：
+- **D（`d_quality_leader`）**：4條件裡3條本地無法覆蓋——近4季ROE、**連續配息≥8年**、
+  連續增加季數-單季稅後淨利。「連續配息≥8年」這一條**結構性卡死**，不是等資料
+  累積就會解的問題（就算今天開始存，也要等8年），除非重新設計一個完全不同的
+  本地代理指標，否則D事實上沒有變成Goodinfo獨立的路徑。
+- **E（`e_growth_momentum`）／G（`g_growth_pullback`）**：各自只卡在**同一條**
+  「連續增加季數–單季稅後淨利≥2」（需要至少2季淨利連續成長，也就是要能看到3個季度
+  的淨利數字才能判斷「連續2次上升」）。查`data/cache/twse/`確認`fundamentals`
+  快取**確實逐季存檔、沒有互相覆蓋**（`fundamentals_2026Q1.parquet`與
+  `fundamentals_2026Q2.parquet`同時存在）——這代表隨著`make fetch-twse`每週例行
+  抓取，季度數會自然累積，**不需要新程式碼，等時間到就有解**：等Q4 2026季報
+  （約2027年初公布）落地後，本地就會有Q2/Q3/Q4三季可比，足以判斷「連續2季成長」，
+  E/G屆時理論上可以解鎖`run-local`。
+- **但E還有一個目前藏著、還沒被觸發的獨立缺口**：`e_growth_momentum.yaml`除了
+  `filters`外還有一條`rules`（「均線多頭排列」），而`apply_local_filters()`／
+  `unmapped_items()`**只檢查`strategy.filters`，完全沒有讀`strategy.rules`**——
+  現在因為E在`filters`那關就被擋下來，這個缺口還沒發作，但將來`filters`那條被
+  上面的日曆累積解開之後，若沒有同時處理`rules`，E會被**悄悄漏篩**（少判一條
+  均線條件就通過），直接違反`field_map.py`自己頭部註解的承諾「不會悄悄漏篩」。
+  這是一個需要跟E的filter-解鎖同時修的程式碼缺口，記在這裡避免將來只修一半。
+  D/F/G的`rules`都是空的（`rules: []`），不受影響。
+
+**(e) 對「你確定策略已取代goodinfo?」的直接回答**：沒有確定，而且答案是否定的——
+目前只有F這一支策略有Goodinfo獨立路徑，而且這條路徑沒有接進`make week`、
+沒有寫進README，使用者完全不知道它存在也在情理之中。E/G有一條靠日曆時間自然解鎖、
+但還沒到的路徑（且E還多一個`rules`缺口要修）。D在可見的未來（至少8年）沒有解。
+本輪所有新增內容（official_sector_top5系列、pe_self_pctile、peg_like_ratio、
+rank_velocity、flow_trigger、L6/G4/G1/G2/G5前瞻軌）全部是建立在Goodinfo仍需要
+成功執行的前提上的揭露/驗證層，沒有一項讓D/E/F/G四支策略的候選生成本身脫離Goodinfo。
+
+**需要使用者拍板、不擅自做的一件事**：`doctor`失敗時要不要讓`make week`自動退化成
+「跳過D/E/G、只用`run-local f_value_rebound`把F的候選塞進當週報表夾，其餘步驟
+照跑」？這聽起來像順手的resilience補強，但有一個真實代價：那一週的
+`candidates_enriched.csv`會變成「只有F」，這個差異目前完全沒有任何欄位/中繼資料
+記錄下來，會原封不動流進`picks.csv`/`excluded.csv`底帳，混進`make pick-outcome`
+的命中率校準，且無法回頭分辨哪幾週是「四策略正常跑」、哪幾週是「Goodinfo被擋、
+只有F」。這是一個會影響長期績效歸因準確度的架構決策，不是單純的容錯補丁，
+留給使用者決定要不要做、要做的話要不要同時加provenance欄位。

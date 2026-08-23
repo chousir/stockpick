@@ -45,6 +45,19 @@ def test_diagnose_blocked():
     assert not result.ok
 
 
+def test_diagnose_cloudflare_challenge_classified_as_blocked():
+    # 2026-08-23 實測抓包的真實特徵（見 docs/31 §19.3）：非 Goodinfo 自家封鎖頁/JS
+    # init 頁格式，若不特判會被 tblStockList 檢查誤判成 STRUCTURE_CHANGED（像改版）
+    html = (
+        "<html><head><title>初始化失敗</title></head><body>"
+        "請開啟瀏覽器的JavaScript及Cookies功能，以支援網站運作。"
+        "<script>window.__CF$cv$params={r:'x',t:'y'}</script></body></html>"
+    )
+    result = diagnose_html(html)
+    assert result.status is DoctorStatus.BLOCKED
+    assert not result.ok
+
+
 def test_diagnose_js_unresolved():
     html = "<html><script>var CLIENT_KEY; window.location.replace('x.asp')</script></html>"
     assert diagnose_html(html).status is DoctorStatus.JS_UNRESOLVED
