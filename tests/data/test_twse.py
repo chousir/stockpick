@@ -1240,6 +1240,80 @@ def test_load_sector_index_history_no_cache_empty(tmp_path: Path):
     assert client.load_sector_index_history().is_empty()
 
 
+# ─── load_fundamentals_history（docs/31 §11） ──────────────────────────────────
+
+
+def _fund_row(stock_id: str, year: int, quarter: int, **overrides: object) -> dict:
+    base = {
+        "stock_id": stock_id, "year": year, "quarter": quarter,
+        "revenue_m": 100.0, "gross_margin_pct": 30.0, "op_margin_pct": 10.0,
+        "pretax_margin_pct": 9.0, "net_margin_pct": 8.0, "eps": 1.0,
+        "debt_ratio_pct": 40.0, "current_ratio": 1.5, "bvps": 20.0, "roe_q_pct": 5.0,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_load_fundamentals_history_computes_qoq_delta(tmp_path: Path):
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    pl.DataFrame([_fund_row("2330", 2026, 1, net_margin_pct=6.0, op_margin_pct=8.0)]).write_parquet(
+        tmp_path / "fundamentals_2026Q1.parquet"
+    )
+    pl.DataFrame([_fund_row("2330", 2026, 2, net_margin_pct=8.0, op_margin_pct=8.5)]).write_parquet(
+        tmp_path / "fundamentals_2026Q2.parquet"
+    )
+
+    df = client.load_fundamentals_history()
+    row = df.filter(pl.col("stock_id") == "2330").row(0, named=True)
+    assert row["quarter_label"] == "2026Q2"
+    assert row["net_margin_pct"] == 8.0
+    assert row["delta_net_margin_pct"] == pytest.approx(2.0)
+    assert row["delta_op_margin_pct"] == pytest.approx(0.5)
+
+
+def test_load_fundamentals_history_single_quarter_delta_is_none(tmp_path: Path):
+    """只有1季快取 → delta留None，不外插、不假裝算得出來（docs/31 §11 現況）。"""
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    pl.DataFrame([_fund_row("2330", 2026, 1)]).write_parquet(
+        tmp_path / "fundamentals_2026Q1.parquet"
+    )
+    df = client.load_fundamentals_history()
+    row = df.filter(pl.col("stock_id") == "2330").row(0, named=True)
+    assert row["delta_net_margin_pct"] is None
+    assert row["delta_op_margin_pct"] is None
+
+
+def test_load_fundamentals_history_missing_field_stays_none(tmp_path: Path):
+    """任一季該欄為null → delta留None，不當0算差分。"""
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    pl.DataFrame([_fund_row("2330", 2026, 1, net_margin_pct=None)]).write_parquet(
+        tmp_path / "fundamentals_2026Q1.parquet"
+    )
+    pl.DataFrame([_fund_row("2330", 2026, 2, net_margin_pct=8.0)]).write_parquet(
+        tmp_path / "fundamentals_2026Q2.parquet"
+    )
+    df = client.load_fundamentals_history()
+    row = df.filter(pl.col("stock_id") == "2330").row(0, named=True)
+    assert row["delta_net_margin_pct"] is None
+
+
+def test_load_fundamentals_history_no_cache_empty(tmp_path: Path):
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    assert client.load_fundamentals_history().is_empty()
+
+
 # ─── _months_back ─────────────────────────────────────────────────────────────
 
 

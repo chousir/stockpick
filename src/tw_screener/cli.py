@@ -1354,6 +1354,16 @@ def backtest_l6_g4_watch_cmd(
     run_l6_g4_watch(settings)
 
 
+@backtest_app.command("g1-g2-g5-watch")
+def backtest_g1_g2_g5_watch_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """docs/31 §11：G1/G2/G5 前瞻累積軌——記錄本週快照，不做統計裁決。手動指令，需每週跑。"""
+    from tw_screener.backtest.g1_g2_g5_watch_runner import run_g1_g2_g5_watch
+
+    run_g1_g2_g5_watch(settings)
+
+
 @backtest_app.command("contrarian-efficacy")
 def backtest_contrarian_efficacy_cmd(
     out_dir: Path | None = typer.Option(

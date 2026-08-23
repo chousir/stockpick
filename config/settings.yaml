@@ -418,6 +418,19 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     l6_mktcap_min_billion: 100.0   # docs/31 §4.2 四條件版：市值≥100億（落難週操作定義沿用）
     trust_flow_window_td: 5        # 投信近5日淨買超視窗（交易日）
     output_path: research/l6_g4_watch/ledger.csv
+  g1_g2_g5_watch:            # docs/31 §11：G1/G2/G5 前瞻累積軌每週快照（手動指令，需每週跑）
+    g1_delta_net_margin_min: 1.5   # docs/31 §4.1 G1：Δnet_margin≥+1.5pp
+    g1_ma60_max_pct: 15.0           # docs/31 §4.1 G1：above_ma60_pct≤+15
+    g2_roe_min: 3.5                 # docs/31 §4.1 G2：roe_q_pct≥3.5
+    g2_debt_max_pct: 60.0           # docs/31 §4.1 G2：debt_ratio_pct≤60
+    g2_current_min: 1.2             # docs/31 §4.1 G2：current_ratio≥1.2
+    g2_mktcap_min_billion: 300.0    # docs/31 §4.1 G2：market_cap_billion≥300
+    g5_val_pctile_max: 40.0         # docs/31 §4.1 G5：val_pctile≤40
+    g5_amount_min_million: 300.0    # docs/31 §4.1 G5：amount_million≥300
+    ma60_window: 60                 # G1 above_ma60_pct 的MA天數
+    market_history_days: 90         # load_market_history回看天數（需≥ma60_window暖身）
+    min_peers: 5                    # 同次產業同儕最低樣本數（val_pctile/gross_margin peer用）
+    output_path: research/g1_g2_g5_watch/ledger.csv
   official_sector_grid:      # docs/31 §10：官方產業分類×MI_INDEX官方指數重測「族群前5」
     horizons_td: [10, 20]        # forward 窗（交易日），與G3同窗才可比較
     top_n_groups: 5               # 族群trend_score當日排名前5（同G3 top_n，維持可比較）

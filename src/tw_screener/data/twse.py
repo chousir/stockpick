@@ -688,6 +688,20 @@ _FUND_VALUE_COLS = (
     "net_margin_pct", "eps", "debt_ratio_pct", "current_ratio", "bvps", "roe_q_pct",
 )
 
+# docs/31 §11：load_fundamentals_history() 輸出——每檔最新季快照＋QoQ差分。
+_FUNDAMENTALS_HISTORY_SCHEMA: dict[str, type[pl.DataType]] = {
+    "stock_id": pl.Utf8,
+    "quarter_label": pl.Utf8,
+    "net_margin_pct": pl.Float64,
+    "op_margin_pct": pl.Float64,
+    "gross_margin_pct": pl.Float64,
+    "roe_q_pct": pl.Float64,
+    "debt_ratio_pct": pl.Float64,
+    "current_ratio": pl.Float64,
+    "delta_net_margin_pct": pl.Float64,
+    "delta_op_margin_pct": pl.Float64,
+}
+
 
 def _safe_ratio(num: float | None, den: float | None) -> float | None:
     """num/den；任一為 None 或 den<=0 → None（守「沒抓到不要編」、避免除零）。"""
@@ -2158,6 +2172,56 @@ class TWSEClient:
         if not files:
             return pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA)
         return load_parquet(files[-1])
+
+    def load_fundamentals_history(self) -> pl.DataFrame:
+        """docs/31 §11：純讀全部 fundamentals_*.parquet 並合併，算 QoQ 差分
+        （`delta_net_margin_pct`/`delta_op_margin_pct`，G1/G5 用）——不打網。
+
+        比照 `load_revenue_yoy_deltas()` 同一種模式：每個快取檔是單一季度全體公司
+        （`fetch_quarterly_fundamentals()` docstring：各端點只回最新一季），跨檔
+        `unique(stock_id, year, quarter)` 去重後取每檔最近 2 季算差分。**目前只有
+        2026Q1/Q2 兩季**，差分只有 1 個值、無時間序列深度（同 docs/31 §11 已記錄）；
+        只有 1 季或缺對應季別的股票 delta 留 None，不外插、不假裝算得出來。
+        """
+        files = list(self.cache_dir.glob("fundamentals_*.parquet"))
+        if not files:
+            return pl.DataFrame(schema=_FUNDAMENTALS_HISTORY_SCHEMA)
+        df = pl.concat([pl.read_parquet(f) for f in files], how="diagonal_relaxed")
+        if df.is_empty():
+            return pl.DataFrame(schema=_FUNDAMENTALS_HISTORY_SCHEMA)
+        recent = (
+            df.unique(subset=["stock_id", "year", "quarter"])
+            .sort(["year", "quarter"], descending=True)
+            .group_by("stock_id", maintain_order=True)
+            .head(2)
+        )
+        def _qoq_delta(col: str, cur: dict, prev_row: dict | None) -> float | None:
+            if prev_row is None:
+                return None
+            a, b = cur.get(col), prev_row.get(col)
+            return a - b if (a is not None and b is not None) else None
+
+        rows: list[dict] = []
+        for sid, grp in recent.group_by("stock_id"):
+            key = sid[0] if isinstance(sid, tuple) else sid
+            g = grp.sort(["year", "quarter"], descending=True)
+            latest = g.row(0, named=True)
+            prev = g.row(1, named=True) if g.height >= 2 else None
+            rows.append(
+                {
+                    "stock_id": str(key),
+                    "quarter_label": f"{latest['year']}Q{latest['quarter']}",
+                    "net_margin_pct": latest.get("net_margin_pct"),
+                    "op_margin_pct": latest.get("op_margin_pct"),
+                    "gross_margin_pct": latest.get("gross_margin_pct"),
+                    "roe_q_pct": latest.get("roe_q_pct"),
+                    "debt_ratio_pct": latest.get("debt_ratio_pct"),
+                    "current_ratio": latest.get("current_ratio"),
+                    "delta_net_margin_pct": _qoq_delta("net_margin_pct", latest, prev),
+                    "delta_op_margin_pct": _qoq_delta("op_margin_pct", latest, prev),
+                }
+            )
+        return pl.DataFrame(rows, schema=_FUNDAMENTALS_HISTORY_SCHEMA)
 
     def load_revenue_yoy_deltas(self) -> dict[str, tuple[float | None, float | None]]:
         """M-BR1：純讀全部 revenue_*.parquet，算每檔月營收 YoY 的二階導（不打網）。
