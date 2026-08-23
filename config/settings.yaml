@@ -431,6 +431,11 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     market_history_days: 90         # load_market_history回看天數（需≥ma60_window暖身）
     min_peers: 5                    # 同次產業同儕最低樣本數（val_pctile/gross_margin peer用）
     output_path: research/g1_g2_g5_watch/ledger.csv
+  official_sector_watch:     # docs/31 §12：官方族群前5前瞻累積軌每週快照（手動指令，需每週跑）
+    min_purity: 0.5                # docs/31 §10.10：穩健區間0.4-0.6取中點，非重新調參
+    top_n_groups: 5                 # 同§10 top_n，維持可比較
+    market_history_days: 90         # load_market_history回看天數（需≥ma_long=60暖身）
+    output_path: research/official_sector_watch/ledger.csv
   official_sector_grid:      # docs/31 §10：官方產業分類×MI_INDEX官方指數重測「族群前5」
     horizons_td: [10, 20]        # forward 窗（交易日），與G3同窗才可比較
     top_n_groups: 5               # 族群trend_score當日排名前5（同G3 top_n，維持可比較）

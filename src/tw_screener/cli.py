@@ -1364,6 +1364,16 @@ def backtest_g1_g2_g5_watch_cmd(
     run_g1_g2_g5_watch(settings)
 
 
+@backtest_app.command("official-sector-watch")
+def backtest_official_sector_watch_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """docs/31 §12：官方族群前5前瞻累積軌——記錄本週快照，不做統計裁決。手動指令，需每週跑。"""
+    from tw_screener.backtest.official_sector_watch_runner import run_official_sector_watch
+
+    run_official_sector_watch(settings)
+
+
 @backtest_app.command("contrarian-efficacy")
 def backtest_contrarian_efficacy_cmd(
     out_dir: Path | None = typer.Option(
