@@ -21,7 +21,7 @@
   Yahoo 概念股       │ config/concepts.yaml 主題標籤（手標次產業＋自動爬概念股）      │
                     └──────────────────────────┬───────────────────────────────┘
                                                ▼
- make week GROUP=defg ＝ 一條指令串起以下十二步：
+ make week GROUP=defg ＝ 一條指令串起以下十五步：
  ① fetch-twse                日線/法人/月營收/產業別/官方估值比(PE/PB/殖利率) 增量入快取
  ② fetch-institutional-history 回補近 20 日上市＋上櫃法人（隔幾天沒跑也自動補齊）
  ③ fetch-tdcc                集保大戶持股比（容錯：TDCC 異常不擋，大戶欄退化 null）
@@ -29,16 +29,23 @@
  ⑤ screen-all GROUP=defg     Goodinfo 跑 D/E/F/G 四策略 → screen_result_*.csv（純快照）
  ⑥ fetch-candidates-history  對命中股聯集補抓 13 個月個股日線（MA60/量比/動能用）
  ⑦ rotation                  ★ 次產業輪動（全市場宇宙・價格趨勢分數主鍵＋趨勢領頭板）→ sector_rotation.md/csv
- ⑧ cp-value-candidates       個股 CP 補漲候選＋C2 三重濾網 → cp_candidates.md（group Section 6 要讀）
- ⑨ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv（含揭露欄）
- ⑩ snapshot-week             point-in-time 週快照：凍結 concepts/宇宙/持股 → data/snapshots/（容錯：失敗不擋）
- ⑪ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
- ⑫ pick-outcome-brief        上週 picks r+5/α/勝率＋偽陰性一頁 → 本週輸入包（容錯：失敗不擋）
+ ⑧ macro                     docs/25 v2 總經燈號（BAA10Y 主訊號＋揭露面板，容錯：FRED 掛了不擋主流程）
+ ⑨ cp-value-candidates       個股 CP 補漲候選＋C2 三重濾網 → cp_candidates.md（group Section 6 要讀）
+ ⑩ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv（含揭露欄；docs/31 §13 官方族群前5前瞻累積軌已內含）
+ ⑪ l6-g4-watch               docs/31 §9 前瞻累積軌：記錄本週快照（PE/月營收YoY/投信買超），不做裁決（容錯：失敗不擋）
+ ⑫ g1-g2-g5-watch            docs/31 §11 前瞻累積軌：記錄本週快照，不做裁決（容錯：失敗不擋）
+ ⑬ snapshot-week             point-in-time 週快照：凍結 concepts/宇宙/持股 → data/snapshots/（容錯：失敗不擋）
+ ⑭ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
+ ⑮ pick-outcome-brief        上週 picks r+5/α/勝率＋偽陰性一頁 → 本週輸入包（容錯：失敗不擋）
                                                ▼
  手動：把報告貼給 Claude（docs/11 prompt）→ pick.md（首屏 ≤60 行一頁決策卡；核心層距季線 >+15% 硬擋）
  手動：tw-screener picks sync 解析 pick.md 尾端區塊、整批寫底帳 → 每季 make pick-outcome 算命中率×α（pick 閉環）
  手動：make report STOCK_ID=XXXX → 個股深度報告
 ```
+
+> ⑪⑫（`l6-g4-watch`／`g1-g2-g5-watch`）是研究用前瞻累積軌，只記錄不裁決（docs/31 §9/§11），
+> 產物在 `research/`（gitignored，不進版控），跟其他步驟寫進 `reports/YYYY-Www/` 不同；沒有
+> 顯示在下方「要貼給 Claude 分析的」清單裡，不必貼、也不影響 pick.md 產出。
 
 兩個分析宇宙刻意不同、互相校驗：
 
@@ -119,7 +126,7 @@ make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退�
 首次設定做完後，平時就這幾條（產出與貼 Claude 細節見上方「主流程」）：
 
 ```bash
-make week GROUP=defg                              # ①~⑫ 一鍵跑完（尾段 week-check 缺產物自動 WARNING＋pick-outcome-brief）
+make week GROUP=defg                              # ①~⑮ 一鍵跑完（尾段 week-check 缺產物自動 WARNING＋pick-outcome-brief）
 # 貼給 Claude 的 6 類檔（全在 reports/YYYY-Www/，詳見上方主流程表）：
 #   group_analysis.md  sector_rotation.md  candidates_enriched.csv
 #   cp_candidates.md  holdings/watchlist_enriched.csv  screen_result_*.csv
@@ -159,7 +166,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 
 | 指令                                                     | 做什麼                                               | 何時用                               |
 | -------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------ |
-| `make week GROUP=defg`                                 | 完整週流程 ①~⑫                                     | **每週一次（主入口）**         |
+| `make week GROUP=defg`                                 | 完整週流程 ①~⑮                                     | **每週一次（主入口）**         |
 | `make pick-outcome`                                    | pick 閉環：分層命中率×α（vs 大盤＋族群）＋偽陰性帳＋**停損延遲帳（M3.1）** | 每季（pick 底帳變厚後）              |
 | `make dash-dev`                                        | 起 dashboard 開發伺服器（FastAPI:8000＋Vite:5173）   | 視覺化瀏覽本週報告（§13）           |
 
@@ -170,6 +177,8 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make weekend GROUP=defg`                              | week ＋ git commit/push 結果                         | 想自動存檔時                         |
 | `make rotation`                                        | 次產業資金輪動報表（單獨重跑）                       | 盤後想單看資金流向                   |
 | `make group`                                           | 族群分析（單獨重跑，吃既有 CSV）                     | 改 concepts.yaml 後重產報告          |
+| `make l6-g4-watch`                                     | docs/31 §9 前瞻累積軌：記錄本週快照（PE/月營收YoY/投信買超），只記錄不裁決 | week 已容錯內含，可單獨重跑          |
+| `make g1-g2-g5-watch`                                  | docs/31 §11 前瞻累積軌：記錄本週快照，只記錄不裁決   | week 已容錯內含，可單獨重跑          |
 | `make report STOCK_ID=2330`                            | 單檔個股深度報告                                     | picks 選出後逐檔深掘                 |
 | `make screen STRATEGY=d_quality_leader`                | 跑單一策略                                           | 調策略 YAML 後測試                   |
 | `make screen-dry STRATEGY=…`                          | 只組 Goodinfo URL 不打網                             | 驗證 YAML 條件                       |

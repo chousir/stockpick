@@ -407,6 +407,21 @@ G2/G5（需擴欄）。**G3 已驗證未過關**（見§9收官段），移出�
 - §7.1的政策旁路門檻是本規劃書風險最高的一條提案（直接動SOP），必須等本節驗證過再落地，
   不在本輪套用。
 
+**2026-08-23補記：查核確認§7.1政策旁路無法用2022-2026資料驗證，原因跟L6/G4本身相同**。
+使用者提議「用2022-2026資料測」——直接查核`research/panel/panel.parquet`（2022-2026
+實際回測資料集）欄位：只有價格/報酬/籌碼/regime/次產業（`date/stock_id/close/volume/
+r5-40/ma20-60_dist_pct/vol_ratio/alpha5-40/foreign_net/trust_net/dealer_net/
+margin_balance_lots/big_holder_pct*/regime/sub_industry`），**完全沒有PE、月營收YoY、
+毛利率等欄位**。這不是疏漏——這些欄位來自本session已確認**純快照、無歷史查詢能力**的
+TWSE端點（`t187ap05_L`月營收／`valuation_ratios`／`fundamentals`，見§8/§9記錄），
+沒有回溯路徑，跟官方族群前5訊號（§10-16，靠MI_INDEX/價格/籌碼，這些端點**確實支援
+歷史回查**才能retest）是完全不同的資料處境。**F2旁路要驗證的正是L6判準本身
+（YoY≥20∧PE≤25∧投信近5日淨買>0）的歷史命中率**，L6判準本身就卡在這個相同的快照
+限制上（見§9 L6/G4前瞻累積軌的建置理由）——**F2旁路的驗證只能跟著L6前瞻累積軌一起
+等時間**（`l6-g4-watch`每週手動快照累積週次），不存在「改用既有4年資料就能測」的
+捷徑。§7.4「必須等本節驗證過再落地」的門檻因此維持原判，且明確排除2022-2026回測
+當替代驗證路徑，避免未來又被問到同一個問題時重新查一次。
+
 ---
 
 ## 8. 資料擴充提案（列 queue，不在本輪做）
@@ -1390,3 +1405,13 @@ V2 regime（`analysis/regime.py`，進攻/中性/防禦）對2022-2026三個較�
 研究）記在docs/25-macro-regime.md §6 Phase 4**，不在此重複——docs/25本來就是
 regime/總經燈號系統的主文件，這個查核延伸自docs/25既有Phase 3的共振讀法研究，
 放在那裡比放docs/31更容易被未來session找到、不會被docs/31的大量其他內容淹沒。
+
+**2026-08-23補記：三條前瞻累積軌已整進`make week`（使用者追問「有整進make week嗎、
+README有更新嗎」）**：`official-sector-watch`（§13）本來就已經內含在`group`步驟裡；
+本輪新增`l6-g4-watch`／`g1-g2-g5-watch`兩個Makefile target，皆以`-`容錯前綴掛在
+`group`之後、`snapshot-week`之前——三條軌現在都會隨每次`make week`自動累積，不必
+再手動另外跑。**順便修正README一個跟本輪無關、原本就存在的過時問題**：README的
+「十二步」流程圖漏列`macro`（docs/25總經燈號）這一步，`Makefile`實際`week` target
+早就有這步（在`rotation`之後、`cp-value-candidates`之前）——README現已改成正確的
+「十五步」，`macro`補回、兩條新watch步驟加入，並註記⑪⑫產物在`research/`
+（gitignored，非`reports/`，不必貼給Claude）。
