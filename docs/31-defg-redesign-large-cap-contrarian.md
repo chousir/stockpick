@@ -1160,3 +1160,28 @@ top_n=1這個「提高信心」的切法，代價是把原本top5版本還算跨
 walk-forward收斂值，跟§12已上線設定一致，不需更動）；新增揭露欄位需**同時顯示
 當週macro regime**，讓分析師知道這個訊號在目前regime下的歷史可信度不同，不是
 恆定的——避免讀者在防禦regime週把它當跟進攻regime同等可信的訊號來用。
+
+### 13.8 milestone收官：已整進make week並實跑驗證（2026-08-23）
+
+`group_runner.py::run_group_analysis`新增純揭露欄計算（重用§10/§12既有函式，
+零新驗證框架），`candidates_enriched.csv`新增`official_sector_top5`/`_group`/
+`_rank`/`_trend_score`/`_regime`五欄，同一次計算順便呼叫
+`official_sector_watch.upsert_ledger()`累積research底帳。任何一步資料缺席
+→ try/except整段留空，不擋group報告主流程。4個新測試（含map缺席留白、命中股
+正確填值），`_CANONICAL_REUSE_FIELDS`同步更新五欄避免重疊股跨CSV分岔。
+
+**實跑`tw-screener analysis group`驗證（非模擬）**：2026-W34，87檔候選股，
+8檔命中官方族群前5（產險/散裝/PC-NB-平板三個族群），`candidates_enriched.csv`
+90欄（原85欄+5新欄）、既有欄位/`group_analysis.md`皆無變化（純新增）；
+`research/official_sector_watch/ledger.csv`同步累積本週38列。**這週大盤regime
+是「中性」（分數-0.30）——正好是§13.5證實歷史上量不到效應的regime，是這個
+揭露欄位在真實使用情境下第一次印出「訊號亮但regime提示信心低」的組合，證明
+regime欄位確實會在需要的時候起作用，不是擺著好看**。
+
+**至此§10-§13全案收官**：官方族群前5訊號已從研究假設（G3 leftover finding）→
+獨立驗證（§10.2/§10.6過關）→控制實驗拆解成因（§10.9粒度為主）→walk-forward
+外樣本驗證（§10.10單一切分、§13.4多段切分揭露時間集中性）→高信心變體+regime
+依賴性查核（§13.5）→週轉率查核（§13.6）→純揭露欄位整進生產（§13.3/13.8），
+全程保留每一步包含否定/邊際結果的誠實記錄。**仍然不是「取代Goodinfo的新策略」**
+——目前只是`make week`裡的一個非gate揭露欄，是否要往候選生成/排序輸入的方向
+進一步生產化，留待使用者依累積下來的真實使用回饋另行拍板。
