@@ -936,3 +936,43 @@ purity=0.7（排除28.4%）結果，其實比purity=0.0~0.6整段都弱**——�
 精確值不穩定，若要生產化，門檻應該取一個穩健區間（如0.4-0.6）而非單一「最佳值」，
 或乾脆不設門檻依賴purity排序當連續分數（而非硬砍點）——這是留給未來若真要生產化時
 的設計問題，本節只負責證明「效應本身不是全期調參數調出來的巧合」。
+
+---
+
+## 11. G1/G2/G5 前瞻累積軌（2026-08-23，使用者指示接續，執行前預先登記）
+
+依§9原排序，G1/G2/G5是G3之後「小工程量」候選，但§9查核時發現三者皆需fundamentals
+（僅2季）撐QoQ差分，判定「零回測深度」擱置。**本節重新查核，發現G2的資料闕口記載
+已過時**：`fundamentals_2026Q2.parquet`實測已含`roe_q_pct`/`debt_ratio_pct`/
+`current_ratio`欄位（`group_report.py`早就在用），G2完全不需要新欄位，也不需要
+QoQ差分（G2定義本身就是單季快照條件）。G1/G5需要的`Δnet_margin`/`Δop_margin`確實
+只能算出**一個**QoQ差分值（2026Q2−2026Q1），沒有時間序列深度可回測——但這跟L6/G4
+面對的問題同構：**不是不能算，是只能前瞻累積，不能回溯**。比照L6/G4模式，三式合併
+建一條`g1_g2_g5_watch`前瞻軌，本輪只記錄不裁決。
+
+**新欄位缺口與作法**（比照§9 item3查核精神，動工前列清楚）：
+- `roe_q_pct`/`debt_ratio_pct`/`current_ratio`/`net_margin_pct`/`op_margin_pct`/
+  `gross_margin_pct`：已在`fundamentals_*.parquet`，`load_latest_fundamentals()`已有
+  但只讀最新一季。**新增**`load_fundamentals_history()`（比照`load_revenue_yoy_deltas()`
+  模式，純讀累積快取，跨季join算Δ），目前只有2季、Δ只有1個值，未來每季自然多一個。
+- `ma60_dist_pct`（G1用）：全市場無現成函式，**新增**用
+  `analysis.rotation.load_market_history()`（已累積1492+22天`daily_*`/`otc_daily_*`
+  快取，遠超60日窗）算rolling MA60，取最新一日的乖離%。
+- `amount_million`（G5用）：`daily_*.parquet`本就有`trade_value`欄（原始新台幣元），
+  除以1e6即可，不需新抓。
+- `val_pctile`（G5用）：重用生產既有`analysis.valuation.build_valuation()`＋
+  `build_peer_membership(list_subindustries(), industry_df)`，跟`group_runner.py`
+  生產路徑完全同一套函式，零新邏輯。
+- `peer_gross_margin_median`（G5「毛利率優於同次產業中位」用）：**新增**——用同一份
+  peer membership，對`gross_margin_pct`算組內中位數（非`build_valuation`本身的功能，
+  但輸入資料完全共用，不需另開資料源）。
+- `cum_rev_yoy_pct`（G1用）：`build_local_universe()`已有，直接重用。
+
+**跟L6/G4的差異（前瞻累積軌的cadence不同，需記住）**：L6/G4的PE/營收/投信買超每週甚至
+每日都會變；G1/G2/G5的fundamentals衍生欄位**每季才更新一次**（MOPS財報公告頻率），
+同一季內連續好幾週的ledger快照，這些欄位數值會完全相同（只有市場面欄位如市值/量能
+會變）——這不是bug，是財報資料本質使然，讀底帳時記得別把「同季內同一批股票連續出現」
+誤讀成獨立訊號。
+
+**不設驗證門檻／不寫死判準**：跟L6/G4同一個理由——現在樣本是0週，寫裁決規則沒有
+意義，先建記錄機制，累積夠了再另立milestone討論。
