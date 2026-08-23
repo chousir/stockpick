@@ -976,3 +976,13 @@ QoQ差分（G2定義本身就是單季快照條件）。G1/G5需要的`Δnet_mar
 
 **不設驗證門檻／不寫死判準**：跟L6/G4同一個理由——現在樣本是0週，寫裁決規則沒有
 意義，先建記錄機制，累積夠了再另立milestone討論。
+
+**實作與W34首筆快照（2026-08-23，同session）**：新增`load_fundamentals_history()`
+（比照`load_revenue_yoy_deltas()`模式）＋`g1_g2_g5_watch.py`/runner＋CLI
+`tw-screener backtest g1-g2-g5-watch`。`ma60_dist_pct`用`load_market_history()`
+（已累積1492+22天`daily_*`/`otc_daily_*`）算全市場rolling MA60；`val_pctile`／
+`gross_margin_peer_median`重用生產既有`build_valuation()`／`compute_subind_relative()`，
+零新邏輯。實跑記錄W34（資料日2026-08-21）首筆快照：g1=243、g2=44、g5=21檔命中
+（295檔，重複命中不去重）——G1/G5命中數偏高主要因為門檻本身較寬鬆（尤其G1的
+`Δop_margin≥0`門檻幾乎是「沒惡化」而非「顯著改善」），是否要收緊留給未來累積夠
+樣本後再議，本輪不動判準。12個測試全綠，ruff/mypy無新增錯誤。
