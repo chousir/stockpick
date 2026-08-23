@@ -856,6 +856,8 @@ def _build_enriched_rows(
     rev_yoy_delta_map: dict | None = None,
     cum_rev_yoy_map: dict | None = None,
     shares_map: dict | None = None,
+    official_sector_map: dict | None = None,
+    official_sector_regime: str | None = None,
 ) -> list[dict]:
     """組「每檔 × 技術/籌碼/估值/基本面 + flags」列（candidates / 庫存 / 觀察 共用）。
 
@@ -875,6 +877,12 @@ def _build_enriched_rows(
     shares_map={stock_id: shares_outstanding}——已發行股數（上市+上櫃合併），供
     `market_cap_billion()` 用（× close_map 的收盤價 / 1e8）。任一缺值 market_cap_billion 回
     None（不猜）。
+
+    official_sector_map={stock_id: {"sub_industry", "trend_score", "group_rank"}}
+    （docs/31 §12/§13）——官方族群前5揭露欄，**純揭露非gate、非排序輸入**。
+    official_sector_regime：本週大盤regime標籤（同`describe_regime()`輸出），隨欄位
+    一併印出——docs/31 §13.5已證實這個訊號的效應幾乎全部集中在「進攻」regime，
+    中性/防禦regime下歷史上量不到效應，讀者需要這個context才不會誤判可信度。
     """
     if members.is_empty():
         return []
@@ -1160,6 +1168,14 @@ def _build_enriched_rows(
             min_gross_margin_pct=m5_min_gm,
         )
 
+        # docs/31 §12/§13：官方族群前5揭露欄（純揭露非gate）。多標籤股取group_rank最佳
+        # 那筆（runner端已去重），未上榜(或映射覆蓋不到)則三欄皆None，如實留白不臆造。
+        osec = (official_sector_map or {}).get(sid)
+        official_sector_top5 = osec is not None
+        official_sector_group = osec.get("sub_industry") if osec else None
+        official_sector_rank = osec.get("group_rank") if osec else None
+        official_sector_trend_score = osec.get("trend_score") if osec else None
+
         # 除息還原：5 日視窗內現金股利已加回 momentum_5d（修假負）；標旗供人工查證
         ex_div_cash = _num(r.get("ex_div_cash"), 2)
         div_addback_pct = _num(r.get("div_addback_pct"), 2)
@@ -1270,6 +1286,14 @@ def _build_enriched_rows(
                 # M1 合格左側票＝contrarian_base ∧ 連買≥N日 ∧ 未破 60 日新低 ∧ 已解禁。
                 # True＝可進「機會層・左側M-BR1 小注」子表（永不核心）；證據狀態見 docs/24 §6
                 "contrarian_ready": contrarian_ready,
+                # docs/31 §12/§13：官方族群前5（純揭露非gate、非排序輸入）。
+                # official_sector_regime：本週大盤regime——§13.5示範這個訊號效應集中
+                # 在「進攻」regime，中性/防禦下歷史上量不到效應，讀者判讀可信度要看這欄。
+                "official_sector_top5": official_sector_top5,
+                "official_sector_group": official_sector_group,
+                "official_sector_rank": official_sector_rank,
+                "official_sector_trend_score": official_sector_trend_score,
+                "official_sector_regime": official_sector_regime,
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
             }
         )
@@ -1300,6 +1324,8 @@ def write_candidates_enriched_csv(
     rev_yoy_delta_map: dict | None = None,
     cum_rev_yoy_map: dict | None = None,
     shares_map: dict | None = None,
+    official_sector_map: dict | None = None,
+    official_sector_regime: str | None = None,
 ) -> list[dict]:
     """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
 
@@ -1318,6 +1344,8 @@ def write_candidates_enriched_csv(
         rev_yoy_delta_map=rev_yoy_delta_map,
         cum_rev_yoy_map=cum_rev_yoy_map,
         shares_map=shares_map,
+        official_sector_map=official_sector_map,
+        official_sector_regime=official_sector_regime,
     )
     if not rows:
         return []
@@ -1401,6 +1429,12 @@ _CANONICAL_REUSE_FIELDS = (
     "deep_value_growth",   # M5：估值/成長/毛利皆為當期橫斷面，重疊股讀數必須一致
     "cum_rev_yoy_pct",      # 累計營收YoY：官方口徑，重疊股沿用 candidates 那筆
     "market_cap_billion",   # 市值（億元）：股數月頻＋收盤價當期，重疊股沿用 candidates 那筆
+    # docs/31 §12/§13：官方族群前5，當週橫斷面排名，重疊股沿用 candidates 那筆
+    "official_sector_top5",
+    "official_sector_group",
+    "official_sector_rank",
+    "official_sector_trend_score",
+    "official_sector_regime",
 )
 
 

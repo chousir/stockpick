@@ -7,7 +7,7 @@ CLI 只保留參數解析＋呼叫 run_group_analysis；資料載入、enrich、
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import typer
 from rich.console import Console
@@ -408,6 +408,68 @@ def run_group_analysis(settings: Path) -> None:
         else {}
     )
 
+    # docs/31 §12/§13：官方族群前5揭露欄——重用官方族群指數重測（§10）已驗證的純函式，
+    # 不重新設計。純揭露非gate/非排序輸入；任一步驟資料缺席就整段跳過（誠實留白，
+    # 不擋 group 報告主流程，同 washout/macro 等既有揭露段的容錯慣例）。
+    official_sector_map: dict[str, dict] = {}
+    try:
+        from tw_screener.analysis.rotation import load_market_history
+        from tw_screener.backtest import official_sector_grid as osg
+        from tw_screener.backtest import official_sector_watch as osw
+        from tw_screener.backtest.rotation_efficacy import trend_score_series
+
+        osc_cfg = cfg.get("backtest", {}).get("official_sector_watch", {})
+        os_min_purity = float(osc_cfg.get("min_purity", 0.5))
+        os_top_n = int(osc_cfg.get("top_n_groups", 5))
+        os_history_days = int(osc_cfg.get("market_history_days", 90))
+        os_cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+
+        os_data_date = client.latest_trading_date()
+        if os_data_date is not None and not industry_df.is_empty():
+            client.fetch_sector_index_historical(os_data_date)
+            os_sector_index = client.load_sector_index_history()
+            os_hand = list_subindustries()
+            if not os_sector_index.is_empty() and not os_hand.is_empty():
+                os_purity = osg.compute_subindustry_purity(os_hand, industry_df)
+                os_membership = osg.build_hand_sector_membership(
+                    os_hand, os_purity, min_purity=os_min_purity
+                )
+                os_baskets = osg.build_hand_sector_baskets(
+                    os_sector_index, os_purity, min_purity=os_min_purity
+                )
+                os_market_hist = load_market_history(os_cache_dir, n_days=os_history_days)
+                if (
+                    not os_membership.is_empty() and not os_baskets.is_empty()
+                    and not os_market_hist.is_empty()
+                ):
+                    os_price = os_market_hist.select("date", "stock_id", "close")
+                    os_trend = trend_score_series(os_price, os_membership, os_baskets)
+                    os_names = {
+                        str(rr["stock_id"]): rr.get("stock_name")
+                        for rr in industry_df.iter_rows(named=True)
+                    }
+                    os_snapshot = osw.latest_top5_snapshot(
+                        os_membership, os_trend, os_names, week_tag, os_data_date,
+                        os_min_purity, top_n_groups=os_top_n,
+                    )
+                    if not os_snapshot.is_empty():
+                        os_best = os_snapshot.sort(["stock_id", "group_rank"]).unique(
+                            subset=["stock_id"], keep="first"
+                        )
+                        official_sector_map = {
+                            str(rr["stock_id"]): rr for rr in os_best.iter_rows(named=True)
+                        }
+                        # 讓research/底帳跟著make week自動累積（docs/31 §13.3）——
+                        # 不必再手動額外跑 official-sector-watch 指令。
+                        osw_out = Path(
+                            osc_cfg.get("output_path", "research/official_sector_watch/ledger.csv")
+                        )
+                        osw.upsert_ledger(osw_out, os_snapshot)
+        console.print(f"  官方族群前5：{len(official_sector_map)} 檔命中（purity≥{os_min_purity}）")
+    except Exception as e:  # noqa: BLE001 — 純揭露段，任何一步壞掉不擋 group 報告主流程
+        console.print(f"[yellow]  官方族群前5揭露欄計算失敗，該段留空：{e}[/yellow]")
+        official_sector_map = {}
+
     csv_path = output_path.parent / "candidates_enriched.csv"
     cand_rows = write_candidates_enriched_csv(
         leaders, themes_long, screener_results, csv_path,
@@ -421,6 +483,8 @@ def run_group_analysis(settings: Path) -> None:
         rev_yoy_delta_map=rev_yoy_delta_map,
         cum_rev_yoy_map=cum_rev_yoy_map,
         shares_map=shares_map,
+        official_sector_map=official_sector_map,
+        official_sector_regime=cast("str | None", regime.get("regime")),
     )
     # 重疊股重用：庫存/觀察清單同檔一律沿用 candidates 那筆，避免跨 CSV 量比/集中度/成交額分岔
     canonical_rows = {row["stock_id"]: row for row in cand_rows}

@@ -536,3 +536,48 @@ def test_m_br1_null_safe_when_inst_missing(tmp_path):
     assert miss["inst_flow_inflection"] is None
     assert miss["fundamental_health"] == "待查"   # 無 rev_yoy → 待查，不猜
     assert miss["contrarian_base"] is False       # 缺資料不得放行
+
+
+def test_official_sector_columns_default_blank_without_map(tmp_path):
+    """docs/31 §12/§13：不傳official_sector_map → 五欄如實留白，不臆造命中。"""
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), results, out)
+    df = pl.read_csv(out)
+    assert (df["official_sector_top5"] == False).all()  # noqa: E712
+    assert df["official_sector_group"].is_null().all()
+    assert df["official_sector_rank"].is_null().all()
+    assert df["official_sector_trend_score"].is_null().all()
+    assert df["official_sector_regime"].is_null().all()
+
+
+def test_official_sector_columns_populated_from_map(tmp_path):
+    """命中股顯示對應族群/排名/trend_score/當週regime；未命中股五欄留白。"""
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    official_sector_map = {
+        "2330": {
+            "sub_industry": "半導體業", "trend_score": 96.9, "group_rank": 1,
+        }
+    }
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(
+        members, pl.DataFrame(), results, out,
+        official_sector_map=official_sector_map, official_sector_regime="進攻",
+    )
+    df = pl.read_csv(out)
+    by_id = {str(r["stock_id"]): r for r in df.iter_rows(named=True)}
+    assert by_id["2330"]["official_sector_top5"] is True
+    assert by_id["2330"]["official_sector_group"] == "半導體業"
+    assert by_id["2330"]["official_sector_rank"] == 1
+    assert by_id["2330"]["official_sector_trend_score"] == 96.9
+    assert by_id["2330"]["official_sector_regime"] == "進攻"
+    assert by_id["2454"]["official_sector_top5"] is False
+    assert by_id["2454"]["official_sector_group"] is None
+    # regime 對全部列一視同仁（本週單一標籤，非命中與否而異）
+    assert by_id["2454"]["official_sector_regime"] == "進攻"
