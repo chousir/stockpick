@@ -18,13 +18,18 @@ console = Console()
 
 
 def run_official_sector_grid(
-    settings: Path, out_dir: Path | None, group_source: str = "official"
+    settings: Path,
+    out_dir: Path | None,
+    group_source: str = "official",
+    hand_min_purity: float | None = None,
 ) -> None:
     """docs/31 §10 milestone：官方產業分類×MI_INDEX官方指數，重測「族群前5」。
 
     Args:
         group_source: "official"（§10.2，TWSE官方粗分類~32組直接當群組）｜
             "hand"（§10.6，手標46細分類，purity≥門檻才映射官方指數當basket_index）。
+        hand_min_purity: 覆寫 settings 的 purity 門檻（§10.8 控制實驗掃描用；
+            僅 group_source="hand" 時生效）。None → 讀 settings.hand_min_purity。
     """
     import yaml
 
@@ -49,7 +54,10 @@ def run_official_sector_grid(
     top_n = int(oc.get("top_n_groups", 5))
     snapshot_gap_td = int(oc.get("snapshot_gap_td", 5))
     n_boot = int(oc.get("n_boot", 1000))
-    min_purity = float(oc.get("hand_min_purity", 0.7))
+    min_purity = (
+        float(hand_min_purity) if hand_min_purity is not None
+        else float(oc.get("hand_min_purity", 0.7))
+    )
     panel_path = Path(
         cfg.get("backtest", {}).get("factor_lab", {}).get(
             "panel_path", "research/panel/panel.parquet"
@@ -129,7 +137,9 @@ def run_official_sector_grid(
         console.print("[red]格為空——輸入資料異常[/red]")
         raise typer.Exit(1)
 
-    tag_suffix = "" if group_source == "official" else f"_{group_source}"
+    tag_suffix = (
+        "" if group_source == "official" else f"_{group_source}_p{round(min_purity * 100)}"
+    )
     base_tag = date.today().strftime("%Y%m%d") + tag_suffix
     out.mkdir(parents=True, exist_ok=True)
     grid.write_csv(out / f"official_sector_grid_{base_tag}.csv")
