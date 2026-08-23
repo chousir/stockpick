@@ -175,6 +175,45 @@ def test_parse_daily_all_historical_missing_table_empty():
     assert _parse_daily_all_historical(payload).is_empty()
 
 
+def test_parse_sector_index_historical_picks_correct_table_by_title():
+    """docs/31 §10.4：table0(跨市場)是誘餌，target table 有相同欄名——title 是唯一可靠鍵。"""
+    from tw_screener.data.twse import _parse_sector_index_historical
+
+    df = _parse_sector_index_historical(_load_mi_index_fixture("mi_index_sector_sample.json"))
+    names = set(df["index_name"].to_list())
+    assert "沒戶指數" not in names  # 誘餌表的資料不該混進來
+    assert "半導體類指數" in names
+    assert "發行量加權股價指數" in names
+
+
+def test_parse_sector_index_historical_values_and_sign():
+    from tw_screener.data.twse import _parse_sector_index_historical
+
+    df = _parse_sector_index_historical(_load_mi_index_fixture("mi_index_sector_sample.json"))
+    r = {row["index_name"]: row for row in df.iter_rows(named=True)}
+    assert r["半導體類指數"]["close_index"] == pytest.approx(500.0)
+    assert r["半導體類指數"]["change_pct"] == pytest.approx(-1.0)
+    assert r["發行量加權股價指數"]["change_pct"] == pytest.approx(0.28)
+    assert "無效行" not in r  # close_index 無法解析（N/A）的列略過
+
+
+def test_parse_sector_index_historical_non_trading_day_empty():
+    from tw_screener.data.twse import _parse_sector_index_historical
+
+    payload = {"stat": "查無資料", "date": "20220101", "tables": []}
+    assert _parse_sector_index_historical(payload).is_empty()
+
+
+def test_parse_sector_index_historical_missing_table_empty():
+    from tw_screener.data.twse import _parse_sector_index_historical
+
+    payload = {
+        "stat": "OK", "date": "20220105",
+        "tables": [{"title": "其他表", "fields": [], "data": []}],
+    }
+    assert _parse_sector_index_historical(payload).is_empty()
+
+
 def test_reconcile_daily_historical_against_openapi_cache_values():
     """對拍（規劃書 WS-K.2）：MI_INDEX 歷史版解析值須與既有 OpenAPI daily_20260709.parquet
     真實值全等。2026-07-12 人工對拍：交集 1364/1369 檔 close/trade_volume/trade_value/
@@ -1118,6 +1157,87 @@ def test_fetch_daily_all_historical_non_trading_day_no_cache_file(tmp_path: Path
     df = client.fetch_daily_all_historical(date(2022, 1, 1))
     assert df.is_empty()
     assert not (tmp_path / "daily_20220101.parquet").exists()
+
+
+def test_fetch_sector_index_historical_cache_hit(tmp_path: Path):
+    """已有 sector_index_{date}.parquet 快取 → 直接讀、不打網。"""
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    pl.DataFrame({
+        "date": [date(2026, 8, 21)], "index_name": ["半導體類指數"],
+        "close_index": [500.0], "change_pct": [-1.0],
+    }).write_parquet(tmp_path / "sector_index_20260821.parquet")
+
+    called: list[str] = []
+    client._get_legacy = lambda url: called.append(url) or {}  # type: ignore[method-assign]
+
+    df = client.fetch_sector_index_historical(date(2026, 8, 21))
+    assert called == [], "快取命中時不應呼叫 _get_legacy"
+    assert df["index_name"].to_list() == ["半導體類指數"]
+
+
+def test_fetch_sector_index_historical_fetches_and_caches(tmp_path: Path):
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    payload = _load_mi_index_fixture("mi_index_sector_sample.json")
+    calls: list[str] = []
+
+    def fake_legacy(url: str) -> dict:
+        calls.append(url)
+        return payload
+
+    client._get_legacy = fake_legacy  # type: ignore[method-assign]
+
+    df = client.fetch_sector_index_historical(date(2026, 8, 21))
+    assert len(calls) == 1
+    assert "MI_INDEX" in calls[0] and "date=20260821" in calls[0]
+    assert (tmp_path / "sector_index_20260821.parquet").exists()
+    assert "半導體類指數" in df["index_name"].to_list()
+
+
+def test_fetch_sector_index_historical_non_trading_day_no_cache_file(tmp_path: Path):
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    client._get_legacy = (  # type: ignore[method-assign]
+        lambda url: {"stat": "查無資料", "date": "20220101", "tables": []}
+    )
+
+    df = client.fetch_sector_index_historical(date(2022, 1, 1))
+    assert df.is_empty()
+    assert not (tmp_path / "sector_index_20220101.parquet").exists()
+
+
+def test_load_sector_index_history_merges_and_dedupes(tmp_path: Path):
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    pl.DataFrame({
+        "date": [date(2026, 8, 20)], "index_name": ["半導體類指數"],
+        "close_index": [490.0], "change_pct": [0.5],
+    }).write_parquet(tmp_path / "sector_index_20260820.parquet")
+    pl.DataFrame({
+        "date": [date(2026, 8, 21)], "index_name": ["半導體類指數"],
+        "close_index": [500.0], "change_pct": [-1.0],
+    }).write_parquet(tmp_path / "sector_index_20260821.parquet")
+
+    df = client.load_sector_index_history()
+    assert df.height == 2
+    assert df["date"].to_list() == [date(2026, 8, 20), date(2026, 8, 21)]
+
+
+def test_load_sector_index_history_no_cache_empty(tmp_path: Path):
+    client = TWSEClient(
+        base_url="https://test.invalid", cache_dir=tmp_path,
+        ttl_hours=6.0, user_agent="test", interval_sec=0.0,
+    )
+    assert client.load_sector_index_history().is_empty()
 
 
 # ─── _months_back ─────────────────────────────────────────────────────────────

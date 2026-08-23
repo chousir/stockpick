@@ -257,6 +257,69 @@ def _parse_daily_all_historical(payload: dict[str, Any]) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=schema)
 
 
+_SECTOR_INDEX_SCHEMA = {
+    "date": pl.Date,
+    "index_name": pl.Utf8,
+    "close_index": pl.Float64,
+    "change_pct": pl.Float64,
+}
+
+
+def _parse_sector_index_historical(payload: dict[str, Any]) -> pl.DataFrame:
+    """解析 TWSE legacy MI_INDEX 同一份 payload 裡的「價格指數(臺灣證券交易所)」表
+    （docs/31 §10.2/§10.4）——`_parse_daily_all_historical` 只取「每日收盤行情」表
+    （個股），本函式取的是**同一次請求**回傳的另一張表（官方產業類指數點數），非
+    額外打一次網。
+
+    用 title 精確比對鎖定「XX年XX月XX日 價格指數(臺灣證券交易所)」這張（而非「價格指數
+    (跨市場)」／「價格指數(臺灣指數公司)」——三者欄名相同，只能靠 title 分辨，見
+    2026-08-23 實測：4 個表都是 fields=['指數','收盤指數',...]，title 才是唯一可靠鍵）。
+    不用固定 tables[0] 位置索引——即使順序漂移，title 比對仍能定位到正確表。
+    只留「XX類指數」（傳統官方產業分類，§10.2 映射用）與大盤指數，其餘風格/主題指數
+    （臺灣50、高股息…）留在原始資料但不特別處理，呼叫端只挑用得到的名字。
+    """
+    if not payload or payload.get("stat") != "OK":
+        return pl.DataFrame(schema=_SECTOR_INDEX_SCHEMA)
+    date_str: str = str(payload.get("date", ""))
+    if not date_str or len(date_str) != 8:
+        return pl.DataFrame(schema=_SECTOR_INDEX_SCHEMA)
+    trade_date = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+
+    table = None
+    for t in payload.get("tables") or []:
+        title = str(t.get("title") or "")
+        if "價格指數" in title and "臺灣證券交易所" in title:
+            table = t
+            break
+    if table is None:
+        return pl.DataFrame(schema=_SECTOR_INDEX_SCHEMA)
+
+    fields = [str(f).strip() for f in table.get("fields", [])]
+    idx = {name: i for i, name in enumerate(fields)}
+    i_name, i_close, i_chg = idx.get("指數"), idx.get("收盤指數"), idx.get("漲跌百分比(%)")
+    if i_name is None or i_close is None:
+        return pl.DataFrame(schema=_SECTOR_INDEX_SCHEMA)
+
+    rows = []
+    for r in table.get("data") or []:
+        try:
+            name = str(r[i_name]).strip()
+            close_v = _clean_float(str(r[i_close]))
+            if not name or close_v is None:
+                continue
+            chg = (
+                _clean_float(str(r[i_chg]))
+                if i_chg is not None and i_chg < len(r)
+                else None
+            )
+            rows.append(
+                {"date": trade_date, "index_name": name, "close_index": close_v, "change_pct": chg}
+            )
+        except (KeyError, ValueError, IndexError) as e:
+            logger.warning("略過無效族群指數列：{} — {}", r[:1] if r else "?", e)
+    return pl.DataFrame(rows, schema=_SECTOR_INDEX_SCHEMA)
+
+
 def _parse_institutional(payload: dict[str, Any]) -> pl.DataFrame:
     """
     解析 legacy T86 三大法人買賣超回應 → DataFrame。
@@ -1536,6 +1599,47 @@ class TWSEClient:
         else:
             logger.info("MI_INDEX {} 無資料（非交易日 / 未發布），略過", date_str)
         return df
+
+    def fetch_sector_index_historical(self, trading_date: date) -> pl.DataFrame:
+        """回補指定歷史交易日的官方產業類指數（docs/31 §10.4），存 sector_index_{date}.parquet。
+
+        跟 `fetch_daily_all_historical` 打**同一個** MI_INDEX 端點（`date=` 參數同樣驗證
+        可回查任意歷史交易日），但解析目標是同一份 payload 裡的另一張表（「價格指數
+        (臺灣證券交易所)」，含官方產業類指數點數，見 `_parse_sector_index_historical`）。
+        兩個方法各自獨立打網＋各自快取（跟 `fetch_otc_daily_all_historical` 對
+        `fetch_daily_all_historical` 的既有慣例一致）——沒有共用 payload，因為兩者的
+        cache-hit時機不同（`daily_{date}.parquet` 多半已回補過，這裡是全新的快取池，
+        重複發送不可避免，是一次性回補的已知成本，非本函式該優化的範圍）。
+        非交易日／空資料/表不存在 → 不落檔，回空表。
+        """
+        date_str = trading_date.strftime("%Y%m%d")
+        cache_file = self.cache_dir / f"sector_index_{date_str}.parquet"
+        if cache_file.exists():
+            logger.info("命中快取 {}", cache_file)
+            return load_parquet(cache_file)
+
+        url = (
+            f"{self.legacy_base_url}/exchangeReport/MI_INDEX?response=json"
+            f"&date={date_str}&type=ALLBUT0999"
+        )
+        payload = self._get_legacy(url)
+        df = _parse_sector_index_historical(payload)
+        if not df.is_empty():
+            save_parquet(df, cache_file)
+        else:
+            logger.info("MI_INDEX {} 無族群指數表（非交易日 / 未發布），略過", date_str)
+        return df
+
+    def load_sector_index_history(self) -> pl.DataFrame:
+        """純讀本地所有 sector_index_*.parquet 並合併（不打網）。無快取回空表。"""
+        files = sorted(self.cache_dir.glob("sector_index_*.parquet"))
+        if not files:
+            return pl.DataFrame(schema=_SECTOR_INDEX_SCHEMA)
+        return (
+            pl.concat([pl.read_parquet(f) for f in files])
+            .unique(subset=["date", "index_name"], keep="first")
+            .sort(["index_name", "date"])
+        )
 
     def fetch_institutional(self, as_of: date | None = None) -> pl.DataFrame:
         """

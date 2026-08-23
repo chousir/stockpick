@@ -445,6 +445,62 @@ def data_backfill_daily_history(
     )
 
 
+@data_app.command("backfill-sector-index")
+def data_backfill_sector_index(
+    start: str = typer.Option(..., "--start", help="回補起始日（YYYY-MM-DD，含）"),
+    end: str = typer.Option(
+        ..., "--end", help="回補結束日（YYYY-MM-DD，含）；由 end 往 start 逐日曆日走"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """一次性逐日回補官方產業類指數（docs/31 §10.4，`backend/official_sector_grid.py` 用）。
+
+    跟 `backfill-daily-history` 打**同一個** MI_INDEX 端點（不同解析目標、不同快取池
+    `sector_index_{date}.parquet`），已回補過 `daily_*` 的日期無法免費省下這次請求
+    （原始payload未落地保存），一次性成本同當初 `backfill-daily-history` 量級。
+    從 --end 往 --start 逐日曆日走（跳週末）；單日失敗記 log 不中斷；已有快取的日期
+    直接讀檔跳過（天然可續跑）；每 50 個日曆日印進度。
+    """
+    from datetime import date as _date
+    from datetime import timedelta as _timedelta
+
+    from tw_screener.data.twse import create_client
+
+    try:
+        start_date = _date.fromisoformat(start)
+        end_date = _date.fromisoformat(end)
+    except ValueError:
+        console.print(f"[red]--start/--end 格式錯誤（需 YYYY-MM-DD）：{start} / {end}[/red]")
+        raise typer.Exit(1) from None
+    if start_date > end_date:
+        console.print(f"[red]--start {start} 不可晚於 --end {end}[/red]")
+        raise typer.Exit(1)
+
+    client = create_client(settings)
+    total_days = (end_date - start_date).days + 1
+    console.print(f"[bold]逐日回補官方產業類指數：{start} → {end}（{total_days} 日曆日）[/bold]")
+
+    cur = end_date
+    processed = done = failed = 0
+    while cur >= start_date:
+        processed += 1
+        if cur.weekday() >= 5:
+            cur -= _timedelta(days=1)
+            continue
+        try:
+            df = client.fetch_sector_index_historical(cur)
+            if not df.is_empty():
+                done += 1
+        except Exception as e:  # noqa: BLE001 — 單日失敗不該中斷整批回補
+            failed += 1
+            console.print(f"[yellow]  {cur} 失敗：{e}[/yellow]")
+        if processed % 50 == 0:
+            console.print(f"  進度：已走 {processed}/{total_days} 日曆日（成功 {done}）")
+        cur -= _timedelta(days=1)
+
+    console.print(f"[green]回補完成：{done} 個交易日、失敗 {failed} 次[/green]")
+
+
 @data_app.command("backfill-institutional-history")
 def data_backfill_institutional_history(
     start: str = typer.Option(..., "--start", help="回補起始日（YYYY-MM-DD，含）"),
