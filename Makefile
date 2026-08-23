@@ -27,7 +27,9 @@ endif
 	$(MAKE) fetch-twse
 	$(MAKE) fetch-institutional-history   # 回補近 20 日上市+上櫃法人；隔幾天沒跑也自動補齊
 	-$(MAKE) fetch-tdcc   # 集保大戶持股比（規劃書 02 D3）；TDCC 異常不擋主流程，大戶欄退化為 null
-	$(MAKE) doctor   # Goodinfo 健康檢查（規劃書 02 D1）：被擋/改版就早停，不讓 screen-all 白跑
+	-$(MAKE) doctor   # Goodinfo 健康檢查（規劃書 02 D1）：只診斷不擋（2026-08-23 拍板，docs/31 §19.3）——
+	                  # screen-all 本來就會逐策略捕捉 GoodinfoBlockedError 記進 failures，doctor 失敗
+	                  # 不代表 screen-all 會白跑；擋在這裡只會讓 D/E/F/G 連「本週未取得」都印不出來
 	$(MAKE) screen-all GROUP=$(GROUP)
 	$(MAKE) fetch-candidates-history
 	-$(MAKE) rotation   # 先跑輪動（group 的 2.8 雷達要讀 sector_rotation.csv 並列；失敗不擋主流程）

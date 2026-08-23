@@ -25,8 +25,8 @@
  ① fetch-twse                日線/法人/月營收/產業別/官方估值比(PE/PB/殖利率) 增量入快取
  ② fetch-institutional-history 回補近 20 日上市＋上櫃法人（隔幾天沒跑也自動補齊）
  ③ fetch-tdcc                集保大戶持股比（容錯：TDCC 異常不擋，大戶欄退化 null）
- ④ doctor                    Goodinfo 健康檢查（被擋/改版早停，不讓 screen-all 白跑）
- ⑤ screen-all GROUP=defg     Goodinfo 跑 D/E/F/G 四策略 → screen_result_*.csv（純快照）
+ ④ doctor                    Goodinfo 健康檢查（只診斷不擋，2026-08-23 拍板，docs/31 §19.3；⑤仍會嘗試執行）
+ ⑤ screen-all GROUP=defg     Goodinfo 跑 D/E/F/G 四策略 → screen_result_*.csv（純快照；被擋時逐策略印「本週未取得」，不中止流程）
  ⑥ fetch-candidates-history  對命中股聯集補抓 13 個月個股日線（MA60/量比/動能用）
  ⑦ rotation                  ★ 次產業輪動（全市場宇宙・價格趨勢分數主鍵＋趨勢領頭板）→ sector_rotation.md/csv
  ⑧ macro                     docs/25 v2 總經燈號（BAA10Y 主訊號＋揭露面板，容錯：FRED 掛了不擋主流程）
@@ -206,7 +206,8 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make snapshot-week`                                    | point-in-time 週快照：凍結 concepts/宇宙/持股到 data/snapshots/（docs/23 WS-J.1） | week 已內含，可單獨重跑     |
 | `make backfill-daily-history START=… END=…`         | bulk 逐日全市場歷史（TWSE MI_INDEX，一日一請求；上櫃無 bulk 走逐檔） | 面板延伸冷啟動（比逐檔快）    |
 | `make backfill-institutional-history START=… END=…` | 逐日上市法人歷史（TWSE T86，一日一請求；顯式起迄不依賴 latest 錨點） | 面板法人冷啟動（build-panel 前）|
-| `make doctor`                                          | Goodinfo 健康檢查（week 已內含，可單獨重跑）         | 懷疑被擋/改版時                      |
+| `make doctor`                                          | Goodinfo 健康檢查（week 已內含，只診斷不擋，可單獨重跑）| 懷疑被擋/改版時                      |
+| `uv run tw-screener screen run-local f_value_rebound`  | Goodinfo 被擋時的手動退路：純用 TWSE/TPEX 官方快取跑 F 策略（唯一目前可完全本地化的策略，docs/31 §19.3；D/E/G 因表外條件無法本地化，未接進 `make week`） | doctor 顯示 BLOCKED 時想至少拿到 F 的候選 |
 | `make fetch-tdcc`                                      | TDCC 集保大戶持股比（week 已內含）                   | 大戶欄空值時單獨補                   |
 | `make fetch-twse`                                      | 增量抓日線/法人/月營收                               | 通常不必單獨跑（week 含）            |
 | `make fetch-stock STOCK_ID=2330`                       | 抓單檔完整資料                                       | 臨時看一檔沒快取的股                 |
