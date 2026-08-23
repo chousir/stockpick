@@ -5,12 +5,16 @@ from __future__ import annotations
 from datetime import date
 
 import polars as pl
+import pytest
 
 from tw_screener.backtest.official_sector_grid import (
     _INDUSTRY_TO_INDEX_ALIASES,
     _UNMAPPED_INDUSTRIES,
+    build_hand_sector_baskets,
+    build_hand_sector_membership,
     build_official_sector_baskets,
     build_official_sector_membership,
+    compute_subindustry_purity,
     official_group_rank_grid,
 )
 
@@ -112,3 +116,95 @@ def test_official_group_rank_grid_two_cells_only() -> None:
 def test_official_group_rank_grid_empty_when_missing_columns() -> None:
     grid = official_group_rank_grid(pl.DataFrame({"date": [date(2026, 1, 1)]}))
     assert grid.is_empty()
+
+
+# ─── §10.6：手標46細分類 + purity-mapped 官方指數 ──────────────────────────────
+
+
+def _hand_membership(rows: list[tuple[str, str]]) -> pl.DataFrame:
+    return pl.DataFrame(rows, schema=["sub_industry", "stock_id"], orient="row")
+
+
+def _official_industry(rows: list[tuple[str, str | None]]) -> pl.DataFrame:
+    return pl.DataFrame(
+        rows, schema={"stock_id": pl.Utf8, "industry_name": pl.Utf8}, orient="row"
+    )
+
+
+def test_compute_subindustry_purity_high_purity_group() -> None:
+    hand = _hand_membership([("封測", "2330"), ("封測", "2454"), ("封測", "6488")])
+    official = _official_industry(
+        [("2330", "半導體業"), ("2454", "半導體業"), ("6488", "光電業")]
+    )
+    purity = compute_subindustry_purity(hand, official)
+    row = purity.filter(pl.col("sub_industry") == "封測").row(0, named=True)
+    assert row["dominant_official"] == "半導體業"
+    assert row["n_match"] == 2
+    assert row["n_total"] == 3
+    assert row["purity"] == pytest.approx(2 / 3)
+
+
+def test_compute_subindustry_purity_all_unmatched_is_zero_not_full() -> None:
+    """全員industry_name缺席 → purity=0.0（不是100%）——避免「查無資料」誤讀成「完全純」。"""
+    hand = _hand_membership([("安全監控", "1111"), ("安全監控", "2222")])
+    official = _official_industry([("1111", None), ("2222", None)])
+    purity = compute_subindustry_purity(hand, official)
+    row = purity.filter(pl.col("sub_industry") == "安全監控").row(0, named=True)
+    assert row["dominant_official"] is None
+    assert row["purity"] == 0.0
+
+
+def test_compute_subindustry_purity_empty_input() -> None:
+    empty_hand = pl.DataFrame(schema={"sub_industry": pl.Utf8, "stock_id": pl.Utf8})
+    empty_official = pl.DataFrame(schema={"stock_id": pl.Utf8, "industry_name": pl.Utf8})
+    assert compute_subindustry_purity(empty_hand, empty_official).is_empty()
+
+
+def test_build_hand_sector_membership_filters_by_purity_threshold() -> None:
+    hand = _hand_membership(
+        [("封測", "2330"), ("封測", "2454"), ("太陽能", "9999"), ("太陽能", "8888")]
+    )
+    official = _official_industry(
+        [("2330", "半導體業"), ("2454", "半導體業"), ("9999", "光電業"), ("8888", None)]
+    )
+    purity = compute_subindustry_purity(hand, official)
+    out = build_hand_sector_membership(hand, purity, min_purity=0.7)
+    assert set(out["sub_industry"].to_list()) == {"封測"}  # 太陽能 purity 0.5 < 0.7
+
+
+def test_build_hand_sector_membership_excludes_unmapped_dominant() -> None:
+    """多數官方類別本身查無 MI_INDEX 對應（§10.2排除清單）→ 即使 purity 100% 也不納入。"""
+    hand = _hand_membership([("某組", "1111"), ("某組", "2222")])
+    official = _official_industry([("1111", "軟體工業"), ("2222", "軟體工業")])
+    purity = compute_subindustry_purity(hand, official)
+    assert purity.row(0, named=True)["purity"] == 1.0
+    out = build_hand_sector_membership(hand, purity, min_purity=0.7)
+    assert out.is_empty()
+
+
+def test_build_hand_sector_baskets_shares_index_across_groups() -> None:
+    """封測/晶圓代工皆多數票落在半導體業 → 共用同一條 basket_index 數列（已知副作用）。"""
+    hand = _hand_membership(
+        [("封測", "2330"), ("晶圓代工", "2454")]
+    )
+    official = _official_industry([("2330", "半導體業"), ("2454", "半導體業")])
+    purity = compute_subindustry_purity(hand, official)
+    sector_index = pl.DataFrame(
+        {"date": [date(2026, 8, 21)], "index_name": ["半導體類指數"], "close_index": [500.0]}
+    )
+    baskets = build_hand_sector_baskets(sector_index, purity, min_purity=0.7)
+    values = {
+        r["sub_industry"]: r["basket_index"] for r in baskets.iter_rows(named=True)
+    }
+    assert values == {"封測": 500.0, "晶圓代工": 500.0}
+
+
+def test_build_hand_sector_baskets_empty_input() -> None:
+    empty_purity = pl.DataFrame(schema={
+        "sub_industry": pl.Utf8, "dominant_official": pl.Utf8,
+        "n_total": pl.UInt32, "n_match": pl.UInt32, "purity": pl.Float64,
+    })
+    assert build_hand_sector_baskets(
+        pl.DataFrame(schema={"date": pl.Date, "index_name": pl.Utf8, "close_index": pl.Float64}),
+        empty_purity,
+    ).is_empty()

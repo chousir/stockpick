@@ -107,36 +107,151 @@ def build_official_sector_membership(official_membership: pl.DataFrame) -> pl.Da
     )
 
 
+def _pick_index_series(idx: pl.DataFrame, candidates: tuple[str, ...]) -> pl.DataFrame:
+    """每個日期取候選清單裡優先序最高、當天有出現的那一個 index_name（date, close_index）。
+
+    處理跨期改名（如觀光類指數→觀光餐旅類指數）；候選清單只有一個名字時等同精確 join。
+    """
+    sub = idx.filter(pl.col("index_name").is_in(list(candidates)))
+    if sub.is_empty():
+        return pl.DataFrame(schema={"date": pl.Date, "close_index": pl.Float64})
+    pref = {name: i for i, name in enumerate(candidates)}
+    return (
+        sub.with_columns(pl.col("index_name").replace_strict(pref).alias("_pref"))
+        .sort(["date", "_pref"])
+        .unique(subset=["date"], keep="first")
+        .select("date", "close_index")
+    )
+
+
 def build_official_sector_baskets(sector_index: pl.DataFrame) -> pl.DataFrame:
     """`client.load_sector_index_history()` 輸出（index_name, date, close_index）→
     以 canonical 群組標籤為 key 的 (sub_industry, date, basket_index) frame，
     供直接餵給 `rotation_efficacy.trend_score_series(price, membership, baskets)`
     （該函式只讀 baskets 的這三欄，見模組頂 docstring）。
-
-    每個 canonical 群組、每個日期：依候選清單順序取第一個在當天實際存在的 index_name
-    （處理觀光類指數的跨期改名；其餘群組候選清單只有一個名字，等同精確 join）。
     """
     if sector_index.is_empty():
         return pl.DataFrame(schema=_BASKET_SCHEMA)
     idx = sector_index.select("date", "index_name", "close_index")
     rows: list[pl.DataFrame] = []
     for canonical, candidates in _INDUSTRY_TO_INDEX_ALIASES.items():
-        sub = idx.filter(pl.col("index_name").is_in(list(candidates)))
-        if sub.is_empty():
+        picked = _pick_index_series(idx, candidates)
+        if picked.is_empty():
             continue
-        # 每個 date 只留候選清單裡優先序最高、當天有出現的那一個
-        pref = {name: i for i, name in enumerate(candidates)}
-        picked = (
-            sub.with_columns(pl.col("index_name").replace_strict(pref).alias("_pref"))
-            .sort(["date", "_pref"])
-            .unique(subset=["date"], keep="first")
-            .select(
+        rows.append(
+            picked.select(
                 pl.lit(canonical).alias("sub_industry"),
                 "date",
                 pl.col("close_index").alias("basket_index"),
             )
         )
-        rows.append(picked)
+    if not rows:
+        return pl.DataFrame(schema=_BASKET_SCHEMA)
+    return pl.concat(rows).sort(["sub_industry", "date"])
+
+
+_PURITY_SCHEMA: dict[str, type[pl.DataType]] = {
+    "sub_industry": pl.Utf8, "dominant_official": pl.Utf8,
+    "n_total": pl.UInt32, "n_match": pl.UInt32, "purity": pl.Float64,
+}
+
+
+def compute_subindustry_purity(
+    hand_membership: pl.DataFrame, official_industry: pl.DataFrame
+) -> pl.DataFrame:
+    """§10.6：手標次產業（`list_subindustries()`）成員 join 官方 `industry_name`，
+    算每個手標群組的多數官方類別與純度（`n_match`/`n_total`）。
+
+    純度分母含 industry_name 缺席（null/空字串）的成員——這些股票對「這組能不能對應到
+    單一官方類別」也是雜訊來源，不能悄悄從分母排除、假裝乾淨。全員皆缺席
+    → `dominant_official=None`、`purity=0.0`（不是 100%，避免「查無資料」誤讀成「完全
+    純」）。
+    """
+    if hand_membership.is_empty() or official_industry.is_empty():
+        return pl.DataFrame(schema=_PURITY_SCHEMA)
+    joined = hand_membership.join(
+        official_industry.select("stock_id", "industry_name"), on="stock_id", how="left"
+    )
+    totals = joined.group_by("sub_industry").agg(pl.len().cast(pl.UInt32).alias("n_total"))
+    counts = (
+        joined.filter(pl.col("industry_name").is_not_null() & (pl.col("industry_name") != ""))
+        .group_by("sub_industry", "industry_name")
+        .agg(pl.len().cast(pl.UInt32).alias("n_match"))
+    )
+    if counts.is_empty():
+        return totals.with_columns(
+            pl.lit(None, dtype=pl.Utf8).alias("dominant_official"),
+            pl.lit(0, dtype=pl.UInt32).alias("n_match"),
+            pl.lit(0.0).alias("purity"),
+        ).select(list(_PURITY_SCHEMA))
+    top = (
+        counts.sort(["sub_industry", "n_match"], descending=[False, True])
+        .unique(subset=["sub_industry"], keep="first")
+        .rename({"industry_name": "dominant_official"})
+    )
+    return (
+        totals.join(top, on="sub_industry", how="left")
+        .with_columns(
+            pl.col("n_match").fill_null(0),
+            (pl.col("n_match").fill_null(0) / pl.col("n_total")).alias("purity"),
+        )
+        .select(list(_PURITY_SCHEMA))
+        .sort("sub_industry")
+    )
+
+
+def _eligible_hand_groups(purity: pl.DataFrame, min_purity: float) -> pl.DataFrame:
+    """§10.6 門檻：purity≥min_purity 且多數官方類別本身有 MI_INDEX 對應（§10.2）——
+    兩者缺一不納入，不猜測、不用次高票替代。
+    """
+    return purity.filter(
+        (pl.col("purity") >= min_purity)
+        & pl.col("dominant_official").is_not_null()
+        & pl.col("dominant_official").is_in(list(_INDUSTRY_TO_INDEX_ALIASES))
+    )
+
+
+def build_hand_sector_membership(
+    hand_membership: pl.DataFrame, purity: pl.DataFrame, min_purity: float = 0.7
+) -> pl.DataFrame:
+    """§10.6：手標次產業原始標籤（不改名）→ 過濾至 purity 達標的群組。"""
+    if hand_membership.is_empty() or purity.is_empty():
+        return pl.DataFrame(schema=_MEMBERSHIP_SCHEMA)
+    eligible = _eligible_hand_groups(purity, min_purity)["sub_industry"].to_list()
+    return (
+        hand_membership.filter(pl.col("sub_industry").is_in(eligible))
+        .select("sub_industry", "stock_id")
+        .unique(maintain_order=True)
+        .sort(["sub_industry", "stock_id"])
+    )
+
+
+def build_hand_sector_baskets(
+    sector_index: pl.DataFrame, purity: pl.DataFrame, min_purity: float = 0.7
+) -> pl.DataFrame:
+    """§10.6：手標次產業標籤 → 用其「多數官方類別」對應的 MI_INDEX 指數當 basket_index。
+
+    多個手標群組若多數票落在同一個官方類別（如封測/晶圓代工/IC設計服務皆→半導體業），
+    會共用同一條 basket_index 數列——這是已知、predetermined 的副作用（見 §10.6），
+    不是 bug，呼叫端報告需如實揭露。
+    """
+    if sector_index.is_empty() or purity.is_empty():
+        return pl.DataFrame(schema=_BASKET_SCHEMA)
+    idx = sector_index.select("date", "index_name", "close_index")
+    eligible = _eligible_hand_groups(purity, min_purity)
+    rows: list[pl.DataFrame] = []
+    for r in eligible.iter_rows(named=True):
+        candidates = _INDUSTRY_TO_INDEX_ALIASES[r["dominant_official"]]
+        picked = _pick_index_series(idx, candidates)
+        if picked.is_empty():
+            continue
+        rows.append(
+            picked.select(
+                pl.lit(r["sub_industry"]).alias("sub_industry"),
+                "date",
+                pl.col("close_index").alias("basket_index"),
+            )
+        )
     if not rows:
         return pl.DataFrame(schema=_BASKET_SCHEMA)
     return pl.concat(rows).sort(["sub_industry", "date"])

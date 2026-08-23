@@ -423,6 +423,7 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     top_n_groups: 5               # 族群trend_score當日排名前5（同G3 top_n，維持可比較）
     snapshot_gap_td: 5            # 週頻快照間隔（交易日）→ CI block長度換算用
     n_boot: 1000
+    hand_min_purity: 0.7          # docs/31 §10.6：手標次產業→官方類別 majority-mapping門檻
     output_dir: research/official_sector_grid
   contrarian_efficacy:       # M-BR1 Phase 2 底部左側聯合桶檢驗（make contrarian-efficacy）
     horizons_td: [5, 10, 20, 40] # forward alpha 窗（交易日）

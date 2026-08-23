@@ -1326,11 +1326,17 @@ def backtest_official_sector_grid_cmd(
         None, help="輸出目錄（預設讀 settings，research/official_sector_grid）"
     ),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+    group_source: str = typer.Option(
+        "official",
+        "--group-source",
+        help="分組來源：official（§10.2，TWSE官方粗分類，預設）｜"
+        "hand（§10.6，手標46細分類，purity達門檻才映射官方指數，輸出檔名加_hand後綴）",
+    ),
 ) -> None:
     """docs/31 §10 milestone：官方產業分類×MI_INDEX官方指數，重測G3「族群前5」。"""
     from tw_screener.backtest.official_sector_grid_runner import run_official_sector_grid
 
-    run_official_sector_grid(settings, out_dir)
+    run_official_sector_grid(settings, out_dir, group_source)
 
 
 @backtest_app.command("l6-g4-watch")

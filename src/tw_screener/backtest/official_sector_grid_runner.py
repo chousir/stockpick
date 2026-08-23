@@ -17,11 +17,18 @@ from rich.console import Console
 console = Console()
 
 
-def run_official_sector_grid(settings: Path, out_dir: Path | None) -> None:
-    """docs/31 §10 milestone：官方產業分類×MI_INDEX官方指數，重測「族群前5」。"""
+def run_official_sector_grid(
+    settings: Path, out_dir: Path | None, group_source: str = "official"
+) -> None:
+    """docs/31 §10 milestone：官方產業分類×MI_INDEX官方指數，重測「族群前5」。
+
+    Args:
+        group_source: "official"（§10.2，TWSE官方粗分類~32組直接當群組）｜
+            "hand"（§10.6，手標46細分類，purity≥門檻才映射官方指數當basket_index）。
+    """
     import yaml
 
-    from tw_screener.analysis.sector_universe import load_industry_mapping
+    from tw_screener.analysis.sector_universe import list_subindustries, load_industry_mapping
     from tw_screener.backtest import factor_lab as lab
     from tw_screener.backtest import official_sector_grid as osg
     from tw_screener.backtest.rotation_efficacy import (
@@ -31,6 +38,10 @@ def run_official_sector_grid(settings: Path, out_dir: Path | None) -> None:
     )
     from tw_screener.data.twse import create_client
 
+    if group_source not in ("official", "hand"):
+        console.print(f"[red]--group-source 需為 official|hand，收到 {group_source!r}[/red]")
+        raise typer.Exit(1)
+
     with open(settings) as f:
         cfg = yaml.safe_load(f)
     oc = cfg.get("backtest", {}).get("official_sector_grid", {})
@@ -38,6 +49,7 @@ def run_official_sector_grid(settings: Path, out_dir: Path | None) -> None:
     top_n = int(oc.get("top_n_groups", 5))
     snapshot_gap_td = int(oc.get("snapshot_gap_td", 5))
     n_boot = int(oc.get("n_boot", 1000))
+    min_purity = float(oc.get("hand_min_purity", 0.7))
     panel_path = Path(
         cfg.get("backtest", {}).get("factor_lab", {}).get(
             "panel_path", "research/panel/panel.parquet"
@@ -56,10 +68,6 @@ def run_official_sector_grid(settings: Path, out_dir: Path | None) -> None:
     if industry.is_empty():
         console.print("[red]缺官方產業分類（industry_*.parquet/otc_industry_*.parquet）[/red]")
         raise typer.Exit(1)
-    official_raw = official_membership_frame(industry)
-    membership = osg.build_official_sector_membership(official_raw)
-    n_excluded = official_raw["stock_id"].n_unique() - membership["stock_id"].n_unique()
-    n_total = official_raw["stock_id"].n_unique()
 
     sector_index = client.load_sector_index_history()
     if sector_index.is_empty():
@@ -68,7 +76,30 @@ def run_official_sector_grid(settings: Path, out_dir: Path | None) -> None:
             "`tw-screener data backfill-sector-index --start ... --end ...`[/red]"
         )
         raise typer.Exit(1)
-    baskets = osg.build_official_sector_baskets(sector_index)
+
+    if group_source == "official":
+        official_raw = official_membership_frame(industry)
+        membership = osg.build_official_sector_membership(official_raw)
+        n_excluded = official_raw["stock_id"].n_unique() - membership["stock_id"].n_unique()
+        n_total = official_raw["stock_id"].n_unique()
+        baskets = osg.build_official_sector_baskets(sector_index)
+        exclude_note = "因查無對應MI_INDEX類指數被排除（§10.2明確排除清單，非隨機遺漏）"
+    else:
+        hand = list_subindustries()
+        purity = osg.compute_subindustry_purity(hand, industry)
+        membership = osg.build_hand_sector_membership(hand, purity, min_purity=min_purity)
+        n_excluded = hand["stock_id"].n_unique() - membership["stock_id"].n_unique()
+        n_total = hand["stock_id"].n_unique()
+        baskets = osg.build_hand_sector_baskets(sector_index, purity, min_purity=min_purity)
+        n_groups_total = purity.height
+        n_groups_eligible = (
+            membership["sub_industry"].n_unique() if not membership.is_empty() else 0
+        )
+        exclude_note = (
+            f"因多數官方類別純度<{min_purity:.0%}或多數類別本身查無MI_INDEX對應被排除"
+            f"（§10.6門檻；{n_groups_total}個手標次產業中{n_groups_eligible}個達標）"
+        )
+
     if baskets.is_empty() or membership.is_empty():
         console.print("[red]映射後族群/籃子為空，無法計算[/red]")
         raise typer.Exit(1)
@@ -98,7 +129,8 @@ def run_official_sector_grid(settings: Path, out_dir: Path | None) -> None:
         console.print("[red]格為空——輸入資料異常[/red]")
         raise typer.Exit(1)
 
-    base_tag = date.today().strftime("%Y%m%d")
+    tag_suffix = "" if group_source == "official" else f"_{group_source}"
+    base_tag = date.today().strftime("%Y%m%d") + tag_suffix
     out.mkdir(parents=True, exist_ok=True)
     grid.write_csv(out / f"official_sector_grid_{base_tag}.csv")
 
@@ -107,22 +139,31 @@ def run_official_sector_grid(settings: Path, out_dir: Path | None) -> None:
 
     n_weeks = stock_rows["date"].n_unique()
     n_groups = membership["sub_industry"].n_unique()
+    title_variant = (
+        "官方產業分類（§10.2）" if group_source == "official" else "手標46細分類（§10.6）"
+    )
     lines = [
-        "# docs/31 §10：官方族群指數重測「族群前5」（G3 leftover finding 獨立驗證）",
+        f"# docs/31 §10：官方族群指數重測「族群前5」——{title_variant}",
         "",
-        "> 全新假設，非重跑G3資料——分組單位＝TWSE官方產業分類（非手標次產業）、"
-        "族群強弱量尺＝MI_INDEX官方發布市值加權指數點數（非等權籃子）。門檻／停止條件"
-        "已於 docs/31 §10.3 執行前預先登記，本報告只呈現結果，裁決依登記門檻套用。",
+        "> 全新假設，非重跑G3資料——族群強弱量尺＝MI_INDEX官方發布市值加權指數點數"
+        "（非等權籃子）。門檻／停止條件已於 docs/31 §10.3/§10.6 執行前預先登記，"
+        "本報告只呈現結果，裁決依登記門檻套用。",
         "",
-        f"- 產出日：{date.today()}；映射後 {n_groups} 個官方群組、{n_weeks} 週快照；"
-        f"官方產業分類原始 {n_total} 檔中 {n_excluded} 檔（"
-        f"{n_excluded / n_total * 100:.1f}%）因查無對應MI_INDEX類指數被排除"
-        "（§10.2 明確排除清單，非隨機遺漏）。",
+        f"- 產出日：{date.today()}；分組來源：{group_source}；映射後 {n_groups} 個群組、"
+        f"{n_weeks} 週快照；原始 {n_total} 檔中 {n_excluded} 檔"
+        f"（{n_excluded / n_total * 100:.1f}%）{exclude_note}。",
         "- `mean`/`median`/`win_rate`＝原始個股alpha{h}，供量級參考；`ci_lo`/`ci_hi`是對"
         "delta（cell當日均值−當日全樣本均值）做moving-block bootstrap CI，理由同G3。"
         "**只有2個cell**（族群前5 vs 非前5）——刻意不重建G3的4維格。",
-        "",
     ]
+    if group_source == "hand":
+        lines.append(
+            "- ⚠️ **已知副作用（§10.6，非bug）**：多個手標細分類若多數票落在同一個官方"
+            "類別（如封測/晶圓代工/IC設計服務皆→半導體業），會共用同一條`basket_index`"
+            "數列——trend_score的`c_ma`分量因此相同，但`breadth`/`leader_rs`兩項仍各自"
+            "用該細分類自身成員計算，非完全重複測量。"
+        )
+    lines.append("")
 
     for h in sorted(set(grid["horizon"].to_list())):
         sub = grid.filter(pl.col("horizon") == h)
@@ -213,7 +254,7 @@ def run_official_sector_grid(settings: Path, out_dir: Path | None) -> None:
                         f"B={n_boot}・seed=42）對族群前5格delta（cell當日均值−當日全樣本均值）"
                         "per-date序列算CI95"
                     ),
-                    membership_desc="TWSE官方產業分類（映射至MI_INDEX類指數，§10.2）",
+                    membership_desc=title_variant,
                 ),
                 "",
             ]
