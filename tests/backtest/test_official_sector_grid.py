@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import polars as pl
 import pytest
@@ -16,6 +16,7 @@ from tw_screener.backtest.official_sector_grid import (
     build_official_sector_membership,
     compute_subindustry_purity,
     official_group_rank_grid,
+    walk_forward_top5_grid,
 )
 
 
@@ -208,3 +209,103 @@ def test_build_hand_sector_baskets_empty_input() -> None:
         pl.DataFrame(schema={"date": pl.Date, "index_name": pl.Utf8, "close_index": pl.Float64}),
         empty_purity,
     ).is_empty()
+
+
+# ─── walk_forward_top5_grid（docs/31 §10.13） ──────────────────────────────────
+
+
+def _weekly_dates(n: int, start: date = date(2023, 1, 2)) -> list[date]:
+    return [start + timedelta(weeks=i) for i in range(n)]
+
+
+def _synthetic_walk_forward_inputs(n_weeks: int = 40) -> dict[str, pl.DataFrame]:
+    """兩個100%純度群組（半導體業恆強於光電業），供walk_forward_top5_grid結構性測試
+    （不主張統計顯著，只確認流程跑得通、schema正確）。"""
+    dates = _weekly_dates(n_weeks)
+    semis = ["2330", "2454", "2379"]
+    optos = ["3008", "3406", "6116"]
+
+    hand = pl.DataFrame(
+        [("半導體業", s) for s in semis] + [("光電業", s) for s in optos],
+        schema=["sub_industry", "stock_id"], orient="row",
+    )
+    official = pl.DataFrame(
+        [(s, "半導體業") for s in semis] + [(s, "光電業") for s in optos],
+        schema=["stock_id", "industry_name"], orient="row",
+    )
+    purity = compute_subindustry_purity(hand, official)
+
+    sector_index_rows = []
+    price_rows = []
+    alpha_rows = []
+    for i, d in enumerate(dates):
+        sector_index_rows.append(
+            {"date": d, "index_name": "半導體類指數", "close_index": 100.0 + i * 2.0}
+        )
+        sector_index_rows.append(
+            {"date": d, "index_name": "光電類指數", "close_index": 100.0 + i * 0.2}
+        )
+        for s in semis:
+            price_rows.append({"date": d, "stock_id": s, "close": 100.0 + i * 2.0})
+            alpha_rows.append({"date": d, "stock_id": s, "alpha10": 1.0})
+        for s in optos:
+            price_rows.append({"date": d, "stock_id": s, "close": 100.0 + i * 0.2})
+            alpha_rows.append({"date": d, "stock_id": s, "alpha10": -1.0})
+
+    sector_index_schema = {"date": pl.Date, "index_name": pl.Utf8, "close_index": pl.Float64}
+    sector_index = pl.DataFrame(sector_index_rows, schema=sector_index_schema)
+    price_schema = {"date": pl.Date, "stock_id": pl.Utf8, "close": pl.Float64}
+    price = pl.DataFrame(price_rows, schema=price_schema)
+    panel_alpha = pl.DataFrame(
+        alpha_rows, schema={"date": pl.Date, "stock_id": pl.Utf8, "alpha10": pl.Float64}
+    )
+    return {
+        "hand": hand, "purity": purity, "sector_index": sector_index,
+        "price": price, "panel_alpha": panel_alpha,
+    }
+
+
+def test_walk_forward_top5_grid_runs_and_has_expected_schema() -> None:
+    data = _synthetic_walk_forward_inputs(n_weeks=40)
+    out = walk_forward_top5_grid(
+        data["hand"], data["purity"], data["sector_index"], data["price"], data["panel_alpha"],
+        purity_thresholds=(0.5, 1.0), horizons=(10,), top_n_groups=1, n_splits=2,
+        min_train_frac=0.4, n_boot=50, select_n_boot=20,
+    )
+    assert set(out.columns) == {
+        "horizon", "split_id", "train_end", "test_start", "test_end", "chosen_purity",
+        "train_delta_mean", "test_n", "test_n_dates", "test_delta_mean",
+        "test_ci_lo", "test_ci_hi",
+    }
+    assert not out.is_empty()
+    assert set(out["horizon"].to_list()) == {10}
+    # 半導體業恆強於光電業，前5(top_n_groups預設5，只有2組全入)理論上該偏正——結構性
+    # 檢查方向，不主張統計顯著（合成資料本來就是為了測流程，不是測效應量）
+    assert (out["test_delta_mean"] > 0).all()
+
+
+def test_walk_forward_top5_grid_empty_inputs() -> None:
+    empty_hand = pl.DataFrame(schema={"sub_industry": pl.Utf8, "stock_id": pl.Utf8})
+    empty_purity = pl.DataFrame(schema={
+        "sub_industry": pl.Utf8, "dominant_official": pl.Utf8,
+        "n_total": pl.UInt32, "n_match": pl.UInt32, "purity": pl.Float64,
+    })
+    empty_sector_index = pl.DataFrame(
+        schema={"date": pl.Date, "index_name": pl.Utf8, "close_index": pl.Float64}
+    )
+    empty_price = pl.DataFrame(schema={"date": pl.Date, "stock_id": pl.Utf8, "close": pl.Float64})
+    empty_alpha = pl.DataFrame(schema={"date": pl.Date, "stock_id": pl.Utf8, "alpha10": pl.Float64})
+    out = walk_forward_top5_grid(
+        empty_hand, empty_purity, empty_sector_index, empty_price, empty_alpha
+    )
+    assert out.is_empty()
+
+
+def test_walk_forward_top5_grid_too_few_weeks_returns_empty() -> None:
+    """週數不足以切出任何有效split → 回空表，不硬切。"""
+    data = _synthetic_walk_forward_inputs(n_weeks=5)
+    out = walk_forward_top5_grid(
+        data["hand"], data["purity"], data["sector_index"], data["price"], data["panel_alpha"],
+        purity_thresholds=(1.0,), horizons=(10,), n_splits=4, min_train_frac=0.4,
+    )
+    assert out.is_empty()

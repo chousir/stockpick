@@ -23,8 +23,11 @@ import polars as pl
 from tw_screener.backtest.factor_lab import (
     REGIME_LABELS,
     REGIME_MIN_N,
+    Split,
     moving_block_bootstrap_ci,
+    walk_forward_splits,
 )
+from tw_screener.backtest.rotation_efficacy import trend_score_series
 
 # industry_name → 候選 MI_INDEX index_name（依偏好順序；第一個在當日表格出現的即採用）。
 # 2026-08-23 查核：32 組跨 2021-07-01/2022-06-01/2023-01-03/2026-08-21 四個日期穩定映射。
@@ -408,3 +411,130 @@ def official_group_rank_by_regime(
                 }
             )
     return pl.DataFrame(rows, schema=schema)
+
+
+_WF_SCHEMA: dict[str, type[pl.DataType]] = {
+    "horizon": pl.Int64,
+    "split_id": pl.Int64,
+    "train_end": pl.Date,
+    "test_start": pl.Date,
+    "test_end": pl.Date,
+    "chosen_purity": pl.Float64,
+    "train_delta_mean": pl.Float64,
+    "test_n": pl.UInt32,
+    "test_n_dates": pl.UInt32,
+    "test_delta_mean": pl.Float64,
+    "test_ci_lo": pl.Float64,
+    "test_ci_hi": pl.Float64,
+}
+
+
+def walk_forward_top5_grid(
+    hand: pl.DataFrame,
+    purity: pl.DataFrame,
+    sector_index: pl.DataFrame,
+    price: pl.DataFrame,
+    panel_alpha: pl.DataFrame,
+    purity_thresholds: tuple[float, ...] = (0.0, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9),
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_n_groups: int = 5,
+    n_splits: int = 4,
+    min_train_frac: float = 0.4,
+    n_boot: int = 1000,
+    select_n_boot: int = 50,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """docs/31 §10.13：多段 walk-forward（取代§10.10單一50/50切分）——§10.10只切一刀，
+    是「幸運或不幸的一次切法」；本函式用`factor_lab.walk_forward_splits`（expanding-window
+    +embargo，`grid_scan`既有機制同款）產生 n_splits 段，**每段各自在train重新選purity
+    門檻、在test單獨算delta/CI**，不共用單一門檻，誠實揭露門檻選擇本身跨段是否穩定。
+
+    Args:
+        hand / purity: `list_subindustries()` 輸出／`compute_subindustry_purity()` 輸出。
+        sector_index: `client.load_sector_index_history()` 輸出。
+        price: (date, stock_id, close) 全市場價格（供`trend_score_series`算breadth/leader_rs）。
+        panel_alpha: (date, stock_id, alpha{h}...) ——每個 horizon 對應一欄`alpha{h}`。
+        purity_thresholds: train段選門檻時嘗試的候選清單（同§10.9的8點掃描）。
+        select_n_boot: train段選門檻只需delta_mean點估計排序，CI用不到，特意調低B加速
+            （不影響test段的裁決CI，那邊固定用n_boot）。
+
+    Returns:
+        _WF_SCHEMA；每列一個(horizon, split)組合。任一段訓練/測試段資料不足（無法選出
+        門檻或test格為空）該列不出現，不臆造。
+    """
+    if hand.is_empty() or purity.is_empty() or sector_index.is_empty() or price.is_empty():
+        return pl.DataFrame(schema=_WF_SCHEMA)
+    if "date" not in panel_alpha.columns:
+        return pl.DataFrame(schema=_WF_SCHEMA)
+
+    # 每個候選門檻各自重建一次 stock_rows（membership/basket 隨門檻而變，trend_score
+    # 也要跟著重算）——固定成本，跨 horizon/split 重複使用，不必每段重算。
+    stock_rows_by_thr: dict[float, pl.DataFrame] = {}
+    for thr in purity_thresholds:
+        membership = build_hand_sector_membership(hand, purity, min_purity=thr)
+        baskets = build_hand_sector_baskets(sector_index, purity, min_purity=thr)
+        if membership.is_empty() or baskets.is_empty():
+            continue
+        trend = trend_score_series(price, membership, baskets)
+        if trend.is_empty():
+            continue
+        sr = membership.join(trend, on="sub_industry", how="inner").join(
+            panel_alpha, on=["date", "stock_id"], how="left"
+        )
+        stock_rows_by_thr[thr] = sr
+
+    if not stock_rows_by_thr:
+        return pl.DataFrame(schema=_WF_SCHEMA)
+
+    all_dates = sorted(panel_alpha["date"].unique().to_list())
+    rows: list[dict] = []
+    for h in horizons:
+        tgt = f"alpha{h}"
+        emb = h + 1
+        splits: list[Split] = walk_forward_splits(
+            all_dates, n_splits=n_splits, min_train_frac=min_train_frac, embargo_td=emb
+        )
+        for s in splits:
+            best_thr: float | None = None
+            best_train_delta: float | None = None
+            for thr, sr in stock_rows_by_thr.items():
+                if tgt not in sr.columns:
+                    continue
+                train_sr = sr.filter(pl.col("date") <= s.train_end)
+                grid = official_group_rank_grid(
+                    train_sr, horizons=(h,), top_n_groups=top_n_groups,
+                    n_boot=select_n_boot, seed=seed, snapshot_gap_td=snapshot_gap_td,
+                )
+                top5 = grid.filter(pl.col("group_top5"))
+                if top5.is_empty():
+                    continue
+                dm = top5.row(0, named=True)["delta_mean"]
+                if dm is not None and (best_train_delta is None or dm > best_train_delta):
+                    best_train_delta, best_thr = dm, thr
+            if best_thr is None:
+                continue
+
+            test_sr = stock_rows_by_thr[best_thr].filter(
+                (pl.col("date") >= s.test_start) & (pl.col("date") <= s.test_end)
+            )
+            test_grid = official_group_rank_grid(
+                test_sr, horizons=(h,), top_n_groups=top_n_groups,
+                n_boot=n_boot, seed=seed, snapshot_gap_td=snapshot_gap_td,
+            )
+            top5_test = test_grid.filter(pl.col("group_top5"))
+            if top5_test.is_empty():
+                continue
+            r = top5_test.row(0, named=True)
+            rows.append(
+                {
+                    "horizon": h, "split_id": s.split_id,
+                    "train_end": s.train_end, "test_start": s.test_start,
+                    "test_end": s.test_end, "chosen_purity": best_thr,
+                    "train_delta_mean": best_train_delta,
+                    "test_n": r["n"], "test_n_dates": r["n_dates"],
+                    "test_delta_mean": r["delta_mean"],
+                    "test_ci_lo": r["ci_lo"], "test_ci_hi": r["ci_hi"],
+                }
+            )
+    return pl.DataFrame(rows, schema=_WF_SCHEMA)

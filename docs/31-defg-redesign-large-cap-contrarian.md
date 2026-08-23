@@ -1024,3 +1024,55 @@ runner＋CLI`tw-screener backtest official-sector-watch`，全重用§10既有�
 `散裝`（86.9）／`PC/NB/平板`／`其他光電`，展開回38檔個股（皆無多標籤重複）。
 8個測試全綠，ruff/mypy無新增錯誤。**至此docs/31的三條前瞻累積軌（L6/G4、G1/G2/G5、
 官方族群前5）皆已建成並記錄首週快照**，皆為手動指令、需使用者自行排進每週SOP。
+
+---
+
+## 13. 用現有2022-2026資料強化研究＋整進make week（2026-08-23，使用者指示，執行前預先登記）
+
+使用者指出：不需要等前瞻累積週次——2022-2026已有4年多資料可用，該用來強化研究；
+現有結果「胜率」沒有想像中高（誠實數字：§10各版本`win_rate`約51-55%，不是「大部分
+標的都贏」等級），要求檢視研究方法、加強後直接整進`make week`（不打Goodinfo）。
+
+**使用者已拍板兩個範圍決定**：①生產整合先當**揭露欄位**進`candidates_enriched.csv`
+（非新的candidate-generating策略，非閘門），比照`contrarian_base`/`deep_value_growth`
+等既有訊號上線方式；②「長期」窗口本輪先用panel既有的`alpha40`（約8週），不重建
+panel加r+60/r+120。
+
+### 13.1 §10.13 多段walk-forward預先登記（取代§10.10單一50/50切分）
+
+§10.10只切一刀，是「幸運或不幸的一次切法」。改用`factor_lab.walk_forward_splits`
+（expanding-window+embargo，`grid_scan`既有機制同款，非新框架）產生n_splits=4段，
+**每段各自在train重新選purity門檻、在test單獨算delta/CI**，不共用單一門檻——直接
+回答「門檻選擇本身跨段穩不穩定」，§10.9/10.10已示範全期/單一切分選出的門檻不同
+(0.4 vs 0.6)，這裡用4段看門檻是否持續漂移或收斂。
+
+- 門檻候選：同§10.9掃描的8點(0.0/0.3/0.4/0.5/0.6/0.7/0.8/0.9)。
+- horizons：新增r+40（沿用panel既有`alpha40`欄，零新計算），與既有r+10/r+20並列。
+- embargo：horizon+1交易日（`grid_scan`既有慣例）。
+- 不設過關/否證門檻——本節目的是看「跨段穩不穩」，不是單一二元判定；誠實列出每段
+  結果，包含表現差的段落，不可只挑好看的。
+
+### 13.2 §10.14 一個預先登記的高信心變體（不是釣魚）
+
+使用者要「高勝率」——查核已知現有效應不是高勝率等級，改測**族群第1名（top_n=1）**
+這個更嚴格的切法，看縮小範圍後win_rate/delta_mean會不會有意義地變好。**這是本輪
+第5個以上疊加在同一批資料的規格**（G3格點、§10.2、§10.6、8點purity掃描、
+walk-forward切分之後的第6個）——多重比較的帳必須算清楚寫進報告，不能藏起來。
+執行前寫死：`top_n_groups=1`、purity=0.5（跟production一致）、同樣的horizons/CI/
+regime門檻，跑一次、無論結果好壞都記錄，不可回頭調整重跑。
+
+### 13.3 併入`make week`：揭露欄位設計
+
+沿用§12已建的純函式（`compute_subindustry_purity`／`build_hand_sector_membership`／
+`build_hand_sector_baskets`／`trend_score_series`），在`report/group_runner.py::
+run_group_analysis`既有的`client`／`list_subindustries()`／`build_peer_membership`
+基礎上，新增`load_market_history`（`analysis/rotation.py`，專案已用）＋
+`load_industry_mapping`（`group_runner.py`目前未import，一行新增）算出當週
+`{stock_id: (sub_industry, trend_score, group_rank, is_top5)}`，比照現有
+`valuation_map`/`big_holder_map`同一種map注入模式傳進
+`write_candidates_enriched_csv`→`_build_enriched_rows`，新增
+`official_sector_top5`/`official_sector_rank`/`official_sector_trend_score`三個
+**純揭露欄位**（非gate、非排序輸入）。同一次計算順便呼叫
+`official_sector_watch.upsert_ledger()`，讓research/底帳跟著`make week`自動累積，
+不必再手動額外跑`official-sector-watch`指令。purity門檻採13.1多段walk-forward
+收斂出的穩健值（預期0.4-0.6區間，實際數字待13.1結果出爐才定案，不預先寫死）。
