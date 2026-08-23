@@ -358,6 +358,26 @@ def test_valuation_map_official_primary_goodinfo_fallback(tmp_path):
     assert by_id["2454"]["cheap_flag"] in (None, "")
 
 
+def test_pe_self_history_pctile_populated_and_default_blank(tmp_path):
+    """docs/31 §14：自身PE歷史百分位——命中股顯示，valuation_map缺此key的股如實留白。"""
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    valuation_map = {
+        "2330": {"pe": 31.0, "val_pctile": 12.0, "pe_self_pctile": 87.5, "pe_self_n": 20},
+        "2454": {"pe": 18.0, "val_pctile": 40.0},  # 歷史筆數不足門檻，valuation_map未帶此key
+    }
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), results, out,
+                                  valuation_map=valuation_map)
+    by_id = {str(r["stock_id"]): r for r in pl.read_csv(out).iter_rows(named=True)}
+    assert by_id["2330"]["pe_self_pctile"] == 87.5
+    assert by_id["2330"]["pe_self_n"] == 20
+    assert by_id["2454"]["pe_self_pctile"] is None
+    assert by_id["2454"]["pe_self_n"] is None
+
+
 # ── 0.3 本週族群主軸 / Section 5 補位塊（問題3・M3）─────────────────────────
 
 

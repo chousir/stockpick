@@ -5,10 +5,13 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import polars as pl
 
 from tw_screener.analysis.valuation import (
     build_valuation,
+    compute_self_history_pctile,
     compute_subind_relative,
     compute_valuation_meta,
     market_cap_billion,
@@ -178,3 +181,60 @@ def test_market_cap_billion_none_propagates() -> None:
     assert market_cap_billion(None, 50.0) is None
     assert market_cap_billion(1_000_000, None) is None
     assert market_cap_billion(None, None) is None
+
+
+# ─── compute_self_history_pctile（docs/31 §14：自身估值歷史百分位粗版代理） ──────────
+
+
+def _history_rows(stock_id: str, pes: list[float]) -> list[dict]:
+    return [
+        {
+            "date": date(2026, 1, 1 + i), "stock_id": stock_id, "market": "上市",
+            "pe": pe, "pbr": 1.0, "dividend_yield": 1.0,
+        }
+        for i, pe in enumerate(pes)
+    ]
+
+
+def test_self_history_pctile_latest_is_all_time_high() -> None:
+    history = pl.DataFrame(_history_rows("A", [float(v) for v in range(10, 20)]))
+    out = compute_self_history_pctile(history, min_snapshots=8)
+    row = out.filter(pl.col("stock_id") == "A").row(0, named=True)
+    assert row["pe_self_pctile"] == 100.0
+    assert row["pe_self_n"] == 10
+
+
+def test_self_history_pctile_latest_is_all_time_low() -> None:
+    history = pl.DataFrame(_history_rows("A", [float(v) for v in range(20, 10, -1)]))
+    out = compute_self_history_pctile(history, min_snapshots=8)
+    assert out.filter(pl.col("stock_id") == "A").row(0, named=True)["pe_self_pctile"] == 0.0
+
+
+def test_self_history_pctile_excludes_insufficient_history() -> None:
+    """筆數 < min_snapshots → 不出現，不假裝精確（誠實留白，非0填）。"""
+    history = pl.DataFrame(_history_rows("B", [20.0, 20.0, 20.0]))
+    out = compute_self_history_pctile(history, min_snapshots=8)
+    assert out.is_empty()
+
+
+def test_self_history_pctile_ignores_non_positive_pe() -> None:
+    """虧損股（無正PE）該筆不計入分母——沿用 build_valuation 同一慣例。"""
+    rows = _history_rows("A", [10.0] * 5) + [
+        {"date": date(2026, 1, 6 + i), "stock_id": "A", "market": "上市",
+         "pe": None, "pbr": 1.0, "dividend_yield": 1.0}
+        for i in range(5)
+    ]
+    history = pl.DataFrame(rows, schema={
+        "date": pl.Date, "stock_id": pl.Utf8, "market": pl.Utf8,
+        "pe": pl.Float64, "pbr": pl.Float64, "dividend_yield": pl.Float64,
+    })
+    out = compute_self_history_pctile(history, min_snapshots=8)
+    assert out.is_empty()  # 只有5筆有效PE，未達門檻
+
+
+def test_self_history_pctile_empty_input() -> None:
+    empty = pl.DataFrame(
+        schema={"date": pl.Date, "stock_id": pl.Utf8, "market": pl.Utf8,
+                "pe": pl.Float64, "pbr": pl.Float64, "dividend_yield": pl.Float64}
+    )
+    assert compute_self_history_pctile(empty).is_empty()

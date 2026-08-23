@@ -345,6 +345,7 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
     min_peers: 5             # 次產業同儕有效數下限，低於不計相對位階（樣本太小無代表性）
     cheap_pctile: 30.0       # 次產業升冪百分位 ≤ 此值標「相對便宜」（0=次產業內最便宜；PE 主、PB 補虧損股）
     max_rows: 40             # cp_valuation.md 列出前 N（依百分位遞增）；≤0 不截
+    self_history_min_snapshots: 8  # docs/31 §14：自身PE歷史百分位至少要幾筆快照才計算（目前約10週/23筆深度）
 
 backtest:                    # 規劃書 03 V1 策略回測閉環（make backtest-strategies）
   strategies:

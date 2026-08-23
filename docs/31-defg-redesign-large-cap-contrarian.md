@@ -1249,7 +1249,7 @@ alpha20 +2.18% vs +2.05%），弱於「已進前5」的效應（+2.13%/+3.82%）
 快於同儕90分位」的個股標記為True，同樣附上當週regime，不做為gate或排序輸入。
 若未過關：如實記錄「未過關」或「已否證」，本節到此為止，不追加生產化欄位。
 
-**全部重用§10/§12/§13既有函式**（`build_hand_sector_membership`／
+**全部重用§10/§12/§13既有函式（rank_velocity）**（`build_hand_sector_membership`／
 `build_hand_sector_baskets`／`trend_score_series`／`moving_block_bootstrap_ci`／
 `walk_forward_splits`／`REGIME_LABELS`），只新增「算rank_velocity＋逐日90分位
 切分＋3-cell delta/CI」這一個新函式，不建立新的驗證框架。
@@ -1309,3 +1309,59 @@ regime切片顯示`not_top5_fast`在三個regime本身多半也貼著0（進攻r
 如實記錄，不強行包裝成「有進展」。若未來想再嘗試，值得換一個操作化方式（如
 更長或更短的lag_snapshots、換一個排名爬升的量尺如相對trend_score變化量而非
 名次），但不在本輪範圍內。
+
+---
+
+## 15. 自身估值歷史百分位——粗版「相對便宜度」揭露欄（2026-08-23，使用者拍板先上線）
+
+**動機**：使用者要一個長期手段——EPS×目前股價×PE推估後續合理價的落差（CP值），
+並提醒本益比可能隨利率變動。§14前的研究（見對話記錄）已查核確認**真正的blocker
+是台灣無風險利率/公債殖利率資料源在本地完全缺席**（僅有美股FRED序列，不可拿
+來頂替台灣利率），這不是短期能解的資料缺口。使用者面對「先上線粗版 vs 等資料
+累積」兩個選項，**拍板：先上線粗版，標清楚「相對便宜度、非公允價」**。
+
+**設計（執行前已明確排除的做法）**：
+- **不做**利率調整的公允價模型——沒有資料源就不假裝有調整，寧可欄位少一個維度
+  也不可用美股利率頂替台灣利率（會誤導成「這是台灣的利率環境」）。
+- **不做**EPS前瞻推估——分析師前瞻EPS本地無資料源，`analysis/valuation.py`
+  既有docstring已明講「不瞎掰」，本節不重新開這個口子。
+- **做**兩個已有資料能撐起的相對便宜度讀法並列：①`val_pctile`（既有，次產業同儕
+  橫斷面百分位，0=同業最便宜）；②新增`pe_self_pctile`（自身PE歷史百分位，
+  0=自己歷史上最便宜、100=自己歷史上最貴）。兩者是不同維度（比同業 vs 比自己
+  過去），並列比合成一個數字誠實——合成會掩蓋「這兩個讀法可能矛盾」的資訊。
+
+**實作**：`data/twse.py`新增`load_valuation_ratios_history()`（純讀全部已回補的
+`valuation_ratios_*.parquet`快照，跟只取最新一份的`load_latest_valuation_ratios`
+不同）；`analysis/valuation.py`新增`compute_self_history_pctile(history,
+min_snapshots=8)`——對每檔股票，把最新一筆PE放進自己歷史PE分布裡算百分位；
+歷史筆數<`min_snapshots`（設定值，`cp_value.valuation.self_history_min_snapshots`，
+預設8）→ 該股兩欄留null（誠實「未取得」，不假裝精確）。`report/group_runner.py`
+把`compute_self_history_pctile`的結果`left join`進既有`valuation`表（純揭露段，
+try/except容錯，任一步驟壞掉留空不擋主流程，同官方族群前5段慣例），`pe_self_pctile`/
+`pe_self_n`兩欄隨`valuation_map`自動流入`candidates_enriched.csv`（`group_report.py`
+的`_build_enriched_rows`／`_CANONICAL_REUSE_FIELDS`同步更新）。6個新測試
+（`compute_self_history_pctile`全時高/全時低/歷史不足留白/虧損股排除/空輸入五類
+＋`group_report.py`一類覆蓋率測試）全綠，ruff/mypy對修改的4個檔案零新增錯誤
+（`data/twse.py`既有28個pre-existing mypy錯誤跟改動前後數量一致，非本次引入）。
+
+**實跑`tw-screener analysis group`驗證（2026-W34，非模擬）**：87檔候選股中86檔
+`pe_self_pctile`有值（僅1檔歷史筆數不足門檻），有效歷史筆數22-23筆（≈10週深度，
+跟8月23日查核的快照數一致）。抽樣可見同一檔`val_pctile`與`pe_self_pctile`方向
+可能不同（如2637：`val_pctile`因同儕不足留null、但`pe_self_pctile`=57.1顯示
+「比自己近期偏貴」——若合成一個數字會丟失這個對照，並列設計的價值在此體現）。
+
+**誠實邊界（沿用既有`val_pctile`的但書慣例，同步寫進兩欄註解與本節）**：
+1. **非公允價、非目標價**——只是「比同業/比自己過去貴還便宜」的相對位置，不是
+   「值多少錢」的估計。
+2. **無利率調整**——PE本身隨利率環境變動，這個讀法沒有扣掉這個因素，牛市低利率
+   期間的「歷史相對便宜」可能在升息後的新常態下不再成立，屬於已知、未解的限制，
+   不是本節疏漏。
+3. **歷史窗仍薄（~10週、22-23筆快照）**——`pe_self_n`隨`make week`每週自然累積，
+   之後窗口變長，百分位的代表性才會提高；目前的數字**只反映近10週的相對位置，
+   不是1-3年週期的相對位置**，使用時須配合`pe_self_n`一起讀，筆數少代表性就低。
+4. **PE本身受盈餘品質影響**——虧損股或PE極端值（如本輪僅8-9倍的個股）在小樣本
+   歷史窗裡容易出現極端百分位（0或100），不代表真的處於歷史極值，只代表樣本窗
+   目前就這麼窄。
+
+這是誠實的漸進式交付：不是「解決了長期估值問題」，是「在明確的資料blocker前，
+先把已有資料能撐起的部分老實端出來，且清楚標示還缺什麼」。

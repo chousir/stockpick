@@ -1024,6 +1024,10 @@ def _build_enriched_rows(
         val_metric = (vrow.get("val_metric") or "") if vrow else ""
         val_pctile = _num(vrow.get("val_pctile"), 0) if vrow else None
         cheap_flag = (vrow.get("cheap_flag") or "") if vrow else ""
+        # docs/31 §14：自身估值歷史百分位粗版代理（跟val_pctile的同儕橫斷面是不同維度）——
+        # 「相對便宜度」讀法，非公允價；無利率調整（本地無台灣無風險利率資料源）。
+        pe_self_pctile = _num(vrow.get("pe_self_pctile"), 1) if vrow else None
+        pe_self_n = vrow.get("pe_self_n") if vrow else None
         fn = _num(r.get("foreign_net"), 0)
         tn = _num(r.get("trust_net"), 0)
         instn = _num(r.get("inst_net"), 0)
@@ -1215,6 +1219,11 @@ def _build_enriched_rows(
                 "val_metric": val_metric,  # 相對位階用 PE 或 PB（虧損股退 PB）
                 "val_pctile": val_pctile,  # 次產業升冪百分位（0=同業最便宜；官方 trailing 橫斷面）
                 "cheap_flag": cheap_flag,  # 相對便宜 / 相對便宜(PB) / 空（同儕不足）
+                # docs/31 §14：自身PE歷史百分位（0=自己歷史最便宜、100=自己歷史最貴）——
+                # 粗版「相對便宜度」代理，非公允價、無利率調整；pe_self_n=有效歷史筆數
+                # （筆數越少越不穩，目前約10週深度）；筆數不足門檻→兩欄皆null（未取得）。
+                "pe_self_pctile": pe_self_pctile,
+                "pe_self_n": pe_self_n,
                 "rev_yoy_pct": ryoy,
                 "cum_rev_yoy_pct": cum_ryoy,  # 累計營收YoY（TWSE/TPEX官方口徑，策略E/F/G門檻用）
                 "market_cap_billion": mkt_cap,  # 市值（億元）＝股數×收盤價/1e8（近似Goodinfo口徑）
@@ -1379,6 +1388,8 @@ _CANONICAL_REUSE_FIELDS = (
     "val_metric",
     "val_pctile",
     "cheap_flag",
+    "pe_self_pctile",
+    "pe_self_n",
     "rev_yoy_pct",
     "gross_margin_pct",
     "net_margin_pct",

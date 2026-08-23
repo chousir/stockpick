@@ -2296,6 +2296,24 @@ class TWSEClient:
             return pl.DataFrame(schema=_VALUATION_RATIOS_SCHEMA)
         return load_parquet(files[-1])
 
+    def load_valuation_ratios_history(self) -> pl.DataFrame:
+        """純讀**全部**已回補的 valuation_ratios_*.parquet（不打網）；無快取回空表。
+
+        供docs/31 §14「自身估值歷史百分位」粗版代理用——`fetch_valuation_ratios`本身逐日
+        累積（同日線快取慣例），目前約10週深度（稀疏但真實），跟`load_latest_valuation_ratios`
+        只取最新一日橫斷面不同，這裡回全部快照供`analysis.valuation.compute_self_history_pctile`
+        算每檔自己歷史分布內的位階（跟同儕相對位階的`val_pctile`是不同維度）。
+        """
+        files = sorted(self.cache_dir.glob("valuation_ratios_*.parquet"))
+        if not files:
+            return pl.DataFrame(schema=_VALUATION_RATIOS_SCHEMA)
+        frames = [load_parquet(f) for f in files]
+        return (
+            pl.concat(frames, how="diagonal_relaxed")
+            .unique(subset=["stock_id", "date"], keep="last")
+            .sort(["stock_id", "date"])
+        )
+
     def load_volume_history(
         self, stock_ids: list[str], n_days: int = 21
     ) -> pl.DataFrame:

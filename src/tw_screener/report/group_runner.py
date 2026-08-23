@@ -373,7 +373,7 @@ def run_group_analysis(settings: Path) -> None:
     # 以此為主、Goodinfo 兜底（官方覆蓋 ~97%、口徑一致 trailing）。再過 build_valuation 算次產業
     # 相對位階（PE 主、PB 補虧損股）→ 每檔候選 inline 帶「次位/相對便宜」，免另跑 cp_valuation。
     from tw_screener.analysis.sector_universe import build_peer_membership, list_subindustries
-    from tw_screener.analysis.valuation import build_valuation
+    from tw_screener.analysis.valuation import build_valuation, compute_self_history_pctile
 
     val_df = client.load_latest_valuation_ratios()
     val_cfg = cfg.get("cp_value", {}).get("valuation", {})
@@ -383,6 +383,27 @@ def run_group_analysis(settings: Path) -> None:
         min_peers=int(val_cfg.get("min_peers", 5)),
         cheap_pctile=float(val_cfg.get("cheap_pctile", 30.0)),
     )
+    # docs/31 §14：自身估值歷史百分位粗版代理（跟val_pctile的同儕橫斷面互補，不取代）——
+    # 純揭露欄，任一步驟壞掉不擋主流程（同官方族群前5段的容錯慣例）。
+    try:
+        val_history = client.load_valuation_ratios_history()
+        self_history_min_snapshots = int(val_cfg.get("self_history_min_snapshots", 8))
+        self_history = compute_self_history_pctile(
+            val_history, min_snapshots=self_history_min_snapshots
+        )
+        if not self_history.is_empty():
+            valuation = valuation.join(self_history, on="stock_id", how="left")
+        else:
+            valuation = valuation.with_columns(
+                _pl.lit(None, dtype=_pl.Float64).alias("pe_self_pctile"),
+                _pl.lit(None, dtype=_pl.Int64).alias("pe_self_n"),
+            )
+    except Exception as e:  # noqa: BLE001 — 純揭露段，任何一步壞掉不擋 group 報告主流程
+        console.print(f"[yellow]  自身估值歷史百分位計算失敗，該段留空：{e}[/yellow]")
+        valuation = valuation.with_columns(
+            _pl.lit(None, dtype=_pl.Float64).alias("pe_self_pctile"),
+            _pl.lit(None, dtype=_pl.Int64).alias("pe_self_n"),
+        )
     valuation_map: dict[str, dict] = (
         {str(r["stock_id"]): r for r in valuation.iter_rows(named=True)}
         if not valuation.is_empty()

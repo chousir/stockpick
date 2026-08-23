@@ -183,6 +183,71 @@ def build_valuation(
     )
 
 
+_SELF_HISTORY_SCHEMA: dict[str, type[pl.DataType]] = {
+    "stock_id": pl.Utf8, "pe_self_pctile": pl.Float64, "pe_self_n": pl.Int64,
+}
+
+
+def compute_self_history_pctile(
+    history: pl.DataFrame, min_snapshots: int = 8
+) -> pl.DataFrame:
+    """docs/31 §14：個股**自身**PE歷史分布位階（0=自己歷史上最便宜、100=自己歷史上最貴）——
+    跟`build_valuation`的`val_pctile`（次產業同儕橫斷面）是不同維度，兩者互補：`val_pctile`
+    答「比同業貴還便宜」，這個答「比自己過去貴還便宜」。
+
+    **明確標示為粗版「相對便宜度」讀法，不是嚴謹公允價模型**——沒有利率調整（本益比可能
+    隨利率變動，但本地無台灣無風險利率資料源，docs/31 §14.2已查核確認缺席，不可用美國
+    公債利率頂替）；`valuation_ratios_*.parquet`目前約10週深度、23個快照（2026-08-23查核），
+    稀疏但真實，不是靜態單日代理。
+
+    Args:
+        history: `client.load_valuation_ratios_history()` 輸出（date/stock_id/pe/...，
+            逐日累積快照的長表，非單日橫斷面）。
+        min_snapshots: 該股至少要有幾筆有效歷史PE（含最新一筆）才計算百分位——樣本太少
+            （如只有2、3筆）不足以代表「歷史分布」，寧可留null（未取得），不假裝精確。
+
+    Returns:
+        (stock_id, pe_self_pctile, pe_self_n)；`pe_self_n`＝實際用來算百分位的有效PE筆數，
+        供呼叫端判斷可信度（筆數越少、百分位越不穩）。歷史筆數不足或PE非正 → 該股不出現
+        （呼叫端 left join 後自然為 null，不外插、不用0填）。
+    """
+    if history.is_empty():
+        return pl.DataFrame(schema=_SELF_HISTORY_SCHEMA)
+    valid = history.filter(pl.col("pe").is_not_null() & (pl.col("pe") > 0))
+    if valid.is_empty():
+        return pl.DataFrame(schema=_SELF_HISTORY_SCHEMA)
+    counts = valid.group_by("stock_id").agg(pl.len().alias("_n")).filter(
+        pl.col("_n") >= min_snapshots
+    )
+    if counts.is_empty():
+        return pl.DataFrame(schema=_SELF_HISTORY_SCHEMA)
+    eligible = valid.join(counts.select("stock_id"), on="stock_id", how="inner")
+    latest = (
+        eligible.sort(["stock_id", "date"])
+        .group_by("stock_id", maintain_order=True)
+        .agg(pl.col("date").last().alias("_latest_date"), pl.col("pe").last().alias("_latest_pe"))
+    )
+    ranked = eligible.with_columns(
+        pl.col("pe").rank(method="average").over("stock_id").alias("_rank"),
+        pl.len().over("stock_id").alias("_n"),
+    )
+    latest_rank = (
+        ranked.join(latest, on="stock_id", how="inner")
+        .filter(pl.col("date") == pl.col("_latest_date"))
+        .unique(subset=["stock_id"], keep="last")
+        .with_columns(
+            pl.when(pl.col("_n") > 1)
+            .then((pl.col("_rank") - 1) / (pl.col("_n") - 1) * 100)
+            .otherwise(50.0)
+            .round(1)
+            .alias("pe_self_pctile")
+        )
+    )
+    return latest_rank.select(
+        "stock_id", "pe_self_pctile", pl.col("_n").cast(pl.Int64).alias("pe_self_n")
+    ).sort("stock_id")
+
+
 def compute_valuation_meta(
     valuation: pl.DataFrame, data_date: str = "", universe: str = "上市+上櫃"
 ) -> dict:
