@@ -1016,3 +1016,11 @@ QoQ差分（G2定義本身就是單季快照條件）。G1/G5需要的`Δnet_mar
 - 底帳只記錄「屬於本週前5名群組」的個股列（stock_id/name/sub_industry/trend_score/
   group_rank/purity_used/week/data_date）——不算forward return，跟L6/G4/G1/G2/G5
   同樣「本輪只記錄不裁決」。
+
+**實作與W34首筆快照（2026-08-23，同session）**：新增`official_sector_watch.py`/
+runner＋CLI`tw-screener backtest official-sector-watch`，全重用§10既有函式，只換
+`price`來源為`load_market_history()`即時累積快取（非靜態panel）。實跑記錄W34
+（資料日2026-08-21）：前5名群組為`貨櫃`（trend_score 96.9）／`產險`（88.8）／
+`散裝`（86.9）／`PC/NB/平板`／`其他光電`，展開回38檔個股（皆無多標籤重複）。
+8個測試全綠，ruff/mypy無新增錯誤。**至此docs/31的三條前瞻累積軌（L6/G4、G1/G2/G5、
+官方族群前5）皆已建成並記錄首週快照**，皆為手動指令、需使用者自行排進每週SOP。
