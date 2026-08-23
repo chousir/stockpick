@@ -10,16 +10,21 @@ import pytest
 from tw_screener.backtest.official_sector_grid import (
     _INDUSTRY_TO_INDEX_ALIASES,
     _UNMAPPED_INDUSTRIES,
+    FLOW_TRIGGER_CELLS,
     RANK_VELOCITY_CELLS,
+    build_flow_triggers,
     build_hand_sector_baskets,
     build_hand_sector_membership,
     build_official_sector_baskets,
     build_official_sector_membership,
     compute_rank_velocity,
     compute_subindustry_purity,
+    flow_trigger_by_regime,
+    flow_trigger_grid,
     official_group_rank_grid,
     rank_velocity_by_regime,
     rank_velocity_grid,
+    walk_forward_flow_trigger,
     walk_forward_rank_velocity,
     walk_forward_top5_grid,
 )
@@ -425,3 +430,173 @@ def test_walk_forward_rank_velocity_schema() -> None:
 
 def test_walk_forward_rank_velocity_empty_inputs() -> None:
     assert walk_forward_rank_velocity(pl.DataFrame({"date": [date(2026, 1, 1)]})).is_empty()
+
+
+# ─── flow_trigger（docs/31 §17：★投信流校準訊號能否預測未進前5族群的forward報酬） ──
+
+
+def _institutional_daily_fixture(n_days: int = 150) -> pl.DataFrame:
+    """A族群在第70-100天有一段持續投信買超（觸發★訊號），B族群全程平靜。"""
+    dates = [date(2023, 1, 2) + timedelta(days=i) for i in range(n_days)]
+    rows = []
+    for i, d in enumerate(dates):
+        if d.weekday() >= 5:
+            continue
+        for sub, stock in [("A", "1111"), ("B", "2222")]:
+            trust = 500_000 if (sub == "A" and 70 <= i <= 100) else 0
+            rows.append(
+                {
+                    "date": d, "stock_id": stock, "foreign_net": 0,
+                    "trust_net": trust, "dealer_net": 0,
+                }
+            )
+    return pl.DataFrame(rows)
+
+
+def _flow_trigger_membership() -> pl.DataFrame:
+    return pl.DataFrame(
+        [("A", "1111"), ("B", "2222")], schema=["sub_industry", "stock_id"], orient="row"
+    )
+
+
+def test_build_flow_triggers_fires_only_for_bursting_group() -> None:
+    inst = _institutional_daily_fixture()
+    triggers = build_flow_triggers(
+        inst, _flow_trigger_membership(), z_window=30, z_min_periods=15
+    )
+    assert not triggers.is_empty()
+    assert set(triggers["sub_industry"].to_list()) == {"A"}
+
+
+def test_build_flow_triggers_empty_when_missing_columns() -> None:
+    assert build_flow_triggers(
+        pl.DataFrame({"date": [date(2026, 1, 1)]}), _flow_trigger_membership()
+    ).is_empty()
+
+
+def test_build_flow_triggers_empty_when_membership_empty() -> None:
+    inst = _institutional_daily_fixture()
+    assert build_flow_triggers(
+        inst, pl.DataFrame(schema={"sub_industry": pl.Utf8, "stock_id": pl.Utf8})
+    ).is_empty()
+
+
+def _flow_trigger_stock_rows(n_weeks: int = 10) -> pl.DataFrame:
+    dates = [date(2023, 1, 2) + timedelta(weeks=i) for i in range(n_weeks)]
+    rows = []
+    for d in dates:
+        for sub, score in [("A", 30.0), ("B", 50.0), ("C", 10.0)]:
+            rows.append(
+                {
+                    "date": d, "sub_industry": sub, "trend_score": score,
+                    "alpha10": 1.0 if sub == "A" else 0.0,
+                }
+            )
+    return pl.DataFrame(rows)
+
+
+def _flow_trigger_daily_calendar(n_days: int = 70) -> list:
+    return [date(2023, 1, 2) + timedelta(days=i) for i in range(n_days)]
+
+
+def _single_trigger(sub: str, d) -> pl.DataFrame:
+    return pl.DataFrame(
+        {"sub_industry": [sub], "date": [d]}, schema={"sub_industry": pl.Utf8, "date": pl.Date}
+    )
+
+
+def test_flow_trigger_grid_three_cells_and_schema() -> None:
+    """B恆居第1名(top5參照)；A排名第2(未進前5=top_n_groups1)，觸發後一段窗口內
+    標記not_top5_triggered，其餘標not_top5_untriggered——3個cell皆須出現。"""
+    stock_rows = _flow_trigger_stock_rows()
+    daily_dates = _flow_trigger_daily_calendar()
+    trig_date = date(2023, 1, 2) + timedelta(days=20)
+    triggers = _single_trigger("A", trig_date)
+    grid = flow_trigger_grid(
+        stock_rows, triggers, daily_dates, horizons=(10,), top_n_groups=1,
+        lookback_window=15, n_boot=20,
+    )
+    assert set(grid.columns) == {
+        "horizon", "cell", "n", "n_dates", "mean", "median", "win_rate",
+        "delta_mean", "ci_lo", "ci_hi", "mean_h1", "mean_h2",
+    }
+    assert set(grid["cell"].to_list()) == set(FLOW_TRIGGER_CELLS)
+    # A是唯一觸發過的族群，其alpha10恆為1.0——觸發格應全部來自A
+    triggered_row = grid.filter(pl.col("cell") == "not_top5_triggered").row(0, named=True)
+    assert triggered_row["mean"] == 1.0
+
+
+def test_flow_trigger_grid_no_triggers_all_untriggered() -> None:
+    stock_rows = _flow_trigger_stock_rows()
+    daily_dates = _flow_trigger_daily_calendar()
+    empty_triggers = pl.DataFrame(schema={"sub_industry": pl.Utf8, "date": pl.Date})
+    grid = flow_trigger_grid(
+        stock_rows, empty_triggers, daily_dates, horizons=(10,), top_n_groups=1, n_boot=20,
+    )
+    assert "not_top5_triggered" not in grid["cell"].to_list()
+    assert "not_top5_untriggered" in grid["cell"].to_list()
+
+
+def test_flow_trigger_grid_empty_when_missing_columns() -> None:
+    empty_triggers = pl.DataFrame(schema={"sub_industry": pl.Utf8, "date": pl.Date})
+    assert flow_trigger_grid(
+        pl.DataFrame({"date": [date(2026, 1, 1)]}), empty_triggers, []
+    ).is_empty()
+
+
+def test_flow_trigger_by_regime_runs() -> None:
+    stock_rows = _flow_trigger_stock_rows().with_columns(pl.lit("進攻").alias("regime"))
+    daily_dates = _flow_trigger_daily_calendar()
+    trig_date = date(2023, 1, 2) + timedelta(days=20)
+    triggers = _single_trigger("A", trig_date)
+    out = flow_trigger_by_regime(
+        stock_rows, triggers, daily_dates, horizons=(10,), top_n_groups=1,
+        lookback_window=15, n_boot=20,
+    )
+    assert set(out.columns) == {
+        "horizon", "cell", "regime", "n", "n_dates", "mean", "ci_lo", "ci_hi", "thin",
+    }
+    assert not out.is_empty()
+
+
+def test_flow_trigger_by_regime_empty_without_regime_column() -> None:
+    stock_rows = _flow_trigger_stock_rows()
+    daily_dates = _flow_trigger_daily_calendar()
+    empty_triggers = pl.DataFrame(schema={"sub_industry": pl.Utf8, "date": pl.Date})
+    assert flow_trigger_by_regime(
+        stock_rows, empty_triggers, daily_dates, horizons=(10,)
+    ).is_empty()
+
+
+def _flow_trigger_long_fixture(n_weeks: int = 40) -> pl.DataFrame:
+    dates = [date(2023, 1, 2) + timedelta(weeks=i) for i in range(n_weeks)]
+    rows = []
+    for i, d in enumerate(dates):
+        cyc = i % 3
+        order = ["A", "B", "C"][cyc:] + ["A", "B", "C"][:cyc]
+        for sub, s in zip(order, [90.0, 60.0, 30.0], strict=True):
+            rows.append(
+                {"date": d, "sub_industry": sub, "trend_score": s, "alpha10": 1.0}
+            )
+    return pl.DataFrame(rows)
+
+
+def test_walk_forward_flow_trigger_schema() -> None:
+    stock_rows = _flow_trigger_long_fixture()
+    daily_dates = [date(2023, 1, 2) + timedelta(days=i) for i in range(300)]
+    triggers = _single_trigger("A", date(2023, 3, 1))
+    out = walk_forward_flow_trigger(
+        stock_rows, triggers, daily_dates, horizons=(10,), top_n_groups=1,
+        n_splits=2, min_train_frac=0.4, n_boot=20,
+    )
+    assert set(out.columns) == {
+        "horizon", "cell", "split_id", "test_start", "test_end",
+        "test_n", "test_n_dates", "test_delta_mean", "test_ci_lo", "test_ci_hi",
+    }
+
+
+def test_walk_forward_flow_trigger_empty_inputs() -> None:
+    empty_triggers = pl.DataFrame(schema={"sub_industry": pl.Utf8, "date": pl.Date})
+    assert walk_forward_flow_trigger(
+        pl.DataFrame({"date": [date(2026, 1, 1)]}), empty_triggers, []
+    ).is_empty()

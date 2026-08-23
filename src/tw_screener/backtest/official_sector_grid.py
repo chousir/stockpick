@@ -876,3 +876,342 @@ def walk_forward_rank_velocity(
                     }
                 )
     return pl.DataFrame(rows, schema=_RV_WF_SCHEMA)
+
+
+# ---------------------------------------------------------------------------
+# docs/31 §17：flow_trigger——★投信流校準訊號能否預測未進前5族群的forward報酬
+# ---------------------------------------------------------------------------
+
+FLOW_TRIGGER_CELLS: tuple[str, ...] = ("top5", "not_top5_triggered", "not_top5_untriggered")
+
+_TRIGGER_SCHEMA: dict[str, type[pl.DataType]] = {"sub_industry": pl.Utf8, "date": pl.Date}
+
+
+def build_flow_triggers(
+    institutional_daily: pl.DataFrame,
+    membership: pl.DataFrame,
+    short_window: int = 5,
+    long_window: int = 20,
+    z_window: int = 60,
+    z_min_periods: int = 30,
+    signal_col: str = "trust_flow_20d",
+    threshold: float = 1.0,
+    require_momentum: bool = True,
+) -> pl.DataFrame:
+    """§17.1：重建歷史★投信流校準觸發序列，全部重用既有函式，沿用production
+    `config.rotation.entry_signal`同一組校準參數（不重新調參）。
+
+    Args:
+        institutional_daily: (date, stock_id, foreign_net, trust_net, dealer_net)——
+            `panel.parquet`既有欄位，逐日全市場法人買賣超（股）。`total_net`
+            （三大法人合計，T86官方定義）在本函式內加總，非新概念。
+        membership: (sub_industry, stock_id)，同§10/§14的手標46細分類。
+
+    Returns:
+        (sub_industry, date)——每個向上穿越觸發事件一列（`compute_triggers`既有
+        語意：連續高於門檻只算一次）。輸入缺欄或為空 → 空表。
+    """
+    from tw_screener.analysis.rotation import compute_fund_flows
+    from tw_screener.backtest.rotation_calib import compute_triggers, standardize_signals
+
+    need = {"date", "stock_id", "foreign_net", "trust_net", "dealer_net"}
+    if institutional_daily.is_empty() or membership.is_empty() or not need.issubset(
+        institutional_daily.columns
+    ):
+        return pl.DataFrame(schema=_TRIGGER_SCHEMA)
+    institutional = institutional_daily.select(
+        "date", "stock_id",
+        (pl.col("foreign_net") + pl.col("trust_net") + pl.col("dealer_net")).alias("total_net"),
+        "foreign_net", "trust_net",
+    )
+    flows = compute_fund_flows(
+        membership, institutional, short_window=short_window, long_window=long_window
+    )
+    if flows.is_empty():
+        return pl.DataFrame(schema=_TRIGGER_SCHEMA)
+    flows_z = standardize_signals(flows, z_window=z_window, z_min_periods=z_min_periods)
+    z_col = f"{signal_col}_z"
+    if z_col not in flows_z.columns:
+        return pl.DataFrame(schema=_TRIGGER_SCHEMA)
+    triggers = compute_triggers(
+        flows_z, col=z_col, threshold=threshold, require_momentum=require_momentum
+    )
+    return triggers if not triggers.is_empty() else pl.DataFrame(schema=_TRIGGER_SCHEMA)
+
+
+def _attach_flow_trigger_cell(
+    stock_rows: pl.DataFrame,
+    triggers: pl.DataFrame,
+    daily_dates: list,
+    top_n_groups: int,
+    lookback_window: int,
+) -> pl.DataFrame:
+    """§17.1：3-cell標記（`_add_group_rank`同一套排名邏輯＋觸發後`lookback_window`
+    個**交易日索引**（非日曆天）內算「近期觸發」）。
+
+    Args:
+        daily_dates: 觸發序列所在的完整交易日曆（非`stock_rows`本身的週頻日期）——
+            必須用這份完整交易日曆建交易日索引，「15個交易日內」才量得準；
+            若誤用週頻日期當索引，一步等於5個交易日，會系統性低估lookback範圍。
+    """
+    base = _add_group_rank(stock_rows).with_columns(
+        (pl.col("_rank") <= top_n_groups).alias("group_top5")
+    )
+    if triggers.is_empty():
+        return base.with_columns(
+            pl.when(pl.col("group_top5")).then(pl.lit("top5"))
+            .otherwise(pl.lit("not_top5_untriggered")).alias("cell")
+        )
+    day_index = pl.DataFrame(
+        {"date": sorted(set(daily_dates)), "_day_idx": range(len(set(daily_dates)))}
+    )
+    pop_idx = base.join(day_index, on="date", how="left").sort(["sub_industry", "_day_idx"])
+    trig_idx = (
+        triggers.join(
+            day_index.rename({"date": "_trig_date"}),
+            left_on="date", right_on="_trig_date", how="inner",
+        )
+        .rename({"_day_idx": "_trig_idx"})
+        .select("sub_industry", "_trig_idx")
+        .sort(["sub_industry", "_trig_idx"])
+    )
+    joined = pop_idx.join_asof(
+        trig_idx, left_on="_day_idx", right_on="_trig_idx", by="sub_industry",
+        strategy="backward", check_sortedness=False,
+    )
+    joined = joined.with_columns(
+        (
+            pl.col("_trig_idx").is_not_null()
+            & ((pl.col("_day_idx") - pl.col("_trig_idx")) <= lookback_window)
+        ).fill_null(False).alias("triggered_recent")
+    )
+    return joined.with_columns(
+        pl.when(pl.col("group_top5")).then(pl.lit("top5"))
+        .when(pl.col("triggered_recent")).then(pl.lit("not_top5_triggered"))
+        .otherwise(pl.lit("not_top5_untriggered"))
+        .alias("cell")
+    ).drop(["_day_idx", "_trig_idx", "triggered_recent"])
+
+
+def _aggregate_flow_trigger_cells(
+    cells: pl.DataFrame,
+    horizons: tuple[int, ...],
+    n_boot: int,
+    seed: int,
+    snapshot_gap_td: int,
+) -> pl.DataFrame:
+    """§17.2：逐horizon×cell算mean/CI（結構同`_aggregate_rank_velocity_cells`，
+    獨立寫一份避免動到§14已測試/上線的程式碼路徑，同全案duplicate-small-helper慣例）。
+    """
+    schema = _RV_SCHEMA
+    if cells.is_empty():
+        return pl.DataFrame(schema=schema)
+    mid_date = cells["date"].median()
+
+    rows: list[dict] = []
+    for h in horizons:
+        tgt = f"alpha{h}"
+        if tgt not in cells.columns:
+            continue
+        sub = cells.drop_nulls([tgt])
+        pop_by_date = sub.group_by("date").agg(pl.col(tgt).mean().alias("_pop_mean"))
+        sub = sub.join(pop_by_date, on="date", how="left").with_columns(
+            (pl.col(tgt) - pl.col("_pop_mean")).alias("_delta")
+        )
+        block_len = _block_len_snapshots(h, snapshot_gap_td)
+        for cell_name in FLOW_TRIGGER_CELLS:
+            g = sub.filter(pl.col("cell") == cell_name)
+            if g.is_empty():
+                continue
+            vals = [float(v) for v in g[tgt].to_list()]
+            h1 = g.filter(pl.col("date") <= mid_date)[tgt]
+            h2 = g.filter(pl.col("date") > mid_date)[tgt]
+            med = g[tgt].median()
+            daily_delta = (
+                g.group_by("date").agg(pl.col("_delta").mean().alias("_m")).sort("date")
+            )
+            delta_vals = [float(v) for v in daily_delta["_m"].to_list() if v is not None]
+            ci_lo, ci_hi = (
+                moving_block_bootstrap_ci(delta_vals, block_len=block_len, n_boot=n_boot, seed=seed)
+                if delta_vals else (None, None)
+            )
+            rows.append(
+                {
+                    "horizon": h, "cell": cell_name,
+                    "n": len(vals), "n_dates": len(delta_vals),
+                    "mean": sum(vals) / len(vals) if vals else None,
+                    "median": float(med) if isinstance(med, (int, float)) else None,
+                    "win_rate": sum(1 for v in vals if v > 0) / len(vals) if vals else None,
+                    "delta_mean": sum(delta_vals) / len(delta_vals) if delta_vals else None,
+                    "ci_lo": ci_lo, "ci_hi": ci_hi,
+                    "mean_h1": _smean(h1), "mean_h2": _smean(h2),
+                }
+            )
+    return pl.DataFrame(rows, schema=schema).sort(["horizon", "cell"])
+
+
+def flow_trigger_grid(
+    stock_rows: pl.DataFrame,
+    triggers: pl.DataFrame,
+    daily_dates: list,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_n_groups: int = 5,
+    lookback_window: int = 15,
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """docs/31 §17 預先登記：3個cell（top5參照／未進前5且近期★觸發／未進前5且無
+    觸發）forward報酬對照。焦點格＝`not_top5_triggered`。
+
+    Args:
+        stock_rows: 需含 date/sub_industry/trend_score/alpha{h}（同
+            `rank_velocity_grid`）。
+        triggers: `build_flow_triggers()` 輸出。
+        daily_dates: 完整交易日曆（見`_attach_flow_trigger_cell`）。
+    """
+    need = {"date", "sub_industry", "trend_score"}
+    if stock_rows.is_empty() or not need.issubset(stock_rows.columns):
+        return pl.DataFrame(schema=_RV_SCHEMA)
+    base = stock_rows.drop_nulls(list(need))
+    if base.is_empty():
+        return pl.DataFrame(schema=_RV_SCHEMA)
+    cells = _attach_flow_trigger_cell(base, triggers, daily_dates, top_n_groups, lookback_window)
+    return _aggregate_flow_trigger_cells(cells, horizons, n_boot, seed, snapshot_gap_td)
+
+
+_FT_REGIME_SCHEMA: dict[str, type[pl.DataType]] = {
+    "horizon": pl.Int64, "cell": pl.Utf8, "regime": pl.Utf8, "n": pl.Int64,
+    "n_dates": pl.Int64, "mean": pl.Float64, "ci_lo": pl.Float64, "ci_hi": pl.Float64,
+    "thin": pl.Boolean,
+}
+
+
+def flow_trigger_by_regime(
+    stock_rows: pl.DataFrame,
+    triggers: pl.DataFrame,
+    daily_dates: list,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_n_groups: int = 5,
+    lookback_window: int = 15,
+    n_boot: int = 1000,
+    seed: int = 42,
+    regime_col: str = "regime",
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§17.2：三格 × regime forward 報酬。"""
+    need = {"date", "sub_industry", "trend_score"}
+    if (
+        stock_rows.is_empty()
+        or not need.issubset(stock_rows.columns)
+        or regime_col not in stock_rows.columns
+        or stock_rows[regime_col].drop_nulls().is_empty()
+    ):
+        return pl.DataFrame(schema=_FT_REGIME_SCHEMA)
+    base = stock_rows.drop_nulls(list(need))
+    if base.is_empty():
+        return pl.DataFrame(schema=_FT_REGIME_SCHEMA)
+    cells = _attach_flow_trigger_cell(base, triggers, daily_dates, top_n_groups, lookback_window)
+    if cells.is_empty():
+        return pl.DataFrame(schema=_FT_REGIME_SCHEMA)
+
+    rows: list[dict] = []
+    for h in horizons:
+        tgt = f"alpha{h}"
+        if tgt not in cells.columns:
+            continue
+        sub = cells.drop_nulls([tgt])
+        pop_by_date = sub.group_by("date").agg(pl.col(tgt).mean().alias("_pop_mean"))
+        sub = sub.join(pop_by_date, on="date", how="left").with_columns(
+            (pl.col(tgt) - pl.col("_pop_mean")).alias("_delta")
+        )
+        block_len = _block_len_snapshots(h, snapshot_gap_td)
+        for cell_name in FLOW_TRIGGER_CELLS:
+            cell_sub = sub.filter(pl.col("cell") == cell_name)
+            for reg in REGIME_LABELS:
+                g = cell_sub.filter(pl.col(regime_col) == reg)
+                daily = g.group_by("date").agg(pl.col("_delta").mean().alias("_m")).sort("date")
+                vals = [float(v) for v in daily["_m"].to_list() if v is not None]
+                lo_ci, hi_ci = (
+                    moving_block_bootstrap_ci(vals, block_len=block_len, n_boot=n_boot, seed=seed)
+                    if vals else (None, None)
+                )
+                rows.append(
+                    {
+                        "horizon": h, "cell": cell_name, "regime": reg,
+                        "n": g.height, "n_dates": len(vals),
+                        "mean": (sum(vals) / len(vals)) if vals else None,
+                        "ci_lo": lo_ci, "ci_hi": hi_ci, "thin": len(vals) < REGIME_MIN_N,
+                    }
+                )
+    return pl.DataFrame(rows, schema=_FT_REGIME_SCHEMA)
+
+
+_FT_WF_SCHEMA: dict[str, type[pl.DataType]] = {
+    "horizon": pl.Int64, "cell": pl.Utf8, "split_id": pl.Int64,
+    "test_start": pl.Date, "test_end": pl.Date,
+    "test_n": pl.UInt32, "test_n_dates": pl.UInt32,
+    "test_delta_mean": pl.Float64, "test_ci_lo": pl.Float64, "test_ci_hi": pl.Float64,
+}
+
+
+def walk_forward_flow_trigger(
+    stock_rows: pl.DataFrame,
+    triggers: pl.DataFrame,
+    daily_dates: list,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_n_groups: int = 5,
+    lookback_window: int = 15,
+    n_splits: int = 4,
+    min_train_frac: float = 0.4,
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§17.2 walk-forward：trigger規則是production既有校準值，不在本函式內重選
+    threshold（跟§14的walk_forward_rank_velocity同一立場）——只需各段獨立算
+    delta/CI，誠實列出每段結果。
+    """
+    need = {"date", "sub_industry", "trend_score"}
+    if stock_rows.is_empty() or not need.issubset(stock_rows.columns):
+        return pl.DataFrame(schema=_FT_WF_SCHEMA)
+    base = stock_rows.drop_nulls(list(need))
+    if base.is_empty():
+        return pl.DataFrame(schema=_FT_WF_SCHEMA)
+    cells = _attach_flow_trigger_cell(base, triggers, daily_dates, top_n_groups, lookback_window)
+    if cells.is_empty():
+        return pl.DataFrame(schema=_FT_WF_SCHEMA)
+
+    all_dates = sorted(cells["date"].unique().to_list())
+    rows: list[dict] = []
+    for h in horizons:
+        tgt = f"alpha{h}"
+        if tgt not in cells.columns:
+            continue
+        emb = h + 1
+        splits: list[Split] = walk_forward_splits(
+            all_dates, n_splits=n_splits, min_train_frac=min_train_frac, embargo_td=emb
+        )
+        for s in splits:
+            test_cells = cells.filter(
+                (pl.col("date") >= s.test_start) & (pl.col("date") <= s.test_end)
+            )
+            test_grid = _aggregate_flow_trigger_cells(
+                test_cells, horizons=(h,), n_boot=n_boot, seed=seed,
+                snapshot_gap_td=snapshot_gap_td,
+            )
+            for cell_name in FLOW_TRIGGER_CELLS:
+                r_df = test_grid.filter(pl.col("cell") == cell_name)
+                if r_df.is_empty():
+                    continue
+                r = r_df.row(0, named=True)
+                rows.append(
+                    {
+                        "horizon": h, "cell": cell_name, "split_id": s.split_id,
+                        "test_start": s.test_start, "test_end": s.test_end,
+                        "test_n": r["n"], "test_n_dates": r["n_dates"],
+                        "test_delta_mean": r["delta_mean"],
+                        "test_ci_lo": r["ci_lo"], "test_ci_hi": r["ci_hi"],
+                    }
+                )
+    return pl.DataFrame(rows, schema=_FT_WF_SCHEMA)

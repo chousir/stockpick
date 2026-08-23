@@ -1357,6 +1357,19 @@ def backtest_rank_velocity_grid_cmd(
     run_rank_velocity_grid(settings, out_dir)
 
 
+@backtest_app.command("flow-trigger-grid")
+def backtest_flow_trigger_grid_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/flow_trigger_grid）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """docs/31 §17 milestone：flow_trigger提早卡位訊號（★投信流校準預測未進前5族群）驗證。"""
+    from tw_screener.backtest.flow_trigger_grid_runner import run_flow_trigger_grid
+
+    run_flow_trigger_grid(settings, out_dir)
+
+
 @backtest_app.command("l6-g4-watch")
 def backtest_l6_g4_watch_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),

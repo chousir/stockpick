@@ -455,6 +455,23 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     n_splits: 4                    # 多段walk-forward，同§13.1
     min_train_frac: 0.4
     output_dir: research/rank_velocity_grid
+  flow_trigger_grid:         # docs/31 §17：提早卡位訊號v2（★投信流校準預測未進前5族群）
+    horizons_td: [10, 20, 40]    # 沿用panel既有alpha10/20/40欄，零新計算
+    top_n_groups: 5               # 與production一致，不重新調參
+    min_purity: 0.5                # 與§12/§13.3/§14上線設定一致，不重新調參
+    lookback_window: 15           # 觸發後幾個交易日內算「近期觸發」＝production的lead_window
+    short_window: 5                # compute_fund_flows短窗，同production entry_signal
+    long_window: 20                # compute_fund_flows長窗，同production entry_signal
+    z_window: 60                    # standardize_signals滾動z視窗，同production
+    z_min_periods: 30               # z暖機最低樣本，同production
+    signal_col: trust_flow_20d      # 沿用production rotation.entry_signal校準值，不重新調參
+    threshold: 1.0                  # 同上
+    require_momentum: true          # 同上
+    snapshot_gap_td: 5
+    n_boot: 1000
+    n_splits: 4
+    min_train_frac: 0.4
+    output_dir: research/flow_trigger_grid
   contrarian_efficacy:       # M-BR1 Phase 2 底部左側聯合桶檢驗（make contrarian-efficacy）
     horizons_td: [5, 10, 20, 40] # forward alpha 窗（交易日）
     focal_horizon: 20            # 焦點窗（§4 ground-truth 用 r+20；裁決以此窗）
