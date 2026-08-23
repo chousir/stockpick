@@ -161,6 +161,46 @@ def test_upsert_ledger_idempotent_same_week(tmp_path: Path) -> None:
     assert set(ledger3["week"].to_list()) == {"2026-W34", "2026-W35"}
 
 
+def test_upsert_ledger_all_null_column_does_not_corrupt_later_weeks(tmp_path: Path) -> None:
+    """回歸測試（2026-08-23）：某週寫入時某數值欄全 null（OTC股缺快取的典型情況）——
+    該欄寫進 CSV 後只有空白列，若讀回時沒有明帶 schema，polars 會把它推斷成 Utf8。
+    下一次 upsert 若該欄出現真實浮點值，`diagonal_relaxed` 會把**整欄**（新舊都算）
+    往 Utf8 靠齊，3.0 會變成字串 "3.0"——底帳是唯一資料源，這個污染永久發生、
+    無法回頭修，必須在讀檔那一步就用完整 schema_overrides 擋下來。
+    """
+    path = tmp_path / "ledger.csv"
+    # 週1：rev_yoy_delta 全 null（OTC股缺第二個月快取，g4/rev_yoy_delta 天生 None）
+    week1 = pl.DataFrame(
+        [{"week": "2026-W34", "data_date": date(2026, 8, 22), "stock_id": "6488",
+          "name": "環球晶", "market_cap_billion": 800.0, "pe_ratio": 18.0,
+          "rev_yoy_pct": 15.0, "cum_rev_yoy_pct": 22.0, "rev_yoy_delta": None,
+          "revenue_year_month": "202607", "revenue_preview_risk": False,
+          "trust_net_5d": None, "l6_2cond": True, "l6_4cond": False, "g4": False}],
+        schema=LEDGER_SCHEMA,
+    )
+    upsert_l6_g4_ledger(path, week1)
+
+    # 週2：另一檔真的有 rev_yoy_delta 浮點值
+    week2 = pl.DataFrame(
+        [{"week": "2026-W35", "data_date": date(2026, 8, 29), "stock_id": "1101",
+          "name": "台泥", "market_cap_billion": 50.0, "pe_ratio": 20.0,
+          "rev_yoy_pct": 10.0, "cum_rev_yoy_pct": 25.0, "rev_yoy_delta": 3.0,
+          "revenue_year_month": "202607", "revenue_preview_risk": False,
+          "trust_net_5d": 100.0, "l6_2cond": True, "l6_4cond": False, "g4": False}],
+        schema=LEDGER_SCHEMA,
+    )
+    ledger = upsert_l6_g4_ledger(path, week2)
+
+    assert ledger.schema["rev_yoy_delta"] == pl.Float64
+    w2_delta = ledger.filter(pl.col("stock_id") == "1101").row(0, named=True)["rev_yoy_delta"]
+    assert isinstance(w2_delta, float)
+    assert w2_delta == 3.0
+
+    # 重新從磁碟讀一次（模擬下週再 upsert 時的讀檔）——確認寫進磁碟的 CSV 本身沒有被污染
+    reread = pl.read_csv(path, schema_overrides=LEDGER_SCHEMA)
+    assert reread.schema["rev_yoy_delta"] == pl.Float64
+
+
 def test_ledger_progress_summary_counts_across_weeks() -> None:
     ledger = pl.DataFrame(
         [

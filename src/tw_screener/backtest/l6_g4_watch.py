@@ -158,6 +158,21 @@ def build_l6_g4_snapshot(
     return pl.DataFrame(rows, schema=LEDGER_SCHEMA)
 
 
+def _read_ledger(path: Path) -> pl.DataFrame:
+    """讀既有底帳 CSV，全欄位明帶 `schema_overrides=LEDGER_SCHEMA`。
+
+    2026-08-23 修正：原本只對 `stock_id` 指定 dtype，其餘欄位交給 `pl.read_csv` 自行
+    推斷——當某週命中列的某數值欄（如 `rev_yoy_delta`，OTC 股常見）**全部是 null**時，
+    推斷會把該欄判成 `Utf8`。下一步 `pl.concat(..., how="diagonal_relaxed")` 會把
+    **合併後**的欄位（含先前所有週的真實浮點值）一併靜默升型成字串——底帳是唯一資料源，
+    這個污染永久發生、無法回頭修。全欄位明帶 schema 讓 polars 直接把全 null 欄讀成
+    該型別的 null，不會落回字串推斷。
+    """
+    if not path.exists():
+        return pl.DataFrame(schema=LEDGER_SCHEMA)
+    return pl.read_csv(path, try_parse_dates=True, schema_overrides=LEDGER_SCHEMA)
+
+
 def upsert_l6_g4_ledger(path: Path, new_rows: pl.DataFrame) -> pl.DataFrame:
     """把本週快照併入底帳（以 (week, stock_id) 去重、冪等——同週重跑覆寫舊列）。
 
@@ -166,15 +181,8 @@ def upsert_l6_g4_ledger(path: Path, new_rows: pl.DataFrame) -> pl.DataFrame:
     永久遺失，不能重建。
     """
     if new_rows.is_empty():
-        existing = pl.read_csv(path, try_parse_dates=True) if path.exists() else pl.DataFrame(
-            schema=LEDGER_SCHEMA
-        )
-        return existing
-    existing = (
-        pl.read_csv(path, try_parse_dates=True, schema_overrides={"stock_id": pl.Utf8})
-        if path.exists()
-        else pl.DataFrame(schema=LEDGER_SCHEMA)
-    )
+        return _read_ledger(path)
+    existing = _read_ledger(path)
     if not existing.is_empty():
         week = new_rows["week"][0]
         existing = existing.filter(pl.col("week") != week)

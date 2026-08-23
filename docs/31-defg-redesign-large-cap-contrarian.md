@@ -567,3 +567,39 @@ candidates_enriched.csv——後者只收族群leader子集，會系統性漏掉
 快取）涵蓋門檻邊界、preview_risk旗標、upsert冪等性。`make test`/ruff/mypy全綠。
 **未做（刻意）**：計分/裁決指令——依advisor建議，寫了也測不了（沒有累積資料），等真的
 累積到有意義的週數再另立里程碑設計，不在本輪預先寫死方法論。
+
+### 2026-08-23 修正＋W34首筆快照＋OTC觀察清單擴充
+
+依使用者指示，接續前先查上輪產出有沒有要改進的地方，派research agent做了兩件事：
+①實測l6-g4-watch指令用真快取跑起來是否成功（結果：可以，`reports/2026-W34`資料齊全）；
+②盤點§8剩餘低成本queue項目（TDCC level1-11/holders啟用、OTC觀察清單擴充）的具體工程量。
+
+**查核發現一個真的bug（已修，非揣測）**：`upsert_l6_g4_ledger()`原本讀既有底帳CSV時只對
+`stock_id`指定`schema_overrides`，其餘欄位交給`pl.read_csv`自行推斷。當某週命中列的某數值
+欄（如`rev_yoy_delta`——OTC股缺第二個月營收快取時天生為None）**全部是null**，寫進CSV後
+只剩空白列，讀回時polars會把該欄推斷成`Utf8`；下一次upsert若同一欄出現真實浮點值，
+`pl.concat(...,how="diagonal_relaxed")`會把**合併後整欄**（含先前所有週的真實浮點值）
+静默升型成字串——已用最小重現案例（`pl.DataFrame({"a":[None]},schema={"a":pl.Float64})`
+寫CSV再讀回→String；再跟真實Float64 concat→"3.0"字串）驗證確有其事，非猜測。底帳是唯一
+資料源，這個污染會永久發生、無法回頭修。**修法**：`_read_ledger()`改對全部欄位明帶
+`schema_overrides=LEDGER_SCHEMA`，讓全null欄直接被讀成該型別的null，不落回字串推斷。
+新增回歸測試`test_upsert_ledger_all_null_column_does_not_corrupt_later_weeks`，已驗證
+對修法前的舊code會fail（`assert String == Float64`）、修法後pass——不是空測試。
+
+**資料深度note（非bug，記錄供未來讀底帳時判讀）**：實測全市場營收快取，1978檔中900檔
+（以OTC為主）目前只有1個報告月快取（因OTC月營收支援較晚上線），`rev_yoy_delta`需≥2個
+報告月才算得出來——這代表`g4`旗標在底帳累積初期會對OTC股系統性偏低（約45%的宇宙結構上
+算不出g4），不是門檻設計問題，等OTC營收快取多累積幾個月會自然改善，讀早期週次數字時
+需記得這個偏誤方向。
+
+**W34首筆快照已記錄**：修法後實跑`tw-screener backtest l6-g4-watch`，`research/l6_g4_watch/
+ledger.csv`已有`week=2026-W34`（資料日2026-08-21）的命中列——累積軌正式起算。
+
+**OTC觀察清單擴充**（§8 item4，使用者在TDCC啟用／OTC擴充兩選項中選擇後者，成本低純資料
+變更）：`watchlist/watchlist.csv`新增`6488`環球晶／`8069`元太／`5347`世界先進三檔——實測
+三者皆存在於`otc_industry_*.parquet`快取中（`_load_otc_ids()`可正確辨識為OTC），既有
+`analysis/watchlist.py::enrich_named_list`→`client.fetch_stock_history()`會自動派發到
+`fetch_stock_history_tpex()`回補歷史，本次未動任何程式碼。TDCC level1-11/holders啟用
+（`derive_big_holders`目前只留12-15/17級距，1-11級距與`holders`人數欄位已抓取解析但未
+輸出）維持在§8 queue，留給下一輪需要L1 filter時再做（需擴`derive_big_holders`輸出schema
+＋4週holders WoW邏輯，工程量比本輪其他項目都大，不在本輪一併做）。
