@@ -159,6 +159,21 @@ def build_l6_g4_snapshot(
     return pl.DataFrame(rows, schema=LEDGER_SCHEMA)
 
 
+def select_l6_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
+    """從 `build_l6_g4_snapshot()` 輸出篩 `l6_2cond==True` 的列（docs/31 §5.2實測
+    讀法：YoY≥20∧PE≤25，`screen run-local l6`用）。
+
+    刻意只用`l6_2cond`、不含`l6_4cond`多出的投信近5日淨買/市值≥100億兩條件——
+    那兩條件從未獨立驗證過（docs/31 §9 記載的L6讀法未解問題），不可擅自升級成
+    四條件版當「更嚴謹」，避免引入未經檢驗的額外篩選。**統計驗證仍未過關**
+    （§20：L6目前仍在「累積中」，現有歷史數字樣本量級僅兩個重疊週），呼叫端必須
+    把`source`標成`local_unvalidated`。
+    """
+    if snapshot.is_empty() or "l6_2cond" not in snapshot.columns:
+        return pl.DataFrame(schema={"stock_id": pl.Utf8, "name": pl.Utf8})
+    return snapshot.filter(pl.col("l6_2cond")).select("stock_id", "name").unique("stock_id")
+
+
 @dataclass(frozen=True)
 class L6G4Inputs:
     """`build_l6_g4_snapshot()` 需要的三個輸入（見 `build_l6_g4_inputs()`）。"""

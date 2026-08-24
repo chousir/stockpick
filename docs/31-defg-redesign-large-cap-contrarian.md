@@ -1730,7 +1730,7 @@ rank_velocity、flow_trigger、L6/G4/G1/G2/G5前瞻軌）全部是建立在Goodi
 | 候選 | 設計依據 | 實作狀態 | 驗證狀態 | 揭露狀態 |
 |---|---|---|---|---|
 | G1 利潤率擴張優先 | §4.1 | 已實作（`g1_g2_g5_watch.py`） | 分析層——`Δnet_margin`/`Δop_margin`僅1個QoQ資料點，零回測深度（§9） | `redesign_watch`欄（§20本次上線） |
-| G2 單季ROE×資產負債表體質（D替代式） | §4.1 | 已實作，**不需擴欄**（§11查核推翻§4原始「需擴field_map+universe四欄」註記） | 累積中——單季快照條件，隨`research/g1_g2_g5_watch/`底帳週數增加才夠格檢定 | `redesign_watch`欄（§20本次上線） |
+| G2 單季ROE×資產負債表體質（**2026-08-24已拍板正式接班D**） | §4.1 | 已實作，**不需擴欄**（§11查核推翻§4原始「需擴field_map+universe四欄」註記） | 累積中——單季快照條件，隨`research/g1_g2_g5_watch/`底帳週數增加才夠格檢定，**統計驗證仍未過關** | `redesign_watch`欄＋可用`screen run-local g2`手動產生候選清單（`source=local_unvalidated`） |
 | G3 族群轉強×個股落後 | §4.1 | 已實作＋已回測（`g3_grid.py`） | **已驗證，未過關**（r+10/r+20 CI95皆跨0，§9收官） | 不揭露（避免把未過關訊號包裝成觀察名單） |
 | G4 單月YoY對累計YoY正向分歧 | §4.1 | 已實作（併入`l6_g4_watch.py`） | 分析層——`t187ap05_L`純快照無法回查2022空頭，只能前瞻累積（§9） | `redesign_watch`欄（§20本次上線） |
 | G5 估值未反映利潤率改善 | §4.1 | 已實作（`g1_g2_g5_watch.py`） | 分析層——依賴`Δop_margin`，同G1零回測深度（§9） | `redesign_watch`欄（§20本次上線） |
@@ -1739,7 +1739,7 @@ rank_velocity、flow_trigger、L6/G4/G1/G2/G5前瞻軌）全部是建立在Goodi
 | L3 低位在估值空間 | §4.2 | 未實作 | 分析層——`valuation_ratios`僅23日、無自身時序估值百分位 | 無 |
 | L4 量能壓縮安靜底部 | §4.2 | 未實作 | 分析層——上櫃全市場日線僅22日 | 無 |
 | L5 族群落難×個股相對抗跌 | §4.2 | 未實作 | 分析層 | 無 |
-| L6 YoY≥20∧PE≤25(∧投信買超∧市值≥100億) | §4.2 | 已實作（`l6_g4_watch.py`，`l6_2cond`/`l6_4cond`兩讀法皆存） | 累積中——歷史數字（25.5%/31.7%）樣本量級僅「兩個重疊週」，經不起再壓榨，需新週次（§9） | `redesign_watch`欄（§20本次上線） |
+| L6 YoY≥20∧PE≤25(∧投信買超∧市值≥100億) | §4.2 | 已實作（`l6_g4_watch.py`，`l6_2cond`/`l6_4cond`兩讀法皆存） | 累積中——歷史數字（25.5%/31.7%）樣本量級僅「兩個重疊週」，經不起再壓榨，需新週次（§9） | `redesign_watch`欄＋可用`screen run-local l6`手動產生候選清單（僅用`l6_2cond`讀法，`source=local_unvalidated`） |
 | F2' 成長優質股（PE15-30∧毛利優於同業∧營益率未惡化） | §7.2 | 未實作 | 分析層 | 無 |
 | §7.1 政策旁路（F2位階gate開左側小注旁路） | §7.1 | 未實作（風險最高，明訂不在此輪套用） | 阻擋於L6/G4累積軌先過§7.4門檻，本身無法用2022-2026資料測（§7.4附記） | 無（尚無旁路可揭露） |
 
@@ -1748,3 +1748,33 @@ rank_velocity、flow_trigger、L6/G4/G1/G2/G5前瞻軌）全部是建立在Goodi
 等時間；「分析層」＝目前資料的物理限制（snapshot-only端點/快取深度）讓統計驗證
 做不出來，不是引擎問題，等不到就是等不到（G1/G5的QoQ深度要等多季`fundamentals`
 累積，暫無時間表）；「未實作」＝連程式碼都還沒寫。
+
+### 20.1 D策略定義變更（2026-08-24，使用者拍板）
+
+使用者問「D/E/F/G全面脫離Goodinfo完成了嗎」，查核後發現「全面脫離」要成立需要
+三件事同時具備：①每支策略有純本地可算的filter定義②有真的會產出候選清單的程式
+路徑③候選清單能餵進`group`/`candidates_enriched.csv`/`pick.md`。逐項盤點下來
+四支策略沒有一支同時具備，其中D的原始定義（近四季ROE≥15%＋連續配息≥8年）結構性
+永久卡死（配息連續性不管等多久都追不上8年），是四個缺口裡最沒有時間解法的一個。
+
+**使用者拍板**：正式接受**G2**（單季ROE≥3.5∧負債比≤60%∧流動比≥1.2∧市值≥300億）
+當D的接班定義，不再追求跟Goodinfo原始D定義口徑對齊。**這是定義層級的決策，不是
+統計驗證通過**——G2目前仍在「累積中」（見上表），尚未過§7.4門檻，`screen run-local
+g2`的產出一律標`source=local_unvalidated`，任何人讀到這個source值都要知道這是
+未驗證的假說性判準，不是Goodinfo口徑的等價替代。
+
+同時使用者拍板**先建候選生成路徑**（用G2＋L6，皆標「未驗證」明顯警告）——新增
+`uv run tw-screener screen run-local g2`／`screen run-local l6`（重用已在
+`group`裡跑的`build_g1_g2_g5_snapshot`/`build_l6_g4_snapshot`，只是換一種消費
+方式：篩出命中列寫成`screen_result_{g2_quality_no_history,l6_yoy_pe_flow}.csv`，
+不寫進research底帳，兩者互不影響）。L6只用`l6_2cond`讀法（YoY≥20∧PE≤25，
+§5.2實測），不含`l6_4cond`額外兩條件（從未獨立驗證，§9記載）。**刻意不做**：
+不自動掛進`make week`（比照使用者先前對doctor失敗自動退化的裁決，未驗證假說
+不該悄悄流進候選清單）；不整合進`pick-outcome`底帳歸因；不改
+`config/strategies/d_quality_leader.yaml`（那個檔案是Goodinfo/`apply_local_filters`
+兩條路徑共用的門檻定義，跟G2判準結構不同，硬塞會混淆兩套機制）。
+
+實跑驗證（2026-W34，非模擬）：`screen run-local g2`本地篩出44檔，與同週
+`research/g1_g2_g5_watch/ledger.csv`的g2命中數44筆完全一致；`screen run-local l6`
+篩出281檔，與`research/l6_g4_watch/ledger.csv`的l6_2cond命中數281筆完全一致——
+兩條路徑（揭露欄底帳 vs 候選生成CLI）互相校驗數字一致，不是各算各的。

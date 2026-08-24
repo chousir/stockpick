@@ -173,6 +173,21 @@ def build_g1_g2_g5_snapshot(
     return pl.DataFrame(rows, schema=LEDGER_SCHEMA)
 
 
+def select_g2_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
+    """從 `build_g1_g2_g5_snapshot()` 輸出篩 `g2==True` 的列（docs/31 D策略定義變更，
+    2026-08-24：使用者拍板G2＝「D的無歷史替代式」正式接班D，`screen run-local g2`用）。
+
+    只回傳 `stock_id`/`name` 兩欄（screen_result 慣例最小欄位），呼叫端補
+    `strategy_id`/`screened_at`/`source`/`goodinfo_url`——**統計驗證仍未過關**
+    （docs/31 §20：G2目前仍在「累積中」，樣本量尚不足以套用§7.4門檻），呼叫端必須
+    把`source`標成`local_unvalidated`（非既有`f_value_rebound`那種`local`），
+    不可混用同一個標記，見§19.3訂正。
+    """
+    if snapshot.is_empty() or "g2" not in snapshot.columns:
+        return pl.DataFrame(schema={"stock_id": pl.Utf8, "name": pl.Utf8})
+    return snapshot.filter(pl.col("g2")).select("stock_id", "name").unique("stock_id")
+
+
 @dataclass(frozen=True)
 class G1G2G5Inputs:
     """`build_g1_g2_g5_snapshot()` 需要的五個輸入（見 `build_g1_g2_g5_inputs()`）。"""

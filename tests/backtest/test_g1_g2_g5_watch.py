@@ -11,6 +11,7 @@ from tw_screener.backtest.g1_g2_g5_watch import (
     LEDGER_SCHEMA,
     build_g1_g2_g5_snapshot,
     ledger_progress_summary,
+    select_g2_candidates,
     upsert_ledger,
 )
 
@@ -163,6 +164,39 @@ def test_no_match_rows_dropped() -> None:
         week="2026-W34", data_date=date(2026, 8, 22),
     )
     assert snap.is_empty()
+
+
+def test_select_g2_candidates_filters_to_g2_hits_only() -> None:
+    universe = _universe([
+        {"stock_id": "2330", "name": "台積電",
+         "market_cap_billion": 500.0, "cum_rev_yoy_pct": None},
+        {"stock_id": "1234", "name": "不合格",
+         "market_cap_billion": 1.0, "cum_rev_yoy_pct": None},
+    ])
+    fundamentals = _fundamentals([
+        {"stock_id": "2330", "quarter_label": "2026Q2", "net_margin_pct": None,
+         "delta_net_margin_pct": None, "op_margin_pct": None, "delta_op_margin_pct": None,
+         "gross_margin_pct": None, "roe_q_pct": 5.0, "debt_ratio_pct": 40.0, "current_ratio": 2.0},
+        {"stock_id": "1234", "quarter_label": "2026Q2", "net_margin_pct": None,
+         "delta_net_margin_pct": None, "op_margin_pct": None, "delta_op_margin_pct": None,
+         "gross_margin_pct": None, "roe_q_pct": 0.1, "debt_ratio_pct": 90.0, "current_ratio": 0.5},
+    ])
+    empty_peer = pl.DataFrame(schema={"stock_id": pl.Utf8, "subind_median": pl.Float64})
+    empty_val = pl.DataFrame(schema={"stock_id": pl.Utf8, "val_pctile": pl.Float64})
+    snap = build_g1_g2_g5_snapshot(
+        universe, fundamentals, empty_peer, empty_val,
+        ma60_map={}, amount_map={},
+        week="2026-W34", data_date=date(2026, 8, 22),
+    )
+    out = select_g2_candidates(snap)
+    assert out["stock_id"].to_list() == ["2330"]
+    assert set(out.columns) == {"stock_id", "name"}
+
+
+def test_select_g2_candidates_empty_snapshot() -> None:
+    out = select_g2_candidates(pl.DataFrame(schema=LEDGER_SCHEMA))
+    assert out.is_empty()
+    assert set(out.columns) == {"stock_id", "name"}
 
 
 def test_upsert_ledger_all_null_column_does_not_corrupt_later_weeks(tmp_path: Path) -> None:

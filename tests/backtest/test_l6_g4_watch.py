@@ -12,6 +12,7 @@ from tw_screener.backtest.l6_g4_watch import (
     build_l6_g4_snapshot,
     ledger_progress_summary,
     revenue_disclosure_date,
+    select_l6_candidates,
     upsert_l6_g4_ledger,
 )
 
@@ -113,6 +114,31 @@ def test_no_match_rows_dropped() -> None:
         yoy_deltas={}, trust_net_5d={}, week="2026-W34", data_date=date(2026, 8, 22),
     )
     assert snap.is_empty()
+
+
+def test_select_l6_candidates_filters_to_l6_2cond_only() -> None:
+    """l6_2cond命中(YoY≥20∧PE≤25)但l6_4cond不成立(投信買超為負)的列仍要出現——
+    docs/31 §9刻意只用l6_2cond讀法，不擅自升級成四條件版。"""
+    universe = _universe([
+        {"stock_id": "1101", "name": "台泥", "market_cap_billion": 50.0,
+         "pe_ratio": 20.0, "cum_rev_yoy_pct": 25.0},
+        {"stock_id": "9999", "name": "都沒中", "market_cap_billion": 10.0,
+         "pe_ratio": 60.0, "cum_rev_yoy_pct": -10.0},
+    ])
+    revenue = _revenue([{"stock_id": "1101", "year_month": "202607", "yoy_pct": 10.0}])
+    snap = build_l6_g4_snapshot(
+        universe, revenue, yoy_deltas={"1101": (5.0, 2.0)},
+        trust_net_5d={"1101": -100.0}, week="2026-W34", data_date=date(2026, 8, 22),
+    )
+    out = select_l6_candidates(snap)
+    assert out["stock_id"].to_list() == ["1101"]
+    assert set(out.columns) == {"stock_id", "name"}
+
+
+def test_select_l6_candidates_empty_snapshot() -> None:
+    out = select_l6_candidates(pl.DataFrame(schema=LEDGER_SCHEMA))
+    assert out.is_empty()
+    assert set(out.columns) == {"stock_id", "name"}
 
 
 def test_revenue_preview_risk_flag() -> None:

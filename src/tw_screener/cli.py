@@ -935,10 +935,89 @@ def screen_run_all(
     console.print(f"\n[bold]報告目錄：reports/{week_tag}/[/bold]")
 
 
+# docs/31「D策略定義變更」（2026-08-24，使用者拍板）：G2＝D的正式接班定義，L6＝
+# 唯一有實證歷史數字撐腰的左側filter。兩者皆**尚未通過§7.4統計驗證門檻**（見docs/31
+# §20現況總表），screen_result輸出一律標source=local_unvalidated，跟f_value_rebound
+# 既有的source=local（官方資料替代Goodinfo同一套已知門檻，口徑落差有限）明確區分——
+# 不可混用同一個標記，見§19.3訂正（field_map.py本地映射跟這裡的§4新設計filter是
+# 兩個不同機制）。只用G2/L6的l6_2cond讀法，不含G1/G4/G5（仍在分析層/驗證不出，見
+# §20）、不含L6的l6_4cond額外兩條件（從未獨立驗證，見§9記載）。
+_REDESIGN_STRATEGY_IDS: dict[str, str] = {
+    "g2": "g2_quality_no_history",
+    "l6": "l6_yoy_pe_flow",
+}
+
+
+def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):  # noqa: ANN001
+    """`screen run-local g2`／`screen run-local l6`的候選生成路徑（docs/31 D策略定義變更）。
+
+    重用`group_runner.py`同一套已在跑的snapshot函式（`build_g1_g2_g5_snapshot`／
+    `build_l6_g4_snapshot`），只是換一種消費方式：篩出命中列、轉成screen_result格式，
+    不寫進research/底帳（底帳累積是`group`步驟的職責，這裡是另一條手動生成候選的路徑，
+    兩者互不影響）。回傳(stock_id, name)兩欄DataFrame，呼叫端補其餘欄位。
+    """
+    import polars as pl
+
+    from tw_screener.screener.local import build_local_universe
+
+    empty = pl.DataFrame(schema={"stock_id": pl.Utf8, "name": pl.Utf8})
+
+    universe = build_local_universe(client)
+    if universe.is_empty():
+        return empty
+
+    if strategy == "g2":
+        from tw_screener.backtest.g1_g2_g5_watch import (
+            build_g1_g2_g5_inputs,
+            build_g1_g2_g5_snapshot,
+            select_g2_candidates,
+        )
+
+        data_date = client.latest_trading_date()
+        if data_date is None:
+            return empty
+        inputs = build_g1_g2_g5_inputs(client, cfg, universe)
+        wc = cfg.get("backtest", {}).get("g1_g2_g5_watch", {})
+        snapshot = build_g1_g2_g5_snapshot(
+            universe, inputs.fundamentals, inputs.gross_margin_peer, inputs.valuation,
+            inputs.ma60_map, inputs.amount_map, week_tag, data_date,
+            g1_delta_net_margin_min=float(wc.get("g1_delta_net_margin_min", 1.5)),
+            g1_ma60_max_pct=float(wc.get("g1_ma60_max_pct", 15.0)),
+            g2_roe_min=float(wc.get("g2_roe_min", 3.5)),
+            g2_debt_max_pct=float(wc.get("g2_debt_max_pct", 60.0)),
+            g2_current_min=float(wc.get("g2_current_min", 1.2)),
+            g2_mktcap_min_billion=float(wc.get("g2_mktcap_min_billion", 300.0)),
+            g5_val_pctile_max=float(wc.get("g5_val_pctile_max", 40.0)),
+            g5_amount_min_million=float(wc.get("g5_amount_min_million", 300.0)),
+        )
+        return select_g2_candidates(snapshot)
+
+    from tw_screener.backtest.l6_g4_watch import (
+        build_l6_g4_inputs,
+        build_l6_g4_snapshot,
+        select_l6_candidates,
+    )
+
+    data_date = client.latest_trading_date()
+    if data_date is None:
+        return empty
+    l6_inputs = build_l6_g4_inputs(client, cfg, data_date)
+    wc = cfg.get("backtest", {}).get("l6_g4_watch", {})
+    snapshot = build_l6_g4_snapshot(
+        universe, l6_inputs.revenue, l6_inputs.yoy_deltas, l6_inputs.trust_net_5d,
+        week_tag, data_date,
+        l6_yoy_min=float(wc.get("l6_yoy_min", 20.0)),
+        l6_pe_max=float(wc.get("l6_pe_max", 25.0)),
+        l6_mktcap_min_billion=float(wc.get("l6_mktcap_min_billion", 100.0)),
+    )
+    return select_l6_candidates(snapshot)
+
+
 @screen_app.command("run-local")
 def screen_run_local(
     strategy: str = typer.Argument(
-        help="策略 ID，如 f_value_rebound（僅門檻可完全由官方資料覆蓋的策略可跑）"
+        help="策略 ID，如 f_value_rebound（僅門檻可完全由官方資料覆蓋的策略可跑）；"
+        "或 g2／l6（docs/31 §4新設計候選，統計驗證未過關，見下方說明）"
     ),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
@@ -952,6 +1031,12 @@ def screen_run_local(
     輸出 reports/YYYY-Www/screen_result_{strategy}.csv，欄位對齊 Goodinfo 路徑產出，
     多一欄 source=local，供之後週報／pick-outcome 辨識資料來源（本地口徑與 Goodinfo
     篩選器存在落差：市值股數月頻、PE/殖利率為官方 trailing 非 Goodinfo 自算，見 docs/02）。
+
+    strategy=g2／l6 時走另一條路徑（docs/31 D策略定義變更，2026-08-24）：G2＝D的
+    正式接班定義、L6＝實證左側filter，皆為docs/31 §4全新設計、**尚未通過統計驗證**
+    （§20總表），輸出source=local_unvalidated（非f_value_rebound的source=local），
+    明確跟已知口徑落差的官方資料替代路徑區分開。**手動指令，不掛`make week`**——
+    是否要在某週把這份候選塞進報表，由你自己判斷，不自動發生。
     """
     import polars as pl
     import yaml as _yaml
@@ -967,6 +1052,42 @@ def screen_run_local(
 
     with open(settings, encoding="utf-8") as fh:
         cfg = _yaml.safe_load(fh)
+
+    if strategy in _REDESIGN_STRATEGY_IDS:
+        strategy_id = _REDESIGN_STRATEGY_IDS[strategy]
+        client = create_client(settings)
+        week_tag = derive_week_tag(settings)
+        console.print(
+            f"[bold]本地篩選：{strategy_id}[/bold]（不打 Goodinfo，docs/31 §4新設計，"
+            "[yellow]尚未通過統計驗證[/yellow]）"
+        )
+        result = _run_redesign_local_screen(strategy, cfg, client, week_tag)
+        if result.is_empty():
+            console.print(
+                "[yellow]本週無命中股（或本地候選宇宙/交易日快取缺，請先跑 "
+                "make fetch-twse）[/yellow]"
+            )
+        screened_at = client.latest_trading_date()
+        out = result.with_columns(
+            [
+                pl.lit(strategy_id).alias("strategy_id"),
+                pl.lit(screened_at).alias("screened_at"),
+                pl.col("stock_id").map_elements(stock_detail_url, return_dtype=pl.Utf8).alias(
+                    "goodinfo_url"
+                ),
+                pl.lit("local_unvalidated").alias("source"),
+            ]
+        )
+        report_dir = Path(cfg["paths"]["reports_dir"]) / week_tag
+        report_dir.mkdir(parents=True, exist_ok=True)
+        out_path = report_dir / f"screen_result_{strategy_id}.csv"
+        out.write_csv(out_path)
+        console.print(f"[green]本地篩出 {len(out)} 檔[/green]，結果存於 [bold]{out_path}[/bold]")
+        console.print(
+            "[yellow]source=local_unvalidated：docs/31 §4新設計filter，尚未通過§7.4"
+            "統計驗證門檻（§20總表），非既有Goodinfo口徑的等價替代，判讀時務必留意[/yellow]"
+        )
+        return
 
     strategy_path = Path(cfg["paths"]["strategies_dir"]) / f"{strategy}.yaml"
     if not strategy_path.exists():
