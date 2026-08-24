@@ -1524,6 +1524,19 @@ def backtest_g1_g2_g5_watch_cmd(
     run_g1_g2_g5_watch(settings)
 
 
+@backtest_app.command("redesign-prelim-read")
+def backtest_redesign_prelim_read_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """docs/31 §21.4：G1/G2/G4/G5/L6 初步（非§7.4正式驗證）forward alpha讀值——
+    用既有ledger快照＋即時日線快取算，樣本量小、CI在樣本不足時為空，如實印出，
+    不是有效訊號的驗證結果。輸出research/redesign_prelim_read/latest.md。"""
+    from tw_screener.backtest.redesign_prelim_read import run_redesign_prelim_read
+
+    report = run_redesign_prelim_read(settings)
+    console.print(report)
+
+
 @backtest_app.command("official-sector-watch")
 def backtest_official_sector_watch_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),

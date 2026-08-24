@@ -1807,3 +1807,149 @@ strategy_id沒有表項時全部退化成單字母「G」，跟既有Goodinfo `g
 **§20.1「刻意不做」清單更新**：「不自動掛進`make week`」已被本次拍板推翻，改為
 自動；「不整合`pick-outcome`底帳歸因」「不改`d_quality_leader.yaml`」兩條維持
 不變，本輪未動。
+
+## 21. 減量研究計畫 Part 1：逐式目的定義＋參數可行性分級（2026-08-24）
+
+使用者要求「先定義好每個策略目的以及它可以使用那些參數來達到，再來看是不是
+既有可以研究或是要累積一段時間」——本節是這個要求的直接產出，逐式查核，
+非猜測。
+
+### 21.1 資料現況（實測，2026-08-24）
+
+- `fundamentals_*.parquet`（G1/G2/G5用的毛利率/營益率/ROE/負債比/流動比）：
+  **只有2026Q1、2026Q2兩季**。
+- `revenue_*.parquet`（G4/L6用的月營收YoY）：**只有202605-202608四個月**。
+- `valuation_ratios_*.parquet`（L6/G5用的PE/估值分位）：**24筆快照，
+  約2026-06中～2026-08中，10週左右**。
+- `research/panel/panel.parquet`：2022-01-03～2026-07-15完整，欄位為
+  `close/volume/r5-40/ma20-60_dist_pct/vol_ratio/mkt_ew_r*/alpha*/
+  div_coverage/foreign_net/trust_net/dealer_net/chip_coverage/
+  margin_balance_lots/big_holder_pct/big_holder_1000_pct/regime/
+  sub_industry/delisted`——**完全沒有PE/營收/毛利率/ROE/負債比欄位**。
+
+前三個資料源全部來自TWSE snapshot-only端點（`t187ap05_L`/`fundamentals`/
+`valuation_ratios`，官方swagger確認無`date=`查詢參數，§9/§16已反覆驗證），
+**不是還沒抓，是官方端點本身查不到歷史**。
+
+### 21.2 逐式查核表
+
+| 式 | 目的（想抓的訊號） | 需要的參數 | panel可算？ | 判定 |
+|---|---|---|---|---|
+| G1 利潤率擴張優先 | 大型股「安靜」的營運轉折——利潤率先於營收爆發改善，市場還沒price in | Δnet_margin/Δop_margin(fundamentals) + cum_rev_yoy_pct(revenue) + ma60_dist(panel可) | ❌ 核心判準(Δmargin)無panel替代 | 只能用snapshot累積 |
+| G2 單季ROE×資產負債表體質(=新D) | 用「當下體質」取代「多年track record」判斷品質，不需要8年配息史 | roe_q_pct/debt_ratio_pct/current_ratio(fundamentals) + market_cap(需股數，panel無) | ❌「品質」本質上是財報資料，沒有價格代理 | 只能用snapshot累積 |
+| G4 單月YoY對累計YoY正向分歧 | 抓循環股的「二階導轉正」——月增速正在加速，即使絕對水準不起眼 | yoy_pct/cum_yoy_pct/rev_yoy_delta(revenue) | ❌ panel完全無營收欄位 | 只能用snapshot累積 |
+| G5 估值未反映利潤率改善 | 便宜×利潤率同時在改善——估值還沒跟上真實基本面轉強 | val_pctile(valuation_ratios) + gross_margin+peer(fundamentals) + Δop_margin | ❌ 估值分位/毛利率皆無panel替代 | 只能用snapshot累積 |
+| L6 YoY≥20∧PE≤25(∧投信買超∧市值≥100億) | 便宜×成長×法人確認的左側反彈 | cum_rev_yoy_pct(revenue) + pe_ratio(valuation_ratios) + trust_net_5d(**panel有**) | 🟡 只有投信買超這一條能測 | 核心(YoY+PE)仍需snapshot累積；投信流向已被§17測過且**已否證**，不可再包裝成新結果 |
+
+**結論**：五式的核心判準（利潤率/ROE/負債比/營收YoY/PE）全部是財報或估值
+資料，**沒有誠實的價格/籌碼代理可以替代**——這不是資料工程問題，是「品質/
+成長/價值」這幾個概念本質上需要財報數字，不是靠爬梳量價籌碼繞得過去的。
+panel.parquet那條路（動能/籌碼流/大戶/次產業輪動）是另一條獨立研究線
+（official_sector_top5／rank_velocity／flow_trigger，§10/§14/§17，2/3已
+否證、1個過關），跟這五式是**不同的研究問題**，不應互相取代，但可作為
+§22的獨立研究線繼續深化。
+
+### 21.3 累積速度分級（取代「無限期等」）
+
+- `valuation_ratios`(PE)：**每次跑production就存一筆快照，速度最快**——
+  目前24筆（約10週）。L6的PE條件、G5的val_pctile條件用這個，最快接近
+  可用深度。
+- `revenue`：MOPS**月**公告，速度中等——目前4個月。G4、L6的YoY條件用這個。
+- `fundamentals`：MOPS**季**公告，速度最慢——目前2季。G1/G2/G5的margin/
+  ROE/負債比/流動比全部卡在這個最慢的節奏，要湊到能做regime切片的多季
+  樣本，寫實估計要**12-18個月以上**（4-6季）才夠格套用本專案自己的
+  CI95+regime+walk-forward驗證門檻——這是節奏問題，不是「量設小一點」
+  能繞過的物理限制。
+
+### 21.4 立即可做：初步（非regime驗證）cross-sectional讀值
+
+不用等到多季才有東西可看——`research/g1_g2_g5_watch/ledger.csv`／
+`research/l6_g4_watch/ledger.csv`已經逐週累積快照（即使fundamentals本身
+沒變，市值/PE/YoY等欄位每週仍在動），對每一筆命中列可用日線快取算出
+r+10/r+20/r+40 forward alpha，跟當週全樣本比delta——重用`backtest/panel.py`
+的`build_price_panel()`（只傳price，不傳dividends/institutional等選配輸入）
+算r{h}/mkt_ew_r{h}/alpha{h}，`factor_lab.py`的`moving_block_bootstrap_ci`
+做delta的CI，樣本太小（`n_dates<10`）時自動回`(None, None)`，不硬套CI。
+**這是初步讀值，樣本量小、未做regime切片、不是生產化驗證**，隨每週
+`make week`自動累積會自然變準。實作：`backtest/redesign_prelim_read.py`
+＋CLI `uv run tw-screener backtest redesign-prelim-read`（本輪新增，5個
+測試全綠，ruff/mypy零新增錯誤）。
+
+**實跑結果（2026-08-24，非模擬）：目前兩份底帳皆是空的，尚無法算出任何
+forward alpha**——不是bug，是純粹的時間問題：兩份底帳目前都只有**一週**
+資料（2026-W34，資料日2026-08-21，`screen-redesign-local`本次剛掛進
+`make week`才第一次記錄），連最短的r+10（需entry後10個交易日）都還沒
+滿足，最快要等到約**2026-09-04**才會有第一筆可算的觀察值，且只有N=1，
+要湊到`moving_block_bootstrap_ci`門檻的`n_dates≥10`（即10個不重疊/半
+重疊週次）寫實估計要到**2026年11月左右**。這個工具已經正確就位、隨
+`make week`每週自動累積的快照會自然餵給它，之後任何session要看初步
+讀值，直接跑`uv run tw-screener backtest redesign-prelim-read`即可，
+不需要每次重新確認「能不能測」。
+
+## 22. 減量研究計畫 Part 3（backlog，本輪只寫規劃不執行）：panel-only候選
+排列組合＋歷史關鍵點測試
+
+**狀態：未開工，待使用者下輪拍板優先序。** 延續official_sector_top5／
+rank_velocity／flow_trigger這條線（§10/§14/§17，2/3已否證、1個過關），但
+使用者這次要求**多樣性組合**＋**參數網格**＋**在具體歷史時間點測試**，範圍
+明顯比之前任何一次單一假說驗證大，值得獨立立milestone，不跟Part 1/2/5
+一起做。
+
+### 22.1 候選維度（每個維度內部也要做參數網格，不是只測固定門檻）
+
+- 族群輪動：`trend_score`／`group_rank`（門檻、族群粒度已在§10.6-10.9探索過
+  purity 0.4最優，可再細調）。
+- 法人流向：`foreign_net`/`trust_net`/`dealer_net`（§17已否證單獨用投信流
+  預測「提早進前5」，**不可重測同一個問題**；但可測**跟大戶持股pct、regime
+  聯集**這類沒測過的新組合，是否分開看時各自無效、疊加卻有效——這是新假說，
+  不是重跑舊否證）。
+- 大戶集中度變化：`big_holder_pct`/`big_holder_1000_pct`的WoW方向。
+- 融資水位：`margin_balance_lots`（水位/變化率，注意docs/26 §5.1已示範
+  水位百分位在單向趨勢序列上鑑別力低，優先用「較上次變化」而非絕對水位）。
+- 價格動能：`ma60_dist_pct`/`vol_ratio`（rank_velocity已否證用排名爬升，
+  可測「距離動能」等其他切法，一樣要避免重問rank_velocity問過的問題）。
+
+### 22.2 前置查核（開工前必做，本輪未做）
+
+**先客觀列出要測的具體歷史時間點清單**（使用者要求「產業輪動點/暴漲點/
+暴跌點」）——不能憑印象挑，要從`panel.parquet`/`research/sector_rotation`
+歷史資料客觀找出（如：用全市場報酬序列找最大單週/單月跌幅日＝暴跌候選、
+用次產業trend_score歷史交叉點找輪動候選）。已知的3個宏觀事件（2022空頭起點
+2022-01、2024-08-05崩盤、2025-04關稅衝擊）可以直接用，但「暴漲點」與
+「產業輪動點」需要額外查核方法，本輪未做。
+
+### 22.3 紀律要求（開工時比照§10.10已建立的方法論，不可放寬）
+
+排列組合＋參數網格會產生大量測試，**必須**：
+- 全部網格結果都要報告，不能只列命中的組合（避免變相p-hack）。
+- 用walk-forward切分守住過擬合（§10.10已示範方法）。
+- 每個候選式跑之前先§7.4/§10.3同一套CI95+regime+前後半段一致性門檻預先登記，
+  不可等結果出來才回頭定義「過關」標準。
+
+## 23. 減量研究計畫 Part 4（backlog，本輪只寫規劃不執行）：宏觀風險參數
+grid search（n=3事件，使用者已拍板「做，但標示為候選假說」）
+
+**狀態：使用者已拍板方向，未開工，待使用者下輪確認要不要排進下個milestone。**
+
+### 23.1 設計
+
+對docs/25/26既有宏觀指標（BAA10Y／VIX／DGS20／STLFSI4等）的視窗長度／z門檻／
+組合方式（單一指標 vs 多指標聯集/交集）做網格掃描，對2022空頭起點(2022-01)／
+2024-08-05崩盤／2025-04關稅衝擊這3個已知事件測「有沒有一組參數在3個點都
+提前反應」。
+
+### 23.2 執行前必須寫清楚的三件事（不可省略，否則會變成本專案已經批評過的
+「不夠格判讀就先包裝成進展」）
+
+1. **n=3是極小樣本**，任何夠大的網格幾乎必然能找到「湊巧配得上3點」的組合
+   ——這是過擬合到3個雜訊點，不是找到真正預警能力，必須在報告最前面就講清楚。
+2. **全部網格結果都要報告**，不能只列命中3點的組合（同§22.3紀律）。
+3. **需要定義未來的真正驗證測試**：下一次真的發生系統性下跌時，這組門檻
+   有沒有再次提前反應——這是唯一算數的驗證，現在做不到，只能記錄下來，
+   讓未來事件發生時可以直接檢驗這輪找到的候選組合。
+
+### 23.3 產出定位
+
+這個研究的產出**頂多是「候選假說清單」，不是「驗證過的早期預警系統」**——
+不可以用來取代docs/25既有的V2 regime/BAA10Y主燈號，也不可以包裝成新的
+決策依據，純粹是「這組參數過去3次剛好都亮了，值得繼續觀察」的候選清單。
