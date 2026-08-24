@@ -21,36 +21,47 @@
   Yahoo 概念股       │ config/concepts.yaml 主題標籤（手標次產業＋自動爬概念股）      │
                     └──────────────────────────┬───────────────────────────────┘
                                                ▼
- make week GROUP=defg ＝ 一條指令串起以下十三步：
+ make week GROUP=defg ＝ 一條指令串起以下十四步：
  ① fetch-twse                日線/法人/月營收/產業別/官方估值比(PE/PB/殖利率) 增量入快取
  ② fetch-institutional-history 回補近 20 日上市＋上櫃法人（隔幾天沒跑也自動補齊）
  ③ fetch-tdcc                集保大戶持股比（容錯：TDCC 異常不擋，大戶欄退化 null）
  ④ doctor                    Goodinfo 健康檢查（只診斷不擋，2026-08-23 拍板，docs/31 §19.3；⑤仍會嘗試執行）
  ⑤ screen-all GROUP=defg     Goodinfo 跑 D/E/F/G 四策略 → screen_result_*.csv（純快照；被擋時逐策略印「本週未取得」，不中止流程）
- ⑥ fetch-candidates-history  對命中股聯集補抓 13 個月個股日線（MA60/量比/動能用）
- ⑦ rotation                  ★ 次產業輪動（全市場宇宙・價格趨勢分數主鍵＋趨勢領頭板）→ sector_rotation.md/csv
- ⑧ macro                     docs/25 v2 總經燈號（BAA10Y 主訊號＋揭露面板，容錯：FRED 掛了不擋主流程）
- ⑨ cp-value-candidates       個股 CP 補漲候選＋C2 三重濾網 → cp_candidates.md（group Section 6 要讀）
- ⑩ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv（含揭露欄；docs/31 §13 官方族群前5＋§4/§9/§11 G1/G2/G4/G5/L6 新設計候選觀察欄與前瞻累積軌皆已內含）
- ⑪ snapshot-week             point-in-time 週快照：凍結 concepts/宇宙/持股 → data/snapshots/（容錯：失敗不擋）
- ⑫ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
- ⑬ pick-outcome-brief        上週 picks r+5/α/勝率＋偽陰性一頁 → 本週輸入包（容錯：失敗不擋）
+ ⑥ screen-redesign-local     docs/31 §4 全新本地filter(G1/G2/G4/G5/L6)，不打Goodinfo→screen_result_*.csv（2026-08-24拍板直接掛進主流程，**實驗性質未過統計驗證**，容錯：失敗不擋）
+ ⑦ fetch-candidates-history  對命中股聯集（含⑤⑥）補抓 13 個月個股日線（MA60/量比/動能用）
+ ⑧ rotation                  ★ 次產業輪動（全市場宇宙・價格趨勢分數主鍵＋趨勢領頭板）→ sector_rotation.md/csv
+ ⑨ macro                     docs/25 v2 總經燈號（BAA10Y 主訊號＋揭露面板，容錯：FRED 掛了不擋主流程）
+ ⑩ cp-value-candidates       個股 CP 補漲候選＋C2 三重濾網 → cp_candidates.md（group Section 6 要讀）
+ ⑪ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv（含揭露欄；docs/31 §13 官方族群前5＋§4/§9/§11 G1/G2/G4/G5/L6 新設計候選觀察欄與前瞻累積軌皆已內含）
+ ⑫ snapshot-week             point-in-time 週快照：凍結 concepts/宇宙/持股 → data/snapshots/（容錯：失敗不擋）
+ ⑬ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
+ ⑭ pick-outcome-brief        上週 picks r+5/α/勝率＋偽陰性一頁 → 本週輸入包（容錯：失敗不擋）
                                                ▼
  手動：把報告貼給 Claude（docs/11 prompt）→ pick.md（首屏 ≤60 行一頁決策卡；核心層距季線 >+15% 硬擋）
  手動：tw-screener picks sync 解析 pick.md 尾端區塊、整批寫底帳 → 每季 make pick-outcome 算命中率×α（pick 閉環）
  手動：make report STOCK_ID=XXXX → 個股深度報告
 ```
 
+> **候選宇宙現含兩種來源，規模差很大**：⑤ Goodinfo D/E/F/G（~87 檔）＋⑥ docs/31
+> 本地 G1/G2/G4/G5/L6（2026-08-24 拍板：不用全部跟隨 Goodinfo，用現有本地資料
+> 做 filter，直接掛進主流程，接受未驗證/結果可能不理想——實測單週命中數
+> g1=107／g2=44／g4=351／g5=21／l6=281 檔，門檻目前很鬆）。兩者一起流進
+> `candidates_enriched.csv`，`strategy` 欄用 G1/G2/G4/G5/L6 標籤跟 Goodinfo 的
+> D/E/F/G 明確區分（見 `screen_result_*.csv` 的 `source` 欄：Goodinfo 來源無此欄、
+> F 本地替代路徑是 `local`、G1/G2/G4/G5/L6 是 `local_unvalidated`）。**候選數因此
+> 會比純 Goodinfo 時代明顯變大**，屬預期行為。
+>
 > `candidates_enriched.csv` 的 `redesign_watch` 欄（docs/31 §4/§9/§11，2026-08-24
-> 新增）＝G1/G2/G4/G5/L6 新設計候選命中旗標（逗號分隔，未命中留白）——純觀察揭露，
-> 不進篩選/排序/pick.md 核心層，**全部未經統計驗證**（G3 已驗證未過關，不在此欄）。
-> `research/g1_g2_g5_watch/`／`research/l6_g4_watch/` 底帳（gitignored）現在跟著
-> `group`（步驟⑩）自動累積，`make l6-g4-watch`／`make g1-g2-g5-watch` 只是可單獨
-> 重跑的手動工具，不是唯一入口。
+> 新增）＝G1/G2/G4/G5/L6 命中旗標（逗號分隔，未命中留白）——純觀察揭露，不影響
+> 排序/篩選/pick.md 核心層，跟⑥的候選生成是兩條獨立機制（前者是揭露欄，標註任何
+> 候選股是否也命中這五式；後者是這五式自己產生候選股）。**全部未經統計驗證**
+> （G3 已驗證未過關，不在此欄）。`research/g1_g2_g5_watch/`／
+> `research/l6_g4_watch/` 底帳（gitignored）跟著 `group`（步驟⑪）自動累積，
+> `make l6-g4-watch`／`make g1-g2-g5-watch` 只是可單獨重跑的手動工具。
 
 兩個分析宇宙刻意不同、互相校驗：
 
-|      | ⑨ 族群分析（group_analysis.md）             | ⑦ 資金輪動（sector_rotation.md）          |
+|      | ⑪ 族群分析（group_analysis.md）             | ⑧ 資金輪動（sector_rotation.md）          |
 | ---- | -------------------------------------------- | ------------------------------------------ |
 | 宇宙 | **本週篩中的候選股**（精、有選擇偏誤） | **全次產業成員**（無偏、含未入選股） |
 | 鏡頭 | 漲幅/breadth/法人（候選股之間比強弱）        | 20 日法人資金流時間序列＋位階象限          |
@@ -114,7 +125,7 @@ make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退�
 | `candidates_enriched.csv`                            | **主要挑股宇宙**：全候選股 × 技術/籌碼/估值（官方 PE/PB/殖利率＋次產業相對便宜位階）/月營收/flags 排雷欄/揭露欄（flow_state・risk_kind・pullback_quality，純揭露非 gate） |
 | `cp_candidates.md`                                   | 個股 CP 補漲候選＋三重濾網（錢進＋沒漲＋相對便宜；埋伏/追突破/反轉三型態）＋末段短窗早訊號／過熱-退潮警示（限庫存/觀察・低信心）                                                 |
 | `holdings_enriched.csv` / `watchlist_enriched.csv` | 我的庫存/觀察清單（有維護才產，**無論如何都要分析**）                                                                                                                      |
-| `screen_result_{d,e,f,g}_*.csv`                      | 各策略原始入選快照（看「哪檔中哪些策略」用）                                                                                                                                     |
+| `screen_result_*.csv`                                | 各策略原始入選快照（看「哪檔中哪些策略」用）——`{d,e,f,g}` 是 Goodinfo 四策略；`{g1_margin_expansion,g2_quality_no_history,g4_yoy_divergence,g5_valuation_gap,l6_yoy_pe_flow}` 是 docs/31 §4 本地新設計候選（不打 Goodinfo，`source=local_unvalidated`，**未過統計驗證**） |
 
 **⚙️ 不必貼**：`theme_strength.csv`（內容已在 Section 2.8）、`screen_log.md`（檔數統計）。
 
@@ -127,7 +138,7 @@ make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退�
 首次設定做完後，平時就這幾條（產出與貼 Claude 細節見上方「主流程」）：
 
 ```bash
-make week GROUP=defg                              # ①~⑬ 一鍵跑完（尾段 week-check 缺產物自動 WARNING＋pick-outcome-brief）
+make week GROUP=defg                              # ①~⑭ 一鍵跑完（尾段 week-check 缺產物自動 WARNING＋pick-outcome-brief）
 # 貼給 Claude 的 6 類檔（全在 reports/YYYY-Www/，詳見上方主流程表）：
 #   group_analysis.md  sector_rotation.md  candidates_enriched.csv
 #   cp_candidates.md  holdings/watchlist_enriched.csv  screen_result_*.csv
@@ -167,7 +178,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 
 | 指令                                                     | 做什麼                                               | 何時用                               |
 | -------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------ |
-| `make week GROUP=defg`                                 | 完整週流程 ①~⑬                                     | **每週一次（主入口）**         |
+| `make week GROUP=defg`                                 | 完整週流程 ①~⑭                                     | **每週一次（主入口）**         |
 | `make pick-outcome`                                    | pick 閉環：分層命中率×α（vs 大盤＋族群）＋偽陰性帳＋**停損延遲帳（M3.1）** | 每季（pick 底帳變厚後）              |
 | `make dash-dev`                                        | 起 dashboard 開發伺服器（FastAPI:8000＋Vite:5173）   | 視覺化瀏覽本週報告（§13）           |
 

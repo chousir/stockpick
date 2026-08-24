@@ -24,6 +24,14 @@ _STRATEGY_LABEL: dict[str, str] = {
     "e_growth_momentum": "E",
     "f_value_rebound": "F",
     "g_growth_pullback": "G",
+    # docs/31 §4新設計候選（2026-08-24掛進make week）：不用單字母fallback
+    # （sid[0].upper()對g1/g2/g4/g5全會撞成"G"，跟g_growth_pullback的"G"混淆），
+    # 明確標多字元標籤跟D/E/F/G區分。
+    "g1_margin_expansion": "G1",
+    "g2_quality_no_history": "G2",
+    "g4_yoy_divergence": "G4",
+    "g5_valuation_gap": "G5",
+    "l6_yoy_pe_flow": "L6",
 }
 
 _STRATEGY_NAME: dict[str, str] = {
@@ -36,6 +44,11 @@ _STRATEGY_NAME: dict[str, str] = {
     "e_growth_momentum": "成長動能",
     "f_value_rebound": "價值反彈",
     "g_growth_pullback": "成長拉回",
+    "g1_margin_expansion": "本地-利潤率擴張",
+    "g2_quality_no_history": "本地-品質龍頭(新D)",
+    "g4_yoy_divergence": "本地-YoY分歧",
+    "g5_valuation_gap": "本地-估值落差",
+    "l6_yoy_pe_flow": "本地-左側反彈",
 }
 
 _STRATEGY_DESCRIPTION: dict[str, str] = {
@@ -67,6 +80,29 @@ _STRATEGY_DESCRIPTION: dict[str, str] = {
     "g_growth_pullback": (
         "市值 ≥ 100 億 + 月營收 YoY ≥ 20% + 季線上揚回踩（乖離 −5%~+10%）+ 量縮"
         "（中線成長拉回・回檔買點，E 的逆勢孿生）"
+    ),
+    # docs/31 §4 全新本地filter（不打Goodinfo，2026-08-24掛進make week）：
+    # **尚未通過統計驗證**（§20總表），screen_result的source=local_unvalidated，
+    # 命中股會混進主候選宇宙，判讀時務必留意來源不是Goodinfo/官方口徑等價替代。
+    "g1_margin_expansion": (
+        "Δ單季毛利率≥+1.5pp + Δ單季營益率≥0 + 累計營收YoY≥0 + 距季線≤+15%"
+        "（本地未驗證・利潤率擴張優先，D的無歷史替代式思路延伸）"
+    ),
+    "g2_quality_no_history": (
+        "單季ROE≥3.5% + 負債比≤60% + 流動比≥1.2 + 市值≥300億"
+        "（本地未驗證・D的正式接班定義，2026-08-24拍板，見§20.1）"
+    ),
+    "g4_yoy_divergence": (
+        "單月YoY>累計YoY + 累計YoY≥0 + YoY環比未惡化"
+        "（本地未驗證・量兩個官方口徑差＋二階導同號）"
+    ),
+    "g5_valuation_gap": (
+        "估值百分位≤40 + 毛利率優於同業中位 + 營益率環比未惡化 + 成交額≥300萬"
+        "（本地未驗證・估值未反映利潤率改善）"
+    ),
+    "l6_yoy_pe_flow": (
+        "累計營收YoY≥20% + 本益比≤25"
+        "（本地未驗證・唯一有實證歷史數字撐腰的左側filter，僅用§5.2實測二條件讀法）"
     ),
 }
 

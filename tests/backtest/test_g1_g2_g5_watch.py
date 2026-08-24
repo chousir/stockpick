@@ -11,7 +11,9 @@ from tw_screener.backtest.g1_g2_g5_watch import (
     LEDGER_SCHEMA,
     build_g1_g2_g5_snapshot,
     ledger_progress_summary,
+    select_g1_candidates,
     select_g2_candidates,
+    select_g5_candidates,
     upsert_ledger,
 )
 
@@ -195,6 +197,70 @@ def test_select_g2_candidates_filters_to_g2_hits_only() -> None:
 
 def test_select_g2_candidates_empty_snapshot() -> None:
     out = select_g2_candidates(pl.DataFrame(schema=LEDGER_SCHEMA))
+    assert out.is_empty()
+    assert set(out.columns) == {"stock_id", "name"}
+
+
+def test_select_g1_candidates_filters_to_g1_hits_only() -> None:
+    universe = _universe([
+        {"stock_id": "1101", "name": "台泥", "market_cap_billion": 50.0, "cum_rev_yoy_pct": 5.0},
+        {"stock_id": "9999", "name": "都沒中", "market_cap_billion": 1.0, "cum_rev_yoy_pct": -10.0},
+    ])
+    fundamentals = _fundamentals([
+        {"stock_id": "1101", "quarter_label": "2026Q2", "net_margin_pct": 8.0,
+         "delta_net_margin_pct": 2.0, "op_margin_pct": 10.0, "delta_op_margin_pct": 0.5,
+         "gross_margin_pct": 20.0, "roe_q_pct": 1.0, "debt_ratio_pct": 70.0,
+         "current_ratio": 0.5},
+    ])
+    empty_peer = pl.DataFrame(schema={"stock_id": pl.Utf8, "subind_median": pl.Float64})
+    empty_val = pl.DataFrame(schema={"stock_id": pl.Utf8, "val_pctile": pl.Float64})
+    snap = build_g1_g2_g5_snapshot(
+        universe, fundamentals, empty_peer, empty_val,
+        ma60_map={"1101": 5.0}, amount_map={"1101": 100.0},
+        week="2026-W34", data_date=date(2026, 8, 22),
+    )
+    out = select_g1_candidates(snap)
+    assert out["stock_id"].to_list() == ["1101"]
+    assert set(out.columns) == {"stock_id", "name"}
+
+
+def test_select_g1_candidates_empty_snapshot() -> None:
+    out = select_g1_candidates(pl.DataFrame(schema=LEDGER_SCHEMA))
+    assert out.is_empty()
+    assert set(out.columns) == {"stock_id", "name"}
+
+
+def test_select_g5_candidates_filters_to_g5_hits_only() -> None:
+    universe = _universe(
+        [{"stock_id": "3006", "name": "晶豪科",
+          "market_cap_billion": 30.0, "cum_rev_yoy_pct": None}]
+    )
+    fundamentals = _fundamentals(
+        [{"stock_id": "3006", "quarter_label": "2026Q2", "net_margin_pct": None,
+          "delta_net_margin_pct": None, "op_margin_pct": 15.0, "delta_op_margin_pct": 1.0,
+          "gross_margin_pct": 35.0, "roe_q_pct": None, "debt_ratio_pct": None,
+          "current_ratio": None}]
+    )
+    peer = pl.DataFrame(
+        [{"stock_id": "3006", "subind_median": 30.0}],
+        schema={"stock_id": pl.Utf8, "subind_median": pl.Float64},
+    )
+    val = pl.DataFrame(
+        [{"stock_id": "3006", "val_pctile": 20.0}],
+        schema={"stock_id": pl.Utf8, "val_pctile": pl.Float64},
+    )
+    snap = build_g1_g2_g5_snapshot(
+        universe, fundamentals, peer, val,
+        ma60_map={}, amount_map={"3006": 500.0},
+        week="2026-W34", data_date=date(2026, 8, 22),
+    )
+    out = select_g5_candidates(snap)
+    assert out["stock_id"].to_list() == ["3006"]
+    assert set(out.columns) == {"stock_id", "name"}
+
+
+def test_select_g5_candidates_empty_snapshot() -> None:
+    out = select_g5_candidates(pl.DataFrame(schema=LEDGER_SCHEMA))
     assert out.is_empty()
     assert set(out.columns) == {"stock_id", "name"}
 

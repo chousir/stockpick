@@ -1,5 +1,5 @@
 .PHONY: help init sync test test-unit lint typecheck fmt clean clean-cache deep-clean \
-        fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history fetch-margin-history build-themes screen screen-all screen-dry doctor \
+        fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history fetch-margin-history build-themes screen screen-all screen-redesign-local screen-dry doctor \
         group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
         l6-g4-watch g1-g2-g5-watch \
         backfill-daily-history backfill-institutional-history \
@@ -19,7 +19,7 @@ help:  ## 列主要指令（裸打 make 即顯示）
 	@echo ""
 	@echo "進階指令：見 Makefile 各進階區段或 README「指令總覽」"
 
-week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-all → fetch-candidates-history → rotation → macro → cp-value-candidates → group → snapshot-week → week-check → pick-outcome-brief
+week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-all → screen-redesign-local → fetch-candidates-history → rotation → macro → cp-value-candidates → group → snapshot-week → week-check → pick-outcome-brief
 ifndef GROUP
 	@echo "❌ 請指定 GROUP=defg（現行唯一主流程；abc/def 已退役）"
 	@exit 1
@@ -31,6 +31,8 @@ endif
 	                  # screen-all 本來就會逐策略捕捉 GoodinfoBlockedError 記進 failures，doctor 失敗
 	                  # 不代表 screen-all 會白跑；擋在這裡只會讓 D/E/F/G 連「本週未取得」都印不出來
 	$(MAKE) screen-all GROUP=$(GROUP)
+	-$(MAKE) screen-redesign-local   # docs/31 §4 全新本地filter(G1/G2/G4/G5/L6)：2026-08-24拍板不用全部
+	                                 # 跟隨Goodinfo，直接併進候選宇宙；未過統計驗證，候選數會明顯變大
 	$(MAKE) fetch-candidates-history
 	-$(MAKE) rotation   # 先跑輪動（group 的 2.8 雷達要讀 sector_rotation.csv 並列；失敗不擋主流程）
 	-$(MAKE) macro   # docs/25 v2 總經燈號（BAA10Y 主訊號＋揭露面板）；FRED 掛了不擋主流程
@@ -72,6 +74,13 @@ ifndef GROUP
 	@exit 1
 endif
 	uv run tw-screener screen run-all --group $(GROUP)
+
+screen-redesign-local:  ## docs/31 §4 全新本地filter(G1/G2/G4/G5/L6)：不打Goodinfo，2026-08-24拍板直接掛進week，實驗性質未過§7.4統計驗證，結果可能不理想
+	-uv run tw-screener screen run-local g1
+	-uv run tw-screener screen run-local g2
+	-uv run tw-screener screen run-local g4
+	-uv run tw-screener screen run-local g5
+	-uv run tw-screener screen run-local l6
 
 fetch-candidates-history:  ## 對本週篩選結果補抓 STOCK_DAY 歷史（MA20/60+斜率+動能，MONTHS=13 預設≈年線；首次 30-40 分鐘，過去月份永久快取）
 	uv run tw-screener data fetch-candidates-history --months $(or $(MONTHS),13)

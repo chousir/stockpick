@@ -1729,17 +1729,17 @@ rank_velocity、flow_trigger、L6/G4/G1/G2/G5前瞻軌）全部是建立在Goodi
 
 | 候選 | 設計依據 | 實作狀態 | 驗證狀態 | 揭露狀態 |
 |---|---|---|---|---|
-| G1 利潤率擴張優先 | §4.1 | 已實作（`g1_g2_g5_watch.py`） | 分析層——`Δnet_margin`/`Δop_margin`僅1個QoQ資料點，零回測深度（§9） | `redesign_watch`欄（§20本次上線） |
-| G2 單季ROE×資產負債表體質（**2026-08-24已拍板正式接班D**） | §4.1 | 已實作，**不需擴欄**（§11查核推翻§4原始「需擴field_map+universe四欄」註記） | 累積中——單季快照條件，隨`research/g1_g2_g5_watch/`底帳週數增加才夠格檢定，**統計驗證仍未過關** | `redesign_watch`欄＋可用`screen run-local g2`手動產生候選清單（`source=local_unvalidated`） |
+| G1 利潤率擴張優先 | §4.1 | 已實作（`g1_g2_g5_watch.py`） | 分析層——`Δnet_margin`/`Δop_margin`僅1個QoQ資料點，零回測深度（§9） | `redesign_watch`欄＋**已自動掛進`make week`**（`screen-redesign-local`，2026-08-24，併入主候選宇宙） |
+| G2 單季ROE×資產負債表體質（**2026-08-24已拍板正式接班D**） | §4.1 | 已實作，**不需擴欄**（§11查核推翻§4原始「需擴field_map+universe四欄」註記） | 累積中——單季快照條件，隨`research/g1_g2_g5_watch/`底帳週數增加才夠格檢定，**統計驗證仍未過關** | `redesign_watch`欄＋**已自動掛進`make week`**（`screen-redesign-local`，2026-08-24，併入主候選宇宙，`source=local_unvalidated`） |
 | G3 族群轉強×個股落後 | §4.1 | 已實作＋已回測（`g3_grid.py`） | **已驗證，未過關**（r+10/r+20 CI95皆跨0，§9收官） | 不揭露（避免把未過關訊號包裝成觀察名單） |
-| G4 單月YoY對累計YoY正向分歧 | §4.1 | 已實作（併入`l6_g4_watch.py`） | 分析層——`t187ap05_L`純快照無法回查2022空頭，只能前瞻累積（§9） | `redesign_watch`欄（§20本次上線） |
-| G5 估值未反映利潤率改善 | §4.1 | 已實作（`g1_g2_g5_watch.py`） | 分析層——依賴`Δop_margin`，同G1零回測深度（§9） | `redesign_watch`欄（§20本次上線） |
+| G4 單月YoY對累計YoY正向分歧 | §4.1 | 已實作（併入`l6_g4_watch.py`） | 分析層——`t187ap05_L`純快照無法回查2022空頭，只能前瞻累積（§9） | `redesign_watch`欄＋**已自動掛進`make week`**（`screen-redesign-local`，2026-08-24，併入主候選宇宙） |
+| G5 估值未反映利潤率改善 | §4.1 | 已實作（`g1_g2_g5_watch.py`） | 分析層——依賴`Δop_margin`，同G1零回測深度（§9） | `redesign_watch`欄＋**已自動掛進`make week`**（`screen-redesign-local`，2026-08-24，併入主候選宇宙） |
 | L1 集保籌碼集中×股東人數下降 | §4.2 | 未實作 | 未驗證——僅8週TDCC快取，回測深度為零 | 無 |
 | L2 融資投降×不再破底 | §4.2 | 未實作 | 分析層 | 無 |
 | L3 低位在估值空間 | §4.2 | 未實作 | 分析層——`valuation_ratios`僅23日、無自身時序估值百分位 | 無 |
 | L4 量能壓縮安靜底部 | §4.2 | 未實作 | 分析層——上櫃全市場日線僅22日 | 無 |
 | L5 族群落難×個股相對抗跌 | §4.2 | 未實作 | 分析層 | 無 |
-| L6 YoY≥20∧PE≤25(∧投信買超∧市值≥100億) | §4.2 | 已實作（`l6_g4_watch.py`，`l6_2cond`/`l6_4cond`兩讀法皆存） | 累積中——歷史數字（25.5%/31.7%）樣本量級僅「兩個重疊週」，經不起再壓榨，需新週次（§9） | `redesign_watch`欄＋可用`screen run-local l6`手動產生候選清單（僅用`l6_2cond`讀法，`source=local_unvalidated`） |
+| L6 YoY≥20∧PE≤25(∧投信買超∧市值≥100億) | §4.2 | 已實作（`l6_g4_watch.py`，`l6_2cond`/`l6_4cond`兩讀法皆存） | 累積中——歷史數字（25.5%/31.7%）樣本量級僅「兩個重疊週」，經不起再壓榨，需新週次（§9） | `redesign_watch`欄＋**已自動掛進`make week`**（`screen-redesign-local`，2026-08-24，僅用`l6_2cond`讀法，併入主候選宇宙，`source=local_unvalidated`） |
 | F2' 成長優質股（PE15-30∧毛利優於同業∧營益率未惡化） | §7.2 | 未實作 | 分析層 | 無 |
 | §7.1 政策旁路（F2位階gate開左側小注旁路） | §7.1 | 未實作（風險最高，明訂不在此輪套用） | 阻擋於L6/G4累積軌先過§7.4門檻，本身無法用2022-2026資料測（§7.4附記） | 無（尚無旁路可揭露） |
 
@@ -1778,3 +1778,32 @@ g2`的產出一律標`source=local_unvalidated`，任何人讀到這個source值
 `research/g1_g2_g5_watch/ledger.csv`的g2命中數44筆完全一致；`screen run-local l6`
 篩出281檔，與`research/l6_g4_watch/ledger.csv`的l6_2cond命中數281筆完全一致——
 兩條路徑（揭露欄底帳 vs 候選生成CLI）互相校驗數字一致，不是各算各的。
+
+### 20.2 追加拍板：G1/G4/G5全部併入＋自動掛進make week（2026-08-24，同日追加）
+
+使用者對§20.1的範圍限縮（只做G2/L6）明確推翻：「不用全部跟隨goodinfo，要用自己
+現有資料來做filter，然後不要再想Goodinfo，然後請串接到make week，雖然實驗性質
+還沒過，但可以先接上，只是跑的結果不理想而已」。這推翻了§20.1「刻意不做」清單
+裡的兩條：**G1/G4/G5也要能用**（不只G2/L6）、**要自動掛進`make week`**（不維持
+手動指令）。
+
+規模查核（AskUserQuestion確認）：實測本週命中數g1=107、g2=44、g4=351、g5=21、
+l6_2cond=281檔（Goodinfo D/E/F/G共同才~87檔）。若五式全部併進主候選宇宙，候選數
+會從~87膨脹到數百檔量級。使用者選擇**全部併進主體候選宇宙，不額外收斂門檻**，
+接受規模與品質皆未成熟的現況。
+
+工程：`select_g1_candidates()`/`select_g5_candidates()`（`g1_g2_g5_watch.py`）＋
+`select_g4_candidates()`（`l6_g4_watch.py`）補齊；`cli.py`的`_REDESIGN_STRATEGY_IDS`
+擴充到五式；新增`screen-redesign-local`Makefile目標（五個`screen run-local`各自
+`-`前綴容錯），`-$(MAKE) screen-redesign-local`掛進`week`（`screen-all`之後、
+`fetch-candidates-history`之前，非阻擋）。**踩到一個新bug**：`report/group_report.py`
+的`_STRATEGY_LABEL.get(sid, sid[0].upper())` fallback——g1/g2/g4/g5四個新
+strategy_id沒有表項時全部退化成單字母「G」，跟既有Goodinfo `g_growth_pullback`
+策略標籤「G」直接碰撞，會讓候選股的`strategy`欄誤讀成命中Goodinfo G策略。已在
+`_STRATEGY_LABEL`/`_STRATEGY_NAME`/`_STRATEGY_DESCRIPTION`補上五式獨立項目
+（標籤"G1"/"G2"/"G4"/"G5"/"L6"，非單字母）修正——這是範圍擴大到真正流進
+`group_stocks()`候選管線後才會踩到的問題，§20.1只做手動CLI指令時沒踩到。
+
+**§20.1「刻意不做」清單更新**：「不自動掛進`make week`」已被本次拍板推翻，改為
+自動；「不整合`pick-outcome`底帳歸因」「不改`d_quality_leader.yaml`」兩條維持
+不變，本輪未動。

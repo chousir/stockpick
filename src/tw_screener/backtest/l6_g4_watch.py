@@ -174,6 +174,16 @@ def select_l6_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
     return snapshot.filter(pl.col("l6_2cond")).select("stock_id", "name").unique("stock_id")
 
 
+def select_g4_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
+    """從 `build_l6_g4_snapshot()` 輸出篩 `g4==True` 的列（docs/31 2026-08-24使用者
+    拍板：用現有本地資料做filter直接掛進`make week`，接受未驗證，`screen run-local
+    g4`用）。G4仍在「分析層」（`t187ap05_L`純快照無法回查2022空頭，見§9/§20）。
+    """
+    if snapshot.is_empty() or "g4" not in snapshot.columns:
+        return pl.DataFrame(schema={"stock_id": pl.Utf8, "name": pl.Utf8})
+    return snapshot.filter(pl.col("g4")).select("stock_id", "name").unique("stock_id")
+
+
 @dataclass(frozen=True)
 class L6G4Inputs:
     """`build_l6_g4_snapshot()` 需要的三個輸入（見 `build_l6_g4_inputs()`）。"""

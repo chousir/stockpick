@@ -12,6 +12,7 @@ from tw_screener.backtest.l6_g4_watch import (
     build_l6_g4_snapshot,
     ledger_progress_summary,
     revenue_disclosure_date,
+    select_g4_candidates,
     select_l6_candidates,
     upsert_l6_g4_ledger,
 )
@@ -137,6 +138,33 @@ def test_select_l6_candidates_filters_to_l6_2cond_only() -> None:
 
 def test_select_l6_candidates_empty_snapshot() -> None:
     out = select_l6_candidates(pl.DataFrame(schema=LEDGER_SCHEMA))
+    assert out.is_empty()
+    assert set(out.columns) == {"stock_id", "name"}
+
+
+def test_select_g4_candidates_filters_to_g4_hits_only() -> None:
+    universe = _universe([
+        {"stock_id": "AAA", "name": "命中", "market_cap_billion": 10.0,
+         "pe_ratio": 40.0, "cum_rev_yoy_pct": 5.0},
+        {"stock_id": "BBB", "name": "累計為負", "market_cap_billion": 10.0,
+         "pe_ratio": 40.0, "cum_rev_yoy_pct": -3.0},
+    ])
+    revenue = _revenue([
+        {"stock_id": "AAA", "year_month": "202607", "yoy_pct": 12.0},
+        {"stock_id": "BBB", "year_month": "202607", "yoy_pct": 12.0},
+    ])
+    snap = build_l6_g4_snapshot(
+        universe, revenue,
+        yoy_deltas={"AAA": (3.0, 1.0), "BBB": (3.0, 1.0)},
+        trust_net_5d={}, week="2026-W34", data_date=date(2026, 8, 22),
+    )
+    out = select_g4_candidates(snap)
+    assert out["stock_id"].to_list() == ["AAA"]
+    assert set(out.columns) == {"stock_id", "name"}
+
+
+def test_select_g4_candidates_empty_snapshot() -> None:
+    out = select_g4_candidates(pl.DataFrame(schema=LEDGER_SCHEMA))
     assert out.is_empty()
     assert set(out.columns) == {"stock_id", "name"}
 

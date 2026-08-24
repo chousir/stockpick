@@ -188,6 +188,29 @@ def select_g2_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
     return snapshot.filter(pl.col("g2")).select("stock_id", "name").unique("stock_id")
 
 
+def select_g1_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
+    """從 `build_g1_g2_g5_snapshot()` 輸出篩 `g1==True` 的列（docs/31 2026-08-24
+    使用者拍板：不用全部跟隨Goodinfo，用現有本地資料做filter，直接掛進`make week`，
+    接受「未驗證、結果可能不理想」——`screen run-local g1`用）。
+
+    只回傳 `stock_id`/`name` 兩欄，呼叫端補其餘欄位並把`source`標成
+    `local_unvalidated`（G1目前仍在「分析層」，`Δnet_margin`/`Δop_margin`僅1個
+    QoQ資料點、零回測深度，見docs/31 §9/§20，不是統計驗證通過才上線）。
+    """
+    if snapshot.is_empty() or "g1" not in snapshot.columns:
+        return pl.DataFrame(schema={"stock_id": pl.Utf8, "name": pl.Utf8})
+    return snapshot.filter(pl.col("g1")).select("stock_id", "name").unique("stock_id")
+
+
+def select_g5_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
+    """從 `build_g1_g2_g5_snapshot()` 輸出篩 `g5==True` 的列（同上，`screen
+    run-local g5`用；G5同樣仍在「分析層」，依賴`Δop_margin`，零回測深度）。
+    """
+    if snapshot.is_empty() or "g5" not in snapshot.columns:
+        return pl.DataFrame(schema={"stock_id": pl.Utf8, "name": pl.Utf8})
+    return snapshot.filter(pl.col("g5")).select("stock_id", "name").unique("stock_id")
+
+
 @dataclass(frozen=True)
 class G1G2G5Inputs:
     """`build_g1_g2_g5_snapshot()` 需要的五個輸入（見 `build_g1_g2_g5_inputs()`）。"""

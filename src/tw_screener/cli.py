@@ -935,25 +935,32 @@ def screen_run_all(
     console.print(f"\n[bold]報告目錄：reports/{week_tag}/[/bold]")
 
 
-# docs/31「D策略定義變更」（2026-08-24，使用者拍板）：G2＝D的正式接班定義，L6＝
-# 唯一有實證歷史數字撐腰的左側filter。兩者皆**尚未通過§7.4統計驗證門檻**（見docs/31
-# §20現況總表），screen_result輸出一律標source=local_unvalidated，跟f_value_rebound
-# 既有的source=local（官方資料替代Goodinfo同一套已知門檻，口徑落差有限）明確區分——
-# 不可混用同一個標記，見§19.3訂正（field_map.py本地映射跟這裡的§4新設計filter是
-# 兩個不同機制）。只用G2/L6的l6_2cond讀法，不含G1/G4/G5（仍在分析層/驗證不出，見
-# §20）、不含L6的l6_4cond額外兩條件（從未獨立驗證，見§9記載）。
+# docs/31「D策略定義變更」＋2026-08-24使用者追加拍板：不用全部跟隨Goodinfo，用
+# 現有本地資料做filter，五式（G1/G2/G4/G5/L6）全部直接掛進`make week`
+# （`screen-redesign-local`），接受「未驗證、結果可能不理想」的代價，不再侷限只做
+# G2(=D的正式接班定義)/L6(唯一有實證歷史數字撐腰的左側filter)。全部**尚未通過
+# §7.4統計驗證門檻**（見docs/31 §20現況總表），screen_result輸出一律標
+# source=local_unvalidated，跟f_value_rebound既有的source=local（官方資料替代
+# Goodinfo同一套已知門檻，口徑落差有限）明確區分——不可混用同一個標記，見§19.3訂正
+# （field_map.py本地映射跟這裡的§4新設計filter是兩個不同機制）。L6只用l6_2cond
+# 讀法，不含l6_4cond額外兩條件（從未獨立驗證，見§9記載）。
 _REDESIGN_STRATEGY_IDS: dict[str, str] = {
+    "g1": "g1_margin_expansion",
     "g2": "g2_quality_no_history",
+    "g4": "g4_yoy_divergence",
+    "g5": "g5_valuation_gap",
     "l6": "l6_yoy_pe_flow",
 }
+_G1_G2_G5_IDS = {"g1", "g2", "g5"}
 
 
 def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):  # noqa: ANN001
-    """`screen run-local g2`／`screen run-local l6`的候選生成路徑（docs/31 D策略定義變更）。
+    """`screen run-local {g1,g2,g4,g5,l6}`的候選生成路徑（docs/31 D策略定義變更＋
+    2026-08-24追加拍板）。
 
     重用`group_runner.py`同一套已在跑的snapshot函式（`build_g1_g2_g5_snapshot`／
     `build_l6_g4_snapshot`），只是換一種消費方式：篩出命中列、轉成screen_result格式，
-    不寫進research/底帳（底帳累積是`group`步驟的職責，這裡是另一條手動生成候選的路徑，
+    不寫進research/底帳（底帳累積是`group`步驟的職責，這裡是另一條生成候選的路徑，
     兩者互不影響）。回傳(stock_id, name)兩欄DataFrame，呼叫端補其餘欄位。
     """
     import polars as pl
@@ -966,16 +973,19 @@ def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):
     if universe.is_empty():
         return empty
 
-    if strategy == "g2":
+    data_date = client.latest_trading_date()
+    if data_date is None:
+        return empty
+
+    if strategy in _G1_G2_G5_IDS:
         from tw_screener.backtest.g1_g2_g5_watch import (
             build_g1_g2_g5_inputs,
             build_g1_g2_g5_snapshot,
+            select_g1_candidates,
             select_g2_candidates,
+            select_g5_candidates,
         )
 
-        data_date = client.latest_trading_date()
-        if data_date is None:
-            return empty
         inputs = build_g1_g2_g5_inputs(client, cfg, universe)
         wc = cfg.get("backtest", {}).get("g1_g2_g5_watch", {})
         snapshot = build_g1_g2_g5_snapshot(
@@ -990,17 +1000,17 @@ def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):
             g5_val_pctile_max=float(wc.get("g5_val_pctile_max", 40.0)),
             g5_amount_min_million=float(wc.get("g5_amount_min_million", 300.0)),
         )
-        return select_g2_candidates(snapshot)
+        selector = {"g1": select_g1_candidates, "g2": select_g2_candidates,
+                    "g5": select_g5_candidates}[strategy]
+        return selector(snapshot)
 
     from tw_screener.backtest.l6_g4_watch import (
         build_l6_g4_inputs,
         build_l6_g4_snapshot,
+        select_g4_candidates,
         select_l6_candidates,
     )
 
-    data_date = client.latest_trading_date()
-    if data_date is None:
-        return empty
     l6_inputs = build_l6_g4_inputs(client, cfg, data_date)
     wc = cfg.get("backtest", {}).get("l6_g4_watch", {})
     snapshot = build_l6_g4_snapshot(
@@ -1010,14 +1020,14 @@ def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):
         l6_pe_max=float(wc.get("l6_pe_max", 25.0)),
         l6_mktcap_min_billion=float(wc.get("l6_mktcap_min_billion", 100.0)),
     )
-    return select_l6_candidates(snapshot)
+    return select_g4_candidates(snapshot) if strategy == "g4" else select_l6_candidates(snapshot)
 
 
 @screen_app.command("run-local")
 def screen_run_local(
     strategy: str = typer.Argument(
         help="策略 ID，如 f_value_rebound（僅門檻可完全由官方資料覆蓋的策略可跑）；"
-        "或 g2／l6（docs/31 §4新設計候選，統計驗證未過關，見下方說明）"
+        "或 g1／g2／g4／g5／l6（docs/31 §4新設計候選，統計驗證未過關，見下方說明）"
     ),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
@@ -1032,11 +1042,12 @@ def screen_run_local(
     多一欄 source=local，供之後週報／pick-outcome 辨識資料來源（本地口徑與 Goodinfo
     篩選器存在落差：市值股數月頻、PE/殖利率為官方 trailing 非 Goodinfo 自算，見 docs/02）。
 
-    strategy=g2／l6 時走另一條路徑（docs/31 D策略定義變更，2026-08-24）：G2＝D的
-    正式接班定義、L6＝實證左側filter，皆為docs/31 §4全新設計、**尚未通過統計驗證**
-    （§20總表），輸出source=local_unvalidated（非f_value_rebound的source=local），
-    明確跟已知口徑落差的官方資料替代路徑區分開。**手動指令，不掛`make week`**——
-    是否要在某週把這份候選塞進報表，由你自己判斷，不自動發生。
+    strategy=g1／g2／g4／g5／l6 時走另一條路徑（docs/31 D策略定義變更＋2026-08-24
+    使用者追加拍板：五式全部直接掛進`make week`，不用全部跟隨Goodinfo，用現有本地
+    資料做filter，接受未驗證/結果可能不理想）：皆為docs/31 §4全新設計、**尚未通過
+    統計驗證**（§20總表），輸出source=local_unvalidated（非f_value_rebound的
+    source=local），明確跟已知口徑落差的官方資料替代路徑區分開。已掛進`make week`
+    的`screen-redesign-local`步驟自動每週執行，這裡列出也可手動單獨重跑。
     """
     import polars as pl
     import yaml as _yaml
