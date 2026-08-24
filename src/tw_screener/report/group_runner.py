@@ -491,6 +491,78 @@ def run_group_analysis(settings: Path) -> None:
         console.print(f"[yellow]  官方族群前5揭露欄計算失敗，該段留空：{e}[/yellow]")
         official_sector_map = {}
 
+    # docs/31 §4/§9/§11（2026-08-24 使用者要求）：G1/G2/G4/G5/L6 新設計候選揭露欄。
+    # 這五式此前只累積在 gitignored 的 research/ 底帳（`g1-g2-g5-watch`／`l6-g4-watch`
+    # 手動指令），使用者從未在週報實際看到。這裡把底帳計算搬進 group（比照上面
+    # official_sector 段的整合模式）、順便自動 upsert 兩份底帳，並把命中旗標揭露成
+    # candidates_enriched.csv 的單一欄位。純觀察，不進篩選/排序/pick.md 核心層；
+    # G3 已驗證未過關（docs/31 §9），不放進這欄——放進去會把被否證的訊號包裝成觀察名單。
+    # 只加一欄（逗號分隔命中旗標），不加五個布林欄，避免重蹈 §18.1 已反省過的欄位膨脹。
+    redesign_watch_map: dict[str, str] = {}
+    try:
+        from tw_screener.backtest.g1_g2_g5_watch import build_g1_g2_g5_inputs
+        from tw_screener.backtest.g1_g2_g5_watch import build_g1_g2_g5_snapshot as _g1g2g5_snap
+        from tw_screener.backtest.g1_g2_g5_watch import upsert_ledger as upsert_g1g2g5_ledger
+        from tw_screener.backtest.l6_g4_watch import build_l6_g4_inputs, upsert_l6_g4_ledger
+        from tw_screener.backtest.l6_g4_watch import build_l6_g4_snapshot as _l6g4_snap
+        from tw_screener.screener.local.universe import build_local_universe
+
+        rw_data_date = client.latest_trading_date()
+        rw_universe = build_local_universe(client)
+        if rw_data_date is not None and not rw_universe.is_empty():
+            g1g2g5_cfg = cfg.get("backtest", {}).get("g1_g2_g5_watch", {})
+            l6g4_cfg = cfg.get("backtest", {}).get("l6_g4_watch", {})
+
+            g1g2g5_inputs = build_g1_g2_g5_inputs(client, cfg, rw_universe)
+            g1g2g5_snapshot = _g1g2g5_snap(
+                rw_universe, g1g2g5_inputs.fundamentals, g1g2g5_inputs.gross_margin_peer,
+                g1g2g5_inputs.valuation, g1g2g5_inputs.ma60_map, g1g2g5_inputs.amount_map,
+                week_tag, rw_data_date,
+                g1_delta_net_margin_min=float(g1g2g5_cfg.get("g1_delta_net_margin_min", 1.5)),
+                g1_ma60_max_pct=float(g1g2g5_cfg.get("g1_ma60_max_pct", 15.0)),
+                g2_roe_min=float(g1g2g5_cfg.get("g2_roe_min", 3.5)),
+                g2_debt_max_pct=float(g1g2g5_cfg.get("g2_debt_max_pct", 60.0)),
+                g2_current_min=float(g1g2g5_cfg.get("g2_current_min", 1.2)),
+                g2_mktcap_min_billion=float(g1g2g5_cfg.get("g2_mktcap_min_billion", 300.0)),
+                g5_val_pctile_max=float(g1g2g5_cfg.get("g5_val_pctile_max", 40.0)),
+                g5_amount_min_million=float(g1g2g5_cfg.get("g5_amount_min_million", 300.0)),
+            )
+            upsert_g1g2g5_ledger(
+                Path(g1g2g5_cfg.get("output_path", "research/g1_g2_g5_watch/ledger.csv")),
+                g1g2g5_snapshot,
+            )
+
+            l6g4_inputs = build_l6_g4_inputs(client, cfg, rw_data_date)
+            l6g4_snapshot = _l6g4_snap(
+                rw_universe, l6g4_inputs.revenue, l6g4_inputs.yoy_deltas,
+                l6g4_inputs.trust_net_5d, week_tag, rw_data_date,
+                l6_yoy_min=float(l6g4_cfg.get("l6_yoy_min", 20.0)),
+                l6_pe_max=float(l6g4_cfg.get("l6_pe_max", 25.0)),
+                l6_mktcap_min_billion=float(l6g4_cfg.get("l6_mktcap_min_billion", 100.0)),
+            )
+            upsert_l6_g4_ledger(
+                Path(l6g4_cfg.get("output_path", "research/l6_g4_watch/ledger.csv")),
+                l6g4_snapshot,
+            )
+
+            for snap, tag_cols in (
+                (g1g2g5_snapshot, ("g1", "g2", "g5")),
+                (l6g4_snapshot, ("l6_2cond", "l6_4cond", "g4")),
+            ):
+                for row in snap.iter_rows(named=True):
+                    hits = [c for c in tag_cols if row.get(c)]
+                    if not hits:
+                        continue
+                    sid = str(row["stock_id"])
+                    prior = redesign_watch_map.get(sid, "")
+                    redesign_watch_map[sid] = ",".join(
+                        [t for t in prior.split(",") if t] + hits
+                    )
+        console.print(f"  docs/31新設計候選觀察（未驗證）：{len(redesign_watch_map)} 檔命中")
+    except Exception as e:  # noqa: BLE001 — 純揭露段，任何一步壞掉不擋 group 報告主流程
+        console.print(f"[yellow]  G1/G2/G4/G5/L6揭露欄計算失敗，該段留空：{e}[/yellow]")
+        redesign_watch_map = {}
+
     csv_path = output_path.parent / "candidates_enriched.csv"
     cand_rows = write_candidates_enriched_csv(
         leaders, themes_long, screener_results, csv_path,
@@ -506,6 +578,7 @@ def run_group_analysis(settings: Path) -> None:
         shares_map=shares_map,
         official_sector_map=official_sector_map,
         official_sector_regime=cast("str | None", regime.get("regime")),
+        redesign_watch_map=redesign_watch_map,
     )
     # 重疊股重用：庫存/觀察清單同檔一律沿用 candidates 那筆，避免跨 CSV 量比/集中度/成交額分岔
     canonical_rows = {row["stock_id"]: row for row in cand_rows}

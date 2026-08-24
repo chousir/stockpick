@@ -1374,7 +1374,8 @@ def backtest_flow_trigger_grid_cmd(
 def backtest_l6_g4_watch_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
-    """docs/31 §9 item4：L6/G4 前瞻累積軌——記錄本週快照，不做統計裁決。手動指令，需每週跑。"""
+    """docs/31 §9 item4：L6/G4 前瞻累積軌——記錄本週快照，不做統計裁決。week 已內含（透過
+    `group`），本指令是可單獨重跑的手動工具。"""
     from tw_screener.backtest.l6_g4_watch_runner import run_l6_g4_watch
 
     run_l6_g4_watch(settings)
@@ -1384,7 +1385,8 @@ def backtest_l6_g4_watch_cmd(
 def backtest_g1_g2_g5_watch_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
-    """docs/31 §11：G1/G2/G5 前瞻累積軌——記錄本週快照，不做統計裁決。手動指令，需每週跑。"""
+    """docs/31 §11：G1/G2/G5 前瞻累積軌——記錄本週快照，不做統計裁決。week 已內含（透過
+    `group`），本指令是可單獨重跑的手動工具。"""
     from tw_screener.backtest.g1_g2_g5_watch_runner import run_g1_g2_g5_watch
 
     run_g1_g2_g5_watch(settings)

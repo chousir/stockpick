@@ -21,6 +21,7 @@ margin、roe/debt/current_ratio、Δ）每季才更新一次（MOPS財報公告�
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -170,6 +171,105 @@ def build_g1_g2_g5_snapshot(
             }
         )
     return pl.DataFrame(rows, schema=LEDGER_SCHEMA)
+
+
+@dataclass(frozen=True)
+class G1G2G5Inputs:
+    """`build_g1_g2_g5_snapshot()` 需要的五個輸入（見 `build_g1_g2_g5_inputs()`）。"""
+
+    fundamentals: pl.DataFrame
+    gross_margin_peer: pl.DataFrame
+    valuation: pl.DataFrame
+    ma60_map: dict[str, float | None]
+    amount_map: dict[str, float | None]
+
+
+def build_g1_g2_g5_inputs(client, cfg: dict, universe: pl.DataFrame) -> G1G2G5Inputs:  # noqa: ANN001 — TWSEClient，避免循環 import
+    """組 `build_g1_g2_g5_snapshot()` 需要的五個輸入（純讀既有快取，不打網）。
+
+    抽出自原本寫死在 `g1_g2_g5_watch_runner.run_g1_g2_g5_watch` 裡的邏輯，供該 CLI
+    runner 與 `report/group_runner.py`（docs/31 使用者要求把 G1/G2/G5 揭露進
+    `candidates_enriched.csv` 後新增）共用，避免兩處各自維護一份等價邏輯。
+    """
+    from pathlib import Path as _Path
+
+    from tw_screener.analysis.rotation import load_market_history
+    from tw_screener.analysis.sector_universe import (
+        build_peer_membership,
+        list_subindustries,
+        load_industry_mapping,
+    )
+    from tw_screener.analysis.valuation import build_valuation, compute_subind_relative
+
+    wc = cfg.get("backtest", {}).get("g1_g2_g5_watch", {})
+    ma60_window = int(wc.get("ma60_window", 60))
+    market_history_days = int(wc.get("market_history_days", 90))
+    min_peers = int(wc.get("min_peers", 5))
+    cache_dir = _Path(cfg["paths"]["cache_dir"]) / "twse"
+
+    fundamentals = client.load_fundamentals_history()
+
+    industry = load_industry_mapping(cache_dir)
+    hand = list_subindustries()
+    membership = build_peer_membership(hand, industry)
+
+    gross_margin_peer = (
+        compute_subind_relative(
+            fundamentals, membership, value_col="gross_margin_pct", min_peers=min_peers
+        )
+        if not fundamentals.is_empty() and not membership.is_empty()
+        else pl.DataFrame(schema={"stock_id": pl.Utf8, "subind_median": pl.Float64})
+    )
+
+    ratios = client.load_latest_valuation_ratios()
+    valuation = (
+        build_valuation(ratios, membership, min_peers=min_peers)
+        if not ratios.is_empty() and not membership.is_empty()
+        else pl.DataFrame(schema={"stock_id": pl.Utf8, "val_pctile": pl.Float64})
+    )
+
+    # ma60_dist_pct：全市場累積日線快取算 rolling MA60，取最新一日
+    market_hist = load_market_history(cache_dir, n_days=market_history_days)
+    ma60_map: dict[str, float | None] = {}
+    if not market_hist.is_empty():
+        ma60_expr = (
+            pl.col("close")
+            .rolling_mean(ma60_window, min_samples=ma60_window)
+            .over("stock_id")
+            .alias("_ma60")
+        )
+        ma = (
+            market_hist.sort(["stock_id", "date"])
+            .with_columns(ma60_expr)
+            .filter(pl.col("date") == pl.col("date").max())
+            .with_columns(
+                pl.when(pl.col("_ma60") > 0)
+                .then((pl.col("close") - pl.col("_ma60")) / pl.col("_ma60") * 100)
+                .otherwise(None)
+                .alias("_dist")
+            )
+        )
+        ma60_map = {
+            str(r["stock_id"]): (float(r["_dist"]) if r["_dist"] is not None else None)
+            for r in ma.iter_rows(named=True)
+        }
+
+    # amount_million：今日成交金額（daily_*/otc_daily_* 已有 trade_value，原始新台幣元）
+    amount_map: dict[str, float | None] = {}
+    for df in (client.fetch_daily_all(), client.fetch_otc_daily_all()):
+        if df.is_empty() or "trade_value" not in df.columns:
+            continue
+        for r in df.iter_rows(named=True):
+            tv = r.get("trade_value")
+            amount_map[str(r["stock_id"])] = (float(tv) / 1e6) if tv is not None else None
+
+    return G1G2G5Inputs(
+        fundamentals=fundamentals,
+        gross_margin_peer=gross_margin_peer,
+        valuation=valuation,
+        ma60_map=ma60_map,
+        amount_map=amount_map,
+    )
 
 
 def _read_ledger(path: Path) -> pl.DataFrame:

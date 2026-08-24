@@ -19,7 +19,7 @@ help:  ## 列主要指令（裸打 make 即顯示）
 	@echo ""
 	@echo "進階指令：見 Makefile 各進階區段或 README「指令總覽」"
 
-week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-all → fetch-candidates-history → rotation → macro → cp-value-candidates → group → l6-g4-watch → g1-g2-g5-watch → snapshot-week → week-check → pick-outcome-brief
+week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-all → fetch-candidates-history → rotation → macro → cp-value-candidates → group → snapshot-week → week-check → pick-outcome-brief
 ifndef GROUP
 	@echo "❌ 請指定 GROUP=defg（現行唯一主流程；abc/def 已退役）"
 	@exit 1
@@ -35,9 +35,7 @@ endif
 	-$(MAKE) rotation   # 先跑輪動（group 的 2.8 雷達要讀 sector_rotation.csv 並列；失敗不擋主流程）
 	-$(MAKE) macro   # docs/25 v2 總經燈號（BAA10Y 主訊號＋揭露面板）；FRED 掛了不擋主流程
 	-$(MAKE) cp-value-candidates   # 個股 CP 補漲候選＋三重濾網（group 的 7. 分析請求要讀 cp_candidates.md；失敗不擋）
-	$(MAKE) group   # 官方族群前5前瞻累積軌（docs/31 §13）已內含在這步，不必另跑
-	-$(MAKE) l6-g4-watch   # docs/31 §9 前瞻累積軌：記錄本週快照，不做裁決（失敗不擋主流程）
-	-$(MAKE) g1-g2-g5-watch   # docs/31 §11 前瞻累積軌：記錄本週快照，不做裁決（失敗不擋主流程）
+	$(MAKE) group   # 官方族群前5(§13)/G1/G2/G4/G5/L6新設計候選揭露(§4/§9/§11)前瞻累積軌皆已內含在這步，不必另跑
 	-$(MAKE) snapshot-week   # WS-J.1 point-in-time 快照：凍結本週 concepts/watchlist/holdings/宇宙成員（失敗不擋主流程）
 	$(MAKE) week-check   # 尾段產物完整性檢查（規劃書 05 F4）：上面容錯步驟若無聲失敗，這裡點名
 	-$(MAKE) pick-outcome-brief   # WS-A3 上週 picks r+5 回饋一頁（輸入包；失敗不擋主流程）
@@ -87,13 +85,13 @@ macro:  ## docs/25 v2 總經燈號：抓 FRED（快取24h）→算 BAA10Y 主訊
 cp-value-candidates:  ## B3 個股 CP 候選清單（生產軌，產 reports/週次/cp_candidates.md+csv；docs/13）
 	uv run tw-screener cp candidates
 
-group:  ## 跑族群分析，產出 group_analysis.md（docs/31 §13 官方族群前5前瞻累積軌已內含）
+group:  ## 跑族群分析，產出 group_analysis.md（docs/31 §13 官方族群前5＋§4/§9/§11 G1/G2/G4/G5/L6 揭露欄前瞻累積軌皆已內含）
 	uv run tw-screener analysis group
 
-l6-g4-watch:  ## docs/31 §9 L6/G4 前瞻累積軌：記錄本週快照（PE/月營收YoY/投信買超），不做裁決
+l6-g4-watch:  ## docs/31 §9 L6/G4 前瞻累積軌快照（week 已內含，可單獨重跑；不做裁決）
 	uv run tw-screener backtest l6-g4-watch
 
-g1-g2-g5-watch:  ## docs/31 §11 G1/G2/G5 前瞻累積軌：記錄本週快照，不做裁決
+g1-g2-g5-watch:  ## docs/31 §11 G1/G2/G5 前瞻累積軌快照（week 已內含，可單獨重跑；不做裁決）
 	uv run tw-screener backtest g1-g2-g5-watch
 
 week-check:  ## 產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（規劃書 05 F4；不擋流程）

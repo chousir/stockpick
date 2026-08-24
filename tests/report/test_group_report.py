@@ -622,3 +622,32 @@ def test_official_sector_columns_populated_from_map(tmp_path):
     assert by_id["2454"]["official_sector_group"] is None
     # regime 對全部列一視同仁（本週單一標籤，非命中與否而異）
     assert by_id["2454"]["official_sector_regime"] == "進攻"
+
+
+def test_redesign_watch_column_default_blank_without_map(tmp_path):
+    """docs/31 §4/§9/§11：不傳redesign_watch_map → 欄位如實留白，不臆造命中。"""
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), results, out)
+    df = pl.read_csv(out)
+    assert df["redesign_watch"].is_null().all()
+
+
+def test_redesign_watch_column_populated_from_map(tmp_path):
+    """命中股顯示逗號分隔旗標；未命中股留白。"""
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(
+        members, pl.DataFrame(), results, out,
+        redesign_watch_map={"2330": "g2,l6_2cond"},
+    )
+    df = pl.read_csv(out)
+    by_id = {str(r["stock_id"]): r for r in df.iter_rows(named=True)}
+    assert by_id["2330"]["redesign_watch"] == "g2,l6_2cond"
+    assert by_id["2454"]["redesign_watch"] is None

@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -156,6 +157,40 @@ def build_l6_g4_snapshot(
             }
         )
     return pl.DataFrame(rows, schema=LEDGER_SCHEMA)
+
+
+@dataclass(frozen=True)
+class L6G4Inputs:
+    """`build_l6_g4_snapshot()` 需要的三個輸入（見 `build_l6_g4_inputs()`）。"""
+
+    revenue: pl.DataFrame
+    yoy_deltas: dict[str, tuple[float | None, float | None]]
+    trust_net_5d: dict[str, float | None]
+
+
+def build_l6_g4_inputs(client, cfg: dict, data_date: date) -> L6G4Inputs:  # noqa: ANN001 — TWSEClient，避免循環 import
+    """組 `build_l6_g4_snapshot()` 需要的三個輸入（純讀既有快取，不打網）。
+
+    抽出自原本寫死在 `l6_g4_watch_runner.run_l6_g4_watch` 裡的邏輯，供該 CLI runner
+    與 `report/group_runner.py`（docs/31 使用者要求把 L6/G4 揭露進
+    `candidates_enriched.csv` 後新增）共用，避免兩處各自維護一份等價邏輯。
+    """
+    wc = cfg.get("backtest", {}).get("l6_g4_watch", {})
+    flow_window = int(wc.get("trust_flow_window_td", 5))
+
+    revenue = client.fetch_revenue()
+    yoy_deltas = client.load_revenue_yoy_deltas()
+
+    inst = client.load_institutional_history(n_days=flow_window, as_of=data_date)
+    trust_net_5d: dict[str, float | None] = {}
+    if not inst.is_empty() and {"stock_id", "trust_net"}.issubset(inst.columns):
+        agg = inst.group_by("stock_id").agg(pl.col("trust_net").sum().alias("_s"))
+        trust_net_5d = {
+            str(r["stock_id"]): (float(r["_s"]) if r["_s"] is not None else None)
+            for r in agg.iter_rows(named=True)
+        }
+
+    return L6G4Inputs(revenue=revenue, yoy_deltas=yoy_deltas, trust_net_5d=trust_net_5d)
 
 
 def _read_ledger(path: Path) -> pl.DataFrame:

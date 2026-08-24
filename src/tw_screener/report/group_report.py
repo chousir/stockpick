@@ -858,6 +858,7 @@ def _build_enriched_rows(
     shares_map: dict | None = None,
     official_sector_map: dict | None = None,
     official_sector_regime: str | None = None,
+    redesign_watch_map: dict | None = None,
 ) -> list[dict]:
     """組「每檔 × 技術/籌碼/估值/基本面 + flags」列（candidates / 庫存 / 觀察 共用）。
 
@@ -883,6 +884,12 @@ def _build_enriched_rows(
     official_sector_regime：本週大盤regime標籤（同`describe_regime()`輸出），隨欄位
     一併印出——docs/31 §13.5已證實這個訊號的效應幾乎全部集中在「進攻」regime，
     中性/防禦regime下歷史上量不到效應，讀者需要這個context才不會誤判可信度。
+
+    redesign_watch_map={stock_id: "g2,l6_2cond"}（docs/31 §4/§9/§11，2026-08-24 使用者
+    要求後新增）——G1/G2/G4/G5/L6 五式新設計候選命中旗標，逗號分隔、未命中留 None。
+    **全部未經統計驗證**（G1/G4/G5 因 fundamentals 僅2季QoQ深度不足、G2/L6 樣本仍在
+    累積中，見 docs/31 §9/§11/§19）——純觀察揭露，不進篩選/排序/pick.md 核心層。
+    G3 已驗證未過關（docs/31 §9），不在此欄出現。
     """
     if members.is_empty():
         return []
@@ -1187,6 +1194,10 @@ def _build_enriched_rows(
         official_sector_rank = osec.get("group_rank") if osec else None
         official_sector_trend_score = osec.get("trend_score") if osec else None
 
+        # docs/31 §4/§9/§11：G1/G2/G4/G5/L6 新設計候選觀察欄（純揭露非gate，未經統計
+        # 驗證）——None＝本週未命中任何一式。
+        redesign_watch = (redesign_watch_map or {}).get(sid)
+
         # 除息還原：5 日視窗內現金股利已加回 momentum_5d（修假負）；標旗供人工查證
         ex_div_cash = _num(r.get("ex_div_cash"), 2)
         div_addback_pct = _num(r.get("div_addback_pct"), 2)
@@ -1314,6 +1325,9 @@ def _build_enriched_rows(
                 "official_sector_rank": official_sector_rank,
                 "official_sector_trend_score": official_sector_trend_score,
                 "official_sector_regime": official_sector_regime,
+                # docs/31 §4/§9/§11：G1/G2/G4/G5/L6新設計候選觀察（純揭露非gate，未經
+                # 統計驗證，G3已驗證未過關不在此欄）——None＝本週未命中任何一式。
+                "redesign_watch": redesign_watch,
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
             }
         )
@@ -1346,6 +1360,7 @@ def write_candidates_enriched_csv(
     shares_map: dict | None = None,
     official_sector_map: dict | None = None,
     official_sector_regime: str | None = None,
+    redesign_watch_map: dict | None = None,
 ) -> list[dict]:
     """輸出「全候選股 × 技術/籌碼/估值/基本面 + flags 排雷欄」CSV，供 ProPicks 全宇宙挑股。
 
@@ -1366,6 +1381,7 @@ def write_candidates_enriched_csv(
         shares_map=shares_map,
         official_sector_map=official_sector_map,
         official_sector_regime=official_sector_regime,
+        redesign_watch_map=redesign_watch_map,
     )
     if not rows:
         return []
@@ -1458,6 +1474,8 @@ _CANONICAL_REUSE_FIELDS = (
     "official_sector_rank",
     "official_sector_trend_score",
     "official_sector_regime",
+    # docs/31 §4/§9/§11：G1/G2/G4/G5/L6新設計候選觀察，當週橫斷面判定，重疊股沿用 candidates 那筆
+    "redesign_watch",
 )
 
 
