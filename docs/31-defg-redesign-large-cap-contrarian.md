@@ -2199,6 +2199,66 @@ sector_top5之外的新證據**——本節的結果應理解為「同一族群�
 比單一維度更強/更弱）——這是本次14個假說預算裡的第2個測試，開工前需先
 寫維度2組合的pre-registration。
 
+### 22.7 維度2（法人流向）pre-registration（2026-08-25，執行前寫死）
+
+**累積測試數：本次是14個假說預算中的第2個（2/14）。維度2本身不設獨立
+候選**（§17已用官方top5切法否證單獨用★投信流預測forward alpha），本節只做
+兩件事，其中只有②算一次正式假說測試：
+
+**①正確性回歸測試（不計入14個假說預算，屬工具驗證）**：拿真實
+2022-2026`panel.parquet`的`foreign_net`/`trust_net`/`dealer_net`＋真實
+`build_flow_triggers()`觸發序列＋真實`_attach_flow_trigger_cell()`3-cell，
+分別用`_aggregate_flow_trigger_cells`（已發布）與`evaluate_signal_cells`
+（新通用版）算一次，確認r+20`not_top5_triggered`格數字與§17.4已發布值
+（delta_mean −0.31%、CI[−0.61,−0.06]）一致——這次用真實資料重跑（先前
+只在合成資料驗證過等價性），完整履行§22.3.3的正確性回歸測試要求。
+
+**②維度1×維度2組合測試（14個假說預算的第2個，唯一正式裁決）**：
+
+**這是什麼問題**：在**已經是維度1 rotation-hit**（族群trend_score當日前
+20%）的次產業裡，額外命中★投信流觸發訊號，forward alpha是否比單純
+rotation-hit更強／更弱／沒有差異？**明確不是重問§17已否證的問題**——§17
+問的是「未進官方top5的族群，投信觸發能不能單獨預測」（已否證，方向為
+負）；本節問的是「已經是（維度1定義的）強勢族群，投信觸發是否有額外
+邊際資訊」，母體與問題結構都不同。
+
+**cell定義（4格，rotation hit/miss × flow triggered/untriggered，交叉
+標籤）**：
+- `hit_triggered`／`hit_untriggered`：維度1 rotation-hit的次產業，依是否
+  在`lookback_window`（15個交易日，同§17.1 production校準值）內有
+  ★投信流觸發再分兩格。
+- `miss_triggered`／`miss_untriggered`：rotation-miss的次產業同樣再分兩格
+  ——**`miss_triggered` vs `miss_untriggered`預期會重現§17已否證的負向
+  方向**（母體換成維度1的「前20%外」而非官方top5外，但性質相近），此格
+  只作全揭露報告用，**不算入本節新假說測試**，不可把它重新包裝成「新
+  否證」或「新候選」。
+
+**訊號側欄位自我檢查**：rotation側同§22.5（`close`經trend_score_series）；
+flow側沿用`build_flow_triggers`／`_attach_flow_trigger_cell`同期/落後欄位
+（`foreign_net`/`trust_net`/`dealer_net`，皆§17已審過trailing/當期無
+look-ahead）。`alpha{h}`只當結果側。✅ 符合規則。
+
+**統計方法**：`hit_triggered`格套用與§22.5**完全相同**的四步裁決規則
+（CI95→regime→前後半段→walk-forward保留驗證窗複核，`evaluate_signal_
+cells`/`evaluate_signal_cells_by_regime`/`walk_forward_splits`同一套，不
+另造統計邏輯）。**解讀方式**：`hit_triggered`的裁決結果與§22.5已知的
+`hit`格全樣本數字（r+10 delta+0.55%／r+20 delta+0.98%／r+40 delta+1.79%）
+比對——若`hit_triggered`明顯高於`hit`整體 → 「flow強化rotation訊號」；
+若相近（點估計差距在CI寬度內） → 「flow無額外加值」；若明顯低於甚至
+轉負 → 「flow為負向干擾」（沿用§17負向方向的延伸觀察，非新機制）。**不
+新造成對兩格點估計差異本身做bootstrap的檢定**（那需要新的成對差異統計
+工具，超出本輪核准範圍，留給日後若這條線值得深化再議）。
+
+**已知的樣本量風險（不可迴避，先寫清楚）**：flow觸發本身「不罕見」
+（§17.4：1582個事件橫跨41個群組），但交叉維度1的hit切片（41組中約8組）
+會顯著縮小`hit_triggered`格的可用天數/n_dates——**若`n_dates<10`（CI門檻）
+或regime切片明顯樣本不足，誠實結論是「樣本不足，無法判定」，這是本節
+預先承認的合理結果之一，不是失敗**。
+
+**本節不做**：不對miss_triggered/miss_untriggered套用完整四步裁決（純
+描述性報告，避免變相重測§17）；不做維度1×維度2以外的更高階組合（同
+§22.3.6三維以上組合本輪不做的既有限制）。
+
 ## 23. 減量研究計畫 Part 4（backlog，本輪只寫規劃不執行）：宏觀風險參數
 grid search（n=3事件，使用者已拍板「做，但標示為候選假說」）
 
