@@ -2090,6 +2090,65 @@ G3（否證）、rank_velocity（否證）、flow_trigger（否證）、official
   數字與§17.4發布值一致②維度1 pre-registration寫進本文件、跑完後依四項
   門檻裁決③每次執行後更新「累積測試數」記錄。
 
+### 22.5 維度1（族群輪動）pre-registration（2026-08-25，執行前寫死）
+
+**累積測試數：本次是14個假說預算中的第1個（1/14）。**
+
+**這是什麼問題**：族群trend_score當日橫斷面排名前20%（次產業層級），是否
+predict該次產業成員股的forward alpha？**明確不是重跑official_sector_top5
+（§10-§13已過關的「族群前5」）**——那是固定top-5門檻的既有研究、已生產化
+（`redesign_watch`/`official_sector_top5`揭露欄的資料來源）；本節依§22.3.2
+統一規則改用「前20%」動態門檻，是一個新的、獨立的測試，不能拿official_
+sector_top5已過關的結論帶過。
+
+**訊號建構（全部重用production既有函式，零新統計邏輯）**：
+- Membership/basket：手標46細分類，purity≥0.5（`compute_subindustry_purity`
+  ＋`build_hand_sector_membership`/`build_hand_sector_baskets`，min_purity
+  沿用§10.9/rank_velocity_grid/flow_trigger_grid/official_sector_watch已
+  一致採用的0.5，不重新調參，避免額外引入一個門檻自由度）；`basket_index`
+  ＝MI_INDEX官方市值加權指數（同§10.6）。
+- 族群強弱量尺：`trend_score_series()`（`rotation_efficacy.py`，已在4個
+  milestone重用過的production函式），逐週snapshot（`weekly_snapshot_dates`）。
+- **cell定義**：逐日對當日trend_score非null的sub_industry依trend_score
+  降冪排名，`_rank ≤ ⌈0.2 × 當日有效群組數⌉` → `hit`，其餘 → `miss`。
+  用「當日有效群組數」動態算分母（不用固定46或固定`⌊46×0.2⌋=9`）——因
+  MI_INDEX部分較新分類指數歷史較淺（§10.2已載明2021-07尚無2026-08已有），
+  固定分母會在資料缺席的早期日期系統性錯置門檻。
+
+**訊號側欄位自我檢查**（§22.3.2要求）：本維度訊號只用`close`（經
+`trend_score_series`內部的basket_index/MA/breadth/RS計算）與sub_industry
+membership（外部`concepts.yaml`+官方產業分類+MI_INDEX，非panel欄位）——
+皆同期或落後；`alpha{h}`只在後段當結果側比對，未流入`trend_score`或cell
+分派的任何計算。✅ 符合規則。
+
+**Horizons／統計參數**：r+10/r+20/r+40（沿用`alpha10/20/40`，同§13.1起
+production慣例）；`n_boot=1000`、`seed=42`、`snapshot_gap_td=5`（皆
+production預設，不調參）。
+
+**Walk-forward與保留驗證窗（§22.3.1核准的晉升門檻）**：`walk_forward_
+splits(all_dates, n_splits=4, min_train_frac=0.4, embargo_td=h+1)`
+（每個horizon各自切，embargo同`walk_forward_rank_velocity`慣例）。第4段
+（最近一段）定為**保留驗證窗**，搜尋階段完全不看；搜尋階段＝第1-3段涵蓋
+的全部資料（即全期扣除第4段test區間）。
+
+**裁決規則（依序判定，執行前寫死，不可事後放寬）**：
+1. 在**搜尋階段**資料上，對`hit`cell算delta(vs當日全樣本)之CI95
+   （`evaluate_signal_cells`）＋regime切片（進攻/中性/防禦，`evaluate_
+   signal_cells_by_regime`）＋前後半段（搜尋階段內部再對半）。
+2. **CI95排除0在下（方向為負）** → 直接「已否證」，不論regime/複核結果
+   （同§17.4慣例：否證不需要走完全部後續步驟）。
+3. **CI95不跨0（方向為正）＋跨regime同向≥2（若防禦regime不同向，比照
+   §10.3先例核對防禦占2022空頭天數是否明顯少於同向regime，是則仍可視為
+   滿足）＋前後半段同向** 三者皆過 → 進入第4步保留驗證窗複核；三缺一
+   → 「未過關」（CI跨0但非负方向，或regime<2同向，或前後半段不同向）。
+4. **保留驗證窗複核**：第4段（`walk_forward`表最近一段）`hit`cell的
+   `test_delta_mean`是否與搜尋階段同號——同號 → 「候選」（可寫進§22待
+   後續組合測試/生產化評估的材料）；不同號 → 「觀察結果（未過保留驗證
+   窗）」，不得稱為候選。
+
+**本節只執行維度1，不預先決定維度2-5的精確門檻**（維度2本身無獨立標準，
+見§22.3.4；維度3-5各自開工前才寫各自的pre-registration，避免hindsight）。
+
 ## 23. 減量研究計畫 Part 4（backlog，本輪只寫規劃不執行）：宏觀風險參數
 grid search（n=3事件，使用者已拍板「做，但標示為候選假說」）
 
