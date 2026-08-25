@@ -22,6 +22,7 @@ from tw_screener.backtest.macro_regime_validate import (
     bucket_lift,
     build_level_pct_series,
     build_light_color_series,
+    build_speed_pct_series,
     compute_event_labels,
     high_risk_lift,
 )
@@ -44,6 +45,20 @@ def test_build_level_pct_series_warmup_and_values() -> None:
     assert out.height == n - 30 + 1  # 第 30 筆（index 29）起才達 min_obs
     # 嚴格遞增序列的百分位恆為 1.0（當日值是窗內最大值）
     assert all(v == 1.0 for v in out["score"].to_list())
+
+
+def test_build_speed_pct_series_big_recent_jump_is_high_percentile() -> None:
+    """前段持平、近端陡升的合成序列：最新一筆 speed_pct 應接近窗內最大變化量（高百分位）。"""
+    flat = [100.0] * 60
+    jump = [100.0 + i * 5 for i in range(1, 11)]
+    values = flat + jump
+    df = pl.DataFrame(
+        {"date": _dates(len(values)), "value": values},
+        schema={"date": pl.Date, "value": pl.Float64},
+    )
+    out = build_speed_pct_series(df, lookback_days=70, delta_days=10, min_obs=30)
+    assert out.height > 0
+    assert out["score"].to_list()[-1] > 0.9
 
 
 def test_compute_event_labels_excludes_unexpired_tail() -> None:

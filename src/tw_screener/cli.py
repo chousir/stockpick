@@ -1601,6 +1601,17 @@ def backtest_macro_regime_resonance_cmd(
     run_macro_regime_resonance(settings)
 
 
+@backtest_app.command("macro-grid-search")
+def backtest_macro_grid_search_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """docs/31 §23.4 Part 4：宏觀指標視窗/門檻/組合grid search，對3個已知事件測早期反應
+    （backlog研究，產出僅候選假說清單，不可升級為決策依據，見§23.3）。"""
+    from tw_screener.backtest.macro_grid_search_runner import run_macro_grid_search
+
+    run_macro_grid_search(settings)
+
+
 @backtest_app.command("flow-inflection")
 def backtest_flow_inflection_cmd(
     out_dir: Path | None = typer.Option(

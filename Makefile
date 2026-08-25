@@ -177,6 +177,9 @@ contrarian-efficacy:  ## M-BR1 Phase 2 底部左側聯合桶（轉買×貼近低
 macro-regime-validate:  ## M-Macro2 as-of 回放驗證＋門檻敏感度＋DEXJPUS tail-event 重測（需先跑過三輪研究，產 research/macro_regime_screening/round4）
 	uv run tw-screener backtest macro-regime-validate
 
+macro-grid-search:  ## docs/31 §23.4 Part 4 宏觀指標grid search（backlog研究，僅候選假說清單，產 research/macro_regime_screening/round6_grid）
+	uv run tw-screener backtest macro-grid-search
+
 macro-regime-resonance:  ## M-Macro3 燈號vs V2 regime共振/背離讀法驗證（需先跑過 make regime-history，產 research/macro_regime_screening/round5）
 	uv run tw-screener backtest macro-regime-resonance
 

@@ -32,7 +32,12 @@ from dataclasses import dataclass
 
 import polars as pl
 
-from tw_screener.analysis.macro_regime import classify_light, compute_dual_risk, compute_level_pct
+from tw_screener.analysis.macro_regime import (
+    classify_light,
+    compute_dual_risk,
+    compute_level_pct,
+    compute_speed_pct,
+)
 
 _EVENT_SCHEMA: dict[str, type[pl.DataType]] = {"date": pl.Date, "event": pl.Int8}
 _SCORE_SCHEMA: dict[str, type[pl.DataType]] = {"date": pl.Date, "score": pl.Float64}
@@ -64,6 +69,25 @@ def build_dual_risk_series(
     rows: list[dict[str, object]] = []
     for d in df.sort("date")["date"].to_list():
         score = compute_dual_risk(df, d, lookback_days, delta_days, min_obs)
+        if score is not None:
+            rows.append({"date": d, "score": score})
+    return pl.DataFrame(rows, schema=_SCORE_SCHEMA)
+
+
+def build_speed_pct_series(
+    df: pl.DataFrame, lookback_days: int, delta_days: int, min_obs: int = 30
+) -> pl.DataFrame:
+    """逐日 speed_pct（近 delta_days 變化量的窗內百分位；直接呼叫 production `compute_speed_pct`）。
+
+    docs/31 §23 Part 4 grid search 用：production 揭露面板目前只有 VIXCLS 用 speed_pct
+    （§7.2 Phase 5 anchor），本函式讓 grid 也能對 BAA10Y/DGS20/STLFSI4 套 speed_pct，
+    同樣刻意逐日呼叫既有純函式而非重寫（理由同 `build_level_pct_series`）。
+    """
+    if df.is_empty():
+        return pl.DataFrame(schema=_SCORE_SCHEMA)
+    rows: list[dict[str, object]] = []
+    for d in df.sort("date")["date"].to_list():
+        score = compute_speed_pct(df, d, lookback_days, delta_days, min_obs)
         if score is not None:
             rows.append({"date": d, "score": score})
     return pl.DataFrame(rows, schema=_SCORE_SCHEMA)

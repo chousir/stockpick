@@ -514,6 +514,43 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     n_boot: 1000
     seed: 42
     output_dir: research/macro_regime_screening
+  macro_grid_search:         # docs/31 §23.4 Part 4（2026-08-25，執行前寫死）：宏觀指標視窗/
+                              # 門檻/組合grid search，對3個已知事件測早期反應（backlog研究，
+                              # 頂多產出候選假說清單，不可升級為決策依據，見§23.3/§23.4尾段）
+    raw_dir: research/macro_regime_screening/raw
+    indicator_files:           # 4指標raw parquet檔名（欄位皆為 date,value）
+      BAA10Y: BAA10Y.parquet
+      VIXCLS: VIXCLS.parquet
+      DGS20: DGS20.parquet
+      STLFSI4: STLFSI4.parquet
+    calendar_file: BAA10Y.parquet  # 統一交易日曆基準（§23.4：4指標日曆非100%相同但足夠接近）
+    analysis_start: "2019-01-01"   # 涵蓋756交易日lookback在2022-01-05錨點前的warmup需求
+    analysis_end: "2026-07-31"
+    lookback_grid: [252, 504, 756]
+    delta_grid: [10, 20, 40]       # speed_pct專用
+    threshold_grid: [0.80, 0.90, 0.95]
+    min_obs: 30
+    gap_td: 10                     # episode合併：中斷≤此交易日數仍算同一段
+    min_lead_td: 5                 # 命中視窗下界（太近＝來不及交易）
+    max_lead_td: 60                # 命中視窗上界（太遠＝背景雜訊）
+    fp_before_td: 60               # false positive排除窗：事件前
+    fp_after_td: 20                # false positive排除窗：事件後（給事件本身滯後確認留餘裕）
+    fire_rate_ceiling: 0.20        # 候選天花板①（未校準、低信心，見§23.4）
+    false_positive_ceiling: 5      # 候選天花板②（未校準、低信心，見§23.4）
+    events:                        # 錨點取自docs/25 Phase4已記錄事實/公開常識日期（§23.4表格）
+      - name: "2022空頭"
+        anchors: ["2022-01-05", "2022-04-25"]
+      - name: "2024-08-05崩盤"
+        anchors: ["2024-08-05"]
+      - name: "2025-04關稅衝擊"
+        anchors: ["2025-02-25", "2025-04-07"]
+    combo_fixed_config:            # 多指標組合固定用production/Phase5同款單指標設定（§23.4，
+                                    # 避免組合層再挑一次最佳單指標參數造成二次挑選）
+      BAA10Y: {transform: level_pct, lookback_days: 756, threshold: 0.80}
+      VIXCLS: {transform: speed_pct, lookback_days: 756, delta_days: 20, threshold: 0.80}
+      DGS20: {transform: level_pct, lookback_days: 756, threshold: 0.80}
+      STLFSI4: {transform: level_pct, lookback_days: 756, threshold: 0.80}
+    output_dir: research/macro_regime_screening/round6_grid
   flow_inflection:           # WS-E 資金流 inflection 因子族（make flow-inflection）
     horizons_td: [10, 20]        # 評估窗（交易日）
     n_splits: 4
