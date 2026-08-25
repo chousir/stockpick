@@ -212,6 +212,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make laggard-grid`                                    | 族群強弱×領先落後×位階 forward 報酬格（docs/22 WS-D；`--membership official` 同上） | 每季                                 |
 | `make contrarian-efficacy`                             | 底部左側聯合桶（轉買×貼近低）forward alpha 檢驗＋§1 硬門檻裁決（docs/24 M-BR1 Phase 2） | 面板重建後／樣本變厚後重驗           |
 | `make macro-regime-validate`                           | 總經燈號 as-of 回放驗證＋門檻敏感度＋DEXJPUS tail-event 重測（docs/25 M-Macro2；讀 research/ raw，需先跑過三輪篩選研究） | 一次性驗證（Phase 2 已跑過）    |
+| `make macro-grid-search`                               | 宏觀指標視窗/門檻/組合 grid search，對3個已知事件測早期反應（docs/31 §23.4 Part 4；已跑，0候選，結論見§23.5，不可升級為決策依據） | 一次性研究（已跑過，backlog closed） |
 | `make flow-inflection`                                 | 資金流 inflection 因子族首驗（docs/22 WS-E）          | 樣本變厚後重驗                       |
 | `make margin-factors`                                  | 融資減肥/大戶 WoW/margin_to_vol 三籌碼因子首驗（預註冊 docs/23 §3） | 面板重建後                    |
 | `make regime-history`                                  | regime 標籤歷史化：V2 引擎逐日 as-of 重算（2022-01 起，docs/23 WS-H.3） | 面板延伸前（先產標籤）        |
