@@ -1,10 +1,11 @@
-"""docs/31 §22.5/§22.7 編排——panel-only候選排列組合研究維度1（族群輪動）
-＋維度1×維度2組合（族群輪動×法人流向）。
+"""docs/31 §22.5/§22.7/§22.10 編排——panel-only候選排列組合研究維度1（族群
+輪動）／維度1×維度2組合（族群輪動×法人流向）／維度4（融資水位，個股層級）。
 
-自 cli.py 薄殼呼叫。stock_rows組建方式跟`official_sector_grid_runner.py`／
-`flow_trigger_grid_runner.py`（group_source="hand"）完全相同——重用同一組
-membership/basket建構函式，唯一差異是cell定義（本節用§22.3.2統一的「前20%」
-動態門檻，非official_sector_top5的固定top5）。
+自 cli.py 薄殼呼叫。維度1/維度1×2的stock_rows組建方式跟`official_sector_
+grid_runner.py`／`flow_trigger_grid_runner.py`（group_source="hand"）完全
+相同——重用同一組membership/basket建構函式，唯一差異是cell定義（本節用
+§22.3.2統一的「前20%」動態門檻，非official_sector_top5的固定top5）。維度4
+是個股層級訊號，不套次產業membership，直接吃panel。
 """
 
 from __future__ import annotations
@@ -20,37 +21,29 @@ from rich.console import Console
 
 console = Console()
 
-_DIMENSIONS = ("rotation", "rotation_flow_combo")
+_DIMENSIONS = ("rotation", "rotation_flow_combo", "margin")
 
 
 def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension: str) -> None:
-    """docs/31 §22.5/§22.7：panel-only候選排列組合研究，維度1（族群輪動）與
-    維度1×維度2組合（族群輪動×法人流向）。
+    """docs/31 §22.5/§22.7/§22.10：panel-only候選排列組合研究。
 
     Args:
         dimension: "rotation"（維度1，§22.5）｜"rotation_flow_combo"（維度1×維度2
-            組合，§22.7）。維度3-5依§22.3.4排序，各自開工前才寫pre-registration＋
-            加對應dimension值，本輪不預先搭好尚未存在的分支。
+            組合，§22.7）｜"margin"（維度4融資水位，§22.10）。維度3（大戶集中度）
+            因TDCC快照限制暫緩見§22.9；維度5尚未pre-registration，見§22.3.4。
     """
     if dimension not in _DIMENSIONS:
         console.print(
             f"[red]--dimension 目前只支援 {_DIMENSIONS}，收到 {dimension!r}——"
-            "維度3-5尚未pre-registration，見docs/31 §22.3.4[/red]"
+            "維度3暫緩(§22.9)、維度5尚未pre-registration(§22.3.4)[/red]"
         )
         raise typer.Exit(1)
-
-    from tw_screener.analysis.sector_universe import list_subindustries, load_industry_mapping
-    from tw_screener.backtest import official_sector_grid as osg
-    from tw_screener.backtest.rotation_efficacy import trend_score_series, weekly_snapshot_dates
-    from tw_screener.data.twse import create_client
 
     with open(settings) as f:
         cfg = yaml.safe_load(f)
     rc = cfg.get("backtest", {}).get("redesign_dimension_grid", {})
-    fc = cfg.get("backtest", {}).get("flow_trigger_grid", {})
     horizons = tuple(int(h) for h in rc.get("horizons_td", [10, 20, 40]))
     top_quantile = float(rc.get("top_quantile", 0.2))
-    min_purity = float(rc.get("hand_min_purity", 0.5))
     snapshot_gap_td = int(rc.get("snapshot_gap_td", 5))
     n_boot = int(rc.get("n_boot", 1000))
     n_splits = int(rc.get("n_splits", 4))
@@ -66,6 +59,31 @@ def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension:
         console.print(f"[red]無面板 {panel_path}——先跑 make build-panel[/red]")
         raise typer.Exit(1)
     panel = pl.read_parquet(panel_path)
+    has_regime = "regime" in panel.columns
+    out.mkdir(parents=True, exist_ok=True)
+
+    if dimension == "margin":
+        from tw_screener.backtest.rotation_efficacy import weekly_snapshot_dates
+
+        mc = rc.get("margin", {})
+        chg_window = int(mc.get("chg_window_td", 5))
+        min_prev_lots = float(mc.get("min_prev_lots", 50.0))
+        weekly = set(weekly_snapshot_dates(panel["date"].unique().to_list()))
+        _run_margin(
+            panel, weekly, chg_window=chg_window, min_prev_lots=min_prev_lots,
+            top_quantile=top_quantile, horizons=horizons, snapshot_gap_td=snapshot_gap_td,
+            n_boot=n_boot, n_splits=n_splits, min_train_frac=min_train_frac,
+            has_regime=has_regime, out=out,
+        )
+        return
+
+    from tw_screener.analysis.sector_universe import list_subindustries, load_industry_mapping
+    from tw_screener.backtest import official_sector_grid as osg
+    from tw_screener.backtest.rotation_efficacy import trend_score_series, weekly_snapshot_dates
+    from tw_screener.data.twse import create_client
+
+    fc = cfg.get("backtest", {}).get("flow_trigger_grid", {})
+    min_purity = float(rc.get("hand_min_purity", 0.5))
 
     client = create_client(settings)
     cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
@@ -94,7 +112,6 @@ def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension:
     trend = trend_score_series(price, membership, baskets)
     weekly = set(weekly_snapshot_dates(panel["date"].unique().to_list()))
     trend_weekly = trend.filter(pl.col("date").is_in(list(weekly)))
-    has_regime = "regime" in panel.columns
     stock_rows = membership.join(trend_weekly, on="sub_industry", how="inner").join(
         panel.select(
             "date", "stock_id",
@@ -105,7 +122,6 @@ def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension:
         how="left",
     )
 
-    out.mkdir(parents=True, exist_ok=True)
     common: dict[str, Any] = dict(
         horizons=horizons, snapshot_gap_td=snapshot_gap_td, n_boot=n_boot, n_splits=n_splits,
         min_train_frac=min_train_frac, has_regime=has_regime, out=out, min_purity=min_purity,
@@ -149,10 +165,11 @@ def _decision_lines(
     n_boot: int,
     snapshot_gap_td: int,
     has_regime: bool,
-    min_purity: float,
+    membership_desc: str,
 ) -> tuple[list[str], dict[int, str]]:
-    """docs/31 §22.5/§22.7共用的四步裁決（CI95→regime→前後半段→walk-forward保留
-    驗證窗複核），對`target_cell`逐horizon跑。回傳(markdown行, {horizon: 裁決字串})。
+    """docs/31 §22.5/§22.7/§22.10共用的四步裁決（CI95→regime→前後半段→
+    walk-forward保留驗證窗複核），對`target_cell`逐horizon跑。回傳(markdown行,
+    {horizon: 裁決字串})。
     """
     from tw_screener.backtest import factor_lab as lab
     from tw_screener.backtest import redesign_dimension_grid as rdg
@@ -270,7 +287,7 @@ def _decision_lines(
                     f"B={n_boot}・seed=42）對{target_cell}格delta（cell當日均值−當日全樣本"
                     "均值）per-date序列算CI95"
                 ),
-                membership_desc=f"手標46細分類（purity≥{min_purity:.0%}，同§10.9/§12/§14/§17）",
+                membership_desc=membership_desc,
             ),
             "",
         ]
@@ -377,7 +394,7 @@ def _run_rotation(
     lines += _wf_table(wf, "hit", "## walk-forward（第4段＝§22.5保留驗證窗，不用於搜尋）")
     dec_lines, _ = _decision_lines(
         cells, "hit", wf, horizons, n_splits, min_train_frac, n_boot, snapshot_gap_td,
-        has_regime, min_purity,
+        has_regime, f"手標46細分類（purity≥{min_purity:.0%}，同§10.9/§12/§14/§17）",
     )
     lines += dec_lines
 
@@ -456,7 +473,8 @@ def _run_rotation_flow_combo(
     )
     dec_lines, verdicts = _decision_lines(
         cells, "hit_triggered", wf, horizons, n_splits, min_train_frac, n_boot,
-        snapshot_gap_td, has_regime, min_purity,
+        snapshot_gap_td, has_regime,
+        f"手標46細分類（purity≥{min_purity:.0%}，同§10.9/§12/§14/§17）",
     )
     lines += dec_lines
 
@@ -481,5 +499,78 @@ def _run_rotation_flow_combo(
     lines.append("")
 
     md = out / f"redesign_dim1x2_rotation_flow_{base_tag}.md"
+    md.write_text("\n".join(lines), encoding="utf-8")
+    console.print(f"[green]完成，報告見 {md}[/green]")
+
+
+def _run_margin(
+    panel: pl.DataFrame,
+    weekly_dates: set,
+    chg_window: int,
+    min_prev_lots: float,
+    top_quantile: float,
+    horizons: tuple[int, ...],
+    snapshot_gap_td: int,
+    n_boot: int,
+    n_splits: int,
+    min_train_frac: float,
+    has_regime: bool,
+    out: Path,
+) -> None:
+    from tw_screener.backtest import redesign_dimension_grid as rdg
+
+    grid = rdg.margin_grid(
+        panel, weekly_dates, horizons=horizons, chg_window=chg_window,
+        top_quantile=top_quantile, min_prev_lots=min_prev_lots, n_boot=n_boot,
+        snapshot_gap_td=snapshot_gap_td,
+    )
+    if grid.is_empty():
+        console.print("[red]格為空——輸入資料異常[/red]")
+        raise typer.Exit(1)
+    wf = rdg.walk_forward_margin(
+        panel, weekly_dates, horizons=horizons, chg_window=chg_window,
+        top_quantile=top_quantile, min_prev_lots=min_prev_lots, n_splits=n_splits,
+        min_train_frac=min_train_frac, n_boot=n_boot, snapshot_gap_td=snapshot_gap_td,
+    )
+    cells = rdg.build_margin_cells(
+        panel, weekly_dates, chg_window=chg_window, top_quantile=top_quantile,
+        min_prev_lots=min_prev_lots,
+    )
+
+    base_tag = date.today().strftime("%Y%m%d")
+    grid.write_csv(out / f"redesign_dim4_margin_{base_tag}.csv")
+    if not wf.is_empty():
+        wf.write_csv(out / f"redesign_dim4_margin_wf_{base_tag}.csv")
+
+    n_weeks = cells["date"].n_unique() if not cells.is_empty() else 0
+    n_stocks = cells["stock_id"].n_unique() if not cells.is_empty() else 0
+    lines = [
+        "# docs/31 §22.10：維度4（融資水位，個股層級）——panel-only候選排列組合"
+        "研究第3個假說",
+        "",
+        "> 累積測試數：3/14（維度3因§22.9緣故未消耗預算）。門檻已於 docs/31 §22.10 "
+        "執行前預先登記，本報告只呈現結果，裁決依登記門檻套用。**個股層級訊號，不套"
+        "次產業membership**——與維度1/2的族群層級訊號結構不同。不預設方向，CI95的"
+        "實際符號決定解讀。",
+        "",
+        f"- 產出日：{date.today()}；chg_window={chg_window}個交易日、"
+        f"min_prev_lots={min_prev_lots:.0f}張（分母門檻）、top_quantile="
+        f"{top_quantile:.0%}；{n_weeks} 週快照、{n_stocks} 檔個股（僅上市，"
+        "OTC無margin_balance_lots資料天然排除）。",
+        "- `mean`/`median`/`win_rate`＝原始個股alpha{h}，供量級參考；`ci_lo`/`ci_hi`是對"
+        "delta（cell當日均值−當日全樣本均值）做moving-block bootstrap CI。",
+        "",
+    ]
+    lines += _full_sample_table(
+        grid, "## 全樣本讀值（hit=當週融資餘額5日%變化前20%〈最快增加〉、miss=其餘）"
+    )
+    lines += _wf_table(wf, "hit", "## walk-forward（第4段＝保留驗證窗，不用於搜尋）")
+    dec_lines, _ = _decision_lines(
+        cells, "hit", wf, horizons, n_splits, min_train_frac, n_boot, snapshot_gap_td,
+        has_regime, "個股層級訊號，無次產業membership（僅上市，OTC天然排除）",
+    )
+    lines += dec_lines
+
+    md = out / f"redesign_dim4_margin_{base_tag}.md"
     md.write_text("\n".join(lines), encoding="utf-8")
     console.print(f"[green]完成，報告見 {md}[/green]")

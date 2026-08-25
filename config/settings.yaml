@@ -472,14 +472,17 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     n_splits: 4
     min_train_frac: 0.4
     output_dir: research/flow_trigger_grid
-  redesign_dimension_grid:   # docs/31 §22.5：維度1(族群輪動)——panel-only候選排列組合研究
+  redesign_dimension_grid:   # docs/31 §22.5/§22.7/§22.10：panel-only候選排列組合研究
     horizons_td: [10, 20, 40]    # 沿用panel既有alpha10/20/40欄，同§13.1起慣例
     top_quantile: 0.2             # §22.3.2統一20%規則，非official_sector_top5的固定top5
-    hand_min_purity: 0.5          # 與§12/§13.3/§14/§17上線設定一致，不重新調參
+    hand_min_purity: 0.5          # 與§12/§13.3/§14/§17上線設定一致，不重新調參（維度1/2用）
     snapshot_gap_td: 5
     n_boot: 1000
     n_splits: 4                    # 第4段(最近)＝§22.5核准的保留驗證窗，不用於搜尋
     min_train_frac: 0.4
+    margin:                        # §22.10維度4(融資水位，個股層級)專屬參數
+      chg_window_td: 5               # 5交易日%變化窗，同專案margin_chg_5d/washout慣例
+      min_prev_lots: 50.0            # 分母防雜訊門檻(張)，避免近0水位%變化雜訊主導排名
     output_dir: research/redesign_dimension_grid
   contrarian_efficacy:       # M-BR1 Phase 2 底部左側聯合桶檢驗（make contrarian-efficacy）
     horizons_td: [5, 10, 20, 40] # forward alpha 窗（交易日）

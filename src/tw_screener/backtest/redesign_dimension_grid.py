@@ -457,3 +457,131 @@ def walk_forward_rotation_flow(
         cells, ROTATION_FLOW_CELLS, horizons, n_splits, min_train_frac, n_boot, seed,
         snapshot_gap_td,
     )
+
+
+# ---------------------------------------------------------------------------
+# docs/31 §22.10 維度4：融資水位（個股層級，非次產業層級——見§22.10說明）
+# ---------------------------------------------------------------------------
+
+MARGIN_CELLS: tuple[str, ...] = ("hit", "miss")
+_MARGIN_CELLS_SCHEMA: dict[str, type[pl.DataType]] = {
+    "date": pl.Date, "stock_id": pl.Utf8, "cell": pl.Utf8,
+}
+
+
+def build_margin_cells(
+    panel: pl.DataFrame,
+    weekly_dates: set,
+    chg_window: int = 5,
+    top_quantile: float = 0.2,
+    min_prev_lots: float = 50.0,
+) -> pl.DataFrame:
+    """§22.10：個股`margin_balance_lots`的`chg_window`交易日%變化，當週橫斷面
+    前`top_quantile`（最快速增加）→`hit`，其餘→`miss`。
+
+    **計算順序刻意在完整日頻`panel`上先算差分，才篩到`weekly_dates`**——若
+    先篩週頻再差分，`chg_window`個交易日的窗會被誤算成`chg_window`個週快照
+    （≈5倍天數），是§22.2已踩過的同一種尺度誤用風險，此處在計算順序上防範。
+
+    `min_prev_lots`（預設50張）：分母（`chg_window`日前的水位）低於此值的列
+    直接排除——避免融資餘額接近0的個股（如1張變2張＝+100%）的雜訊放大主導
+    排名，非事後調整的超參數，見§22.10 pre-registration。
+
+    Args:
+        panel: 需含 date/stock_id/margin_balance_lots/alpha{h}（同panel.parquet
+            原始結構，不套次產業membership——本維度是個股層級訊號）。
+        weekly_dates: 週頻快照日期集合（同`weekly_snapshot_dates()`輸出）。
+    """
+    need = {"date", "stock_id", "margin_balance_lots"}
+    if panel.is_empty() or not need.issubset(panel.columns):
+        return pl.DataFrame(schema=_MARGIN_CELLS_SCHEMA)
+
+    with_chg = (
+        panel.sort(["stock_id", "date"])
+        .with_columns(
+            pl.col("margin_balance_lots").shift(chg_window).over("stock_id").alias("_prev")
+        )
+        .with_columns(
+            pl.when(pl.col("_prev") >= min_prev_lots)
+            .then((pl.col("margin_balance_lots") - pl.col("_prev")) / pl.col("_prev") * 100)
+            .otherwise(None)
+            .alias("_chg_pct")
+        )
+    )
+    weekly = with_chg.filter(pl.col("date").is_in(list(weekly_dates))).drop_nulls(["_chg_pct"])
+    if weekly.is_empty():
+        return pl.DataFrame(schema=_MARGIN_CELLS_SCHEMA)
+
+    ranked = weekly.with_columns(
+        pl.col("_chg_pct").rank(method="min", descending=True).over("date").alias("_rank"),
+        pl.col("_chg_pct").count().over("date").alias("_n"),
+    ).with_columns(
+        (pl.col("_rank") <= (pl.col("_n") * top_quantile).ceil()).alias("_hit")
+    )
+    return ranked.with_columns(
+        pl.when(pl.col("_hit")).then(pl.lit("hit")).otherwise(pl.lit("miss")).alias("cell")
+    ).drop(["_prev", "_chg_pct", "_rank", "_n", "_hit"])
+
+
+def margin_grid(
+    panel: pl.DataFrame,
+    weekly_dates: set,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    chg_window: int = 5,
+    top_quantile: float = 0.2,
+    min_prev_lots: float = 50.0,
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§22.10 全樣本讀值：`hit`/`miss` 兩格 forward alpha 對照。"""
+    cells = build_margin_cells(
+        panel, weekly_dates, chg_window=chg_window, top_quantile=top_quantile,
+        min_prev_lots=min_prev_lots,
+    )
+    return evaluate_signal_cells(cells, MARGIN_CELLS, horizons, n_boot, seed, snapshot_gap_td)
+
+
+def margin_by_regime(
+    panel: pl.DataFrame,
+    weekly_dates: set,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    chg_window: int = 5,
+    top_quantile: float = 0.2,
+    min_prev_lots: float = 50.0,
+    n_boot: int = 1000,
+    seed: int = 42,
+    regime_col: str = "regime",
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§22.10 regime切片：`hit`/`miss` 兩格 × regime forward alpha。"""
+    cells = build_margin_cells(
+        panel, weekly_dates, chg_window=chg_window, top_quantile=top_quantile,
+        min_prev_lots=min_prev_lots,
+    )
+    return evaluate_signal_cells_by_regime(
+        cells, MARGIN_CELLS, horizons, n_boot, seed, regime_col, snapshot_gap_td
+    )
+
+
+def walk_forward_margin(
+    panel: pl.DataFrame,
+    weekly_dates: set,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    chg_window: int = 5,
+    top_quantile: float = 0.2,
+    min_prev_lots: float = 50.0,
+    n_splits: int = 4,
+    min_train_frac: float = 0.4,
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§22.10 walk-forward：`build_margin_cells` ＋通用 `walk_forward_cells`。"""
+    cells = build_margin_cells(
+        panel, weekly_dates, chg_window=chg_window, top_quantile=top_quantile,
+        min_prev_lots=min_prev_lots,
+    )
+    return walk_forward_cells(
+        cells, MARGIN_CELLS, horizons, n_splits, min_train_frac, n_boot, seed, snapshot_gap_td
+    )
