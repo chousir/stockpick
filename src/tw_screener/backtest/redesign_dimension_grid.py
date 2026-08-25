@@ -676,3 +676,46 @@ def walk_forward_momentum(
     return walk_forward_cells(
         cells, MOMENTUM_CELLS, horizons, n_splits, min_train_frac, n_boot, seed, snapshot_gap_td
     )
+
+
+_PAIRWISE_COMBO_SCHEMA: dict[str, type[pl.DataType]] = {
+    "date": pl.Date, "stock_id": pl.Utf8, "cell": pl.Utf8, "regime": pl.Utf8,
+}
+
+PAIRWISE_COMBO_CELLS: tuple[str, ...] = ("both_hit", "a_only_hit", "b_only_hit", "neither")
+
+
+def build_pairwise_combo_cells(cells_a: pl.DataFrame, cells_b: pl.DataFrame) -> pl.DataFrame:
+    """§22.15：任兩個既有hit/miss cell表（`build_rotation_cells`／`build_margin_cells`／
+    `build_momentum_cells`輸出）在(date, stock_id)上inner join成2x2交叉，4格
+    （both_hit/a_only_hit/b_only_hit/neither）。
+
+    population＝兩表交集（inner join，不補值）——見§22.15各組合的覆蓋率聲明，
+    不同維度的個股母體本來就不同，交集即為組合可測的實際母體。`alpha{h}`/
+    `regime`等非cell欄位取自`cells_b`（兩者皆源自同一份panel，數值理應一致，
+    只是避免join後重複欄位），呼叫端若要用進攻regime前提過濾，對回傳結果的
+    `regime`欄`.filter()`即可（本函式本身不做任何regime過濾，維持通用）。
+    """
+    need = {"date", "stock_id", "cell"}
+    if cells_a.is_empty() or cells_b.is_empty():
+        return pl.DataFrame(schema=_PAIRWISE_COMBO_SCHEMA)
+    if not need.issubset(cells_a.columns) or not need.issubset(cells_b.columns):
+        return pl.DataFrame(schema=_PAIRWISE_COMBO_SCHEMA)
+
+    a = cells_a.select("date", "stock_id", pl.col("cell").alias("_cell_a"))
+    b_cols = [c for c in cells_b.columns if c != "cell"]
+    b = cells_b.select(*b_cols, pl.col("cell").alias("_cell_b"))
+    joined = a.join(b, on=["date", "stock_id"], how="inner")
+    if joined.is_empty():
+        return pl.DataFrame(schema=_PAIRWISE_COMBO_SCHEMA)
+
+    return joined.with_columns(
+        pl.when((pl.col("_cell_a") == "hit") & (pl.col("_cell_b") == "hit"))
+        .then(pl.lit("both_hit"))
+        .when((pl.col("_cell_a") == "hit") & (pl.col("_cell_b") == "miss"))
+        .then(pl.lit("a_only_hit"))
+        .when((pl.col("_cell_a") == "miss") & (pl.col("_cell_b") == "hit"))
+        .then(pl.lit("b_only_hit"))
+        .otherwise(pl.lit("neither"))
+        .alias("cell")
+    ).drop(["_cell_a", "_cell_b"])

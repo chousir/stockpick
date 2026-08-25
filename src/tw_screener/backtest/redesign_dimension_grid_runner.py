@@ -1,11 +1,16 @@
-"""docs/31 §22.5/§22.7/§22.10 編排——panel-only候選排列組合研究維度1（族群
-輪動）／維度1×維度2組合（族群輪動×法人流向）／維度4（融資水位，個股層級）。
+"""docs/31 §22.5/§22.7/§22.10/§22.12/§22.15 編排——panel-only候選排列組合研究
+維度1（族群輪動）／維度1×維度2組合（族群輪動×法人流向）／維度4（融資水位，
+個股層級）／維度5（價格動能，個股層級）／維度間組合（§22.15，population限定
+進攻regime）。
 
 自 cli.py 薄殼呼叫。維度1/維度1×2的stock_rows組建方式跟`official_sector_
 grid_runner.py`／`flow_trigger_grid_runner.py`（group_source="hand"）完全
 相同——重用同一組membership/basket建構函式，唯一差異是cell定義（本節用
-§22.3.2統一的「前20%」動態門檻，非official_sector_top5的固定top5）。維度4
-是個股層級訊號，不套次產業membership，直接吃panel。
+§22.3.2統一的「前20%」動態門檻，非official_sector_top5的固定top5）。維度4/5
+是個股層級訊號，不套次產業membership，直接吃panel。§22.15的3個組合
+（combo_rotation_margin/combo_rotation_momentum/combo_margin_momentum）重用
+既有cell建構函式，只新增進攻regime population-gate與2x2交叉join邏輯，見
+`redesign_dimension_grid.build_pairwise_combo_cells`。
 """
 
 from __future__ import annotations
@@ -21,16 +26,21 @@ from rich.console import Console
 
 console = Console()
 
-_DIMENSIONS = ("rotation", "rotation_flow_combo", "margin", "momentum")
+_DIMENSIONS = (
+    "rotation", "rotation_flow_combo", "margin", "momentum",
+    "combo_rotation_margin", "combo_rotation_momentum", "combo_margin_momentum",
+)
 
 
 def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension: str) -> None:
-    """docs/31 §22.5/§22.7/§22.10/§22.12：panel-only候選排列組合研究。
+    """docs/31 §22.5/§22.7/§22.10/§22.12/§22.15：panel-only候選排列組合研究。
 
     Args:
         dimension: "rotation"（維度1，§22.5）｜"rotation_flow_combo"（維度1×維度2
             組合，§22.7）｜"margin"（維度4融資水位，§22.10）｜"momentum"（維度5
-            價格動能，§22.12）。維度3（大戶集中度）因TDCC快照限制暫緩見§22.9。
+            價格動能，§22.12）｜"combo_rotation_margin"/"combo_rotation_momentum"/
+            "combo_margin_momentum"（§22.15維度間組合，population限定進攻regime）。
+            維度3（大戶集中度）因TDCC快照限制暫緩見§22.9。
     """
     if dimension not in _DIMENSIONS:
         console.print(
@@ -48,6 +58,9 @@ def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension:
     n_boot = int(rc.get("n_boot", 1000))
     n_splits = int(rc.get("n_splits", 4))
     min_train_frac = float(rc.get("min_train_frac", 0.4))
+    mc = rc.get("margin", {})
+    chg_window = int(mc.get("chg_window_td", 5))
+    min_prev_lots = float(mc.get("min_prev_lots", 50.0))
     panel_path = Path(
         cfg.get("backtest", {}).get("factor_lab", {}).get(
             "panel_path", "research/panel/panel.parquet"
@@ -65,15 +78,36 @@ def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension:
     if dimension == "margin":
         from tw_screener.backtest.rotation_efficacy import weekly_snapshot_dates
 
-        mc = rc.get("margin", {})
-        chg_window = int(mc.get("chg_window_td", 5))
-        min_prev_lots = float(mc.get("min_prev_lots", 50.0))
         weekly = set(weekly_snapshot_dates(panel["date"].unique().to_list()))
         _run_margin(
             panel, weekly, chg_window=chg_window, min_prev_lots=min_prev_lots,
             top_quantile=top_quantile, horizons=horizons, snapshot_gap_td=snapshot_gap_td,
             n_boot=n_boot, n_splits=n_splits, min_train_frac=min_train_frac,
             has_regime=has_regime, out=out,
+        )
+        return
+
+    if dimension == "combo_margin_momentum":
+        from tw_screener.backtest import redesign_dimension_grid as rdg
+        from tw_screener.backtest.rotation_efficacy import weekly_snapshot_dates
+
+        if not has_regime:
+            console.print("[red]面板缺regime欄——§22.15組合需進攻regime前提，先跑 "
+                           "make regime-history 再 make build-panel[/red]")
+            raise typer.Exit(1)
+        weekly = set(weekly_snapshot_dates(panel["date"].unique().to_list()))
+        margin_cells = rdg.build_margin_cells(
+            panel, weekly, chg_window=chg_window, min_prev_lots=min_prev_lots,
+            top_quantile=top_quantile,
+        )
+        momentum_cells = rdg.build_momentum_cells(panel, weekly, top_quantile=top_quantile)
+        _run_combo(
+            margin_cells, momentum_cells, combo_name="margin×momentum",
+            a_desc="融資水位(chg_pct_5d前20%，僅上市)",
+            b_desc="價格動能(ma60_dist_pct前20%，上市＋上櫃)",
+            horizons=horizons, snapshot_gap_td=snapshot_gap_td, n_boot=n_boot,
+            n_splits=n_splits, min_train_frac=min_train_frac, out=out,
+            report_name="redesign_combo_margin_momentum",
         )
         return
 
@@ -139,7 +173,7 @@ def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension:
     )
     if dimension == "rotation":
         _run_rotation(stock_rows, top_quantile=top_quantile, **common)
-    else:
+    elif dimension == "rotation_flow_combo":
         institutional_daily = panel.select(
             "date", "stock_id", "foreign_net", "trust_net", "dealer_net"
         )
@@ -160,6 +194,39 @@ def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension:
             stock_rows, triggers, daily_dates, top_quantile=top_quantile,
             lookback_window=lookback_window, **common,
         )
+    else:
+        from tw_screener.backtest import redesign_dimension_grid as rdg
+
+        if not has_regime:
+            console.print("[red]面板缺regime欄——§22.15組合需進攻regime前提，先跑 "
+                           "make regime-history 再 make build-panel[/red]")
+            raise typer.Exit(1)
+        rotation_cells = rdg.build_rotation_cells(stock_rows, top_quantile=top_quantile)
+        if dimension == "combo_rotation_margin":
+            margin_cells = rdg.build_margin_cells(
+                panel, weekly, chg_window=chg_window, min_prev_lots=min_prev_lots,
+                top_quantile=top_quantile,
+            )
+            _run_combo(
+                rotation_cells, margin_cells, combo_name="族群輪動×融資水位",
+                a_desc="族群輪動(次產業trend_score前20%，hand membership purity≥"
+                f"{min_purity})",
+                b_desc="融資水位(chg_pct_5d前20%，僅上市)",
+                horizons=horizons, snapshot_gap_td=snapshot_gap_td, n_boot=n_boot,
+                n_splits=n_splits, min_train_frac=min_train_frac, out=out,
+                report_name="redesign_combo_rotation_margin",
+            )
+        else:
+            momentum_cells = rdg.build_momentum_cells(panel, weekly, top_quantile=top_quantile)
+            _run_combo(
+                rotation_cells, momentum_cells, combo_name="族群輪動×價格動能",
+                a_desc="族群輪動(次產業trend_score前20%，hand membership purity≥"
+                f"{min_purity})",
+                b_desc="價格動能(ma60_dist_pct前20%，上市＋上櫃)",
+                horizons=horizons, snapshot_gap_td=snapshot_gap_td, n_boot=n_boot,
+                n_splits=n_splits, min_train_frac=min_train_frac, out=out,
+                report_name="redesign_combo_rotation_momentum",
+            )
 
 
 def _c(v: object, suf: str = "", nd: int = 2) -> str:
@@ -303,6 +370,122 @@ def _decision_lines(
             "",
         ]
     return lines, verdicts
+
+
+def _decision_lines_combo(
+    combo_cells: pl.DataFrame,
+    a_only_cell: str,
+    b_only_cell: str,
+    target_cell: str,
+    wf: pl.DataFrame,
+    horizons: tuple[int, ...],
+    n_splits: int,
+    min_train_frac: float,
+    n_boot: int,
+    snapshot_gap_td: int,
+    membership_desc: str,
+) -> list[str]:
+    """§22.15：population已限定進攻regime前提下的裁決——同§22.5四步，但移除
+    regime同向這一項（population本身已是單一regime，無跨regime可比，§22.15
+    pre-registration明文調整），新增「delta_mean需同時大於a_only/b_only單一
+    命中格」的增益判準，用來區分「候選（有增益）」vs「候選（無明確增益）」，
+    這是本函式存在的目的，不可只看`target_cell`過不過關。
+    """
+    from tw_screener.backtest import factor_lab as lab
+    from tw_screener.backtest import redesign_dimension_grid as rdg
+
+    lines = [f"## {target_cell}格裁決（population已限定進攻regime，§22.15調整後四步）", ""]
+    all_dates = sorted(combo_cells["date"].unique().to_list())
+    for h in horizons:
+        emb = h + 1
+        splits = lab.walk_forward_splits(
+            all_dates, n_splits=n_splits, min_train_frac=min_train_frac, embargo_td=emb
+        )
+        if not splits:
+            lines.append(f"- r+{h}：可用週數不足以切出walk-forward段，裁決跳過。")
+            continue
+        confirm_split = splits[-1]
+        search_cells = combo_cells.filter(pl.col("date") < confirm_split.test_start)
+
+        search_grid = rdg.evaluate_signal_cells(
+            search_cells, (target_cell, a_only_cell, b_only_cell), horizons=(h,),
+            n_boot=n_boot, seed=42, snapshot_gap_td=snapshot_gap_td,
+        )
+        target_row_df = search_grid.filter(pl.col("cell") == target_cell)
+        if target_row_df.is_empty():
+            lines.append(f"- r+{h}：搜尋階段{target_cell}格無資料——裁決跳過（樣本不足）。")
+            continue
+        hit = target_row_df.row(0, named=True)
+        ci_lo, ci_hi = hit["ci_lo"], hit["ci_hi"]
+
+        h1, h2 = hit["mean_h1"], hit["mean_h2"]
+        fh_same = (
+            isinstance(h1, (int, float)) and isinstance(h2, (int, float))
+            and (h1 >= 0) == (h2 >= 0)
+        )
+        fh_desc = "同向" if fh_same else "不同向或缺資料"
+
+        if ci_lo is None:
+            verdict = "資料不足"
+        elif ci_hi is not None and ci_hi < 0:
+            verdict = "已否證"
+        elif ci_lo is not None and ci_lo > 0 and fh_same:
+            confirm_row = wf.filter(
+                (pl.col("horizon") == h) & (pl.col("cell") == target_cell)
+                & (pl.col("split_id") == confirm_split.split_id)
+            )
+            confirm_delta = (
+                confirm_row.row(0, named=True)["test_delta_mean"]
+                if not confirm_row.is_empty() else None
+            )
+            if isinstance(confirm_delta, (int, float)) and confirm_delta >= 0:
+                a_row_df = search_grid.filter(pl.col("cell") == a_only_cell)
+                b_row_df = search_grid.filter(pl.col("cell") == b_only_cell)
+                a_delta = (
+                    a_row_df.row(0, named=True)["delta_mean"] if not a_row_df.is_empty()
+                    else None
+                )
+                b_delta = (
+                    b_row_df.row(0, named=True)["delta_mean"] if not b_row_df.is_empty()
+                    else None
+                )
+                both_beat = (
+                    isinstance(a_delta, (int, float)) and isinstance(b_delta, (int, float))
+                    and hit["delta_mean"] > a_delta and hit["delta_mean"] > b_delta
+                )
+                verdict = "候選（有增益）" if both_beat else "候選（無明確增益）"
+            else:
+                verdict = (
+                    f"觀察結果（未過保留驗證窗，第{confirm_split.split_id}段"
+                    f"delta_mean={_c(confirm_delta, '%')}）"
+                )
+        else:
+            verdict = f"未過關（CI跨0或前後半段{fh_desc}）"
+
+        lines.append(
+            f"- **r+{h}裁決：{verdict}**（搜尋階段{target_cell} delta_mean "
+            f"{_c(hit['delta_mean'], '%')}、CI[{_c(ci_lo)}, {_c(ci_hi)}]、"
+            f"前後半段{fh_desc}；保留驗證窗＝第{confirm_split.split_id}段"
+            f"{confirm_split.test_start}~{confirm_split.test_end}）"
+        )
+        console.print(f"  {target_cell} r+{h}：{verdict}")
+        lines += [
+            "",
+            *lab.inference_footer(
+                sample_span=f"{search_cells['date'].min()!s}~{search_cells['date'].max()!s}"
+                f"（搜尋階段，保留驗證窗{confirm_split.test_start}起另計）",
+                regime_dist="population已限定進攻regime快照日(population-gate，非後驗"
+                "切片，見§22.15)",
+                method_desc=(
+                    f"moving-block bootstrap（block長度以快照步數換算horizon={h}td・"
+                    f"B={n_boot}・seed=42）對{target_cell}格delta（cell當日均值−當日全樣本"
+                    "均值）per-date序列算CI95"
+                ),
+                membership_desc=membership_desc,
+            ),
+            "",
+        ]
+    return lines
 
 
 def _full_sample_table(grid: pl.DataFrame, title: str) -> list[str]:
@@ -670,5 +853,79 @@ def _run_momentum(
     lines += dec_lines
 
     md = out / f"redesign_dim5_momentum_{base_tag}.md"
+    md.write_text("\n".join(lines), encoding="utf-8")
+    console.print(f"[green]完成，報告見 {md}[/green]")
+
+
+def _run_combo(
+    cells_a: pl.DataFrame,
+    cells_b: pl.DataFrame,
+    combo_name: str,
+    a_desc: str,
+    b_desc: str,
+    horizons: tuple[int, ...],
+    snapshot_gap_td: int,
+    n_boot: int,
+    n_splits: int,
+    min_train_frac: float,
+    out: Path,
+    report_name: str,
+) -> None:
+    """§22.15：任兩個既有cell表在進攻regime population-gate下的組合裁決。"""
+    from tw_screener.backtest import redesign_dimension_grid as rdg
+
+    gated_a = cells_a.filter(pl.col("regime") == "進攻")
+    gated_b = cells_b.filter(pl.col("regime") == "進攻")
+    combo_cells = rdg.build_pairwise_combo_cells(gated_a, gated_b)
+    if combo_cells.is_empty():
+        console.print("[red]組合格為空——population交集或進攻regime過濾後無資料[/red]")
+        raise typer.Exit(1)
+
+    grid = rdg.evaluate_signal_cells(
+        combo_cells, rdg.PAIRWISE_COMBO_CELLS, horizons=horizons, n_boot=n_boot, seed=42,
+        snapshot_gap_td=snapshot_gap_td,
+    )
+    wf = rdg.walk_forward_cells(
+        combo_cells, rdg.PAIRWISE_COMBO_CELLS, horizons=horizons, n_splits=n_splits,
+        min_train_frac=min_train_frac, n_boot=n_boot, seed=42, snapshot_gap_td=snapshot_gap_td,
+    )
+
+    base_tag = date.today().strftime("%Y%m%d")
+    grid.write_csv(out / f"{report_name}_{base_tag}.csv")
+    if not wf.is_empty():
+        wf.write_csv(out / f"{report_name}_wf_{base_tag}.csv")
+
+    n_weeks = combo_cells["date"].n_unique()
+    n_stocks = combo_cells["stock_id"].n_unique()
+    lines = [
+        f"# docs/31 §22.15：維度間組合——{combo_name}（population已限定進攻regime）",
+        "",
+        "> 累積測試數：見docs/31 §22.15（本批3組合共佔5-7/14）。門檻已於 §22.15 "
+        "執行前預先登記，本報告只呈現結果，裁決依登記門檻套用。**population在餵進"
+        "訊號建構前就已限定進攻regime快照日，不是全樣本結果的後驗子集**——見下方"
+        "母體宣告。",
+        "",
+        f"- A維度：{a_desc}",
+        f"- B維度：{b_desc}",
+        f"- 產出日：{date.today()}；{n_weeks} 週快照(僅進攻regime)、{n_stocks} 檔個股"
+        "（A∩B母體交集，見§22.15覆蓋率聲明）。",
+        "- `mean`/`median`/`win_rate`＝原始個股alpha{h}，供量級參考；`ci_lo`/`ci_hi`是對"
+        "delta（cell當日均值−當日全樣本均值）做moving-block bootstrap CI；全樣本"
+        "population本身已是進攻regime限定。",
+        "",
+    ]
+    lines += _full_sample_table(
+        grid,
+        "## 全樣本讀值（both_hit=兩維度皆命中、a_only/b_only=僅一邊命中、"
+        "neither=皆未命中）",
+    )
+    lines += _wf_table(wf, "both_hit", "## walk-forward（第4段＝保留驗證窗，不用於搜尋）")
+    lines += _decision_lines_combo(
+        combo_cells, "a_only_hit", "b_only_hit", "both_hit", wf, horizons, n_splits,
+        min_train_frac, n_boot, snapshot_gap_td,
+        f"{a_desc}與{b_desc}的個股母體交集，population已限定進攻regime快照日",
+    )
+
+    md = out / f"{report_name}_{base_tag}.md"
     md.write_text("\n".join(lines), encoding="utf-8")
     console.print(f"[green]完成，報告見 {md}[/green]")

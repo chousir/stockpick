@@ -16,10 +16,12 @@ from tw_screener.backtest.official_sector_grid import (
 from tw_screener.backtest.redesign_dimension_grid import (
     MARGIN_CELLS,
     MOMENTUM_CELLS,
+    PAIRWISE_COMBO_CELLS,
     ROTATION_CELLS,
     ROTATION_FLOW_CELLS,
     build_margin_cells,
     build_momentum_cells,
+    build_pairwise_combo_cells,
     build_rotation_cells,
     build_rotation_flow_cells,
     evaluate_signal_cells,
@@ -436,3 +438,89 @@ def test_walk_forward_momentum_schema() -> None:
 
 def test_walk_forward_momentum_empty_inputs() -> None:
     assert walk_forward_momentum(pl.DataFrame({"date": [date(2026, 1, 1)]}), set()).is_empty()
+
+
+def _combo_cells_pair() -> tuple[pl.DataFrame, pl.DataFrame]:
+    """§22.15：4檔個股×1日，涵蓋both_hit/a_only_hit/b_only_hit/neither四種組合。"""
+    d = date(2026, 1, 5)
+    a = pl.DataFrame(
+        {
+            "date": [d, d, d, d],
+            "stock_id": ["1101", "1102", "1103", "1104"],
+            "cell": ["hit", "hit", "miss", "miss"],
+            "alpha20": [1.0, 2.0, 3.0, 4.0],
+            "regime": ["進攻", "進攻", "進攻", "防禦"],
+        }
+    )
+    b = pl.DataFrame(
+        {
+            "date": [d, d, d, d],
+            "stock_id": ["1101", "1102", "1103", "1104"],
+            "cell": ["hit", "miss", "hit", "miss"],
+            "alpha20": [10.0, 20.0, 30.0, 40.0],
+            "regime": ["進攻", "進攻", "進攻", "防禦"],
+        }
+    )
+    return a, b
+
+
+def test_build_pairwise_combo_cells_crosses_hit_flags() -> None:
+    a, b = _combo_cells_pair()
+    combo = build_pairwise_combo_cells(a, b)
+    got = dict(zip(combo["stock_id"].to_list(), combo["cell"].to_list(), strict=True))
+    assert got == {
+        "1101": "both_hit",
+        "1102": "a_only_hit",
+        "1103": "b_only_hit",
+        "1104": "neither",
+    }
+
+
+def test_build_pairwise_combo_cells_keeps_alpha_and_regime_from_b() -> None:
+    a, b = _combo_cells_pair()
+    combo = build_pairwise_combo_cells(a, b)
+    row = combo.filter(pl.col("stock_id") == "1101").row(0, named=True)
+    assert row["alpha20"] == 10.0
+    assert row["regime"] == "進攻"
+
+
+def test_build_pairwise_combo_cells_inner_join_restricts_to_intersection() -> None:
+    a, b = _combo_cells_pair()
+    a_extra = pl.concat(
+        [
+            a,
+            pl.DataFrame(
+                {
+                    "date": [date(2026, 1, 5)],
+                    "stock_id": ["9999"],
+                    "cell": ["hit"],
+                    "alpha20": [99.0],
+                    "regime": ["進攻"],
+                }
+            ),
+        ]
+    )
+    combo = build_pairwise_combo_cells(a_extra, b)
+    assert "9999" not in combo["stock_id"].to_list()
+    assert combo.height == 4
+
+
+def test_build_pairwise_combo_cells_empty_when_missing_columns() -> None:
+    assert build_pairwise_combo_cells(
+        pl.DataFrame({"date": [date(2026, 1, 1)]}), pl.DataFrame({"date": [date(2026, 1, 1)]})
+    ).is_empty()
+
+
+def test_build_pairwise_combo_cells_empty_when_either_input_empty() -> None:
+    a, _ = _combo_cells_pair()
+    assert build_pairwise_combo_cells(a, pl.DataFrame(schema=a.schema)).is_empty()
+
+
+def test_pairwise_combo_cells_feed_evaluate_signal_cells() -> None:
+    a, b = _combo_cells_pair()
+    combo = build_pairwise_combo_cells(a, b)
+    grid = evaluate_signal_cells(combo, PAIRWISE_COMBO_CELLS, horizons=(20,), n_boot=10)
+    assert set(grid["cell"].to_list()) == set(PAIRWISE_COMBO_CELLS)
+    both = grid.filter(pl.col("cell") == "both_hit").row(0, named=True)
+    assert both["n"] == 1
+    assert both["mean"] == pytest.approx(10.0)
