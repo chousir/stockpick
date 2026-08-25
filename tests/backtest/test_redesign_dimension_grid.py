@@ -1,0 +1,175 @@
+"""docs/31 §22.3/§22.5 panel-only候選排列組合共用模組測試。純函式合成資料，不打網。"""
+
+from __future__ import annotations
+
+from datetime import date, timedelta
+
+import polars as pl
+
+from tw_screener.backtest.official_sector_grid import (
+    FLOW_TRIGGER_CELLS,
+    RANK_VELOCITY_CELLS,
+    _aggregate_flow_trigger_cells,
+    _aggregate_rank_velocity_cells,
+)
+from tw_screener.backtest.redesign_dimension_grid import (
+    ROTATION_CELLS,
+    build_rotation_cells,
+    evaluate_signal_cells,
+    evaluate_signal_cells_by_regime,
+    rotation_by_regime,
+    rotation_grid,
+    walk_forward_rotation,
+)
+
+# ─── §22.3.3 正確性回歸測試：evaluate_signal_cells 必須與已發布的兩個私有聚合函式
+# 逐格數字完全一致（不修改 official_sector_grid.py，只驗證新通用版行為等價）───
+
+
+def _synthetic_cells(n_weeks: int = 30) -> pl.DataFrame:
+    """3個cell×n_weeks週合成資料：A格alpha持續正、B格持續負、C格圍繞0震盪——
+    足以讓CI/前後半段/win_rate等各欄位都有非平凡數值可比對。
+    """
+    dates = [date(2023, 1, 2) + timedelta(weeks=i) for i in range(n_weeks)]
+    rows = []
+    for i, d in enumerate(dates):
+        rows.append({"date": d, "cell": "A", "alpha10": 1.0 + 0.01 * i, "alpha20": 2.0})
+        rows.append({"date": d, "cell": "B", "alpha10": -1.0 - 0.01 * i, "alpha20": -2.0})
+        rows.append({"date": d, "cell": "C", "alpha10": 0.05 * ((-1) ** i), "alpha20": 0.0})
+    return pl.DataFrame(rows)
+
+
+def test_evaluate_signal_cells_matches_rank_velocity_aggregator() -> None:
+    cells = _synthetic_cells().rename({"cell": "_orig"}).with_columns(
+        pl.col("_orig").replace(
+            {"A": "top5", "B": "not_top5_fast", "C": "not_top5_slow"}
+        ).alias("cell")
+    ).drop("_orig")
+    horizons = (10, 20)
+    got = evaluate_signal_cells(cells, RANK_VELOCITY_CELLS, horizons, n_boot=200, seed=42)
+    want = _aggregate_rank_velocity_cells(cells, horizons, n_boot=200, seed=42, snapshot_gap_td=5)
+    assert got.equals(want)
+
+
+def test_evaluate_signal_cells_matches_flow_trigger_aggregator() -> None:
+    cells = _synthetic_cells().rename({"cell": "_orig"}).with_columns(
+        pl.col("_orig").replace(
+            {"A": "top5", "B": "not_top5_triggered", "C": "not_top5_untriggered"}
+        ).alias("cell")
+    ).drop("_orig")
+    horizons = (10, 20)
+    got = evaluate_signal_cells(cells, FLOW_TRIGGER_CELLS, horizons, n_boot=200, seed=42)
+    want = _aggregate_flow_trigger_cells(cells, horizons, n_boot=200, seed=42, snapshot_gap_td=5)
+    assert got.equals(want)
+
+
+def test_evaluate_signal_cells_empty_input() -> None:
+    empty = pl.DataFrame({"date": [date(2026, 1, 1)]})
+    assert evaluate_signal_cells(empty, ("hit",), (10,)).is_empty()
+
+
+def test_evaluate_signal_cells_by_regime_empty_without_regime_column() -> None:
+    cells = _synthetic_cells().with_columns(pl.lit(None).cast(pl.Utf8).alias("regime"))
+    out = evaluate_signal_cells_by_regime(cells, ("A", "B", "C"), (10,))
+    assert out.is_empty()
+
+
+def test_evaluate_signal_cells_by_regime_runs() -> None:
+    cells = _synthetic_cells().with_columns(pl.lit("進攻").alias("regime"))
+    out = evaluate_signal_cells_by_regime(cells, ("A", "B", "C"), (10,), n_boot=50)
+    assert set(out.columns) == {
+        "horizon", "cell", "regime", "n", "n_dates", "mean", "ci_lo", "ci_hi", "thin",
+    }
+    assert not out.is_empty()
+
+
+# ─── §22.5 維度1（族群輪動）───
+
+
+def _rotation_stock_rows(n_weeks: int = 12) -> pl.DataFrame:
+    """5個次產業×2檔成員股×n_weeks週：trend_score固定排名(A>B>C>D>E)，
+    當日有效群組數=5 → top_quantile=0.2 → ⌈5*0.2⌉=1 → 只有A格hit。
+    """
+    dates = [date(2026, 1, 2) + timedelta(weeks=i) for i in range(n_weeks)]
+    scores = {"A": 90.0, "B": 70.0, "C": 50.0, "D": 30.0, "E": 10.0}
+    members = {"A": ["1101", "1102"], "B": ["1201", "1202"], "C": ["1301", "1302"],
+               "D": ["1401", "1402"], "E": ["1501", "1502"]}
+    rows = []
+    for d in dates:
+        for sub, score in scores.items():
+            for sid in members[sub]:
+                rows.append(
+                    {
+                        "date": d, "sub_industry": sub, "stock_id": sid,
+                        "trend_score": score, "alpha10": 1.0 if sub == "A" else -0.2,
+                    }
+                )
+    return pl.DataFrame(rows)
+
+
+def test_build_rotation_cells_dynamic_quantile() -> None:
+    cells = build_rotation_cells(_rotation_stock_rows(n_weeks=1), top_quantile=0.2)
+    hits = cells.filter(pl.col("cell") == "hit")["sub_industry"].unique().to_list()
+    assert hits == ["A"]
+    misses = set(cells.filter(pl.col("cell") == "miss")["sub_industry"].unique().to_list())
+    assert misses == {"B", "C", "D", "E"}
+
+
+def test_build_rotation_cells_empty_when_missing_columns() -> None:
+    assert build_rotation_cells(pl.DataFrame({"date": [date(2026, 1, 1)]})).is_empty()
+
+
+def test_build_rotation_cells_drops_null_trend_score() -> None:
+    base = _rotation_stock_rows(n_weeks=1).with_columns(
+        pl.when(pl.col("sub_industry") == "E")
+        .then(None)
+        .otherwise(pl.col("trend_score"))
+        .alias("trend_score")
+    )
+    cells = build_rotation_cells(base, top_quantile=0.2)
+    assert "E" not in cells["sub_industry"].unique().to_list()
+
+
+def test_rotation_grid_schema_and_cells() -> None:
+    grid = rotation_grid(_rotation_stock_rows(n_weeks=12), horizons=(10,), n_boot=50)
+    assert set(grid.columns) == {
+        "horizon", "cell", "n", "n_dates", "mean", "median", "win_rate",
+        "delta_mean", "ci_lo", "ci_hi", "mean_h1", "mean_h2",
+    }
+    assert set(grid["cell"].to_list()).issubset(set(ROTATION_CELLS))
+    hit_row = grid.filter(pl.col("cell") == "hit").row(0, named=True)
+    assert hit_row["delta_mean"] > 0
+
+
+def test_rotation_grid_empty_when_no_alpha_column() -> None:
+    base = _rotation_stock_rows(n_weeks=1).drop("alpha10")
+    assert rotation_grid(base, horizons=(10,)).is_empty()
+
+
+def test_rotation_by_regime_runs() -> None:
+    base = _rotation_stock_rows(n_weeks=12).with_columns(pl.lit("進攻").alias("regime"))
+    out = rotation_by_regime(base, horizons=(10,), n_boot=50)
+    assert not out.is_empty()
+    assert set(out.columns) == {
+        "horizon", "cell", "regime", "n", "n_dates", "mean", "ci_lo", "ci_hi", "thin",
+    }
+
+
+def test_rotation_by_regime_empty_without_regime_column() -> None:
+    assert rotation_by_regime(_rotation_stock_rows(n_weeks=1), horizons=(10,)).is_empty()
+
+
+def test_walk_forward_rotation_schema() -> None:
+    out = walk_forward_rotation(
+        _rotation_stock_rows(n_weeks=40), horizons=(10,), n_splits=2, min_train_frac=0.4,
+        n_boot=50,
+    )
+    assert set(out.columns) == {
+        "horizon", "cell", "split_id", "test_start", "test_end",
+        "test_n", "test_n_dates", "test_delta_mean", "test_ci_lo", "test_ci_hi",
+    }
+    assert not out.is_empty()
+
+
+def test_walk_forward_rotation_empty_inputs() -> None:
+    assert walk_forward_rotation(pl.DataFrame({"date": [date(2026, 1, 1)]})).is_empty()

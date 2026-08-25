@@ -1476,6 +1476,22 @@ def backtest_official_sector_grid_cmd(
     run_official_sector_grid(settings, out_dir, group_source, hand_min_purity)
 
 
+@backtest_app.command("redesign-dimension-grid")
+def backtest_redesign_dimension_grid_cmd(
+    dimension: str = typer.Argument(
+        "rotation", help="候選維度（docs/31 §22.3.4排序）；目前只支援 rotation（維度1，族群輪動）"
+    ),
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/redesign_dimension_grid）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """docs/31 §22.5 milestone：panel-only候選排列組合研究，維度1（族群輪動）。"""
+    from tw_screener.backtest.redesign_dimension_grid_runner import run_redesign_dimension_grid
+
+    run_redesign_dimension_grid(settings, out_dir, dimension)
+
+
 @backtest_app.command("rank-velocity-grid")
 def backtest_rank_velocity_grid_cmd(
     out_dir: Path | None = typer.Option(
