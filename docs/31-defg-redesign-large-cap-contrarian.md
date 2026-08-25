@@ -2259,6 +2259,65 @@ cells`/`evaluate_signal_cells_by_regime`/`walk_forward_splits`同一套，不
 描述性報告，避免變相重測§17）；不做維度1×維度2以外的更高階組合（同
 §22.3.6三維以上組合本輪不做的既有限制）。
 
+### 22.8 維度2結果（2026-08-25 已執行，累積測試數2/14）
+
+**①正確性回歸測試（真實資料，不計入預算）**：用真實2022-2026
+`panel.parquet`重建★投信流觸發序列＋`_attach_flow_trigger_cell`3-cell，
+`_aggregate_flow_trigger_cells`（已發布）與`evaluate_signal_cells`（新
+通用版）在同一份真實cells上算出**逐格數字完全一致**（`.equals()`為
+True）——r+20`not_top5_triggered`格CI[-0.607,-0.059]與§17.4發布值
+[-0.61,-0.06]吻合（四捨五入誤差內）。正確性回歸測試完整履行，未修改
+`_aggregate_flow_trigger_cells`本身。
+
+**②維度1×維度2組合（14個假說預算第2個，正式裁決）**：新增
+`build_rotation_flow_cells()`/`rotation_flow_grid()`/`rotation_flow_
+by_regime()`/`walk_forward_rotation_flow()`（`redesign_dimension_grid.py`，
+同時把walk-forward迴圈抽成通用`walk_forward_cells()`供維度1/維度2共用，
+避免第三份重複程式碼）。CLI擴充為`backtest redesign-dimension-grid
+rotation_flow_combo`。6個新測試全綠（連同既有14個共20個），1193個既有
+測試全數不受影響。
+
+**實跑2022-2026全期資料**（1582個★投信流觸發事件橫跨41個群組）：
+
+| horizon | hit_triggered delta | hit_untriggered delta | miss_triggered delta | miss_untriggered delta |
+|---|---|---|---|---|
+| r+10 | +0.51% [+0.17,+0.84] | +0.52% [+0.24,+0.84] | -0.17% [-0.36,+0.01] | -0.17% [-0.27,-0.07] |
+| r+20 | +0.99% [+0.47,+1.49] | +0.91% [+0.36,+1.55] | -0.33% [-0.69,-0.04] | -0.28% [-0.43,-0.11] |
+| r+40 | +2.00% [+0.85,+3.14] | +1.32% [+0.09,+2.76] | -0.48% [-1.13,+0.36] | -0.47% [-0.92,-0.16] |
+
+`hit_triggered`依§22.7四步門檻三個horizon皆裁決「候選」（CI95排除0在上、
+跨regime同向2個可判regime——防禦regime在搜尋階段樣本不足〈thin〉、前後
+半段同向、保留驗證窗同號）。
+
+**核心結論（本節真正要回答的問題）：flow trigger對已經是rotation-hit的
+族群，沒有找到有意義的額外加值**——`hit_triggered`跟`hit_untriggered`
+三個horizon的delta_mean都非常接近（r+10幾乎相同0.51%vs0.52%；r+20
+0.99%vs0.91%；r+40 2.00%vs1.32%略高但兩者CI大幅重疊[+0.85,+3.14]vs
+[+0.09,+2.76]），跟維度1單獨的`hit`格數字（r+10+0.56%／r+20+1.00%／
+r+40+1.82%）幾乎沒有差異。`hit_triggered`能通過四步機械裁決，是因為它
+繼承了維度1本身的效應，不是因為flow trigger本身加了值——**「候選」這個
+機械標籤不代表「找到更強的組合訊號」，只代表hit_triggered子集本身仍然
+延續了維度1的效應**，這個區分很重要，不可以把裁決結果誤讀成「疊加flow
+訊號比單用維度1更好」。
+
+**誠實但書**：`hit_triggered`格4段walk-forward**比維度1單獨更不乾淨**——
+第2段（2024-07~2025-03）r+40出現顯著負值（-1.29% CI[-2.43,-0.57]，
+清楚排除0在下），跟維度1單獨版同一段（+0.18%，CI跨0但非負）方向相反；
+r+20同段亦為負（-0.35%，CI跨0）。搜尋階段的pooled CI仍吸收這個負向
+子區間後維持整體顯著為正，機械裁決沒有出錯，但這代表**交叉法人流向後
+的樣本比純族群輪動更不穩定**，是額外的、不可省略的揭露。
+
+**miss_triggered vs miss_untriggered（純描述性，非本節新測試）**：三個
+horizon的delta_mean相近（差距皆<0.1個百分點），大致重現§17已否證的
+負向方向，但沒有放大或縮小的明顯型態——不構成對§17結論的修正，僅供
+完整揭露記錄。
+
+**下一步（待使用者確認）**：依§22.3.4排序，維度3（大戶集中度變化，
+big_holder_pct/big_holder_1000_pct WoW方向）待開工——這是14個假說預算
+中第3個獨立維度測試，且是首次不重用trend_score/官方族群指數的全新訊號
+建構（需先處理§22.3.2已提醒的覆蓋率問題：`big_holder_pct`僅TDCC公布日
+〈週五〉有值），開工前需先寫維度3自己的pre-registration。
+
 ## 23. 減量研究計畫 Part 4（backlog，本輪只寫規劃不執行）：宏觀風險參數
 grid search（n=3事件，使用者已拍板「做，但標示為候選假說」）
 

@@ -250,22 +250,22 @@ def rotation_by_regime(
     )
 
 
-def walk_forward_rotation(
-    stock_rows: pl.DataFrame,
+def walk_forward_cells(
+    cells: pl.DataFrame,
+    cell_names: tuple[str, ...],
     horizons: tuple[int, ...] = (10, 20, 40),
-    top_quantile: float = 0.2,
     n_splits: int = 4,
     min_train_frac: float = 0.4,
     n_boot: int = 1000,
     seed: int = 42,
     snapshot_gap_td: int = 5,
 ) -> pl.DataFrame:
-    """§22.5 walk-forward：無需選門檻（top_quantile 為預先登記固定值，非可調
-    超參數），只需各段獨立算 `hit`/`miss` 兩格的 delta/CI，誠實列出每段結果
-    （同 §13.4/§14.2 精神）。最近一段（split_id 最大）即§22.5核准的保留驗證窗，
-    呼叫端不得用它調整訊號定義，只能拿它的結果對搜尋階段（其餘段）做同號複核。
+    """通用 walk-forward：已分派好 cell 的資料 → 各段獨立算各 cell 的 delta/CI，
+    誠實列出每段結果（同 §13.4/§14.2 精神）。最近一段（split_id 最大）即§22.3.1
+    核准的保留驗證窗，呼叫端不得用它調整訊號定義，只能拿它的結果對搜尋階段
+    （其餘段）做同號複核。供§22.5維度1、§22.7維度1×維度2組合共用，避免各自
+    複製一份 walk-forward 迴圈（同 evaluate_signal_cells 的抽出理由）。
     """
-    cells = build_rotation_cells(stock_rows, top_quantile=top_quantile)
     if cells.is_empty():
         return pl.DataFrame(schema=_ROTATION_WF_SCHEMA)
 
@@ -284,10 +284,10 @@ def walk_forward_rotation(
                 (pl.col("date") >= s.test_start) & (pl.col("date") <= s.test_end)
             )
             test_grid = evaluate_signal_cells(
-                test_cells, ROTATION_CELLS, horizons=(h,), n_boot=n_boot, seed=seed,
+                test_cells, cell_names, horizons=(h,), n_boot=n_boot, seed=seed,
                 snapshot_gap_td=snapshot_gap_td,
             )
-            for cell_name in ROTATION_CELLS:
+            for cell_name in cell_names:
                 r_df = test_grid.filter(pl.col("cell") == cell_name)
                 if r_df.is_empty():
                     continue
@@ -302,3 +302,158 @@ def walk_forward_rotation(
                     }
                 )
     return pl.DataFrame(rows, schema=_ROTATION_WF_SCHEMA)
+
+
+def walk_forward_rotation(
+    stock_rows: pl.DataFrame,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_quantile: float = 0.2,
+    n_splits: int = 4,
+    min_train_frac: float = 0.4,
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§22.5 walk-forward：`build_rotation_cells` ＋通用 `walk_forward_cells`。"""
+    cells = build_rotation_cells(stock_rows, top_quantile=top_quantile)
+    return walk_forward_cells(
+        cells, ROTATION_CELLS, horizons, n_splits, min_train_frac, n_boot, seed, snapshot_gap_td
+    )
+
+
+# ---------------------------------------------------------------------------
+# docs/31 §22.7 維度1×維度2組合：rotation(hit/miss) × flow_trigger(triggered/untriggered)
+# ---------------------------------------------------------------------------
+
+ROTATION_FLOW_CELLS: tuple[str, ...] = (
+    "hit_triggered", "hit_untriggered", "miss_triggered", "miss_untriggered",
+)
+
+
+def build_rotation_flow_cells(
+    stock_rows: pl.DataFrame,
+    triggers: pl.DataFrame,
+    daily_dates: list,
+    top_quantile: float = 0.2,
+    lookback_window: int = 15,
+) -> pl.DataFrame:
+    """§22.7：`build_rotation_cells` 的 hit/miss 交叉★投信流「近期觸發」，共4格。
+
+    「近期觸發」判定邏輯（交易日索引 join_asof、`lookback_window`個交易日內）
+    獨立重寫一份，同`official_sector_grid.py`的`_attach_flow_trigger_cell`——
+    不匯入該私有函式，避免耦合到§17已發布程式碼路徑（同全案duplicate-small-
+    helper慣例）。
+
+    Args:
+        daily_dates: 觸發序列所在的完整交易日曆（非`stock_rows`本身的週頻日期）
+            ——同`_attach_flow_trigger_cell`要求，必須用完整交易日曆建索引。
+    """
+    rotation_cells = build_rotation_cells(stock_rows, top_quantile=top_quantile)
+    if rotation_cells.is_empty():
+        return pl.DataFrame(schema=_ROTATION_CELLS_SCHEMA)
+    if triggers.is_empty():
+        return rotation_cells.with_columns(
+            (pl.col("cell") + pl.lit("_untriggered")).alias("cell")
+        )
+
+    day_index = pl.DataFrame(
+        {"date": sorted(set(daily_dates)), "_day_idx": range(len(set(daily_dates)))}
+    )
+    pop_idx = (
+        rotation_cells.join(day_index, on="date", how="left")
+        .sort(["sub_industry", "_day_idx"])
+    )
+    trig_idx = (
+        triggers.join(
+            day_index.rename({"date": "_trig_date"}),
+            left_on="date", right_on="_trig_date", how="inner",
+        )
+        .rename({"_day_idx": "_trig_idx"})
+        .select("sub_industry", "_trig_idx")
+        .sort(["sub_industry", "_trig_idx"])
+    )
+    joined = pop_idx.join_asof(
+        trig_idx, left_on="_day_idx", right_on="_trig_idx", by="sub_industry",
+        strategy="backward", check_sortedness=False,
+    )
+    joined = joined.with_columns(
+        (
+            pl.col("_trig_idx").is_not_null()
+            & ((pl.col("_day_idx") - pl.col("_trig_idx")) <= lookback_window)
+        ).fill_null(False).alias("_triggered_recent")
+    )
+    return joined.with_columns(
+        (
+            pl.col("cell")
+            + pl.when(pl.col("_triggered_recent"))
+            .then(pl.lit("_triggered"))
+            .otherwise(pl.lit("_untriggered"))
+        ).alias("cell")
+    ).drop(["_day_idx", "_trig_idx", "_triggered_recent"])
+
+
+def rotation_flow_grid(
+    stock_rows: pl.DataFrame,
+    triggers: pl.DataFrame,
+    daily_dates: list,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_quantile: float = 0.2,
+    lookback_window: int = 15,
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§22.7 全樣本讀值：4格（hit/miss × triggered/untriggered）forward alpha對照。"""
+    cells = build_rotation_flow_cells(
+        stock_rows, triggers, daily_dates, top_quantile=top_quantile,
+        lookback_window=lookback_window,
+    )
+    return evaluate_signal_cells(
+        cells, ROTATION_FLOW_CELLS, horizons, n_boot, seed, snapshot_gap_td
+    )
+
+
+def rotation_flow_by_regime(
+    stock_rows: pl.DataFrame,
+    triggers: pl.DataFrame,
+    daily_dates: list,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_quantile: float = 0.2,
+    lookback_window: int = 15,
+    n_boot: int = 1000,
+    seed: int = 42,
+    regime_col: str = "regime",
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§22.7 regime切片：4格 × regime forward alpha。"""
+    cells = build_rotation_flow_cells(
+        stock_rows, triggers, daily_dates, top_quantile=top_quantile,
+        lookback_window=lookback_window,
+    )
+    return evaluate_signal_cells_by_regime(
+        cells, ROTATION_FLOW_CELLS, horizons, n_boot, seed, regime_col, snapshot_gap_td
+    )
+
+
+def walk_forward_rotation_flow(
+    stock_rows: pl.DataFrame,
+    triggers: pl.DataFrame,
+    daily_dates: list,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_quantile: float = 0.2,
+    lookback_window: int = 15,
+    n_splits: int = 4,
+    min_train_frac: float = 0.4,
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§22.7 walk-forward：`build_rotation_flow_cells` ＋通用 `walk_forward_cells`。"""
+    cells = build_rotation_flow_cells(
+        stock_rows, triggers, daily_dates, top_quantile=top_quantile,
+        lookback_window=lookback_window,
+    )
+    return walk_forward_cells(
+        cells, ROTATION_FLOW_CELLS, horizons, n_splits, min_train_frac, n_boot, seed,
+        snapshot_gap_td,
+    )

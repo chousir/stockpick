@@ -14,12 +14,17 @@ from tw_screener.backtest.official_sector_grid import (
 )
 from tw_screener.backtest.redesign_dimension_grid import (
     ROTATION_CELLS,
+    ROTATION_FLOW_CELLS,
     build_rotation_cells,
+    build_rotation_flow_cells,
     evaluate_signal_cells,
     evaluate_signal_cells_by_regime,
     rotation_by_regime,
+    rotation_flow_by_regime,
+    rotation_flow_grid,
     rotation_grid,
     walk_forward_rotation,
+    walk_forward_rotation_flow,
 )
 
 # ─── §22.3.3 正確性回歸測試：evaluate_signal_cells 必須與已發布的兩個私有聚合函式
@@ -173,3 +178,70 @@ def test_walk_forward_rotation_schema() -> None:
 
 def test_walk_forward_rotation_empty_inputs() -> None:
     assert walk_forward_rotation(pl.DataFrame({"date": [date(2026, 1, 1)]})).is_empty()
+
+
+# ─── §22.7 維度1×維度2組合（rotation hit/miss × flow_trigger triggered/untriggered）───
+
+
+def test_build_rotation_flow_cells_crosses_hit_with_trigger() -> None:
+    base = _rotation_stock_rows(n_weeks=12)
+    dates = sorted(base["date"].unique().to_list())
+    triggers = pl.DataFrame(
+        [("A", dates[5]), ("C", dates[5])], schema=["sub_industry", "date"], orient="row"
+    )
+    cells = build_rotation_flow_cells(base, triggers, dates, top_quantile=0.2, lookback_window=15)
+    assert set(cells["cell"].unique().to_list()).issubset(set(ROTATION_FLOW_CELLS))
+
+    a_after = cells.filter((pl.col("sub_industry") == "A") & (pl.col("date") == dates[5]))
+    assert a_after["cell"].to_list()[0] == "hit_triggered"
+    a_before = cells.filter((pl.col("sub_industry") == "A") & (pl.col("date") == dates[0]))
+    assert a_before["cell"].to_list()[0] == "hit_untriggered"
+    c_after = cells.filter((pl.col("sub_industry") == "C") & (pl.col("date") == dates[5]))
+    assert c_after["cell"].to_list()[0] == "miss_triggered"
+
+
+def test_build_rotation_flow_cells_empty_triggers_all_untriggered() -> None:
+    base = _rotation_stock_rows(n_weeks=1)
+    dates = sorted(base["date"].unique().to_list())
+    empty_triggers = pl.DataFrame(schema={"sub_industry": pl.Utf8, "date": pl.Date})
+    cells = build_rotation_flow_cells(base, empty_triggers, dates)
+    assert set(cells["cell"].unique().to_list()) == {"hit_untriggered", "miss_untriggered"}
+
+
+def test_build_rotation_flow_cells_empty_when_missing_columns() -> None:
+    base = pl.DataFrame({"date": [date(2026, 1, 1)]})
+    assert build_rotation_flow_cells(base, pl.DataFrame(), []).is_empty()
+
+
+def test_rotation_flow_grid_schema() -> None:
+    base = _rotation_stock_rows(n_weeks=12)
+    dates = sorted(base["date"].unique().to_list())
+    triggers = pl.DataFrame([("A", dates[5])], schema=["sub_industry", "date"], orient="row")
+    grid = rotation_flow_grid(base, triggers, dates, horizons=(10,), n_boot=50)
+    assert set(grid.columns) == {
+        "horizon", "cell", "n", "n_dates", "mean", "median", "win_rate",
+        "delta_mean", "ci_lo", "ci_hi", "mean_h1", "mean_h2",
+    }
+    assert set(grid["cell"].to_list()).issubset(set(ROTATION_FLOW_CELLS))
+
+
+def test_rotation_flow_by_regime_runs() -> None:
+    base = _rotation_stock_rows(n_weeks=12).with_columns(pl.lit("進攻").alias("regime"))
+    dates = sorted(base["date"].unique().to_list())
+    triggers = pl.DataFrame([("A", dates[5])], schema=["sub_industry", "date"], orient="row")
+    out = rotation_flow_by_regime(base, triggers, dates, horizons=(10,), n_boot=50)
+    assert not out.is_empty()
+
+
+def test_walk_forward_rotation_flow_schema() -> None:
+    base = _rotation_stock_rows(n_weeks=40)
+    dates = sorted(base["date"].unique().to_list())
+    triggers = pl.DataFrame([("A", dates[5])], schema=["sub_industry", "date"], orient="row")
+    out = walk_forward_rotation_flow(
+        base, triggers, dates, horizons=(10,), n_splits=2, min_train_frac=0.4, n_boot=50,
+    )
+    assert set(out.columns) == {
+        "horizon", "cell", "split_id", "test_start", "test_end",
+        "test_n", "test_n_dates", "test_delta_mean", "test_ci_lo", "test_ci_hi",
+    }
+    assert not out.is_empty()
