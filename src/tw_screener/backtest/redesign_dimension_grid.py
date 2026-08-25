@@ -585,3 +585,94 @@ def walk_forward_margin(
     return walk_forward_cells(
         cells, MARGIN_CELLS, horizons, n_splits, min_train_frac, n_boot, seed, snapshot_gap_td
     )
+
+
+# ---------------------------------------------------------------------------
+# docs/31 §22.12 維度5：價格動能（個股層級，ma60_dist_pct水位——非rank_velocity
+# 的群組排名爬升速度，見§22.12說明）
+# ---------------------------------------------------------------------------
+
+MOMENTUM_CELLS: tuple[str, ...] = ("hit", "miss")
+_MOMENTUM_CELLS_SCHEMA: dict[str, type[pl.DataType]] = {
+    "date": pl.Date, "stock_id": pl.Utf8, "cell": pl.Utf8,
+}
+
+
+def build_momentum_cells(
+    panel: pl.DataFrame,
+    weekly_dates: set,
+    top_quantile: float = 0.2,
+) -> pl.DataFrame:
+    """§22.12：個股`ma60_dist_pct`（收盤距自身60日均線%，panel既有欄位，不衍生
+    新計算）當週橫斷面前`top_quantile`（距均線最遠／最強勢）→`hit`，其餘→`miss`。
+
+    Args:
+        panel: 需含 date/stock_id/ma60_dist_pct/alpha{h}。
+        weekly_dates: 週頻快照日期集合（同`weekly_snapshot_dates()`輸出）。
+    """
+    need = {"date", "stock_id", "ma60_dist_pct"}
+    if panel.is_empty() or not need.issubset(panel.columns):
+        return pl.DataFrame(schema=_MOMENTUM_CELLS_SCHEMA)
+
+    weekly = panel.filter(pl.col("date").is_in(list(weekly_dates))).drop_nulls(["ma60_dist_pct"])
+    if weekly.is_empty():
+        return pl.DataFrame(schema=_MOMENTUM_CELLS_SCHEMA)
+
+    ranked = weekly.with_columns(
+        pl.col("ma60_dist_pct").rank(method="min", descending=True).over("date").alias("_rank"),
+        pl.col("ma60_dist_pct").count().over("date").alias("_n"),
+    ).with_columns(
+        (pl.col("_rank") <= (pl.col("_n") * top_quantile).ceil()).alias("_hit")
+    )
+    return ranked.with_columns(
+        pl.when(pl.col("_hit")).then(pl.lit("hit")).otherwise(pl.lit("miss")).alias("cell")
+    ).drop(["_rank", "_n", "_hit"])
+
+
+def momentum_grid(
+    panel: pl.DataFrame,
+    weekly_dates: set,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_quantile: float = 0.2,
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§22.12 全樣本讀值：`hit`/`miss` 兩格 forward alpha 對照。"""
+    cells = build_momentum_cells(panel, weekly_dates, top_quantile=top_quantile)
+    return evaluate_signal_cells(cells, MOMENTUM_CELLS, horizons, n_boot, seed, snapshot_gap_td)
+
+
+def momentum_by_regime(
+    panel: pl.DataFrame,
+    weekly_dates: set,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_quantile: float = 0.2,
+    n_boot: int = 1000,
+    seed: int = 42,
+    regime_col: str = "regime",
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§22.12 regime切片：`hit`/`miss` 兩格 × regime forward alpha。"""
+    cells = build_momentum_cells(panel, weekly_dates, top_quantile=top_quantile)
+    return evaluate_signal_cells_by_regime(
+        cells, MOMENTUM_CELLS, horizons, n_boot, seed, regime_col, snapshot_gap_td
+    )
+
+
+def walk_forward_momentum(
+    panel: pl.DataFrame,
+    weekly_dates: set,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_quantile: float = 0.2,
+    n_splits: int = 4,
+    min_train_frac: float = 0.4,
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§22.12 walk-forward：`build_momentum_cells` ＋通用 `walk_forward_cells`。"""
+    cells = build_momentum_cells(panel, weekly_dates, top_quantile=top_quantile)
+    return walk_forward_cells(
+        cells, MOMENTUM_CELLS, horizons, n_splits, min_train_frac, n_boot, seed, snapshot_gap_td
+    )

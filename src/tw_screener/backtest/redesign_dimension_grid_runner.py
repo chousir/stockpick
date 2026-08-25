@@ -21,21 +21,21 @@ from rich.console import Console
 
 console = Console()
 
-_DIMENSIONS = ("rotation", "rotation_flow_combo", "margin")
+_DIMENSIONS = ("rotation", "rotation_flow_combo", "margin", "momentum")
 
 
 def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension: str) -> None:
-    """docs/31 §22.5/§22.7/§22.10：panel-only候選排列組合研究。
+    """docs/31 §22.5/§22.7/§22.10/§22.12：panel-only候選排列組合研究。
 
     Args:
         dimension: "rotation"（維度1，§22.5）｜"rotation_flow_combo"（維度1×維度2
-            組合，§22.7）｜"margin"（維度4融資水位，§22.10）。維度3（大戶集中度）
-            因TDCC快照限制暫緩見§22.9；維度5尚未pre-registration，見§22.3.4。
+            組合，§22.7）｜"margin"（維度4融資水位，§22.10）｜"momentum"（維度5
+            價格動能，§22.12）。維度3（大戶集中度）因TDCC快照限制暫緩見§22.9。
     """
     if dimension not in _DIMENSIONS:
         console.print(
             f"[red]--dimension 目前只支援 {_DIMENSIONS}，收到 {dimension!r}——"
-            "維度3暫緩(§22.9)、維度5尚未pre-registration(§22.3.4)[/red]"
+            "維度3暫緩(§22.9)[/red]"
         )
         raise typer.Exit(1)
 
@@ -74,6 +74,17 @@ def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension:
             top_quantile=top_quantile, horizons=horizons, snapshot_gap_td=snapshot_gap_td,
             n_boot=n_boot, n_splits=n_splits, min_train_frac=min_train_frac,
             has_regime=has_regime, out=out,
+        )
+        return
+
+    if dimension == "momentum":
+        from tw_screener.backtest.rotation_efficacy import weekly_snapshot_dates
+
+        weekly = set(weekly_snapshot_dates(panel["date"].unique().to_list()))
+        _run_momentum(
+            panel, weekly, top_quantile=top_quantile, horizons=horizons,
+            snapshot_gap_td=snapshot_gap_td, n_boot=n_boot, n_splits=n_splits,
+            min_train_frac=min_train_frac, has_regime=has_regime, out=out,
         )
         return
 
@@ -572,5 +583,92 @@ def _run_margin(
     lines += dec_lines
 
     md = out / f"redesign_dim4_margin_{base_tag}.md"
+    md.write_text("\n".join(lines), encoding="utf-8")
+    console.print(f"[green]完成，報告見 {md}[/green]")
+
+
+def _run_momentum(
+    panel: pl.DataFrame,
+    weekly_dates: set,
+    top_quantile: float,
+    horizons: tuple[int, ...],
+    snapshot_gap_td: int,
+    n_boot: int,
+    n_splits: int,
+    min_train_frac: float,
+    has_regime: bool,
+    out: Path,
+) -> None:
+    from tw_screener.backtest import redesign_dimension_grid as rdg
+
+    grid = rdg.momentum_grid(
+        panel, weekly_dates, horizons=horizons, top_quantile=top_quantile, n_boot=n_boot,
+        snapshot_gap_td=snapshot_gap_td,
+    )
+    if grid.is_empty():
+        console.print("[red]格為空——輸入資料異常[/red]")
+        raise typer.Exit(1)
+    wf = rdg.walk_forward_momentum(
+        panel, weekly_dates, horizons=horizons, top_quantile=top_quantile, n_splits=n_splits,
+        min_train_frac=min_train_frac, n_boot=n_boot, snapshot_gap_td=snapshot_gap_td,
+    )
+    cells = rdg.build_momentum_cells(panel, weekly_dates, top_quantile=top_quantile)
+
+    base_tag = date.today().strftime("%Y%m%d")
+    grid.write_csv(out / f"redesign_dim5_momentum_{base_tag}.csv")
+    if not wf.is_empty():
+        wf.write_csv(out / f"redesign_dim5_momentum_wf_{base_tag}.csv")
+
+    n_weeks = cells["date"].n_unique() if not cells.is_empty() else 0
+    n_stocks = cells["stock_id"].n_unique() if not cells.is_empty() else 0
+    lines = [
+        "# docs/31 §22.12：維度5（價格動能，個股層級）——panel-only候選排列組合"
+        "研究第4個假說",
+        "",
+        "> 累積測試數：4/14（維度3因§22.9緣故未消耗預算）。門檻已於 docs/31 §22.12 "
+        "執行前預先登記，本報告只呈現結果，裁決依登記門檻套用。**個股層級訊號，訊號＝"
+        "`ma60_dist_pct`水位本身（非rank_velocity§14的群組排名爬升速度）**。不預設"
+        "方向，CI95的實際符號決定解讀。",
+        "",
+        f"- 產出日：{date.today()}；top_quantile={top_quantile:.0%}；{n_weeks} 週快照、"
+        f"{n_stocks} 檔個股（上市＋上櫃皆含，ma60_dist_pct無OTC限制）。",
+        "- `mean`/`median`/`win_rate`＝原始個股alpha{h}，供量級參考；`ci_lo`/`ci_hi`是對"
+        "delta（cell當日均值−當日全樣本均值）做moving-block bootstrap CI。",
+        "",
+    ]
+    lines += _full_sample_table(
+        grid, "## 全樣本讀值（hit=當週ma60_dist_pct前20%〈距均線最遠/最強勢〉、miss=其餘）"
+    )
+
+    # vol_ratio 描述性佐證（不進四步裁決，見§22.12 pre-registration）
+    if "vol_ratio" in panel.columns and not cells.is_empty():
+        vr = (
+            cells.join(
+                panel.select("date", "stock_id", "vol_ratio"), on=["date", "stock_id"],
+                how="left",
+            )
+            .group_by("cell")
+            .agg(pl.col("vol_ratio").mean().alias("_m"))
+        )
+        lines += ["## vol_ratio 描述性佐證（不進四步裁決，僅供解讀參考）", ""]
+        for r in vr.iter_rows(named=True):
+            lines.append(f"- {r['cell']}格平均vol_ratio：{_c(r['_m'], nd=2)}")
+        lines.append("")
+
+    lines += _wf_table(wf, "hit", "## walk-forward（第4段＝保留驗證窗，不用於搜尋）")
+    lines += [
+        "> **跨維度提醒（§22.12要求）**：請比對上表4段是否重現維度1/2組合/4已一致"
+        "出現的「2024-06~2025-03轉弱、2025-03起轉強」型態（見docs/31 §22.11）——"
+        "若第4次也是同一型態，強化「同一市場regime效應」的解讀，需在docs/31寫入結論"
+        "時明確比對，不可孤立只看本維度數字。",
+        "",
+    ]
+    dec_lines, _ = _decision_lines(
+        cells, "hit", wf, horizons, n_splits, min_train_frac, n_boot, snapshot_gap_td,
+        has_regime, "個股層級訊號，無次產業membership（上市＋上櫃皆含）",
+    )
+    lines += dec_lines
+
+    md = out / f"redesign_dim5_momentum_{base_tag}.md"
     md.write_text("\n".join(lines), encoding="utf-8")
     console.print(f"[green]完成，報告見 {md}[/green]")

@@ -1481,7 +1481,8 @@ def backtest_redesign_dimension_grid_cmd(
     dimension: str = typer.Argument(
         "rotation",
         help="候選維度（docs/31 §22.3.4排序）：rotation（維度1族群輪動,§22.5）｜"
-        "rotation_flow_combo（維度1×2組合,§22.7）｜margin（維度4融資水位,§22.10）",
+        "rotation_flow_combo（維度1×2組合,§22.7）｜margin（維度4融資水位,§22.10）｜"
+        "momentum（維度5價格動能,§22.12）",
     ),
     out_dir: Path | None = typer.Option(
         None, help="輸出目錄（預設讀 settings，research/redesign_dimension_grid）"

@@ -15,20 +15,25 @@ from tw_screener.backtest.official_sector_grid import (
 )
 from tw_screener.backtest.redesign_dimension_grid import (
     MARGIN_CELLS,
+    MOMENTUM_CELLS,
     ROTATION_CELLS,
     ROTATION_FLOW_CELLS,
     build_margin_cells,
+    build_momentum_cells,
     build_rotation_cells,
     build_rotation_flow_cells,
     evaluate_signal_cells,
     evaluate_signal_cells_by_regime,
     margin_by_regime,
     margin_grid,
+    momentum_by_regime,
+    momentum_grid,
     rotation_by_regime,
     rotation_flow_by_regime,
     rotation_flow_grid,
     rotation_grid,
     walk_forward_margin,
+    walk_forward_momentum,
     walk_forward_rotation,
     walk_forward_rotation_flow,
 )
@@ -351,3 +356,83 @@ def test_walk_forward_margin_schema() -> None:
 
 def test_walk_forward_margin_empty_inputs() -> None:
     assert walk_forward_margin(pl.DataFrame({"date": [date(2026, 1, 1)]}), set()).is_empty()
+
+
+# ─── §22.12 維度5（價格動能，個股層級，ma60_dist_pct水位）───
+
+
+def _momentum_panel(n_days: int = 15) -> pl.DataFrame:
+    """3檔個股×n_days：1101距60日均線最遠(+20%，最強勢)、1102持平(0%)、
+    1103落後(-15%)。"""
+    dates = [date(2026, 1, 5) + timedelta(days=i) for i in range(n_days)]
+    rows = []
+    for d in dates:
+        rows.append({"date": d, "stock_id": "1101", "ma60_dist_pct": 20.0, "alpha10": 1.0})
+        rows.append({"date": d, "stock_id": "1102", "ma60_dist_pct": 0.0, "alpha10": -0.2})
+        rows.append({"date": d, "stock_id": "1103", "ma60_dist_pct": -15.0, "alpha10": 5.0})
+    return pl.DataFrame(rows)
+
+
+def test_build_momentum_cells_top_quantile() -> None:
+    panel = _momentum_panel(n_days=5)
+    dates = sorted(panel["date"].unique().to_list())
+    cells = build_momentum_cells(panel, {dates[2]}, top_quantile=0.3)
+    hit_ids = cells.filter(pl.col("cell") == "hit")["stock_id"].to_list()
+    assert hit_ids == ["1101"]
+    miss_ids = set(cells.filter(pl.col("cell") == "miss")["stock_id"].to_list())
+    assert miss_ids == {"1102", "1103"}
+
+
+def test_build_momentum_cells_empty_when_missing_columns() -> None:
+    assert build_momentum_cells(pl.DataFrame({"date": [date(2026, 1, 1)]}), set()).is_empty()
+
+
+def test_build_momentum_cells_drops_null_ma60_dist_pct() -> None:
+    panel = _momentum_panel(n_days=1).with_columns(
+        pl.when(pl.col("stock_id") == "1103").then(None).otherwise(pl.col("ma60_dist_pct"))
+        .alias("ma60_dist_pct")
+    )
+    dates = sorted(panel["date"].unique().to_list())
+    cells = build_momentum_cells(panel, {dates[0]}, top_quantile=1.0)
+    assert "1103" not in cells["stock_id"].unique().to_list()
+
+
+def test_momentum_grid_schema_and_cells() -> None:
+    panel = _momentum_panel(n_days=15)
+    dates = sorted(panel["date"].unique().to_list())
+    grid = momentum_grid(panel, {dates[10]}, horizons=(10,), n_boot=50)
+    assert set(grid.columns) == {
+        "horizon", "cell", "n", "n_dates", "mean", "median", "win_rate",
+        "delta_mean", "ci_lo", "ci_hi", "mean_h1", "mean_h2",
+    }
+    assert set(grid["cell"].to_list()).issubset(set(MOMENTUM_CELLS))
+
+
+def test_momentum_by_regime_runs() -> None:
+    panel = _momentum_panel(n_days=15).with_columns(pl.lit("進攻").alias("regime"))
+    dates = sorted(panel["date"].unique().to_list())
+    out = momentum_by_regime(panel, {dates[10]}, horizons=(10,), n_boot=50)
+    assert not out.is_empty()
+
+
+def test_momentum_by_regime_empty_without_regime_column() -> None:
+    panel = _momentum_panel(n_days=15)
+    dates = sorted(panel["date"].unique().to_list())
+    assert momentum_by_regime(panel, {dates[10]}, horizons=(10,)).is_empty()
+
+
+def test_walk_forward_momentum_schema() -> None:
+    panel = _momentum_panel(n_days=60)
+    dates = sorted(panel["date"].unique().to_list())
+    weekly = set(dates[5::5])
+    out = walk_forward_momentum(
+        panel, weekly, horizons=(10,), n_splits=2, min_train_frac=0.4, n_boot=50,
+    )
+    assert set(out.columns) == {
+        "horizon", "cell", "split_id", "test_start", "test_end",
+        "test_n", "test_n_dates", "test_delta_mean", "test_ci_lo", "test_ci_hi",
+    }
+
+
+def test_walk_forward_momentum_empty_inputs() -> None:
+    assert walk_forward_momentum(pl.DataFrame({"date": [date(2026, 1, 1)]}), set()).is_empty()
