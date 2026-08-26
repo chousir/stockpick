@@ -2777,7 +2777,44 @@ candidates_enriched.csv或任何screen_result CSV**，純研究結論、不存�
 維度3累積後補測，皆為backlog、非本輪待辦**，若之後有人接續要做，
 先讀本節與§22.15，不要重新發明多重比較預算或population-gate設計。
 
-## 23. 減量研究計畫 Part 4（backlog，本輪只寫規劃不執行）：宏觀風險參數
+### 22.17 法人流向剩餘組合 pre-registration（2026-08-25，執行前寫死；
+使用者選接續§22.16 backlog的「法人流向剩餘2組合」方向）
+
+**累積測試數：14個假說預算中的第8-9個（8-9/14）**——§22.15已收斂法人
+流向（維度2）不跟維度4/5組合，本節是使用者明確要求接續那條backlog，
+補測**2組**：法人流向×融資、法人流向×動能（不補三維以上組合，維持
+§22.3原始排除範圍不變）。
+
+**沿用§22.15的全部設計決定，不重新發明**：population同樣在餵進訊號
+建構前就限定進攻regime快照日（非後驗切片，理由同§22.15）；裁決規則
+沿用§22.15的5步（CI95→前後半段同向→walk-forward保留驗證窗→**gain
+判準**：`both_hit`delta_mean需同時大於`a_only_hit`與`b_only_hit`才算
+「候選（有增益）」，否則「候選（無明確增益）」；regime同向≥2/3這步
+同§22.15理由不適用，移除）。法人流向「近期觸發」定義**完全沿用§22.7
+production校準值**（`trust_flow_20d z>1 ∧ flow_momentum>0`、
+`lookback_window=15`交易日），不重新校準、不調整門檻。
+
+**工程做法**：新增`build_flow_cells()`（`redesign_dimension_grid.py`），
+把§22.7`build_rotation_flow_cells()`內部的「次產業層級join_asof觸發
+判定」邏輯獨立抽成一份**單獨的hit/miss cell表**（非附掛在rotation
+cell字串上），才能直接餵`build_pairwise_combo_cells()`跟`margin_cells`/
+`momentum_cells`做2×2交叉——**刻意重寫一份邏輯，不改動`build_rotation_
+flow_cells()`本身**（同該函式docstring已述的duplicate-small-helper
+慣例，避免耦合到§22.7/§17已發布程式碼路徑，那兩處數字不可變動）。
+population與`build_rotation_cells()`相同母體（需`sub_industry`標籤＋
+當週有效`trend_score`）——法人流向本質是次產業層級訊號，沿用§22.7
+既有母體宣告，非本節新限制。
+
+**兩組合的population交集聲明**：
+- **法人流向×融資**：法人流向母體（有次產業標籤＋當週有效trend_score）
+  ∩融資母體（僅上市，OTC無`margin_balance_lots`）。
+- **法人流向×動能**：法人流向母體（同上）∩動能母體（上市＋上櫃皆含，
+  `ma60_dist_pct`無OTC限制）——交集實質上受限於法人流向那邊的次產業
+  membership要求。
+
+**本節不做**：不重新校準flow trigger門檻；不做三維組合；不動已發布
+的§22.7/§17程式碼路徑；不重測§22.15已做過的3組（族群輪動×融資／
+族群輪動×動能／融資×動能）。（backlog，本輪只寫規劃不執行）：宏觀風險參數
 grid search（n=3事件，使用者已拍板「做，但標示為候選假說」）
 
 **狀態：使用者已拍板方向，未開工，待使用者下輪確認要不要排進下個milestone。**
