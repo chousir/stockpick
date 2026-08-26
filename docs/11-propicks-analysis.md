@@ -57,7 +57,15 @@ reports/YYYY-Www/
 
 到 [claude.ai](https://claude.ai)，選 **Claude Opus**（最強模型，這步值得用）。
 
-### Step C：依序貼入檔案內容
+> **也可以不開瀏覽器**：跑 `/daily-picks`（`.claude/commands/daily-picks.md`），Claude
+> Code CLI 會自己跑完 `make week`、觸發總經第二意見掃描、寫好 `macro_risk_latest.yaml`，
+> 再用一個 Opus 子代理讀本檔的 Prompt 範本與任務 0-5、依 Step A 的檔案清單自己讀檔，
+> 直接產出 `reports/<週次>/pick.md`——不用你手動開頁面貼 9 份檔案。**本檔的 Prompt
+> 範本與任務 0-5 是兩種跑法共用的唯一規格來源**，以後要改分析規則只改這裡，
+> `daily-picks.md` 不重複維護一份。`/daily-picks` 跑到 `pick.md` 為止，落正式帳
+> （`picks sync`）仍要你自己決定要不要跑。
+
+### Step C：依序貼入檔案內容（手動網頁流程）
 
 順序：先 prompt → 再 group_analysis.md → 再 **sector_rotation.md** → 再 **candidates_enriched.csv** → 再 **cp_candidates.md** → 再 **inflection_ambush.md** → 再 **holdings/watchlist_enriched.csv（若有）** → 再 4 個 CSV（D/E/F/G）→ 再 **pick_outcome_brief.md（上週帳）** → 最後 **macro_risk_latest.yaml（若當週有貼）**。
 
