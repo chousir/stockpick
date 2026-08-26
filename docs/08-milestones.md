@@ -864,6 +864,20 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 
 ---
 
+## M-FactorLab 二輪（W28 §7 補洞）：推論硬化＋regime 切片全量重跑（規劃書 23・分支 `feat/backtest-r2-w28`）
+
+> 對應規劃書 [docs/23-backtest-r2-w28.md](23-backtest-r2-w28.md)。動機延續 docs/22 §7.2 誠實帳：週頻/日頻快照 × r+20 前瞻窗重疊 → 相鄰觀測自相關，Fisher-z 假設獨立、CI 一律偏窄——本輪把推論修硬（moving-block bootstrap 取代 Fisher-z），不改任何 gate。
+
+- **WS-I 推論硬化**：晉升鐵則改三條件並行——walk-forward 方向一致 ≥4/5 段＋moving-block bootstrap CI95 不含 0＋regime 切片 ≥2 個 regime 同向；Fisher-z pooled CI 降為對照，不作晉升判準。
+- **WS-H.4/J.2 全量重跑裁決**（面板 2022-01~2026-07、160 萬列、核價 100%，regime 樣本進攻 78／中性 118／防禦 31 週）：**trend_score 升級「跨 regime 穩健＋粗分類穩健」**（3/3 切片全 CI>0，系統唯一雙 robustness 因子）；**★ entry 升級**（3/3 CI>0，第一輪「弱」係樣本薄）；**laggard ambush 升「可提案候補」**（r+20 CI 正式分離＋official 版同步分離，效應量小 +0.27pp，升權重仍須走 F1 提案）；**ma60_dist 精煉為防禦 regime 條件性**（防禦 −0.118 CI<0，進攻/中性≈0）；**vol_ratio 維持降級**（CI 全含 0，效應≈0.002-0.011）。
+- **WS-K 籌碼三因子預註冊＋首驗**（融資減肥/大戶 WoW/margin_to_vol）：K1 margin_slim、K3 margin_to_vol **皆無證據**（mean_IC≈0，K3 號與預註冊相反但遠低於 0.03 底線）；K2 big_holder_wow **樣本不足不可判**（TDCC 官方無歷史回溯，2026-06-26 起累積，≥26 週再驗）——個股層籌碼類因子至今零個過效應量底線。
+- 殘餘待辦（自然累積型，非本輪範圍）：TDCC 週檔累積至 ≥26 週重驗 K2；候選宇宙口徑推論硬化；歷史 membership git 回放。
+- 驗收：19 commits、verifier 8/8 PASS。
+
+**已 fast-forward 併入 main（2026-07-15，tip `17cb060`，非 --no-ff bubble）**，`feat/backtest-r2-w28` 分支已刪除。
+
+---
+
 ## M-Macro1：總經避險層 Phase 1——BAA10Y 單訊號＋揭露面板總經燈號（規劃書 25・分支 `feat/macro-regime-phase1`）
 
 > 對應規劃書 [docs/25-macro-regime.md](25-macro-regime.md) §6 Phase 1。委託＝新增「由上而下」外生總經風險燈號，與既有內生 V2 regime 並列不合成。v1 拍腦袋候選＋加權合成設計，經三輪研究（`research/macro_regime_screening/`，block-bootstrap lift/CI）否證——BAA10Y 是唯一全格通過的指標，加權合成本身稀釋訊號——v2 改單一主訊號決定燈色、其餘指標降為揭露面板不計分。
