@@ -1484,7 +1484,8 @@ def backtest_redesign_dimension_grid_cmd(
         "rotation_flow_combo（維度1×2組合,§22.7）｜margin（維度4融資水位,§22.10）｜"
         "momentum（維度5價格動能,§22.12）｜combo_rotation_margin/"
         "combo_rotation_momentum/combo_margin_momentum（維度間組合,§22.15，"
-        "population限定進攻regime）",
+        "population限定進攻regime）｜combo_flow_margin/combo_flow_momentum"
+        "（法人流向剩餘組合,§22.17，同樣population限定進攻regime）",
     ),
     out_dir: Path | None = typer.Option(
         None, help="輸出目錄（預設讀 settings，research/redesign_dimension_grid）"

@@ -29,7 +29,31 @@ console = Console()
 _DIMENSIONS = (
     "rotation", "rotation_flow_combo", "margin", "momentum",
     "combo_rotation_margin", "combo_rotation_momentum", "combo_margin_momentum",
+    "combo_flow_margin", "combo_flow_momentum",
 )
+
+
+def _build_flow_triggers(
+    panel: pl.DataFrame, membership: pl.DataFrame, fc: dict
+) -> tuple[pl.DataFrame, list]:
+    """§22.7/§22.17共用：重建★投信流校準歷史觸發序列（沿用production校準值，不重調）。"""
+    from tw_screener.backtest import official_sector_grid as osg
+
+    institutional_daily = panel.select(
+        "date", "stock_id", "foreign_net", "trust_net", "dealer_net"
+    )
+    triggers = osg.build_flow_triggers(
+        institutional_daily, membership,
+        short_window=int(fc.get("short_window", 5)),
+        long_window=int(fc.get("long_window", 20)),
+        z_window=int(fc.get("z_window", 60)),
+        z_min_periods=int(fc.get("z_min_periods", 30)),
+        signal_col=str(fc.get("signal_col", "trust_flow_20d")),
+        threshold=float(fc.get("threshold", 1.0)),
+        require_momentum=bool(fc.get("require_momentum", True)),
+    )
+    daily_dates = sorted(panel["date"].unique().to_list())
+    return triggers, daily_dates
 
 
 def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension: str) -> None:
@@ -39,8 +63,10 @@ def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension:
         dimension: "rotation"（維度1，§22.5）｜"rotation_flow_combo"（維度1×維度2
             組合，§22.7）｜"margin"（維度4融資水位，§22.10）｜"momentum"（維度5
             價格動能，§22.12）｜"combo_rotation_margin"/"combo_rotation_momentum"/
-            "combo_margin_momentum"（§22.15維度間組合，population限定進攻regime）。
-            維度3（大戶集中度）因TDCC快照限制暫緩見§22.9。
+            "combo_margin_momentum"（§22.15維度間組合，population限定進攻regime）｜
+            "combo_flow_margin"/"combo_flow_momentum"（§22.17法人流向剩餘組合，
+            同樣population限定進攻regime）。維度3（大戶集中度）因TDCC快照限制
+            暫緩見§22.9。
     """
     if dimension not in _DIMENSIONS:
         console.print(
@@ -174,26 +200,51 @@ def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension:
     if dimension == "rotation":
         _run_rotation(stock_rows, top_quantile=top_quantile, **common)
     elif dimension == "rotation_flow_combo":
-        institutional_daily = panel.select(
-            "date", "stock_id", "foreign_net", "trust_net", "dealer_net"
-        )
         console.print("[bold]重建★投信流校準歷史觸發序列（沿用production校準值）...[/bold]")
-        triggers = osg.build_flow_triggers(
-            institutional_daily, membership,
-            short_window=int(fc.get("short_window", 5)),
-            long_window=int(fc.get("long_window", 20)),
-            z_window=int(fc.get("z_window", 60)),
-            z_min_periods=int(fc.get("z_min_periods", 30)),
-            signal_col=str(fc.get("signal_col", "trust_flow_20d")),
-            threshold=float(fc.get("threshold", 1.0)),
-            require_momentum=bool(fc.get("require_momentum", True)),
-        )
-        daily_dates = sorted(panel["date"].unique().to_list())
+        triggers, daily_dates = _build_flow_triggers(panel, membership, fc)
         lookback_window = int(fc.get("lookback_window", 15))
         _run_rotation_flow_combo(
             stock_rows, triggers, daily_dates, top_quantile=top_quantile,
             lookback_window=lookback_window, **common,
         )
+    elif dimension in ("combo_flow_margin", "combo_flow_momentum"):
+        from tw_screener.backtest import redesign_dimension_grid as rdg
+
+        if not has_regime:
+            console.print("[red]面板缺regime欄——§22.17組合需進攻regime前提，先跑 "
+                           "make regime-history 再 make build-panel[/red]")
+            raise typer.Exit(1)
+        console.print("[bold]重建★投信流校準歷史觸發序列（沿用production校準值）...[/bold]")
+        triggers, daily_dates = _build_flow_triggers(panel, membership, fc)
+        lookback_window = int(fc.get("lookback_window", 15))
+        flow_cells = rdg.build_flow_cells(
+            stock_rows, triggers, daily_dates, lookback_window=lookback_window
+        )
+        a_desc = (
+            f"法人流向(★投信流近期觸發，lookback_window={lookback_window}交易日，"
+            f"hand membership purity≥{min_purity})"
+        )
+        if dimension == "combo_flow_margin":
+            margin_cells = rdg.build_margin_cells(
+                panel, weekly, chg_window=chg_window, min_prev_lots=min_prev_lots,
+                top_quantile=top_quantile,
+            )
+            _run_combo(
+                flow_cells, margin_cells, combo_name="法人流向×融資水位",
+                a_desc=a_desc, b_desc="融資水位(chg_pct_5d前20%，僅上市)",
+                horizons=horizons, snapshot_gap_td=snapshot_gap_td, n_boot=n_boot,
+                n_splits=n_splits, min_train_frac=min_train_frac, out=out,
+                report_name="redesign_combo_flow_margin",
+            )
+        else:
+            momentum_cells = rdg.build_momentum_cells(panel, weekly, top_quantile=top_quantile)
+            _run_combo(
+                flow_cells, momentum_cells, combo_name="法人流向×價格動能",
+                a_desc=a_desc, b_desc="價格動能(ma60_dist_pct前20%，上市＋上櫃)",
+                horizons=horizons, snapshot_gap_td=snapshot_gap_td, n_boot=n_boot,
+                n_splits=n_splits, min_train_frac=min_train_frac, out=out,
+                report_name="redesign_combo_flow_momentum",
+            )
     else:
         from tw_screener.backtest import redesign_dimension_grid as rdg
 

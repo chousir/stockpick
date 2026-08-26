@@ -392,6 +392,73 @@ def build_rotation_flow_cells(
     ).drop(["_day_idx", "_trig_idx", "_triggered_recent"])
 
 
+def build_flow_cells(
+    stock_rows: pl.DataFrame,
+    triggers: pl.DataFrame,
+    daily_dates: list,
+    lookback_window: int = 15,
+) -> pl.DataFrame:
+    """§22.17：法人流向「近期觸發」單獨抽成hit/miss cell（非附掛在rotation cell
+    字串上），供跟`build_margin_cells`／`build_momentum_cells`直接餵
+    `build_pairwise_combo_cells()`做2×2組合。
+
+    觸發判定邏輯（次產業層級join_asof、`lookback_window`個交易日內）**刻意重新
+    獨立寫一份**，不重用`build_rotation_flow_cells()`內部邏輯——同該函式docstring
+    已述的duplicate-small-helper慣例，避免耦合到§22.7/§17已發布程式碼路徑（那兩處
+    輸出數字已發布，不可被本函式的任何調整波及）。
+
+    population＝`stock_rows`本身的母體（同`build_rotation_cells`：需date/
+    sub_industry/stock_id皆非null）——法人流向本質是次產業層級訊號，沿用§22.7
+    既有母體宣告，非本函式新增限制。
+
+    Args:
+        daily_dates: 觸發序列所在的完整交易日曆（同`build_rotation_flow_cells`
+            要求，非`stock_rows`本身的週頻日期）。
+    """
+    need = {"date", "sub_industry", "stock_id"}
+    if stock_rows.is_empty() or not need.issubset(stock_rows.columns):
+        return pl.DataFrame(schema=_ROTATION_CELLS_SCHEMA)
+    base = stock_rows.drop_nulls(["date", "sub_industry", "stock_id"])
+    if base.is_empty():
+        return pl.DataFrame(schema=_ROTATION_CELLS_SCHEMA)
+    if triggers.is_empty():
+        return base.with_columns(pl.lit("miss").alias("cell"))
+
+    day_index = pl.DataFrame(
+        {"date": sorted(set(daily_dates)), "_day_idx": range(len(set(daily_dates)))}
+    )
+    sub_ind_days = (
+        base.select("date", "sub_industry").unique()
+        .join(day_index, on="date", how="left")
+        .sort(["sub_industry", "_day_idx"])
+    )
+    trig_idx = (
+        triggers.join(
+            day_index.rename({"date": "_trig_date"}),
+            left_on="date", right_on="_trig_date", how="inner",
+        )
+        .rename({"_day_idx": "_trig_idx"})
+        .select("sub_industry", "_trig_idx")
+        .sort(["sub_industry", "_trig_idx"])
+    )
+    joined = sub_ind_days.join_asof(
+        trig_idx, left_on="_day_idx", right_on="_trig_idx", by="sub_industry",
+        strategy="backward", check_sortedness=False,
+    )
+    joined = joined.with_columns(
+        (
+            pl.col("_trig_idx").is_not_null()
+            & ((pl.col("_day_idx") - pl.col("_trig_idx")) <= lookback_window)
+        ).fill_null(False).alias("_triggered_recent")
+    ).with_columns(
+        pl.when(pl.col("_triggered_recent"))
+        .then(pl.lit("hit"))
+        .otherwise(pl.lit("miss"))
+        .alias("cell")
+    ).select("date", "sub_industry", "cell")
+    return base.join(joined, on=["date", "sub_industry"], how="inner")
+
+
 def rotation_flow_grid(
     stock_rows: pl.DataFrame,
     triggers: pl.DataFrame,

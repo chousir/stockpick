@@ -19,6 +19,7 @@ from tw_screener.backtest.redesign_dimension_grid import (
     PAIRWISE_COMBO_CELLS,
     ROTATION_CELLS,
     ROTATION_FLOW_CELLS,
+    build_flow_cells,
     build_margin_cells,
     build_momentum_cells,
     build_pairwise_combo_cells,
@@ -224,6 +225,56 @@ def test_build_rotation_flow_cells_empty_triggers_all_untriggered() -> None:
 def test_build_rotation_flow_cells_empty_when_missing_columns() -> None:
     base = pl.DataFrame({"date": [date(2026, 1, 1)]})
     assert build_rotation_flow_cells(base, pl.DataFrame(), []).is_empty()
+
+
+# ─── §22.17 法人流向剩餘組合：build_flow_cells單獨抽出hit/miss cell ───
+
+
+def test_build_flow_cells_hit_after_trigger_within_lookback() -> None:
+    base = _rotation_stock_rows(n_weeks=12)
+    dates = sorted(base["date"].unique().to_list())
+    triggers = pl.DataFrame(
+        [("A", dates[5]), ("C", dates[5])], schema=["sub_industry", "date"], orient="row"
+    )
+    cells = build_flow_cells(base, triggers, dates, lookback_window=15)
+    assert set(cells["cell"].unique().to_list()).issubset({"hit", "miss"})
+
+    a_after = cells.filter((pl.col("sub_industry") == "A") & (pl.col("date") == dates[5]))
+    assert a_after["cell"].to_list()[0] == "hit"
+    a_before = cells.filter((pl.col("sub_industry") == "A") & (pl.col("date") == dates[0]))
+    assert a_before["cell"].to_list()[0] == "miss"
+    # B從未觸發，全程miss
+    b_any = cells.filter(pl.col("sub_industry") == "B")
+    assert set(b_any["cell"].to_list()) == {"miss"}
+
+
+def test_build_flow_cells_empty_triggers_all_miss() -> None:
+    base = _rotation_stock_rows(n_weeks=1)
+    dates = sorted(base["date"].unique().to_list())
+    empty_triggers = pl.DataFrame(schema={"sub_industry": pl.Utf8, "date": pl.Date})
+    cells = build_flow_cells(base, empty_triggers, dates)
+    assert set(cells["cell"].unique().to_list()) == {"miss"}
+
+
+def test_build_flow_cells_empty_when_missing_columns() -> None:
+    base = pl.DataFrame({"date": [date(2026, 1, 1)]})
+    assert build_flow_cells(base, pl.DataFrame(), []).is_empty()
+
+
+def test_build_flow_cells_pairs_with_margin_via_pairwise_combo() -> None:
+    """§22.17核心用法：flow cells直接餵build_pairwise_combo_cells跟margin cells組合
+    （不透過rotation cell字串），驗證schema相容、可產出both_hit等4格。"""
+    base = _rotation_stock_rows(n_weeks=3)
+    dates = sorted(base["date"].unique().to_list())
+    triggers = pl.DataFrame([("A", dates[0])], schema=["sub_industry", "date"], orient="row")
+    flow_cells = build_flow_cells(base, triggers, dates, lookback_window=15)
+
+    margin_like = flow_cells.select("date", "stock_id").with_columns(
+        pl.lit("hit").alias("cell")
+    )
+    combo = build_pairwise_combo_cells(flow_cells, margin_like)
+    assert set(combo["cell"].unique().to_list()).issubset(set(PAIRWISE_COMBO_CELLS))
+    assert not combo.is_empty()
 
 
 def test_rotation_flow_grid_schema() -> None:
