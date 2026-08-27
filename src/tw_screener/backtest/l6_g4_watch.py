@@ -275,13 +275,41 @@ def select_l6_candidates_distressed(
 
 
 def select_g4_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
-    """從 `build_l6_g4_snapshot()` 輸出篩 `g4==True` 的列（docs/31 2026-08-24使用者
-    拍板：用現有本地資料做filter直接掛進`make week`，接受未驗證，`screen run-local
-    g4`用）。G4仍在「分析層」（`t187ap05_L`純快照無法回查2022空頭，見§9/§20）。
+    """從 `build_l6_g4_snapshot()` 輸出篩 `g4==True` 的列——**全市場、無市值門檻**
+    （docs/31 2026-08-24使用者拍板：用現有本地資料做filter直接掛進`make week`，接受
+    未驗證，`g4`本身是§9 item4前瞻累積軌預先登記的判準）。G4仍在「分析層」
+    （`t187ap05_L`純快照無法回查2022空頭，見§9/§20）。**候選生成請改用
+    `select_g4_candidates_large_cap()`**（2026-08-27修正，見下）。
     """
     if snapshot.is_empty() or "g4" not in snapshot.columns:
         return pl.DataFrame(schema={"stock_id": pl.Utf8, "name": pl.Utf8})
     return snapshot.filter(pl.col("g4")).select("stock_id", "name").unique("stock_id")
+
+
+def select_g4_candidates_large_cap(
+    snapshot: pl.DataFrame, market_cap_min_billion: float = 300.0
+) -> pl.DataFrame:
+    """docs/31 §20.4：G4候選生成路徑加市值≥`market_cap_min_billion`門檻（預設300億，
+    同G2）——使用者實跑`make week`發現G4(351檔)候選數是其餘四式的3-7倍，查核後
+    確認G4是五式中唯一「無成長水準門檻＋無市值門檻」的（G1有距MA60%上限但無市值下限、
+    G2/G5皆有市值或成交額門檻），呼應docs/31整體「大型股(潛力股)」框架加上市值下限。
+
+    `g4`欄位本身（`l6_g4_watch`底帳累積軌，§9 item4已預先登記的判準）**刻意不動**，
+    理由同L6 population-gate修正（§20.3）：避免更動正在前瞻累積驗證中的判準定義。
+    全市場無門檻版本仍可用`select_g4_candidates()`。
+    """
+    empty = pl.DataFrame(schema={"stock_id": pl.Utf8, "name": pl.Utf8})
+    need = {"stock_id", "name", "market_cap_billion", "g4"}
+    if snapshot.is_empty() or not need.issubset(snapshot.columns):
+        return empty
+    gated = snapshot.filter(
+        pl.col("g4")
+        & pl.col("market_cap_billion").is_not_null()
+        & (pl.col("market_cap_billion") >= market_cap_min_billion)
+    )
+    if gated.is_empty():
+        return empty
+    return gated.select("stock_id", "name").unique("stock_id")
 
 
 @dataclass(frozen=True)

@@ -14,6 +14,7 @@ from tw_screener.backtest.l6_g4_watch import (
     ledger_progress_summary,
     revenue_disclosure_date,
     select_g4_candidates,
+    select_g4_candidates_large_cap,
     select_l6_candidates,
     select_l6_candidates_distressed,
     upsert_l6_g4_ledger,
@@ -249,6 +250,38 @@ def test_select_g4_candidates_empty_snapshot() -> None:
     out = select_g4_candidates(pl.DataFrame(schema=LEDGER_SCHEMA))
     assert out.is_empty()
     assert set(out.columns) == {"stock_id", "name"}
+
+
+# ─── 2026-08-27：G4候選生成加市值≥300億門檻（§20.4） ───
+
+
+def test_select_g4_candidates_large_cap_filters_small_cap_out() -> None:
+    """AAA(市值350億)符合g4且達標；CCC(市值10億)同樣g4命中但市值不足，應排除。"""
+    universe = _universe([
+        {"stock_id": "AAA", "name": "大型股", "market_cap_billion": 350.0,
+         "pe_ratio": 40.0, "cum_rev_yoy_pct": 5.0},
+        {"stock_id": "CCC", "name": "小型股", "market_cap_billion": 10.0,
+         "pe_ratio": 40.0, "cum_rev_yoy_pct": 5.0},
+    ])
+    revenue = _revenue([
+        {"stock_id": "AAA", "year_month": "202607", "yoy_pct": 12.0},
+        {"stock_id": "CCC", "year_month": "202607", "yoy_pct": 12.0},
+    ])
+    snap = build_l6_g4_snapshot(
+        universe, revenue,
+        yoy_deltas={"AAA": (3.0, 1.0), "CCC": (3.0, 1.0)},
+        trust_net_5d={}, week="2026-W34", data_date=date(2026, 8, 22),
+    )
+    # 兩檔皆命中g4（全市場無門檻版本）——用來確認差異只來自市值gate
+    assert set(select_g4_candidates(snap)["stock_id"].to_list()) == {"AAA", "CCC"}
+    out = select_g4_candidates_large_cap(snap, market_cap_min_billion=300.0)
+    assert out["stock_id"].to_list() == ["AAA"]
+    assert set(out.columns) == {"stock_id", "name"}
+
+
+def test_select_g4_candidates_large_cap_empty_snapshot() -> None:
+    out = select_g4_candidates_large_cap(pl.DataFrame(schema=LEDGER_SCHEMA))
+    assert out.is_empty()
 
 
 def test_revenue_preview_risk_flag() -> None:

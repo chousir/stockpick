@@ -1008,7 +1008,7 @@ def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):
         build_distress_snapshot,
         build_l6_g4_inputs,
         build_l6_g4_snapshot,
-        select_g4_candidates,
+        select_g4_candidates_large_cap,
         select_l6_candidates_distressed,
     )
 
@@ -1022,7 +1022,9 @@ def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):
         l6_mktcap_min_billion=float(wc.get("l6_mktcap_min_billion", 100.0)),
     )
     if strategy == "g4":
-        return select_g4_candidates(snapshot)
+        return select_g4_candidates_large_cap(
+            snapshot, market_cap_min_billion=float(wc.get("g4_mktcap_min_billion", 300.0))
+        )
 
     # 2026-08-26 population-gate修正：L6候選生成須限定「落難週」母體（docs/31 §5.2
     # 實際backtest母體，非全市場），見l6_g4_watch.py模組docstring。
