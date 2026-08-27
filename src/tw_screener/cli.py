@@ -1005,10 +1005,11 @@ def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):
         return selector(snapshot)
 
     from tw_screener.backtest.l6_g4_watch import (
+        build_distress_snapshot,
         build_l6_g4_inputs,
         build_l6_g4_snapshot,
         select_g4_candidates,
-        select_l6_candidates,
+        select_l6_candidates_distressed,
     )
 
     l6_inputs = build_l6_g4_inputs(client, cfg, data_date)
@@ -1020,7 +1021,27 @@ def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):
         l6_pe_max=float(wc.get("l6_pe_max", 25.0)),
         l6_mktcap_min_billion=float(wc.get("l6_mktcap_min_billion", 100.0)),
     )
-    return select_g4_candidates(snapshot) if strategy == "g4" else select_l6_candidates(snapshot)
+    if strategy == "g4":
+        return select_g4_candidates(snapshot)
+
+    # 2026-08-26 population-gate修正：L6候選生成須限定「落難週」母體（docs/31 §5.2
+    # 實際backtest母體，非全市場），見l6_g4_watch.py模組docstring。
+    from pathlib import Path as _Path
+
+    from tw_screener.analysis.rotation import load_market_history
+
+    cache_dir = _Path(cfg["paths"]["cache_dir"]) / "twse"
+    market_hist = load_market_history(
+        cache_dir, n_days=int(wc.get("distress_market_history_days", 130))
+    )
+    distress = build_distress_snapshot(market_hist)
+    return select_l6_candidates_distressed(
+        snapshot, distress,
+        market_cap_min_billion=float(wc.get("l6_mktcap_min_billion", 100.0)),
+        ma60_max_pct=float(wc.get("distress_ma60_max_pct", -8.0)),
+        low60_max_pct=float(wc.get("distress_low60_max_pct", 15.0)),
+        ret_8w_max_pct=float(wc.get("distress_ret8w_max_pct", 0.0)),
+    )
 
 
 @screen_app.command("run-local")

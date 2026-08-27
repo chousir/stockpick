@@ -23,6 +23,17 @@
 在原表是獨立測的一列（n=89，27.0%），從未跟YoY/PE聯集驗證過。§9 item4 又只寫「相同判準
 (YoY≥20∧PE≤25)」。本檔對兩種讀法都存旗標（`l6_2cond`／`l6_4cond`），不擅自二選一，
 留給未來重新登記檢定時決定要對哪個口徑算命中率。
+
+**2026-08-26 population-gate修正（不動`l6_2cond`/`l6_4cond`/ledger本身）**：使用者發現
+`select_l6_candidates()`（候選生成路徑，`screen run-local l6`／`make week`用）套的是
+`l6_2cond`（YoY≥20∧PE≤25）在**全市場**——但§5.2實際backtest出25.5%/31.7%命中率的母體
+是「落難週」（市值≥100億∧距MA60<−8%∧距60日低≤+15%∧前8週報酬<0）**交集**YoY≥20∧PE≤25，
+不是全市場套這兩條件。全市場版本量到的是「成長股+合理PE」，是完全不同的母體，不是
+docs/31 §4.2定義的「左側交易股」訊號。新增`build_distress_snapshot()`／
+`select_l6_candidates_distressed()`補上這個母體限定，供候選生成路徑改用；**`l6_2cond`／
+`l6_4cond`／ledger累積軌本身刻意不改**——落難週技術面三維本來就是設計成價格衍生、
+隨時可從日線快取重建（見上段「為什麼要現在存這些欄位」），不落地進ledger是原設計
+意圖，不是疏漏，維持不變才對得上未來重建時的口徑一致性。
 """
 
 from __future__ import annotations
@@ -160,8 +171,9 @@ def build_l6_g4_snapshot(
 
 
 def select_l6_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
-    """從 `build_l6_g4_snapshot()` 輸出篩 `l6_2cond==True` 的列（docs/31 §5.2實測
-    讀法：YoY≥20∧PE≤25，`screen run-local l6`用）。
+    """從 `build_l6_g4_snapshot()` 輸出篩 `l6_2cond==True` 的列——**全市場**，不限落難週
+    （docs/31 §5.2實測讀法本身：YoY≥20∧PE≤25，但套在全市場，非backtest母體，見本檔
+    2026-08-26 population-gate修正段；候選生成請改用`select_l6_candidates_distressed()`）。
 
     刻意只用`l6_2cond`、不含`l6_4cond`多出的投信近5日淨買/市值≥100億兩條件——
     那兩條件從未獨立驗證過（docs/31 §9 記載的L6讀法未解問題），不可擅自升級成
@@ -172,6 +184,94 @@ def select_l6_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
     if snapshot.is_empty() or "l6_2cond" not in snapshot.columns:
         return pl.DataFrame(schema={"stock_id": pl.Utf8, "name": pl.Utf8})
     return snapshot.filter(pl.col("l6_2cond")).select("stock_id", "name").unique("stock_id")
+
+
+_DISTRESS_SCHEMA: dict[str, type[pl.DataType]] = {
+    "stock_id": pl.Utf8, "ma60_dist_pct": pl.Float64,
+    "low60_dist_pct": pl.Float64, "ret_8w_pct": pl.Float64,
+}
+
+
+def build_distress_snapshot(
+    market_hist: pl.DataFrame,
+    ma60_window: int = 60,
+    low_window: int = 60,
+    ret_window_td: int = 40,
+) -> pl.DataFrame:
+    """全市場(date,stock_id,close)歷史 → 每檔最新一日的距MA60%／距60日低%／前
+    `ret_window_td`交易日報酬%（docs/31 §5.2「落難週」技術面三維：距MA60/距60日低/
+    前8週報酬，8週≈40交易日）。
+
+    價格衍生、隨時可重建，刻意不落地進ledger（見本檔頂部docstring「為什麼要現在存」
+    與「population-gate修正」兩段）——本函式就是那個「未來重建」，供
+    `select_l6_candidates_distressed()`在候選生成當下即時算。
+    """
+    need = {"date", "stock_id", "close"}
+    if market_hist.is_empty() or not need.issubset(market_hist.columns):
+        return pl.DataFrame(schema=_DISTRESS_SCHEMA)
+    sorted_hist = market_hist.sort(["stock_id", "date"]).with_columns(
+        pl.col("close").rolling_mean(ma60_window, min_samples=ma60_window)
+        .over("stock_id").alias("_ma60"),
+        pl.col("close").rolling_min(low_window, min_samples=low_window)
+        .over("stock_id").alias("_low60"),
+        pl.col("close").shift(ret_window_td).over("stock_id").alias("_close_prior"),
+    )
+    latest_date = sorted_hist["date"].max()
+    latest = sorted_hist.filter(pl.col("date") == latest_date)
+    if latest.is_empty():
+        return pl.DataFrame(schema=_DISTRESS_SCHEMA)
+    return latest.with_columns(
+        pl.when(pl.col("_ma60") > 0)
+        .then((pl.col("close") - pl.col("_ma60")) / pl.col("_ma60") * 100)
+        .otherwise(None).alias("ma60_dist_pct"),
+        pl.when(pl.col("_low60") > 0)
+        .then((pl.col("close") - pl.col("_low60")) / pl.col("_low60") * 100)
+        .otherwise(None).alias("low60_dist_pct"),
+        pl.when(pl.col("_close_prior") > 0)
+        .then((pl.col("close") - pl.col("_close_prior")) / pl.col("_close_prior") * 100)
+        .otherwise(None).alias("ret_8w_pct"),
+    ).select("stock_id", "ma60_dist_pct", "low60_dist_pct", "ret_8w_pct")
+
+
+def select_l6_candidates_distressed(
+    snapshot: pl.DataFrame,
+    distress: pl.DataFrame,
+    market_cap_min_billion: float = 100.0,
+    ma60_max_pct: float = -8.0,
+    low60_max_pct: float = 15.0,
+    ret_8w_max_pct: float = 0.0,
+) -> pl.DataFrame:
+    """docs/31 §5.2實際backtest母體版本的L6：`l6_2cond` ∧「落難週」四維技術面同時成立
+    （市值≥market_cap_min_billion ∧ 距MA60<ma60_max_pct ∧ 距60日低≤low60_max_pct ∧
+    前8週報酬<ret_8w_max_pct）。
+
+    跟`select_l6_candidates()`（全市場、無落難前提）刻意並存不覆寫——後者是§9/§20
+    既有記載的candidate-generation讀法，本函式才是實際對齊§5.2 25.5%/31.7%命中率
+    所在population的版本。`distress`來自`build_distress_snapshot(market_hist)`。
+    """
+    empty = pl.DataFrame(schema={"stock_id": pl.Utf8, "name": pl.Utf8})
+    need_snap = {"stock_id", "name", "market_cap_billion", "l6_2cond"}
+    need_dist = {"stock_id", "ma60_dist_pct", "low60_dist_pct", "ret_8w_pct"}
+    if snapshot.is_empty() or not need_snap.issubset(snapshot.columns):
+        return empty
+    if distress.is_empty() or not need_dist.issubset(distress.columns):
+        return empty
+    merged = snapshot.filter(pl.col("l6_2cond")).join(distress, on="stock_id", how="inner")
+    if merged.is_empty():
+        return empty
+    gated = merged.filter(
+        pl.col("market_cap_billion").is_not_null()
+        & (pl.col("market_cap_billion") >= market_cap_min_billion)
+        & pl.col("ma60_dist_pct").is_not_null()
+        & (pl.col("ma60_dist_pct") < ma60_max_pct)
+        & pl.col("low60_dist_pct").is_not_null()
+        & (pl.col("low60_dist_pct") <= low60_max_pct)
+        & pl.col("ret_8w_pct").is_not_null()
+        & (pl.col("ret_8w_pct") < ret_8w_max_pct)
+    )
+    if gated.is_empty():
+        return empty
+    return gated.select("stock_id", "name").unique("stock_id")
 
 
 def select_g4_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:

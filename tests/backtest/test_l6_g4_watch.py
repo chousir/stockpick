@@ -9,11 +9,13 @@ import polars as pl
 
 from tw_screener.backtest.l6_g4_watch import (
     LEDGER_SCHEMA,
+    build_distress_snapshot,
     build_l6_g4_snapshot,
     ledger_progress_summary,
     revenue_disclosure_date,
     select_g4_candidates,
     select_l6_candidates,
+    select_l6_candidates_distressed,
     upsert_l6_g4_ledger,
 )
 
@@ -140,6 +142,86 @@ def test_select_l6_candidates_empty_snapshot() -> None:
     out = select_l6_candidates(pl.DataFrame(schema=LEDGER_SCHEMA))
     assert out.is_empty()
     assert set(out.columns) == {"stock_id", "name"}
+
+
+# ─── 2026-08-26 population-gate修正：build_distress_snapshot／
+# select_l6_candidates_distressed ───
+
+
+def _market_hist(n_days: int = 100) -> pl.DataFrame:
+    """兩檔合成日線：1101一路下跌到接近60日低+跌破MA60+8週負報酬（落難）；
+    2330一路上漲、遠離低點+站上MA60+8週正報酬（健康成長，非落難）。"""
+    from datetime import timedelta
+
+    dates = [date(2026, 1, 1) + timedelta(days=i) for i in range(n_days)]
+    rows = []
+    for i, d in enumerate(dates):
+        distressed_close = 100.0 - 30.0 * i / (n_days - 1)
+        healthy_close = 50.0 + 50.0 * i / (n_days - 1)
+        rows.append({"date": d, "stock_id": "1101", "close": distressed_close, "volume": 1000})
+        rows.append({"date": d, "stock_id": "2330", "close": healthy_close, "volume": 1000})
+    return pl.DataFrame(
+        rows, schema={"date": pl.Date, "stock_id": pl.Utf8, "close": pl.Float64, "volume": pl.Int64}
+    )
+
+
+def test_build_distress_snapshot_separates_declining_from_rising() -> None:
+    out = build_distress_snapshot(_market_hist())
+    rows = {r["stock_id"]: r for r in out.iter_rows(named=True)}
+    assert rows["1101"]["ma60_dist_pct"] < -8.0
+    assert rows["1101"]["low60_dist_pct"] <= 15.0
+    assert rows["1101"]["ret_8w_pct"] < 0.0
+    assert rows["2330"]["ma60_dist_pct"] > 0.0
+    assert rows["2330"]["low60_dist_pct"] > 15.0
+    assert rows["2330"]["ret_8w_pct"] > 0.0
+
+
+def test_build_distress_snapshot_empty_when_missing_columns() -> None:
+    assert build_distress_snapshot(pl.DataFrame({"date": [date(2026, 1, 1)]})).is_empty()
+
+
+def test_select_l6_candidates_distressed_excludes_healthy_growth_stock() -> None:
+    """兩檔皆命中l6_2cond(YoY≥20∧PE≤25∧市值達標)，但只有落難的1101該出現——
+    這正是本次修法要防的：全市場套YoY/PE會把健康成長股(2330)誤當左側候選。"""
+    universe = _universe([
+        {"stock_id": "1101", "name": "台泥", "market_cap_billion": 200.0,
+         "pe_ratio": 20.0, "cum_rev_yoy_pct": 25.0},
+        {"stock_id": "2330", "name": "台積電", "market_cap_billion": 200.0,
+         "pe_ratio": 20.0, "cum_rev_yoy_pct": 25.0},
+    ])
+    revenue = _revenue([])
+    snap = build_l6_g4_snapshot(
+        universe, revenue, yoy_deltas={}, trust_net_5d={},
+        week="2026-W34", data_date=date(2026, 8, 22),
+    )
+    distress = build_distress_snapshot(_market_hist())
+    out = select_l6_candidates_distressed(snap, distress)
+    assert out["stock_id"].to_list() == ["1101"]
+    assert set(out.columns) == {"stock_id", "name"}
+
+
+def test_select_l6_candidates_distressed_market_cap_gate() -> None:
+    """技術面落難但市值不足100億 → 仍排除（落難週操作定義的市值門檻）。"""
+    universe = _universe(
+        [{"stock_id": "1101", "name": "小型落難股", "market_cap_billion": 50.0,
+          "pe_ratio": 20.0, "cum_rev_yoy_pct": 25.0}]
+    )
+    snap = build_l6_g4_snapshot(
+        universe, _revenue([]), yoy_deltas={}, trust_net_5d={},
+        week="2026-W34", data_date=date(2026, 8, 22),
+    )
+    distress = build_distress_snapshot(_market_hist())
+    out = select_l6_candidates_distressed(snap, distress, market_cap_min_billion=100.0)
+    assert out.is_empty()
+
+
+def test_select_l6_candidates_distressed_empty_inputs() -> None:
+    empty_snap = pl.DataFrame(schema=LEDGER_SCHEMA)
+    empty_dist = pl.DataFrame(
+        schema={"stock_id": pl.Utf8, "ma60_dist_pct": pl.Float64,
+                "low60_dist_pct": pl.Float64, "ret_8w_pct": pl.Float64}
+    )
+    assert select_l6_candidates_distressed(empty_snap, empty_dist).is_empty()
 
 
 def test_select_g4_candidates_filters_to_g4_hits_only() -> None:
