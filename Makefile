@@ -28,9 +28,13 @@ endif
 	$(MAKE) fetch-institutional-history   # 回補近 20 日上市+上櫃法人；隔幾天沒跑也自動補齊
 	-$(MAKE) fetch-tdcc   # 集保大戶持股比（規劃書 02 D3）；TDCC 異常不擋主流程，大戶欄退化為 null
 	-$(MAKE) doctor   # Goodinfo 健康檢查（規劃書 02 D1）：只診斷不擋（2026-08-23 拍板，docs/31 §19.3）——
-	                  # screen-all 本來就會逐策略捕捉 GoodinfoBlockedError 記進 failures，doctor 失敗
-	                  # 不代表 screen-all 會白跑；擋在這裡只會讓 D/E/F/G 連「本週未取得」都印不出來
-	$(MAKE) screen-all GROUP=$(GROUP)
+	                  # screen-all 逐策略捕捉 GoodinfoParseError/GoodinfoTooManyResultsError 記進
+	                  # failures 繼續跑；doctor 失敗不代表這些會白跑，擋在這裡只會讓 D/E/F/G 連
+	                  # 「本週未取得」都印不出來
+	-$(MAKE) screen-all GROUP=$(GROUP)   # 2026-08-27修正：加`-`前綴，比照doctor容錯——GoodinfoBlockedError
+	                  # （真被封鎖，非可解析的失敗）依runner.py既有設計會中斷整批screen-all；Goodinfo
+	                  # 已知長期被Cloudflare擋（見docs/31、playbook/90），擋在這裡會讓G1-G5/L6本地filter
+	                  # ＋後續步驟連跑都跑不到，整條週流程陣亡，不是只有D/E/F/G「本週未取得」
 	-$(MAKE) screen-redesign-local   # docs/31 §4 全新本地filter(G1/G2/G4/G5/L6)：2026-08-24拍板不用全部
 	                                 # 跟隨Goodinfo，直接併進候選宇宙；未過統計驗證，候選數會明顯變大
 	$(MAKE) fetch-candidates-history

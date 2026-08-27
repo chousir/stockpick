@@ -4,6 +4,7 @@ import os
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 
 from tw_screener.screener.goodinfo.fetcher import GoodinfoBlockedError, GoodinfoFetcher
@@ -199,6 +200,24 @@ def test_blocked_raises_from_cache(tmp_path: Path):
 
     with pytest.raises(GoodinfoBlockedError):
         fetcher.get(url)
+
+
+def test_raise_if_blocked_status_converts_403_to_blocked_error(tmp_path: Path):
+    """2026-08-26修法：403等4xx狀態碼（連200帶Cloudflare驗證頁都沒有，更早期就被拒絕
+    連線）要轉成GoodinfoBlockedError，不能讓raw httpx.HTTPStatusError以未捕捉例外
+    炸穿screen-all／make week（docs/31 §19.3同一原則：封鎖時清楚回報，不是崩潰）。"""
+    fetcher = make_fetcher(tmp_path)
+    url = "https://goodinfo.tw/tw/StockList.asp?x=1"
+    resp = httpx.Response(403, request=httpx.Request("GET", url))
+    with pytest.raises(GoodinfoBlockedError):
+        fetcher._raise_if_blocked_status(resp, url)
+
+
+def test_raise_if_blocked_status_passes_through_200(tmp_path: Path):
+    fetcher = make_fetcher(tmp_path)
+    url = "https://goodinfo.tw/tw/StockList.asp?x=1"
+    resp = httpx.Response(200, request=httpx.Request("GET", url))
+    fetcher._raise_if_blocked_status(resp, url)  # 不應 raise
 
 
 def test_blocked_does_not_write_cache(tmp_path: Path):

@@ -134,6 +134,17 @@ class GoodinfoFetcher:
 
         return f"4.8|{arr1}|{arr2}|{js_tz}|{excel_date}|0|0|0"
 
+    def _raise_if_blocked_status(self, resp: httpx.Response, url: str) -> None:
+        """4xx/5xx 狀態碼視為封鎖（比`_check_blocked()`更早期的封鎖形態——連 200 帶
+        Cloudflare 驗證頁都沒有，直接被拒絕連線），統一轉成`GoodinfoBlockedError`，
+        沿用 runner.py 既有「整批中斷」語意與乾淨錯誤訊息，不讓 raw
+        `httpx.HTTPStatusError`以未捕捉例外炸穿整條 `make week`（docs/31 §19.3
+        同一原則：封鎖時清楚回報，不是讓呼叫端崩潰）。
+        """
+        if resp.status_code >= 400:
+            logger.error("Goodinfo HTTP {}（可能封鎖）：{}", resp.status_code, url)
+            raise GoodinfoBlockedError(f"{url} (HTTP {resp.status_code})")
+
     def _http_get(self, url: str) -> str:
         self._rate_limit()
         headers = {
@@ -142,7 +153,7 @@ class GoodinfoFetcher:
         }
         with httpx.Client(follow_redirects=True, timeout=30.0) as client:
             resp = client.get(url, headers=headers)
-            resp.raise_for_status()
+            self._raise_if_blocked_status(resp, url)
             html = resp.text
 
             # Goodinfo 首次訪問先回傳 JS init 頁面再重導向
@@ -155,7 +166,7 @@ class GoodinfoFetcher:
                     logger.debug("JS init → redirect: {}", redirect_url)
                     self._rate_limit()
                     resp = client.get(redirect_url, headers=headers)
-                    resp.raise_for_status()
+                    self._raise_if_blocked_status(resp, url)
                     html = resp.text
 
             return html
