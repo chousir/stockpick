@@ -1,3 +1,6 @@
+# 2026-08-28起make week預設流程不再呼叫Goodinfo爬取此策略（docs/31 §20.6軟退場）——
+# 結構性無法本地重建（連續增加季數-單季稅後淨利，官方API僅回最新一季無歷史查詢）。
+# 本檔保留當歷史定義參照，手動`make screen STRATEGY=g_growth_pullback`仍可用。
 id: g_growth_pullback
 name: "成長拉回"
 description: "市值≥100億 + 月營收YoY≥20% + 連2季淨利成長（基本面同 E，拉回 timing 在分析層）"

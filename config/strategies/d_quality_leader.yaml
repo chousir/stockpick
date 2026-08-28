@@ -1,3 +1,6 @@
+# 2026-08-28起make week預設流程不再呼叫Goodinfo爬取此策略（docs/31 §20.6軟退場）——
+# 結構性無法本地重建（近四季ROE/連續配息8年/連續增加季數官方API皆無歷史查詢）。
+# 本檔保留當歷史定義參照，手動`make screen STRATEGY=d_quality_leader`仍可用。
 id: d_quality_leader
 name: "品質龍頭"
 description: "市值≥100億 + 近四季ROE≥15% + 連續配息≥8年 + 連2季淨利增加（ProPicks TWCH15 風格）"

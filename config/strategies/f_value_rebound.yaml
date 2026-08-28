@@ -1,3 +1,7 @@
+# 2026-08-28起make week預設流程改走本地等價路徑（`screen run-local f_value_rebound`，
+# Makefile screen-f-local），不再打Goodinfo（docs/31 §20.6軟退場）——四條件field_map.py
+# 全覆蓋，本檔門檻定義仍是唯一事實來源，兩條路徑共用不會漂移。手動`make screen
+# STRATEGY=f_value_rebound`（打Goodinfo）仍可用於比對。
 id: f_value_rebound
 name: "價值反彈"
 description: "市值≥100億 + 本益比≤15 + 殖利率≥3% + 累計營收YoY≥10（ProPicks Top Value 風格）"

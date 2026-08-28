@@ -1,5 +1,5 @@
 .PHONY: help init sync test test-unit lint typecheck fmt clean clean-cache deep-clean \
-        fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history fetch-margin-history build-themes screen screen-all screen-redesign-local screen-dry doctor \
+        fetch-twse fetch-stock fetch-tdcc fetch-candidates-history fetch-institutional-history fetch-margin-history build-themes screen screen-all screen-redesign-local screen-f-local screen-dry doctor \
         group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
         l6-g4-watch g1-g2-g5-watch \
         backfill-daily-history backfill-institutional-history \
@@ -19,7 +19,7 @@ help:  ## 列主要指令（裸打 make 即顯示）
 	@echo ""
 	@echo "進階指令：見 Makefile 各進階區段或 README「指令總覽」"
 
-week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-all → screen-redesign-local → fetch-candidates-history → rotation → macro → cp-value-candidates → group → snapshot-week → week-check → pick-outcome-brief
+week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-f-local → screen-redesign-local → fetch-candidates-history → rotation → macro → cp-value-candidates → group → snapshot-week → week-check → pick-outcome-brief
 ifndef GROUP
 	@echo "❌ 請指定 GROUP=defg（現行唯一主流程；abc/def 已退役）"
 	@exit 1
@@ -27,14 +27,14 @@ endif
 	$(MAKE) fetch-twse
 	$(MAKE) fetch-institutional-history   # 回補近 20 日上市+上櫃法人；隔幾天沒跑也自動補齊
 	-$(MAKE) fetch-tdcc   # 集保大戶持股比（規劃書 02 D3）；TDCC 異常不擋主流程，大戶欄退化為 null
-	-$(MAKE) doctor   # Goodinfo 健康檢查（規劃書 02 D1）：只診斷不擋（2026-08-23 拍板，docs/31 §19.3）——
-	                  # screen-all 逐策略捕捉 GoodinfoParseError/GoodinfoTooManyResultsError 記進
-	                  # failures 繼續跑；doctor 失敗不代表這些會白跑，擋在這裡只會讓 D/E/F/G 連
-	                  # 「本週未取得」都印不出來
-	-$(MAKE) screen-all GROUP=$(GROUP)   # 2026-08-27修正：加`-`前綴，比照doctor容錯——GoodinfoBlockedError
-	                  # （真被封鎖，非可解析的失敗）依runner.py既有設計會中斷整批screen-all；Goodinfo
-	                  # 已知長期被Cloudflare擋（見docs/31、playbook/90），擋在這裡會讓G1-G5/L6本地filter
-	                  # ＋後續步驟連跑都跑不到，整條週流程陣亡，不是只有D/E/F/G「本週未取得」
+	-$(MAKE) doctor   # Goodinfo 健康檢查（規劃書 02 D1）：只診斷不擋。2026-08-28起doctor純觀察用途——
+	                  # 預設流程已不再呼叫Goodinfo（見下），doctor留著只是給想手動`screen run`時
+	                  # 先確認站台狀況，失敗不影響本次week（docs/02、CLAUDE.md鐵律1已同步措辭）
+	-$(MAKE) screen-f-local   # 2026-08-28軟退場（docs/31 §20.6）：D/E/G結構性無法在本地重建（近四季ROE／
+	                  # 連續配息8年／連續增加季數官方API皆無歷史查詢），不再於預設流程嘗試Goodinfo；F
+	                  # 改預設走本地等價定義（field_map.py已確認市值/PE/殖利率/累計月營收YoY四條件全覆蓋）。
+	                  # 想手動試D/E/G/F的Goodinfo原始定義，仍可手動跑`make screen STRATEGY=xxx`或
+	                  # `make screen-all GROUP=defg`（兩個target本身不動，只是不再被week自動呼叫）。
 	-$(MAKE) screen-redesign-local   # docs/31 §4 全新本地filter(G1/G2/G4/G5/L6)：2026-08-24拍板不用全部
 	                                 # 跟隨Goodinfo，直接併進候選宇宙；未過統計驗證，候選數會明顯變大
 	$(MAKE) fetch-candidates-history
@@ -72,12 +72,15 @@ fetch-tdcc:  ## 抓 TDCC 集保戶股權分散表（每週大戶持股比，規�
 doctor:  ## Goodinfo 健康檢查（被擋/改版→exit 1）；make week 在 screen-all 前先擋
 	uv run tw-screener screen doctor
 
-screen-all:  ## 跑指定組策略（GROUP=defg 現行唯一主流程；abc/def 已退役）
+screen-all:  ## 跑指定組策略（GROUP=defg，打Goodinfo；2026-08-28起week已不自動呼叫，僅手動使用）
 ifndef GROUP
 	@echo "❌ 請指定 GROUP=defg（現行唯一主流程；abc/def 已退役）"
 	@exit 1
 endif
 	uv run tw-screener screen run-all --group $(GROUP)
+
+screen-f-local:  ## 策略F(f_value_rebound)本地等價版：不打Goodinfo，2026-08-28起week預設走這個（docs/31 §20.6）
+	uv run tw-screener screen run-local f_value_rebound
 
 screen-redesign-local:  ## docs/31 §4 全新本地filter(G1/G2/G4/G5/L6)：不打Goodinfo，2026-08-24拍板直接掛進week，實驗性質未過§7.4統計驗證，結果可能不理想
 	-uv run tw-screener screen run-local g1

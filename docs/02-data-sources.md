@@ -310,8 +310,13 @@ docs/proposals/02「董監持股完全不在資料層」的說法需一併修正
 uv run tw-screener screen run-local f_value_rebound   # 不打 Goodinfo，輸出 screen_result_f_value_rebound.csv（source=local）
 ```
 
-**是否接進 `make week` 預設流程**（取代 Goodinfo、或 doctor 偵測到 `GoodinfoBlockedError` 時
-自動 fallback）尚未決定——目前僅為手動指令，見 playbook/90 對應條目。
+**2026-08-28 已定案（docs/31 §20.6，軟退場）**：`f_value_rebound` 已改預設走這條本地路徑
+（Makefile `screen-f-local`，`week` target 呼叫）——不是「偵測到封鎖才 fallback」，是**主動
+不再嘗試 Goodinfo**，因為①這條本地路徑四條件全覆蓋，跟 Goodinfo 口徑差距最小②Goodinfo 已知
+長期被 Cloudflare 擋，先打一次再等失敗純屬浪費。D/E/G 因近四季ROE/連續配息8年/連續增加季數
+結構性無法本地重建，`week` 預設流程**不再嘗試**這三式的 Goodinfo 爬取（不是「還在等解封」，
+是主動退場，見下方鐵律1措辭同步）。`make screen-all GROUP=defg`／`make screen
+STRATEGY=d_quality_leader` 等手動路徑保留不變，想手動試 Goodinfo 原始定義仍可以跑。
 
 ---
 
