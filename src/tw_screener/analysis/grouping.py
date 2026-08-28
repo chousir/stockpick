@@ -141,6 +141,9 @@ def _compute_ma_dist(
                 (pl.col(f"_cnt{w}") >= w)
                 & (pl.col(f"_ma{w}") > 0)
                 & pl.col("close").is_not_null()
+                & (pl.col("close") > 0)  # 2026-08-27：第二道防線，即使上游fallback
+                # 漏接也只退化成null（下游本來就有「未取得」處理），不再產生
+                # -100.0這種看似合理實則錯誤的假訊號（見_latest_close_change_map）
             )
             .then((pl.col("close") - pl.col(f"_ma{w}")) / pl.col(f"_ma{w}") * 100.0)
             .otherwise(None)
@@ -167,6 +170,77 @@ def _compute_ma_dist(
         on="stock_id",
         how="left",
     )
+
+
+def _latest_close_change_map(
+    price_history: pl.DataFrame,
+) -> dict[str, tuple[float | None, float | None]]:
+    """本地日線快取（`price_history`）→ 每檔最新收盤價與對前一筆收盤價的漲跌%。
+
+    2026-08-27修正（點1「缺資料」根因）：`group_stocks()`過去只從`screener_results`
+    （Goodinfo或本地G1-G5/L6 filter的screen_result CSV）取`close`——後者6欄不含
+    價格，Goodinfo被擋時`close`全數退化成`0.0`（不是null），下游`_compute_ma_dist`
+    算出`(0-ma60)/ma60*100=-100.0`這種看似合理實則錯誤的數字，被`ma60_dist_pct<0`
+    這類判準當真訊號吃進去。改用`price_history`（`fetch-candidates-history`已對
+    每檔候選股下載的本地TWSE/TPEX OHLCV，不依賴任何screener來源）當主要來源，
+    `stock_rows`建置時只在本地也查不到才退回screen_result的值。
+    """
+    need = {"stock_id", "date", "close"}
+    if price_history.is_empty() or not need.issubset(price_history.columns):
+        return {}
+    sorted_hist = price_history.drop_nulls("close").sort(["stock_id", "date"])
+    agg = sorted_hist.group_by("stock_id").agg(pl.col("close").tail(2).alias("_last2"))
+    out: dict[str, tuple[float | None, float | None]] = {}
+    for row in agg.iter_rows(named=True):
+        last2 = row["_last2"]
+        if not last2:
+            continue
+        latest = float(last2[-1])
+        prev = float(last2[-2]) if len(last2) >= 2 else None
+        change_pct = (latest - prev) / prev * 100.0 if prev else None
+        out[str(row["stock_id"])] = (latest, change_pct)
+    return out
+
+
+def _latest_amount_million_map(
+    volume_history: pl.DataFrame | None,
+    close_map: dict[str, tuple[float | None, float | None]],
+) -> dict[str, float | None]:
+    """本地成交量快取 × 最新收盤價，估算成交金額（百萬元）——近似值（無逐筆成交價
+    可算真實VWAP，用最新量×最新收盤價，同`market_cap_billion`既有近似口徑）。
+    """
+    need = {"stock_id", "date", "trade_volume"}
+    if (
+        volume_history is None
+        or volume_history.is_empty()
+        or not need.issubset(volume_history.columns)
+    ):
+        return {}
+    sorted_vol = volume_history.drop_nulls("trade_volume").sort(["stock_id", "date"])
+    latest_vol = sorted_vol.group_by("stock_id").agg(pl.col("trade_volume").last().alias("_vol"))
+    out: dict[str, float | None] = {}
+    for row in latest_vol.iter_rows(named=True):
+        sid = str(row["stock_id"])
+        close, _ = close_map.get(sid, (None, None))
+        vol = row["_vol"]
+        if close is None or vol is None:
+            continue
+        out[sid] = round(float(vol) * close / 1_000_000.0, 2)
+    return out
+
+
+def _coalesce_num(*vals: object) -> float | None:
+    """回傳第一個可轉成非NaN float的值；全部不可用回None（不捏造0）。"""
+    for v in vals:
+        if v is None:
+            continue
+        try:
+            f = float(v)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        if f == f:  # 排除 NaN（NaN != NaN）
+            return f
+    return None
 
 
 def _sigmoid(x: float) -> float:
@@ -298,6 +372,12 @@ def group_stocks(
 
     strategy_ids = sorted(screener_results.keys())
 
+    # 2026-08-27修正：本地日線/成交量快取為主、screener CSV（Goodinfo或G1-G5/L6
+    # 本地filter）的欄位只在本地也查不到時當備援——見_latest_close_change_map
+    # docstring。兩者皆缺時給None，不捏造0（避免下游算出-100.0這種假訊號）。
+    local_close_map = _latest_close_change_map(price_history)
+    local_amount_map = _latest_amount_million_map(volume_history, local_close_map)
+
     # Build per-stock dict from all strategies (skip ETFs and warrants)
     stock_rows: dict[str, dict] = {}
     skipped_etf = 0
@@ -311,12 +391,15 @@ def group_stocks(
                 skipped_etf += 1
                 continue
             if stock_id not in stock_rows:
+                local_close, local_change = local_close_map.get(stock_id, (None, None))
                 stock_rows[stock_id] = {
                     "stock_id": stock_id,
                     "name": str(row.get("name") or ""),
-                    "close": float(row.get("close") or 0),
-                    "change_pct": float(row.get("change_pct") or 0),
-                    "amount_million": float(row.get("amount_million") or 0),
+                    "close": _coalesce_num(local_close, row.get("close")),
+                    "change_pct": _coalesce_num(local_change, row.get("change_pct")),
+                    "amount_million": _coalesce_num(
+                        local_amount_map.get(stock_id), row.get("amount_million")
+                    ),
                     "goodinfo_url": str(row.get("goodinfo_url") or ""),
                     **{f"in_{s}": False for s in strategy_ids},
                 }

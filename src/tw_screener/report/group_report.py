@@ -1038,7 +1038,13 @@ def _build_enriched_rows(
         mom = _num(r.get("momentum_5d"), 2)
         m60 = _num(r.get("ma60_dist_pct"), 1)
         m20 = _num(r.get("ma20_dist_pct"), 1)
-        close = _num(close_map.get(sid), 2)
+        # 2026-08-27修正：members（group_stocks()輸出）的close已改本地日線快取為主
+        # （見analysis/grouping.py::_latest_close_change_map），優先讀它；close_map
+        # （純screener_results掃描，G1-G5/L6的screen_result不含close時全空）只當
+        # members也缺值時的備援，不再是唯一來源。
+        close = _num(r.get("close"), 2)
+        if close is None:
+            close = _num(close_map.get(sid), 2)
         ma20_price = _lvl(close, m20)
         ma60_price = _lvl(close, m60)
         # M-修法7（7a）進場區間絕對價：T3 結構價（前波低 low_60d）＋回檔深度檢核（距區間低/高）
@@ -1422,7 +1428,13 @@ def write_candidates_enriched_csv(
     if not rows:
         return []
     path.parent.mkdir(parents=True, exist_ok=True)
-    pl.DataFrame(rows).write_csv(path)
+    # 2026-08-28修正（發現於Phase1驗證時，跟本次候選數/組成無關的既有bug）：
+    # pl.DataFrame(rows)預設infer_schema_length=100，只取前100列猜欄位型別；
+    # candidates已常態332檔，某欄前100列剛好是None/其他型別、100列後才出現字串值
+    # （如次產業名"其他光電"）就會讓schema推斷猜錯、write_csv整批崩潰。改
+    # infer_schema_length=None（掃全部列）是polars標準解法，非本次Phase1範圍
+    # 但會擋住candidates_enriched.csv完全產不出來，一併修正。
+    pl.DataFrame(rows, infer_schema_length=None).write_csv(path)
     logger.info("candidates_enriched.csv 輸出 → {}（{} 檔）", path, len(rows))
     return rows
 
@@ -1579,6 +1591,7 @@ def write_named_list_csv(
             )
             row["market_value_k"] = round(close * shares / 1000) if (close and shares) else None
     path.parent.mkdir(parents=True, exist_ok=True)
-    pl.DataFrame(rows).write_csv(path)
+    # 同write_candidates_enriched_csv：infer_schema_length=None避免schema推斷猜錯崩潰。
+    pl.DataFrame(rows, infer_schema_length=None).write_csv(path)
     logger.info("{} 輸出 → {}（{} 檔）", path.name, path, len(rows))
     return len(rows)

@@ -655,7 +655,13 @@ def _make_price_history(stock_id: str, closes: list[float]) -> pl.DataFrame:
 
 
 def test_group_stocks_ma20_correct():
-    """提供 25 日歷史 → ma20_dist_pct 正確（最後 20 日均價）。"""
+    """提供 25 日歷史 → ma20_dist_pct 正確（最後 20 日均價）。
+
+    2026-08-27修正後：close 改以 price_history 最新一筆為準（本地快取優先，見
+    `_latest_close_change_map`），不再是 screener_df 那個可能過期/不一致的值——
+    這裡 price_history 最後一筆是 110.0，screener_df 寫死 100.0 純粹是無關的
+    干擾值，用來驗證「即使screener_df的close不同，也不影響本地計算結果」。
+    """
     closes = [100.0] * 20 + [110.0, 110.0, 110.0, 110.0, 110.0]  # 25 日
     price_history = _make_price_history("2330", closes)
     results = {
@@ -667,8 +673,9 @@ def test_group_stocks_ma20_correct():
     )
     row = members.filter(pl.col("stock_id") == "2330").to_dicts()[0]
     # 最後 20 日：15 日 100 + 5 日 110 → ma20 = (15*100 + 5*110) / 20 = 102.5
-    # close (from screener_df) = 100.0 → dist = (100-102.5)/102.5 * 100 ≈ -2.44%
-    assert row["ma20_dist_pct"] == pytest.approx((100.0 - 102.5) / 102.5 * 100, rel=1e-3)
+    # close（本地price_history最新一筆）= 110.0 → dist = (110-102.5)/102.5*100 ≈ +7.32%
+    assert row["close"] == pytest.approx(110.0, rel=1e-3)
+    assert row["ma20_dist_pct"] == pytest.approx((110.0 - 102.5) / 102.5 * 100, rel=1e-3)
 
 
 def test_group_stocks_ma60_none_when_insufficient():
@@ -698,6 +705,113 @@ def test_group_stocks_ma_no_history():
     for r in members.iter_rows(named=True):
         assert r["ma20_dist_pct"] is None
         assert r["ma60_dist_pct"] is None
+
+
+# ─── 2026-08-27修正：close/change_pct/amount_million本地快取優先（點1缺資料根因）───
+
+
+def _make_price_history_days(stock_id: str, closes: list[float]) -> pl.DataFrame:
+    """同`_make_price_history`但用timedelta生日期，支援>31天（MA60測試需要）。"""
+    from datetime import date, timedelta
+
+    n = len(closes)
+    start = date(2026, 1, 1)
+    return pl.DataFrame({
+        "stock_id": [stock_id] * n,
+        "date": [start + timedelta(days=i) for i in range(n)],
+        "close": closes,
+    })
+
+
+def _make_local_filter_screener_df(stock_ids: list[str], strategy_id: str) -> pl.DataFrame:
+    """G1-G5/L6本地filter的screen_result實際形狀：只有6欄，不含close/change_pct/
+    amount_million——用來驗證這種輸入下不會退化成0.0/`-100.0`。"""
+    return pl.DataFrame(
+        {
+            "stock_id": stock_ids,
+            "name": [f"公司{sid}" for sid in stock_ids],
+            "strategy_id": [strategy_id] * len(stock_ids),
+            "screened_at": ["2026-08-27"] * len(stock_ids),
+            "goodinfo_url": [""] * len(stock_ids),
+            "source": ["local_unvalidated"] * len(stock_ids),
+        }
+    )
+
+
+def test_group_stocks_local_filter_shape_uses_price_history_close():
+    """screen_result無close欄（G1-G5/L6實際形狀）＋本地price_history有資料
+    → close/ma60_dist_pct算出真實值，不是0.0/-100.0。"""
+    closes = [100.0] * 59 + [120.0]  # 60日，最後一筆120
+    price_history = _make_price_history_days("2330", closes)
+    results = {
+        "g1_margin_expansion": _make_local_filter_screener_df(
+            ["2330", "2454"], "g1_margin_expansion"
+        )
+    }
+    _, members = group_stocks(
+        results, price_history, pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    row = members.filter(pl.col("stock_id") == "2330").to_dicts()[0]
+    assert row["close"] == pytest.approx(120.0, rel=1e-3)
+    # ma60 = (59*100+120)/60 ≈ 100.333 → dist = (120-100.333)/100.333*100 ≈ +19.6%
+    assert row["ma60_dist_pct"] is not None
+    assert row["ma60_dist_pct"] > 0  # 遠離0、更遠離錯誤的-100.0
+    assert row["ma60_dist_pct"] != pytest.approx(-100.0)
+
+
+def test_group_stocks_local_filter_shape_no_price_history_gives_null_not_zero():
+    """screen_result無close欄 且 本地price_history也沒資料 → close/ma_dist皆為
+    None，不是0.0/-100.0（下游F2等gate才不會誤判成真訊號）。"""
+    results = {
+        "l6_yoy_pe_flow": _make_local_filter_screener_df(["2330", "2454"], "l6_yoy_pe_flow")
+    }
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    for r in members.iter_rows(named=True):
+        assert r["close"] is None
+        assert r["ma20_dist_pct"] is None
+        assert r["ma60_dist_pct"] is None
+
+
+def test_group_stocks_close_zero_guard_does_not_produce_negative_100():
+    """即使某處仍餵進close=0（防呆而非預期路徑），_compute_ma_dist的guard也要讓
+    ma_dist_pct退化成None，不能算出-100.0這種看似合理的假訊號。"""
+    from tw_screener.analysis.grouping import _compute_ma_dist
+
+    closes = [100.0] * 60
+    price_history = _make_price_history_days("2330", closes)
+    stock_df = pl.DataFrame({"stock_id": ["2330"], "close": [0.0]})
+    out = _compute_ma_dist(price_history, stock_df, windows=(60,), slope_for=60)
+    row = out.to_dicts()[0]
+    assert row["ma60_dist_pct"] is None
+
+
+def test_group_stocks_local_filter_shape_amount_million_from_volume_history():
+    """screen_result無amount_million欄 ＋ 本地volume_history有資料 → amount_million
+    以本地量×收盤價估算，不是0.0（避免下游誤判成低流動假陽性）。"""
+    from datetime import date
+
+    closes = [100.0] * 60
+    price_history = _make_price_history_days("2330", closes)
+    volume_history = pl.DataFrame({
+        "stock_id": ["2330"],
+        "date": [date(2026, 3, 1)],
+        "trade_volume": [50_000.0],  # 股
+    })
+    results = {
+        "g4_yoy_divergence": _make_local_filter_screener_df(["2330", "2454"], "g4_yoy_divergence")
+    }
+    _, members = group_stocks(
+        results, price_history, pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+        volume_history=volume_history,
+    )
+    row = members.filter(pl.col("stock_id") == "2330").to_dicts()[0]
+    # amount_million = 50000股 × 100元 / 1e6 = 5.0
+    assert row["amount_million"] == pytest.approx(5.0, rel=1e-3)
 
 
 # ─── 策略 G：MA60 斜率 + 拉回 setup 過濾 ──────────────────────────────────────

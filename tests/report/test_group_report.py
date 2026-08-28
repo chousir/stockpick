@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 
 import polars as pl
+import pytest
 
 from tw_screener.analysis.grouping import group_stocks
 from tw_screener.report.group_report import (
@@ -651,3 +652,34 @@ def test_redesign_watch_column_populated_from_map(tmp_path):
     by_id = {str(r["stock_id"]): r for r in df.iter_rows(named=True)}
     assert by_id["2330"]["redesign_watch"] == "g2,l6_2cond"
     assert by_id["2454"]["redesign_watch"] is None
+
+
+def test_candidates_csv_close_from_local_price_history_when_screener_lacks_it(tmp_path):
+    """2026-08-27修正：screen_result無close欄（G1-G5/L6實際形狀，Goodinfo被擋時的
+    候選來源）＋本地price_history有資料 → candidates_enriched.csv的close欄仍算得
+    出真實值，不是空白/0（點1「缺資料」根因修復的端到端驗證）。"""
+    local_filter_df = pl.DataFrame({
+        "stock_id": ["2330", "2454"],
+        "name": ["台積電", "聯發科"],
+        "strategy_id": ["g1_margin_expansion"] * 2,
+        "screened_at": ["2026-08-27"] * 2,
+        "goodinfo_url": [""] * 2,
+        "source": ["local_unvalidated"] * 2,
+    })
+    price_history = pl.DataFrame({
+        "stock_id": ["2330"] * 3,
+        "date": [date(2026, 3, 1), date(2026, 3, 2), date(2026, 3, 3)],
+        "close": [500.0, 510.0, 520.0],
+    })
+    results = {"g1_margin_expansion": local_filter_df}
+    _, members = group_stocks(
+        results, price_history, pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), results, out)
+    df = pl.read_csv(out)
+    by_id = {str(r["stock_id"]): r for r in df.iter_rows(named=True)}
+    assert by_id["2330"]["close"] == pytest.approx(520.0, rel=1e-3)
+    # 2454無本地價格快取、screen_result也無close欄 → None，不捏造0
+    assert by_id["2454"]["close"] is None
