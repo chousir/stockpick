@@ -941,6 +941,8 @@ def _build_enriched_rows(
     from tw_screener.analysis.inflection import flow_diff_5_20, margin_slim
     from tw_screener.analysis.valuation import (
         deep_value_growth,
+        implied_price_from_ratio_median,
+        implied_price_gap_pct,
         market_cap_billion,
         peg_like_ratio,
     )
@@ -1084,6 +1086,24 @@ def _build_enriched_rows(
         # docs/31 §18：PEG-like（PE對月營收YoY成長比，非EPS-based classic PEG）——
         # 只用官方PE（跟val_pctile/pe_self_pctile一致，不用Goodinfo兜底值算比值）。
         peg_like = peg_like_ratio(_num(off_pe, 4), ryoy)
+        # docs/31 §20.7：估值回歸參考價——同儕腿（PE/PB回歸同產業中位數）＋自身腿（PE回歸
+        # 自身歷史中位數，v1只做PE基準股票，PB/虧損股該欄留空）。**機械式回顧計算，非
+        # 目標價**，見implied_price_from_ratio_median() docstring。current_ratio一律用
+        # 官方PE/PB（off_pe/off_pb），跟val_median/pe_self_median同源、不混Goodinfo兜底值。
+        val_median = _num(vrow.get("val_median"), 2) if vrow else None
+        current_ratio_peer = (
+            _num(off_pe, 4) if val_metric == "PE"
+            else (_num(off_pb, 4) if val_metric == "PB" else None)
+        )
+        val_implied_price_peer = implied_price_from_ratio_median(
+            close, current_ratio_peer, val_median
+        )
+        val_gap_pct_peer = implied_price_gap_pct(val_implied_price_peer, close)
+        pe_self_median = _num(vrow.get("pe_self_median"), 2) if vrow else None
+        val_implied_price_self = implied_price_from_ratio_median(
+            close, _num(off_pe, 4), pe_self_median
+        )
+        val_gap_pct_self = implied_price_gap_pct(val_implied_price_self, close)
         fn = _num(r.get("foreign_net"), 0)
         tn = _num(r.get("trust_net"), 0)
         instn = _num(r.get("inst_net"), 0)
@@ -1284,6 +1304,14 @@ def _build_enriched_rows(
                 # （筆數越少越不穩，目前約10週深度）；筆數不足門檻→兩欄皆null（未取得）。
                 "pe_self_pctile": pe_self_pctile,
                 "pe_self_n": pe_self_n,
+                # docs/31 §20.7：估值回歸參考價——機械式回顧計算（現價×中位數/現行比值），
+                # 非目標價、非預測。peer腿依val_metric用同產業PE或PB中位數；self腿只用PE
+                # （v1範圍，PB/虧損股該兩欄留null）。gap_pct為正＝估值高於現價（相對便宜、
+                # 進場訊號）；為負＝估值低於現價（基本面看好但價格已衝高、等回檔訊號）。
+                "val_implied_price_peer": val_implied_price_peer,
+                "val_gap_pct_peer": val_gap_pct_peer,
+                "val_implied_price_self": val_implied_price_self,
+                "val_gap_pct_self": val_gap_pct_self,
                 # docs/31 §18：PEG-like＝官方PE / 月營收YoY%（成長替代EPS成長率，因本地
                 # 無法算EPS YoY）——數字小＝相對成長便宜，但非傳統EPS-based PEG、無利率
                 # 調整；PE非正或YoY非正時留null（比值方向會反轉，不可解讀，不硬算）。
@@ -1465,6 +1493,10 @@ _CANONICAL_REUSE_FIELDS = (
     "cheap_flag",
     "pe_self_pctile",
     "pe_self_n",
+    "val_implied_price_peer",
+    "val_gap_pct_peer",
+    "val_implied_price_self",
+    "val_gap_pct_self",
     "peg_like_ratio",
     "rev_yoy_pct",
     "gross_margin_pct",

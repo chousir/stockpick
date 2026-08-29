@@ -373,7 +373,11 @@ def run_group_analysis(settings: Path) -> None:
     # 以此為主、Goodinfo 兜底（官方覆蓋 ~97%、口徑一致 trailing）。再過 build_valuation 算次產業
     # 相對位階（PE 主、PB 補虧損股）→ 每檔候選 inline 帶「次位/相對便宜」，免另跑 cp_valuation。
     from tw_screener.analysis.sector_universe import build_peer_membership, list_subindustries
-    from tw_screener.analysis.valuation import build_valuation, compute_self_history_pctile
+    from tw_screener.analysis.valuation import (
+        build_valuation,
+        compute_self_history_median,
+        compute_self_history_pctile,
+    )
 
     val_df = client.load_latest_valuation_ratios()
     val_cfg = cfg.get("cp_value", {}).get("valuation", {})
@@ -403,6 +407,27 @@ def run_group_analysis(settings: Path) -> None:
         valuation = valuation.with_columns(
             _pl.lit(None, dtype=_pl.Float64).alias("pe_self_pctile"),
             _pl.lit(None, dtype=_pl.Int64).alias("pe_self_n"),
+        )
+    # docs/31 §20.7：估值回歸參考價「自身回歸」腿的錨點（自身歷史PE中位數，跟上面的
+    # pe_self_pctile百分位是互補不同用途，同一份val_history重用不重抓）。只取
+    # pe_self_median（pe_self_n跟pctile那次join算出來的同一份，避免重複欄位衝突）。
+    try:
+        self_history_median = compute_self_history_median(
+            val_history, min_snapshots=self_history_min_snapshots
+        )
+        if not self_history_median.is_empty():
+            valuation = valuation.join(
+                self_history_median.select("stock_id", "pe_self_median"),
+                on="stock_id", how="left",
+            )
+        else:
+            valuation = valuation.with_columns(
+                _pl.lit(None, dtype=_pl.Float64).alias("pe_self_median")
+            )
+    except Exception as e:  # noqa: BLE001 — 純揭露段，任何一步壞掉不擋 group 報告主流程
+        console.print(f"[yellow]  自身估值歷史中位數計算失敗，該段留空：{e}[/yellow]")
+        valuation = valuation.with_columns(
+            _pl.lit(None, dtype=_pl.Float64).alias("pe_self_median")
         )
     valuation_map: dict[str, dict] = (
         {str(r["stock_id"]): r for r in valuation.iter_rows(named=True)}

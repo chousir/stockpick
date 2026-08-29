@@ -8,12 +8,16 @@ from __future__ import annotations
 from datetime import date
 
 import polars as pl
+import pytest
 
 from tw_screener.analysis.valuation import (
     build_valuation,
+    compute_self_history_median,
     compute_self_history_pctile,
     compute_subind_relative,
     compute_valuation_meta,
+    implied_price_from_ratio_median,
+    implied_price_gap_pct,
     market_cap_billion,
     peg_like_ratio,
 )
@@ -259,3 +263,79 @@ def test_peg_like_ratio_none_when_growth_missing_or_non_positive() -> None:
     assert peg_like_ratio(pe=20.0, rev_yoy_pct=None) is None
     assert peg_like_ratio(pe=20.0, rev_yoy_pct=0.0) is None
     assert peg_like_ratio(pe=20.0, rev_yoy_pct=-10.0) is None
+
+
+# ─── compute_self_history_median（docs/31 §20.7：估值回歸參考價自身腿的錨點） ─────
+
+
+def test_self_history_median_basic() -> None:
+    history = pl.DataFrame(_history_rows("A", [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0]))
+    out = compute_self_history_median(history, min_snapshots=8)
+    row = out.filter(pl.col("stock_id") == "A").row(0, named=True)
+    assert row["pe_self_median"] == pytest.approx(45.0)
+    assert row["pe_self_n"] == 8
+
+
+def test_self_history_median_excludes_insufficient_history() -> None:
+    history = pl.DataFrame(_history_rows("B", [20.0, 20.0, 20.0]))
+    out = compute_self_history_median(history, min_snapshots=8)
+    assert out.is_empty()
+
+
+def test_self_history_median_ignores_non_positive_pe() -> None:
+    rows = _history_rows("A", [10.0] * 5) + [
+        {"date": date(2026, 1, 6 + i), "stock_id": "A", "market": "上市",
+         "pe": None, "pbr": 1.0, "dividend_yield": 1.0}
+        for i in range(5)
+    ]
+    history = pl.DataFrame(rows, schema={
+        "date": pl.Date, "stock_id": pl.Utf8, "market": pl.Utf8,
+        "pe": pl.Float64, "pbr": pl.Float64, "dividend_yield": pl.Float64,
+    })
+    out = compute_self_history_median(history, min_snapshots=8)
+    assert out.is_empty()  # 只有5筆有效PE，未達門檻
+
+
+def test_self_history_median_empty_input() -> None:
+    empty = pl.DataFrame(
+        schema={"date": pl.Date, "stock_id": pl.Utf8, "market": pl.Utf8,
+                "pe": pl.Float64, "pbr": pl.Float64, "dividend_yield": pl.Float64}
+    )
+    assert compute_self_history_median(empty).is_empty()
+
+
+# ─── implied_price_from_ratio_median / implied_price_gap_pct（docs/31 §20.7） ──
+
+
+def test_implied_price_from_ratio_median_basic() -> None:
+    """現價100、現行PE20、同儕中位PE30 → 若回歸中位數，implied_price=100*(30/20)=150。"""
+    assert implied_price_from_ratio_median(
+        current_price=100.0, current_ratio=20.0, reference_median=30.0
+    ) == pytest.approx(150.0)
+
+
+def test_implied_price_from_ratio_median_none_when_ratio_non_positive() -> None:
+    assert implied_price_from_ratio_median(100.0, 0.0, 30.0) is None
+    assert implied_price_from_ratio_median(100.0, -5.0, 30.0) is None
+
+
+def test_implied_price_from_ratio_median_none_when_missing_input() -> None:
+    assert implied_price_from_ratio_median(None, 20.0, 30.0) is None
+    assert implied_price_from_ratio_median(100.0, None, 30.0) is None
+    assert implied_price_from_ratio_median(100.0, 20.0, None) is None
+
+
+def test_implied_price_gap_pct_positive_means_undervalued() -> None:
+    """implied_price(150) > current_price(100) → gap為正＝估值高於現價＝相對便宜/進場訊號。"""
+    assert implied_price_gap_pct(implied_price=150.0, current_price=100.0) == pytest.approx(50.0)
+
+
+def test_implied_price_gap_pct_negative_means_price_ran_ahead() -> None:
+    """implied_price(80) < current_price(100) → gap為負＝基本面看好但價格已衝高、等回檔。"""
+    assert implied_price_gap_pct(implied_price=80.0, current_price=100.0) == pytest.approx(-20.0)
+
+
+def test_implied_price_gap_pct_none_when_missing_or_non_positive_price() -> None:
+    assert implied_price_gap_pct(None, 100.0) is None
+    assert implied_price_gap_pct(150.0, None) is None
+    assert implied_price_gap_pct(150.0, 0.0) is None

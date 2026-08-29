@@ -400,6 +400,40 @@ def test_peg_like_ratio_column_computed_and_null_when_growth_non_positive(tmp_pa
     assert by_id["2454"]["peg_like_ratio"] is None
 
 
+def test_valuation_implied_price_columns_peer_and_self_legs(tmp_path):
+    """docs/31 §20.7：估值回歸參考價——同儕腿(PE回歸同產業中位數)+自身腿(PE回歸自身
+    歷史中位數)。close來自_screener_df固定100.0；2330有val_median+pe_self_median
+    兩腿皆算得出；2454只有val_median(PB基準)，self腿因pe_self_median缺留null。"""
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    valuation_map = {
+        "2330": {"pe": 20.0, "val_metric": "PE", "val_median": 30.0, "pe_self_median": 25.0},
+        "2454": {"pbr": 4.0, "val_metric": "PB", "val_median": 5.0},  # PB基準，無pe_self_median
+    }
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), results, out,
+                                  valuation_map=valuation_map)
+    by_id = {str(r["stock_id"]): r for r in pl.read_csv(out).iter_rows(named=True)}
+
+    # 2330：close=100、PE 20 回歸同產業中位30 → implied_price_peer=150、gap_pct_peer=+50%
+    row = by_id["2330"]
+    assert row["val_implied_price_peer"] == pytest.approx(150.0)
+    assert row["val_gap_pct_peer"] == pytest.approx(50.0)
+    # close=100、PE 20 回歸自身歷史中位25 → implied_price_self=125、gap_pct_self=+25%
+    assert row["val_implied_price_self"] == pytest.approx(125.0)
+    assert row["val_gap_pct_self"] == pytest.approx(25.0)
+
+    # 2454：PB基準，close=100、PB 4 回歸同產業PB中位5 → implied_price_peer=125、gap=+25%
+    row2 = by_id["2454"]
+    assert row2["val_implied_price_peer"] == pytest.approx(125.0)
+    assert row2["val_gap_pct_peer"] == pytest.approx(25.0)
+    # self腿v1只做PE基準，2454無pe_self_median → 留null，不硬算
+    assert row2["val_implied_price_self"] is None
+    assert row2["val_gap_pct_self"] is None
+
+
 # ── 0.3 本週族群主軸 / Section 5 補位塊（問題3・M3）─────────────────────────
 
 

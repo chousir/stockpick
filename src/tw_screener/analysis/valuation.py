@@ -343,6 +343,91 @@ def deep_value_growth(
     return at_base
 
 
+_SELF_HISTORY_MEDIAN_SCHEMA: dict[str, type[pl.DataType]] = {
+    "stock_id": pl.Utf8, "pe_self_median": pl.Float64, "pe_self_n": pl.Int64,
+}
+
+
+def compute_self_history_median(
+    history: pl.DataFrame, min_snapshots: int = 8
+) -> pl.DataFrame:
+    """docs/31 §20.7：個股自身PE歷史快照序列的中位數——供`implied_price_from_ratio_median()`
+    的「自身回歸」腿使用。跟`compute_self_history_pctile()`同樣的輸入/篩選邏輯（同
+    `min_snapshots`門檻、同樣要求pe>0），只是輸出中位數而非百分位排名——兩者互補不
+    互相取代：百分位答「現在比自己過去貴還便宜」，中位數是估值回歸參考價要用的實際
+    回歸錨點（若PE回到自身歷史中位數，價格會是多少）。
+
+    Args:
+        history: 同`compute_self_history_pctile()`——`client.load_valuation_ratios_history()`
+            輸出（date/stock_id/pe/...，逐日累積快照長表）。
+        min_snapshots: 同`compute_self_history_pctile()`——樣本太少不計算，寧可留null。
+
+    Returns:
+        (stock_id, pe_self_median, pe_self_n)。歷史筆數不足或PE非正 → 該股不出現。
+    """
+    if history.is_empty():
+        return pl.DataFrame(schema=_SELF_HISTORY_MEDIAN_SCHEMA)
+    valid = history.filter(pl.col("pe").is_not_null() & (pl.col("pe") > 0))
+    if valid.is_empty():
+        return pl.DataFrame(schema=_SELF_HISTORY_MEDIAN_SCHEMA)
+    counts = valid.group_by("stock_id").agg(pl.len().alias("_n")).filter(
+        pl.col("_n") >= min_snapshots
+    )
+    if counts.is_empty():
+        return pl.DataFrame(schema=_SELF_HISTORY_MEDIAN_SCHEMA)
+    eligible = valid.join(counts.select("stock_id"), on="stock_id", how="inner")
+    return eligible.group_by("stock_id").agg(
+        pl.col("pe").median().round(2).alias("pe_self_median"),
+        pl.len().cast(pl.Int64).alias("pe_self_n"),
+    ).sort("stock_id")
+
+
+def implied_price_from_ratio_median(
+    current_price: float | None,
+    current_ratio: float | None,
+    reference_median: float | None,
+) -> float | None:
+    """docs/31 §20.7「估值回歸參考價」：若`current_ratio`（PE或PB）回歸到
+    `reference_median`，現價會落在哪裡——`current_price × (reference_median /
+    current_ratio)`。同一公式供兩種回歸腿共用：傳`val_median`（`build_valuation()`
+    輸出的同產業中位數）算「同儕回歸」；傳`pe_self_median`（`compute_self_history_
+    median()`輸出）算「自身回歸」。
+
+    **機械式回顧計算，非預測，不可稱「目標價」／「預估價」／「會漲到」**：只用已觀察
+    到的現價與已算好的中位數重新定價，沒有任何前瞻/預測成分——跟MA60停損「結構性、
+    非預測」同一類（docs/06/playbook/60已收錄這個框架，呼叫端輸出時須附標準免責句）。
+    此公式**不是**利率調整/前瞻EPS的DCF公允價模型——那條路已兩次查核確認台灣無風險
+    利率資料源缺席、不可行（docs/31 §14.2/§18），本函式刻意不碰。
+
+    Args:
+        current_price: 現價。
+        current_ratio: 現在的PE或PB（依同一鏡頭跟`reference_median`對齊——呼叫端
+            負責確保兩者同基準，本函式不驗證，例如`reference_median`傳PB中位數時
+            `current_ratio`也要傳PBR，不可混用PE）。
+        reference_median: 回歸錨點（同產業中位數或自身歷史中位數）。
+
+    Returns:
+        implied_price；`current_ratio<=0`或任一輸入缺值回None（不硬算、不猜）。
+    """
+    if current_price is None or current_ratio is None or reference_median is None:
+        return None
+    if current_ratio <= 0:
+        return None
+    return round(current_price * (reference_median / current_ratio), 2)
+
+
+def implied_price_gap_pct(
+    implied_price: float | None, current_price: float | None
+) -> float | None:
+    """`(implied_price / current_price − 1) × 100`——正＝估值回歸參考價高於現價
+    （相對便宜，進場訊號）；負＝估值回歸參考價低於現價（基本面看好但價格已衝高，
+    等回檔訊號）。正負號語意對應使用者原話（docs/31 §20.7）。
+    """
+    if implied_price is None or current_price is None or current_price <= 0:
+        return None
+    return round((implied_price / current_price - 1) * 100, 1)
+
+
 def peg_like_ratio(pe: float | None, rev_yoy_pct: float | None) -> float | None:
     """docs/31 §18：PE 對月營收YoY成長率之比（PEG-like，非傳統EPS-based PEG）。
 

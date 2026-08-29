@@ -82,7 +82,8 @@ def test_is_stale(tmp_path: Path):
     f = make_fetcher(tmp_path)
     p = tmp_path / "old.html.gz"
     p.touch()
-    old_ts = time.time() - 10 * 86400  # 10 天前——2 天在「假日+週末連休≥3 天」時晚於最近交易日盤後界線（2026-07-12 實際踩到），10 天蓋住任何連休
+    # 10 天前：2 天在連休≥3 天時晚於最近交易日盤後界線（2026-07-12 實際踩到），10 天蓋住任何連休
+    old_ts = time.time() - 10 * 86400
     os.utime(p, (old_ts, old_ts))
     assert not f._is_fresh(p)
 
