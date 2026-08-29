@@ -627,8 +627,12 @@ def run_group_analysis(settings: Path) -> None:
         small_pos = float(icfg.get("ambush_foreign_20d_small_positive_lots", 5000))
         allow_bz = bool(icfg.get("ambush_allow_base_zone_branch", True))
         nm_limit = int(icfg.get("ambush_near_miss_md_limit", 15))
+        # infer_schema_length=None：cand_rows 常 >100 列，預設只看前 100 列猜型別，
+        # 晚出現的字串值（如次產業「主機板」）會撞錯，2026-08-29 實跑觸發
+        # （同 report/inflection_ambush.py 內部已修過的成因，那邊修的是另一個
+        # 更晚的 DataFrame 建構點，這裡是更早、真正先炸的那個）
         qualified, near_miss = build_inflection_ambush(
-            _pl.DataFrame(cand_rows) if cand_rows else _pl.DataFrame(),
+            _pl.DataFrame(cand_rows, infer_schema_length=None) if cand_rows else _pl.DataFrame(),
             near_low_pct=near_low,
             inflection_days_range=(days_rng[0], days_rng[1]),
             small_positive_lots=small_pos,
