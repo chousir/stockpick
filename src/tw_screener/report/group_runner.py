@@ -372,7 +372,11 @@ def run_group_analysis(settings: Path) -> None:
     # 官方日估值比（PE/PB/殖利率）：純讀快取，由 make fetch-twse 累積（BWIBBU）。candidates 估值欄
     # 以此為主、Goodinfo 兜底（官方覆蓋 ~97%、口徑一致 trailing）。再過 build_valuation 算次產業
     # 相對位階（PE 主、PB 補虧損股）→ 每檔候選 inline 帶「次位/相對便宜」，免另跑 cp_valuation。
-    from tw_screener.analysis.sector_universe import build_peer_membership, list_subindustries
+    from tw_screener.analysis.sector_universe import (
+        build_broad_industry_membership,
+        build_peer_membership,
+        list_subindustries,
+    )
     from tw_screener.analysis.valuation import (
         build_valuation,
         compute_self_history_median,
@@ -386,6 +390,9 @@ def run_group_analysis(settings: Path) -> None:
         build_peer_membership(list_subindustries(), industry_df),
         min_peers=int(val_cfg.get("min_peers", 5)),
         cheap_pctile=float(val_cfg.get("cheap_pctile", 30.0)),
+        # 手標次產業樣本 <min_peers（如晶圓代工全市場僅4檔）退用TWSE粗產業別，
+        # 讓這類股票不再永遠估值缺（2026-08-29，docs/31 §20.8）
+        broad_membership=build_broad_industry_membership(industry_df),
     )
     # docs/31 §14：自身估值歷史百分位粗版代理（跟val_pctile的同儕橫斷面互補，不取代）——
     # 純揭露欄，任一步驟壞掉不擋主流程（同官方族群前5段的容錯慣例）。

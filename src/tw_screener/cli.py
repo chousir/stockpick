@@ -2145,6 +2145,7 @@ def cp_valuation_cmd(
     import yaml
 
     from tw_screener.analysis.sector_universe import (
+        build_broad_industry_membership,
         build_peer_membership,
         list_subindustries,
         load_industry_mapping,
@@ -2176,6 +2177,8 @@ def cp_valuation_cmd(
         peer_members,
         min_peers=int(val.get("min_peers", 5)),
         cheap_pctile=float(val.get("cheap_pctile", 30.0)),
+        # 手標次產業樣本 <min_peers 退用TWSE粗產業別（2026-08-29，docs/31 §20.8）
+        broad_membership=build_broad_industry_membership(industry),
     )
     meta = compute_valuation_meta(valuation, data_date=str(latest), universe="上市+上櫃")
 

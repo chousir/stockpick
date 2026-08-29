@@ -21,6 +21,7 @@ def run_cp_candidates(settings: Path) -> None:
 
     from tw_screener.analysis.rotation import compute_subindustry_baskets, load_market_history
     from tw_screener.analysis.sector_universe import (
+        build_broad_industry_membership,
         build_peer_membership,
         list_subindustries,
         load_industry_mapping,
@@ -162,6 +163,8 @@ def run_cp_candidates(settings: Path) -> None:
         peer_members,
         min_peers=int(val_cfg.get("min_peers", 5)),
         cheap_pctile=cheap_pctile,
+        # 手標次產業樣本 <min_peers 退用TWSE粗產業別（2026-08-29，docs/31 §20.8）
+        broad_membership=build_broad_industry_membership(industry),
     )
     candidates = attach_valuation(candidates, valuation, cheap_pctile=cheap_pctile)
 

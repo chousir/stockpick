@@ -339,3 +339,52 @@ def test_implied_price_gap_pct_none_when_missing_or_non_positive_price() -> None
     assert implied_price_gap_pct(None, 100.0) is None
     assert implied_price_gap_pct(150.0, None) is None
     assert implied_price_gap_pct(150.0, 0.0) is None
+
+
+# ─── broad_membership 小樣本兜底（2026-08-29，docs/31 §20.8） ──────────────────
+
+
+def test_broad_membership_rescues_undersized_hand_tagged_group() -> None:
+    """手標次產業僅4檔（<min_peers=5，如晶圓代工實例）——不傳broad維持null，傳了才救回。"""
+    rows = [{"stock_id": s, "pe": pe} for s, pe in
+            (("w1", 28.1), ("w2", 15.0), ("w3", 20.0), ("w4", 22.0),
+             ("o1", 30.0), ("o2", 31.0), ("o3", 29.0), ("o4", 28.0), ("o5", 27.0))]
+    membership = _membership(
+        [("晶圓代工", s) for s in ("w1", "w2", "w3", "w4")]
+        + [("其他半導體", s) for s in ("o1", "o2", "o3", "o4", "o5")]
+    )
+    broad = _membership([("產業別:半導體業", s) for s in
+                          ("w1", "w2", "w3", "w4", "o1", "o2", "o3", "o4", "o5")])
+
+    without = build_valuation(_ratios(rows), membership, min_peers=5)
+    by_without = {r["stock_id"]: r for r in without.iter_rows(named=True)}
+    for s in ("w1", "w2", "w3", "w4"):
+        assert by_without[s]["val_pctile"] is None
+        assert by_without[s]["peer_source"] is None
+
+    with_broad = build_valuation(_ratios(rows), membership, min_peers=5, broad_membership=broad)
+    by_with = {r["stock_id"]: r for r in with_broad.iter_rows(named=True)}
+    for s in ("w1", "w2", "w3", "w4"):
+        assert by_with[s]["val_pctile"] is not None
+        assert by_with[s]["peer_source"] == "產業別(次產業樣本不足)"
+    # 已經有夠樣本的次產業（其他半導體，5檔）不受影響——值與不傳broad時完全一致
+    for s in ("o1", "o2", "o3", "o4", "o5"):
+        assert by_with[s]["val_pctile"] == by_without[s]["val_pctile"]
+        assert by_with[s]["val_median"] == by_without[s]["val_median"]
+        assert by_with[s]["peer_source"] == "次產業"
+
+
+def test_broad_membership_none_or_empty_keeps_old_behavior() -> None:
+    """broad_membership 不傳或傳空表——行為與修改前完全一致（向後相容）。"""
+    rows = [{"stock_id": s, "pe": pe} for s, pe in
+            (("w1", 28.1), ("w2", 15.0), ("w3", 20.0), ("w4", 22.0))]
+    membership = _membership([("晶圓代工", s) for s in ("w1", "w2", "w3", "w4")])
+    empty_broad = pl.DataFrame(schema={"sub_industry": pl.Utf8, "stock_id": pl.Utf8})
+
+    out_none = build_valuation(_ratios(rows), membership, min_peers=5)
+    out_empty = build_valuation(
+        _ratios(rows), membership, min_peers=5, broad_membership=empty_broad
+    )
+    for s in ("w1", "w2", "w3", "w4"):
+        assert out_none.filter(pl.col("stock_id") == s)["val_pctile"].item() is None
+        assert out_empty.filter(pl.col("stock_id") == s)["val_pctile"].item() is None

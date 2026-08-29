@@ -94,17 +94,47 @@ def compute_subind_relative(
     )
 
 
+def _fill_from_broad(fine: pl.DataFrame, broad: pl.DataFrame) -> pl.DataFrame:
+    """細分類（fine）算不出（樣本 <min_peers）時，用粗分類（broad）補值；細有值則不動。
+
+    多帶一欄 `used_broad`（bool）＝「這檔的值是從粗分類補來的」，供 `peer_source` 標註
+    透明（2026-08-29，docs/31 §20.8）：不可讓粗分類補來的值悄悄冒充「次產業」同儕。
+    """
+    rel_cols = [c for c in _REL_SCHEMA if c != "stock_id"]
+    if fine.is_empty() and broad.is_empty():
+        return pl.DataFrame(schema={**_REL_SCHEMA, "used_broad": pl.Boolean})
+    if broad.is_empty():
+        return fine.with_columns(pl.lit(False).alias("used_broad"))
+    broad_r = broad.rename({c: f"_b_{c}" for c in rel_cols})
+    base_fine = fine if not fine.is_empty() else pl.DataFrame(schema=_REL_SCHEMA)
+    merged = base_fine.join(broad_r, on="stock_id", how="full", coalesce=True)
+    merged = merged.with_columns(
+        (pl.col("subind_pctile").is_null() & pl.col("_b_subind_pctile").is_not_null())
+        .alias("used_broad")
+    )
+    for c in rel_cols:
+        merged = merged.with_columns(pl.coalesce(pl.col(c), pl.col(f"_b_{c}")).alias(c))
+    return merged.select("stock_id", *rel_cols, "used_broad")
+
+
 def build_valuation(
     ratios: pl.DataFrame,
     membership: pl.DataFrame,
     min_peers: int = 5,
     cheap_pctile: float = 30.0,
+    broad_membership: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """估值長表（docs/13 C1）：官方 PE/PBR + 次產業相對位階（PE 主、PB 補虧損股）+ 相對便宜標。
 
     Args:
         ratios: (stock_id, market, pe, pbr, dividend_yield) 官方日估值比（單一交易日橫斷面）。
         membership: (sub_industry, stock_id) 同儕分組（手標次產業細 / TWSE 產業別兜底）。
+        broad_membership: 選填，`sector_universe.build_broad_industry_membership()` 輸出
+            （全市場每檔一列的 TWSE 粗產業分類，不受手標與否影響）。當某檔的手標次產業
+            樣本數 <`min_peers`（如晶圓代工全市場僅4檔，永遠算不出同儕）時，**單獨**對
+            這幾檔補一次粗分類計算——手標樣本本來就夠的股票不受影響、數字不變
+            （2026-08-29 使用者實測發現＋拍板修，docs/31 §20.8）。不傳＝維持舊行為
+            （樣本不足永遠 null），向後相容。
 
     Returns:
         每檔一列（_VALUATION_SCHEMA）。pe_status：ok（有正 PE）／無本益比（虧損或無正盈餘，
@@ -128,13 +158,28 @@ def build_valuation(
         )
     )
 
-    pe_rel = compute_subind_relative(
-        base.filter(pl.col("pe_status") == "ok").select("stock_id", "pe"),
-        membership, value_col="pe", min_peers=min_peers,
-    ).rename({c: f"pe_{c}" for c in _REL_SCHEMA if c != "stock_id"})
-    pb_rel = compute_subind_relative(
-        base.select("stock_id", "pbr"), membership, value_col="pbr", min_peers=min_peers
-    ).rename({c: f"pb_{c}" for c in _REL_SCHEMA if c != "stock_id"})
+    pe_valid = base.filter(pl.col("pe_status") == "ok").select("stock_id", "pe")
+    pb_valid = base.select("stock_id", "pbr")
+    pe_rel = compute_subind_relative(pe_valid, membership, value_col="pe", min_peers=min_peers)
+    pb_rel = compute_subind_relative(pb_valid, membership, value_col="pbr", min_peers=min_peers)
+    if broad_membership is not None and not broad_membership.is_empty():
+        # 手標次產業樣本 <min_peers 時退用粗分類補值——只補「細算不出來」的股票，
+        # 細已經算得出來的不動（2026-08-29，docs/31 §20.8）
+        pe_rel = _fill_from_broad(
+            pe_rel, compute_subind_relative(pe_valid, broad_membership, "pe", min_peers)
+        )
+        pb_rel = _fill_from_broad(
+            pb_rel, compute_subind_relative(pb_valid, broad_membership, "pbr", min_peers)
+        )
+    else:
+        pe_rel = pe_rel.with_columns(pl.lit(False).alias("used_broad"))
+        pb_rel = pb_rel.with_columns(pl.lit(False).alias("used_broad"))
+    pe_rel = pe_rel.rename(
+        {c: f"pe_{c}" for c in (*_REL_SCHEMA, "used_broad") if c != "stock_id"}
+    )
+    pb_rel = pb_rel.rename(
+        {c: f"pb_{c}" for c in (*_REL_SCHEMA, "used_broad") if c != "stock_id"}
+    )
 
     out = base.join(pe_rel, on="stock_id", how="left").join(pb_rel, on="stock_id", how="left")
     has_pe = pl.col("pe_subind_pctile").is_not_null()
@@ -150,6 +195,10 @@ def build_valuation(
         pl.coalesce("pe_subind_pctile", "pb_subind_pctile").alias("val_pctile"),
         pl.when(has_pe).then(pl.col("pe_peer_n"))
         .otherwise(pl.col("pb_peer_n")).alias("val_peer_n"),
+        # 這檔實際採用的鏡頭（PE或PB）是否吃了粗分類補值——peer_source 判讀要用，
+        # 不可讓粗分類補來的值悄悄冒充「次產業」同儕
+        pl.when(has_pe).then(pl.col("pe_used_broad"))
+        .otherwise(pl.col("pb_used_broad")).fill_null(False).alias("_val_used_broad"),
     ).with_columns(
         pl.when(pl.col("val_pctile").is_null())
         .then(pl.lit(""))
@@ -163,7 +212,8 @@ def build_valuation(
         .alias("cheap_flag")
     )
 
-    # peer_source：同儕來自手標次產業（細）或 TWSE 產業別兜底（粗）——讓相對便宜可信度透明
+    # peer_source：同儕來自手標次產業（細）、TWSE 產業別兜底（粗），或手標樣本不足
+    # 退用粗分類（2026-08-29新增第三種，docs/31 §20.8）——讓相對便宜可信度透明
     if not membership.is_empty():
         src = membership.group_by("stock_id").agg(
             (~pl.col("sub_industry").str.starts_with(PEER_FALLBACK_PREFIX)).any().alias("_fine")
@@ -171,6 +221,8 @@ def build_valuation(
         out = out.join(src, on="stock_id", how="left").with_columns(
             pl.when(pl.col("val_pctile").is_null())
             .then(None)
+            .when(pl.col("_fine") & pl.col("_val_used_broad"))
+            .then(pl.lit("產業別(次產業樣本不足)"))
             .when(pl.col("_fine"))
             .then(pl.lit("次產業"))
             .otherwise(pl.lit("產業別"))
@@ -178,7 +230,7 @@ def build_valuation(
         ).drop("_fine")
     else:
         out = out.with_columns(pl.lit(None, dtype=pl.Utf8).alias("peer_source"))
-    return out.select(list(_VALUATION_SCHEMA.keys())).sort(
+    return out.drop("_val_used_broad").select(list(_VALUATION_SCHEMA.keys())).sort(
         "val_pctile", descending=False, nulls_last=True
     )
 

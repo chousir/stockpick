@@ -122,6 +122,38 @@ def build_peer_membership(
     )
 
 
+def build_broad_industry_membership(industry: pl.DataFrame) -> pl.DataFrame:
+    """估值用**粗**同儕分組——TWSE/TPEX 產業別，不論手標與否，全市場每檔一列。
+
+    與 `build_peer_membership` 的差異：後者的粗分類只給「完全未手標」的股票用，
+    手標次產業本身太小（如晶圓代工全市場僅4檔，永遠 <`min_peers`）的股票兩頭落空、
+    同儕估值永遠算不出來（2026-08-29 使用者實測發現，台積電/聯電/世界/力積電皆是
+    此例，docs/31 §20.8）。本函式**不排除已手標股**，讓 `build_valuation()` 能在
+    細分類樣本不足時，單獨對這些股票補一次粗分類同儕計算（見該函式 `broad_membership`
+    參數）——細算得出來的股票不受影響，只補「細算不出來」的缺口。
+
+    Args:
+        industry: load_industry_mapping 輸出 (stock_id, ..., industry_name)
+
+    Returns:
+        (sub_industry, stock_id)：sub_industry＝「{PEER_FALLBACK_PREFIX}{TWSE 產業別}」。
+        industry_name 缺/空者不兜底（誠實留「估值缺」，同 `build_peer_membership`）。
+    """
+    if industry.is_empty():
+        return pl.DataFrame(schema=_MEMBERSHIP_SCHEMA)
+    return (
+        industry.filter(
+            pl.col("industry_name").is_not_null() & (pl.col("industry_name") != "")
+        )
+        .select(
+            (pl.lit(PEER_FALLBACK_PREFIX) + pl.col("industry_name")).alias("sub_industry"),
+            "stock_id",
+        )
+        .unique(["sub_industry", "stock_id"], maintain_order=True)
+        .sort(["sub_industry", "stock_id"])
+    )
+
+
 def load_industry_mapping(cache_dir: Path) -> pl.DataFrame:
     """純讀最新月份 industry_YYYYMM + otc_industry_YYYYMM 快取 → 全市場 28 類對照。
 

@@ -233,6 +233,7 @@ def build_g1_g2_g5_inputs(client, cfg: dict, universe: pl.DataFrame) -> G1G2G5In
 
     from tw_screener.analysis.rotation import load_market_history
     from tw_screener.analysis.sector_universe import (
+        build_broad_industry_membership,
         build_peer_membership,
         list_subindustries,
         load_industry_mapping,
@@ -261,7 +262,13 @@ def build_g1_g2_g5_inputs(client, cfg: dict, universe: pl.DataFrame) -> G1G2G5In
 
     ratios = client.load_latest_valuation_ratios()
     valuation = (
-        build_valuation(ratios, membership, min_peers=min_peers)
+        build_valuation(
+            ratios, membership, min_peers=min_peers,
+            # 手標次產業樣本 <min_peers 退用TWSE粗產業別（2026-08-29，docs/31 §20.8）——
+            # G5「估值未反映利潤率改善」的核心判準就是 val_pctile，樣本不足永遠算不出
+            # 等於這批股票永遠沒資格當G5候選，同一顆bug兩處都要修
+            broad_membership=build_broad_industry_membership(industry),
+        )
         if not ratios.is_empty() and not membership.is_empty()
         else pl.DataFrame(schema={"stock_id": pl.Utf8, "val_pctile": pl.Float64})
     )

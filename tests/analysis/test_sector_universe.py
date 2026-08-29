@@ -9,6 +9,7 @@ import polars as pl
 from tw_screener.analysis.sector_universe import (
     PEER_FALLBACK_PREFIX,
     audit_priceless_members,
+    build_broad_industry_membership,
     build_peer_membership,
     list_subindustries,
     load_industry_mapping,
@@ -173,3 +174,34 @@ def test_peer_membership_empty_inputs():
     ind = _industry_df([("9999", "某鋼鐵", "10", "鋼鐵工業")])
     out = build_peer_membership(empty_m, ind)
     assert out.height == 1 and out["sub_industry"][0] == f"{PEER_FALLBACK_PREFIX}鋼鐵工業"
+
+
+# ── build_broad_industry_membership（2026-08-29，docs/31 §20.8）───────────────────
+
+
+def test_broad_industry_membership_includes_hand_tagged_stocks():
+    """與 build_peer_membership 的差異：已手標股（如晶圓代工4檔）也要出現在粗分類裡。"""
+    ind = _industry_df(
+        [
+            ("2330", "台積電", "24", "半導體業"),
+            ("2454", "聯發科", "24", "半導體業"),
+            ("9999", "某鋼鐵", "10", "鋼鐵工業"),
+            ("8888", "某空白", "99", ""),
+        ]
+    )
+    out = build_broad_industry_membership(ind)
+    m = {(r["sub_industry"], r["stock_id"]) for r in out.iter_rows(named=True)}
+    # 已手標股（2330/2454）仍出現在粗分類——這是跟 build_peer_membership 唯一的差異
+    assert (f"{PEER_FALLBACK_PREFIX}半導體業", "2330") in m
+    assert (f"{PEER_FALLBACK_PREFIX}半導體業", "2454") in m
+    assert (f"{PEER_FALLBACK_PREFIX}鋼鐵工業", "9999") in m
+    # industry_name 空者仍不兜底（誠實留估值缺，同 build_peer_membership）
+    assert not any(sid == "8888" for _, sid in m)
+
+
+def test_broad_industry_membership_empty_input():
+    empty_i = pl.DataFrame(
+        schema={"stock_id": pl.Utf8, "stock_name": pl.Utf8,
+                "industry_code": pl.Utf8, "industry_name": pl.Utf8}
+    )
+    assert build_broad_industry_membership(empty_i).is_empty()
