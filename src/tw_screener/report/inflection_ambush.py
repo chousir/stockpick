@@ -132,7 +132,10 @@ def build_inflection_ambush(
     def _frame(rows: list[dict]) -> pl.DataFrame:
         if not rows:
             return empty
-        df = pl.DataFrame(rows)
+        # infer_schema_length=None：rows>100 時預設只看前 100 列猜型別，晚出現的字串值
+        # （如次產業「主機板」）會撞現有數值欄猜測、write_csv 崩潰（2026-08-29 實跑觸發，
+        # 同 group_report.py 已修過的成因，見該檔 write_candidates_enriched_csv 附近註解）
+        df = pl.DataFrame(rows, infer_schema_length=None)
         if "位階依據" not in df.columns:
             return df
         # 距低型（含「皆是」）優先，其次剛轉買天數越少越前，最後距低越小越前
