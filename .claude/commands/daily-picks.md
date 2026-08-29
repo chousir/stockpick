@@ -1,14 +1,19 @@
 ---
-description: 每日全量流程——make week 全量 Goodinfo 掃描 ＋ 總經第二意見掃描 ＋ Opus 合成當日推薦（pick.md）
+description: 每日全量流程——make week（2026-08-28起預設不打Goodinfo，見docs/31 §20.6）＋ 總經第二意見掃描 ＋ Opus 合成當日推薦（pick.md）
 argument-hint: ""
 allowed-tools: Bash, Read, Write, Agent, Glob, Grep
 ---
 
-你要跑一次**每日全量流程**：全量 `make week` → 總經第二意見掃描 → 把掃描結果寫成
+你要跑一次**每日全量流程**：`make week` → 總經第二意見掃描 → 把掃描結果寫成
 `macro_risk_latest.yaml` → 用 Opus 子代理依 docs/11 規格合成當日 `pick.md`。
 
-使用者已明確拍板兩件事（不要再問）：**接受全量每日跑 Goodinfo**（週選股系統改成每日
-跑，流量比原設計大，使用者已知情同意）；**每天全新產出 `pick.md`，同週內互相覆蓋**。
+**2026-08-28起 `make week` 預設流程已不再打 Goodinfo**（D/E/G結構性無法本地重建、
+F改走本地等價路徑，docs/31 §20.6軟退場）——本節「使用者已拍板全量每日跑 Goodinfo」
+的授權背景仍保留紀錄，但**現行預設流程不會用到它**，`doctor` 只是單頁非阻塞健康
+檢查、不是掃描。若要手動跑Goodinfo原始定義，走 `make screen-all GROUP=defg`（本指令
+不會自動呼叫）。
+
+使用者已明確拍板：**每天全新產出 `pick.md`，同週內互相覆蓋**。
 
 依序執行，任何一步失敗就停下來回報，不要跳過：
 
@@ -18,9 +23,12 @@ allowed-tools: Bash, Read, Write, Agent, Glob, Grep
 make week GROUP=defg
 ```
 
-這一步會全量打 Goodinfo（`screen-all`），可能跑一段時間。跑完後 `reports/<週次>/` 下
-會有 docs/11 §Step A 列的檔案。此時 `macro_risk_latest.yaml` 還不存在，`week-check`
-會印它 missing——**這是預期行為，不是錯誤**，繼續下一步。
+現行預設流程**不打 Goodinfo**（`screen-f-local`＋`screen-redesign-local` 皆本地
+filter，`doctor` 只是單頁非阻塞健康檢查）——比純本地計算多花的時間主要在抓 TWSE/
+TPEX OpenAPI、法人史、TDCC、族群分析等步驟，仍可能跑數分鐘，但不是在等 Goodinfo
+速率限制。跑完後 `reports/<週次>/` 下會有 docs/11 §Step A 列的檔案。此時
+`macro_risk_latest.yaml` 還不存在，`week-check` 會印它 missing——**這是預期行為，
+不是錯誤**，繼續下一步。
 
 ## Step 2 — 總經第二意見掃描（Sonnet 子代理）
 
