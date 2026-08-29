@@ -12,11 +12,16 @@ import pytest
 
 from tw_screener.analysis.valuation import (
     build_valuation,
+    compute_composite_valuation_gap,
     compute_self_history_median,
+    compute_self_history_median_pb,
+    compute_self_history_median_yield,
     compute_self_history_pctile,
     compute_subind_relative,
+    compute_valuation_legs,
     compute_valuation_meta,
     implied_price_from_ratio_median,
+    implied_price_from_yield_median,
     implied_price_gap_pct,
     market_cap_billion,
     peg_like_ratio,
@@ -388,3 +393,127 @@ def test_broad_membership_none_or_empty_keeps_old_behavior() -> None:
     for s in ("w1", "w2", "w3", "w4"):
         assert out_none.filter(pl.col("stock_id") == s)["val_pctile"].item() is None
         assert out_empty.filter(pl.col("stock_id") == s)["val_pctile"].item() is None
+
+
+# ─── 估值回歸參考價（綜合版）——docs/31 §20.9 ─────────────────────────────────
+
+
+def test_implied_price_from_yield_median_direction_is_inverted() -> None:
+    """殖利率越高（相對參考中位數）＝現在相對便宜——implied_price應該高於現價（正向confirm）。"""
+    # 現價100、現在殖利率5%（比同儕中位數3%高，代表現在配息相對現價高／股價相對便宜）
+    implied = implied_price_from_yield_median(
+        current_price=100.0, current_yield_pct=5.0, reference_yield_median_pct=3.0
+    )
+    assert implied == pytest.approx(166.67, abs=0.01)
+    assert implied is not None and implied > 100.0  # 現價便宜 → implied price 應該更高
+
+
+def test_implied_price_from_yield_median_none_when_missing_or_non_positive() -> None:
+    assert implied_price_from_yield_median(None, 5.0, 3.0) is None
+    assert implied_price_from_yield_median(100.0, None, 3.0) is None
+    assert implied_price_from_yield_median(100.0, 5.0, None) is None
+    assert implied_price_from_yield_median(100.0, 0.0, 3.0) is None
+    assert implied_price_from_yield_median(100.0, 5.0, -1.0) is None
+    assert implied_price_from_yield_median(-1.0, 5.0, 3.0) is None
+
+
+def test_compute_valuation_legs_pb_and_yield_regardless_of_pe_availability() -> None:
+    """PE可用與否都要算出PB/殖利率同儕中位數——跟build_valuation()的val_metric選擇無關。"""
+    rows = [
+        {"stock_id": s, "pe": pe} for s, pe in
+        (("p1", 10.0), ("p2", 12.0), ("p3", None), ("p4", 16.0), ("p5", 18.0))
+        # p3 虧損（pe=None）——PE不可用，但PB/殖利率仍應算得出
+    ]
+    ratios = pl.DataFrame([
+        {**r, "market": "上市", "pbr": 1.0 + i * 0.2, "dividend_yield": 5.0 - i * 0.5}
+        for i, r in enumerate(rows)
+    ], schema={"stock_id": pl.Utf8, "pe": pl.Float64, "market": pl.Utf8,
+               "pbr": pl.Float64, "dividend_yield": pl.Float64})
+    membership = _membership([("A", s) for s in ("p1", "p2", "p3", "p4", "p5")])
+    legs = compute_valuation_legs(ratios, membership, min_peers=5)
+    by = {r["stock_id"]: r for r in legs.iter_rows(named=True)}
+    # p3 沒有PE，但PB/殖利率兩條額外線索應該正常算出（不受PE缺值影響）
+    assert by["p3"]["pb_peer_median"] is not None
+    assert by["p3"]["yield_peer_median"] is not None
+
+
+def test_compute_valuation_legs_broad_membership_rescues_undersized_group() -> None:
+    rows = [{"stock_id": s, "pe": 10.0} for s in ("w1", "w2", "w3", "w4")]
+    ratios = pl.DataFrame([
+        {**r, "market": "上市", "pbr": 1.5, "dividend_yield": 2.0} for r in rows
+    ], schema={"stock_id": pl.Utf8, "pe": pl.Float64, "market": pl.Utf8,
+               "pbr": pl.Float64, "dividend_yield": pl.Float64})
+    membership = _membership([("小分類", s) for s in ("w1", "w2", "w3", "w4")])
+    broad = _membership([("產業別:大分類", s) for s in ("w1", "w2", "w3", "w4", "extra")])
+    without = compute_valuation_legs(ratios, membership, min_peers=5)
+    assert without.filter(pl.col("stock_id") == "w1")["pb_peer_median"].item() is None
+    # broad也只有4個有pbr資料的成員（extra沒進ratios）——仍不足5，驗證真的是broad在算,
+    # 不是巧合過門檻：改用5個有效pbr成員的broad才會過
+    ratios2 = pl.concat([
+        ratios,
+        pl.DataFrame([{"stock_id": "extra", "pe": None, "market": "上市", "pbr": 2.0,
+                        "dividend_yield": 1.0}]),
+    ])
+    with_broad = compute_valuation_legs(ratios2, membership, min_peers=5, broad_membership=broad)
+    assert with_broad.filter(pl.col("stock_id") == "w1")["pb_peer_median"].item() is not None
+
+
+def test_compute_self_history_median_pb_and_yield() -> None:
+    history = pl.DataFrame({
+        "stock_id": ["s1"] * 9,
+        "date": [date(2026, 1, i + 1) for i in range(9)],
+        "pbr": [1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8],
+        "dividend_yield": [5.0, 4.9, 4.8, 4.7, 4.6, 4.5, 4.4, 4.3, 4.2],
+    })
+    pb_out = compute_self_history_median_pb(history, min_snapshots=8)
+    assert pb_out.filter(pl.col("stock_id") == "s1")["pb_self_median"].item() == pytest.approx(1.4)
+    yield_out = compute_self_history_median_yield(history, min_snapshots=8)
+    assert yield_out.filter(pl.col("stock_id") == "s1")["yield_self_median"].item() == \
+        pytest.approx(4.6)
+
+
+def test_compute_self_history_median_pb_insufficient_snapshots_null() -> None:
+    history = pl.DataFrame({
+        "stock_id": ["s1"] * 3,
+        "date": [date(2026, 1, i + 1) for i in range(3)],
+        "pbr": [1.0, 1.1, 1.2],
+        "dividend_yield": [5.0, 4.9, 4.8],
+    })
+    assert compute_self_history_median_pb(history, min_snapshots=8).is_empty()
+
+
+def test_compute_self_history_median_pe_unchanged_after_refactor() -> None:
+    """回歸測試：抽出共用helper後，PE版行為必須跟修改前逐位元組一致。"""
+    history = pl.DataFrame({
+        "stock_id": ["s1"] * 9,
+        "date": [date(2026, 1, i + 1) for i in range(9)],
+        "pe": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0],
+    })
+    out = compute_self_history_median(history, min_snapshots=8)
+    row = out.filter(pl.col("stock_id") == "s1")
+    assert row["pe_self_median"].item() == pytest.approx(14.0)
+    assert row["pe_self_n"].item() == 9
+
+
+def test_compute_composite_valuation_gap_median_of_available_legs() -> None:
+    gap, n = compute_composite_valuation_gap([10.0, -5.0, 20.0])
+    assert gap == pytest.approx(10.0)  # sorted [-5,10,20] → median 10
+    assert n == 3
+
+
+def test_compute_composite_valuation_gap_filters_none() -> None:
+    gap, n = compute_composite_valuation_gap([None, 10.0, None, 30.0])
+    assert gap == pytest.approx(20.0)  # median of [10,30]
+    assert n == 2
+
+
+def test_compute_composite_valuation_gap_all_none() -> None:
+    gap, n = compute_composite_valuation_gap([None, None, None])
+    assert gap is None
+    assert n == 0
+
+
+def test_compute_composite_valuation_gap_even_count_averages_middle_two() -> None:
+    gap, n = compute_composite_valuation_gap([0.0, 10.0, 20.0, 30.0])
+    assert gap == pytest.approx(15.0)  # (10+20)/2
+    assert n == 4

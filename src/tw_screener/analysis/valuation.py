@@ -400,6 +400,32 @@ _SELF_HISTORY_MEDIAN_SCHEMA: dict[str, type[pl.DataType]] = {
 }
 
 
+def _self_history_median_generic(
+    history: pl.DataFrame, ratio_col: str, min_snapshots: int
+) -> pl.DataFrame:
+    """`compute_self_history_median()`系列的共用核心——泛用欄名`_median`/`_n`，
+    呼叫端各自 rename 成自己的輸出欄名（`pe_self_median`／`pb_self_median`／
+    `yield_self_median`）。2026-08-29新增（docs/31 §20.9綜合版估值），把原本寫死
+    `pe`欄的邏輯抽出來供PB/殖利率重用，PE呼叫端行為完全不變（純refactor、非新邏輯）。
+    """
+    schema = {"stock_id": pl.Utf8, "_median": pl.Float64, "_n": pl.Int64}
+    if history.is_empty():
+        return pl.DataFrame(schema=schema)
+    valid = history.filter(pl.col(ratio_col).is_not_null() & (pl.col(ratio_col) > 0))
+    if valid.is_empty():
+        return pl.DataFrame(schema=schema)
+    counts = valid.group_by("stock_id").agg(pl.len().alias("_n")).filter(
+        pl.col("_n") >= min_snapshots
+    )
+    if counts.is_empty():
+        return pl.DataFrame(schema=schema)
+    eligible = valid.join(counts.select("stock_id"), on="stock_id", how="inner")
+    return eligible.group_by("stock_id").agg(
+        pl.col(ratio_col).median().round(2).alias("_median"),
+        pl.len().cast(pl.Int64).alias("_n"),
+    ).sort("stock_id")
+
+
 def compute_self_history_median(
     history: pl.DataFrame, min_snapshots: int = 8
 ) -> pl.DataFrame:
@@ -417,21 +443,48 @@ def compute_self_history_median(
     Returns:
         (stock_id, pe_self_median, pe_self_n)。歷史筆數不足或PE非正 → 該股不出現。
     """
-    if history.is_empty():
-        return pl.DataFrame(schema=_SELF_HISTORY_MEDIAN_SCHEMA)
-    valid = history.filter(pl.col("pe").is_not_null() & (pl.col("pe") > 0))
-    if valid.is_empty():
-        return pl.DataFrame(schema=_SELF_HISTORY_MEDIAN_SCHEMA)
-    counts = valid.group_by("stock_id").agg(pl.len().alias("_n")).filter(
-        pl.col("_n") >= min_snapshots
+    return _self_history_median_generic(history, "pe", min_snapshots).rename(
+        {"_median": "pe_self_median", "_n": "pe_self_n"}
     )
-    if counts.is_empty():
-        return pl.DataFrame(schema=_SELF_HISTORY_MEDIAN_SCHEMA)
-    eligible = valid.join(counts.select("stock_id"), on="stock_id", how="inner")
-    return eligible.group_by("stock_id").agg(
-        pl.col("pe").median().round(2).alias("pe_self_median"),
-        pl.len().cast(pl.Int64).alias("pe_self_n"),
-    ).sort("stock_id")
+
+
+_SELF_HISTORY_MEDIAN_PB_SCHEMA: dict[str, type[pl.DataType]] = {
+    "stock_id": pl.Utf8, "pb_self_median": pl.Float64, "pb_self_n": pl.Int64,
+}
+_SELF_HISTORY_MEDIAN_YIELD_SCHEMA: dict[str, type[pl.DataType]] = {
+    "stock_id": pl.Utf8, "yield_self_median": pl.Float64, "yield_self_n": pl.Int64,
+}
+
+
+def compute_self_history_median_pb(
+    history: pl.DataFrame, min_snapshots: int = 8
+) -> pl.DataFrame:
+    """docs/31 §20.9：個股自身PB歷史快照序列的中位數——估值回歸參考價（綜合版）的
+    第三條線索。跟`compute_self_history_median()`（PE版）同一套篩選/門檻邏輯，只是
+    換算PBR欄，供帳面價值角度的自身回歸腿（跟PE的獲利角度互補、不取代）。
+
+    Args/Returns：同`compute_self_history_median()`，只是欄名換成`pb_self_median`／
+    `pb_self_n`。
+    """
+    return _self_history_median_generic(history, "pbr", min_snapshots).rename(
+        {"_median": "pb_self_median", "_n": "pb_self_n"}
+    )
+
+
+def compute_self_history_median_yield(
+    history: pl.DataFrame, min_snapshots: int = 8
+) -> pl.DataFrame:
+    """docs/31 §20.9：個股自身殖利率歷史快照序列的中位數——估值回歸參考價（綜合版）
+    的第五條線索。**注意方向與PE/PB相反**：殖利率越低＝價格相對越貴（股利固定時），
+    須配`implied_price_from_yield_median()`（反向公式），不可誤用
+    `implied_price_from_ratio_median()`（PE/PB正向公式）。
+
+    Args/Returns：同`compute_self_history_median()`，只是欄名換成`yield_self_median`／
+    `yield_self_n`，篩選門檻改用`dividend_yield`欄（>0 才算有效，0元股利不計入）。
+    """
+    return _self_history_median_generic(history, "dividend_yield", min_snapshots).rename(
+        {"_median": "yield_self_median", "_n": "yield_self_n"}
+    )
 
 
 def implied_price_from_ratio_median(
@@ -478,6 +531,131 @@ def implied_price_gap_pct(
     if implied_price is None or current_price is None or current_price <= 0:
         return None
     return round((implied_price / current_price - 1) * 100, 1)
+
+
+def implied_price_from_yield_median(
+    current_price: float | None,
+    current_yield_pct: float | None,
+    reference_yield_median_pct: float | None,
+) -> float | None:
+    """docs/31 §20.9「估值回歸參考價（綜合版）」殖利率腿——**方向與PE/PB相反**。
+
+    股利固定時，殖利率(dividend_yield_pct)＝股利/價格×100，價格越高殖利率越低——
+    跟PE/PB「比值越高、implied_price越高」相反。若目前殖利率回歸到參考中位數，
+    現價會是 `current_price × (current_yield_pct / reference_yield_median_pct)`
+    （注意分子分母順序與`implied_price_from_ratio_median()`相反，不可誤用該函式）。
+
+    正負號語意仍與其他腿一致（`implied_price_gap_pct()`共用）：implied_price高於
+    現價＝正＝相對便宜；低於現價＝負＝現價已跑贏、看好但衝高。**機械式回顧計算，
+    非預測**，同`implied_price_from_ratio_median()`的紅線框架，不可稱「目標價」。
+
+    Args:
+        current_price: 現價。
+        current_yield_pct: 目前殖利率（%，如3.5代表3.5%）。
+        reference_yield_median_pct: 參考殖利率中位數（同儕橫斷面或自身歷史）。
+
+    Returns:
+        implied_price；任一輸入缺值或非正即 None（0元股利股無此腿，不猜）。
+    """
+    if current_price is None or current_yield_pct is None or reference_yield_median_pct is None:
+        return None
+    if current_price <= 0 or current_yield_pct <= 0 or reference_yield_median_pct <= 0:
+        return None
+    return round(current_price * (current_yield_pct / reference_yield_median_pct), 2)
+
+
+_VALUATION_LEGS_SCHEMA: dict[str, type[pl.DataType]] = {
+    "stock_id": pl.Utf8, "pb_peer_median": pl.Float64, "yield_peer_median": pl.Float64,
+}
+
+
+def compute_valuation_legs(
+    ratios: pl.DataFrame,
+    membership: pl.DataFrame,
+    min_peers: int = 5,
+    broad_membership: pl.DataFrame | None = None,
+) -> pl.DataFrame:
+    """docs/31 §20.9「估值回歸參考價（綜合版）」的**額外**同儕線索——跟`build_valuation()`
+    平行、互不影響的計算，刻意不動`build_valuation()`本身（G5候選/`cp_valuation.md`
+    依賴其既有val_metric/val_median行為，不可因為加綜合版順手改到）。
+
+    `build_valuation()`只在PE不可用時才把PB當「主」鏡頭（val_metric=PB）；本函式
+    **不論PE是否可用，都額外算一次PB同儕中位數**，供綜合版當獨立於獲利面的帳面
+    價值線索；同理額外算殖利率同儕中位數。
+
+    Args:
+        ratios: 同`build_valuation()`——(stock_id, market, pe, pbr, dividend_yield)。
+        membership: 同`build_valuation()`。
+        min_peers: 同`build_valuation()`。
+        broad_membership: 同`build_valuation()`——手標次產業樣本不足時的粗分類兜底
+            （docs/31 §20.8），這裡同步套用，理由一致。
+
+    Returns:
+        (stock_id, pb_peer_median, yield_peer_median)。同儕不足（含粗分類兜底後仍
+        不足）→ null，不猜。
+    """
+    if ratios.is_empty():
+        return pl.DataFrame(schema=_VALUATION_LEGS_SCHEMA)
+    base = ratios.select("stock_id", "pbr", "dividend_yield").unique(
+        "stock_id", keep="first"
+    )
+    pb_rel = compute_subind_relative(
+        base.select("stock_id", "pbr"), membership, value_col="pbr", min_peers=min_peers
+    )
+    yield_rel = compute_subind_relative(
+        base.select("stock_id", "dividend_yield"), membership,
+        value_col="dividend_yield", min_peers=min_peers,
+    )
+    if broad_membership is not None and not broad_membership.is_empty():
+        pb_rel = _fill_from_broad(
+            pb_rel,
+            compute_subind_relative(
+                base.select("stock_id", "pbr"), broad_membership, "pbr", min_peers
+            ),
+        )
+        yield_rel = _fill_from_broad(
+            yield_rel,
+            compute_subind_relative(
+                base.select("stock_id", "dividend_yield"), broad_membership,
+                "dividend_yield", min_peers,
+            ),
+        )
+    out = base.select("stock_id").join(
+        pb_rel.select("stock_id", pl.col("subind_median").alias("pb_peer_median")),
+        on="stock_id", how="left",
+    ).join(
+        yield_rel.select("stock_id", pl.col("subind_median").alias("yield_peer_median")),
+        on="stock_id", how="left",
+    )
+    return out.select(list(_VALUATION_LEGS_SCHEMA.keys()))
+
+
+def compute_composite_valuation_gap(
+    legs: list[float | None],
+) -> tuple[float | None, int]:
+    """docs/31 §20.9：把多條估值缺口%線索（同儕PE/自身PE/同儕PB/自身PB/同儕殖利率/
+    自身殖利率，各自可能null）合成一個「估值回歸參考價（綜合版）」缺口%。
+
+    **取中位數、不取平均**——中位數對單一極端腿較不敏感（如某條線索因同儕樣本異常
+    算出離譜大的gap%，平均會被拉走、中位數不會）。回傳的`n_legs`必須跟著結果一起
+    印出（docs/11規格要求）：鏡頭數越少，這個綜合數字信心越低，1–2條不算穩健的
+    「綜合」，只是剛好只有一條線索有資料，不可包裝成更權威的樣子。
+
+    Args:
+        legs: 各條線索的gap%（`implied_price_gap_pct()`/依殖利率反向公式算出的gap%），
+            缺值傳None，函式自己過濾。
+
+    Returns:
+        (綜合gap%, 實際用了幾條非null線索)。全部為None → (None, 0)。
+    """
+    valid = [v for v in legs if v is not None]
+    if not valid:
+        return None, 0
+    s = sorted(valid)
+    n = len(s)
+    mid = n // 2
+    median = s[mid] if n % 2 == 1 else (s[mid - 1] + s[mid]) / 2
+    return round(median, 1), n
 
 
 def peg_like_ratio(pe: float | None, rev_yoy_pct: float | None) -> float | None:

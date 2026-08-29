@@ -940,8 +940,10 @@ def _build_enriched_rows(
     from tw_screener.analysis.grouping import classify_risk_kind, near_flow_state, rank_themes
     from tw_screener.analysis.inflection import flow_diff_5_20, margin_slim
     from tw_screener.analysis.valuation import (
+        compute_composite_valuation_gap,
         deep_value_growth,
         implied_price_from_ratio_median,
+        implied_price_from_yield_median,
         implied_price_gap_pct,
         market_cap_billion,
         peg_like_ratio,
@@ -1104,6 +1106,31 @@ def _build_enriched_rows(
             close, _num(off_pe, 4), pe_self_median
         )
         val_gap_pct_self = implied_price_gap_pct(val_implied_price_self, close)
+        # docs/31 §20.9：估值回歸參考價（綜合版）——額外4條線索（同儕PB/自身PB/同儕
+        # 殖利率/自身殖利率，跟build_valuation()的val_metric主鏡頭選擇平行、互不影響，
+        # 不論PE是否可用都算）＋上面PE兩條，共最多6條，取中位數合成。殖利率腿用反向
+        # 公式（implied_price_from_yield_median），跟PE/PB正向公式不同。缺值的線索
+        # 自然被compute_composite_valuation_gap()濾掉，不用手動判斷哪條可用。
+        pb_peer_median = _num(vrow.get("pb_peer_median"), 2) if vrow else None
+        val_gap_pct_pb_peer = implied_price_gap_pct(
+            implied_price_from_ratio_median(close, _num(off_pb, 4), pb_peer_median), close
+        )
+        pb_self_median = _num(vrow.get("pb_self_median"), 2) if vrow else None
+        val_gap_pct_pb_self = implied_price_gap_pct(
+            implied_price_from_ratio_median(close, _num(off_pb, 4), pb_self_median), close
+        )
+        yield_peer_median = _num(vrow.get("yield_peer_median"), 2) if vrow else None
+        val_gap_pct_yield_peer = implied_price_gap_pct(
+            implied_price_from_yield_median(close, dy, yield_peer_median), close
+        )
+        yield_self_median = _num(vrow.get("yield_self_median"), 2) if vrow else None
+        val_gap_pct_yield_self = implied_price_gap_pct(
+            implied_price_from_yield_median(close, dy, yield_self_median), close
+        )
+        val_gap_pct_composite, val_composite_n_legs = compute_composite_valuation_gap([
+            val_gap_pct_peer, val_gap_pct_self, val_gap_pct_pb_peer, val_gap_pct_pb_self,
+            val_gap_pct_yield_peer, val_gap_pct_yield_self,
+        ])
         fn = _num(r.get("foreign_net"), 0)
         tn = _num(r.get("trust_net"), 0)
         instn = _num(r.get("inst_net"), 0)
@@ -1312,6 +1339,17 @@ def _build_enriched_rows(
                 "val_gap_pct_peer": val_gap_pct_peer,
                 "val_implied_price_self": val_implied_price_self,
                 "val_gap_pct_self": val_gap_pct_self,
+                # docs/31 §20.9：估值回歸參考價（綜合版）——同儕PB/自身PB/同儕殖利率/
+                # 自身殖利率4條額外線索（gap_pct only，implied_price留在函式內部不
+                # 逐一輸出，避免CSV欄位爆量），加上上面PE兩條取中位數合成的綜合缺口%
+                # ＋用了幾條線索（信心指標，1–2條=低信心）。同一套紅線框架、同一套
+                # 「機械式回顧計算非預測」免責句。
+                "val_gap_pct_pb_peer": val_gap_pct_pb_peer,
+                "val_gap_pct_pb_self": val_gap_pct_pb_self,
+                "val_gap_pct_yield_peer": val_gap_pct_yield_peer,
+                "val_gap_pct_yield_self": val_gap_pct_yield_self,
+                "val_gap_pct_composite": val_gap_pct_composite,
+                "val_composite_n_legs": val_composite_n_legs,
                 # docs/31 §18：PEG-like＝官方PE / 月營收YoY%（成長替代EPS成長率，因本地
                 # 無法算EPS YoY）——數字小＝相對成長便宜，但非傳統EPS-based PEG、無利率
                 # 調整；PE非正或YoY非正時留null（比值方向會反轉，不可解讀，不硬算）。
@@ -1497,6 +1535,12 @@ _CANONICAL_REUSE_FIELDS = (
     "val_gap_pct_peer",
     "val_implied_price_self",
     "val_gap_pct_self",
+    "val_gap_pct_pb_peer",
+    "val_gap_pct_pb_self",
+    "val_gap_pct_yield_peer",
+    "val_gap_pct_yield_self",
+    "val_gap_pct_composite",
+    "val_composite_n_legs",
     "peg_like_ratio",
     "rev_yoy_pct",
     "gross_margin_pct",

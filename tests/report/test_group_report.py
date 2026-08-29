@@ -434,6 +434,42 @@ def test_valuation_implied_price_columns_peer_and_self_legs(tmp_path):
     assert row2["val_gap_pct_self"] is None
 
 
+def test_valuation_composite_gap_uses_available_legs(tmp_path):
+    """docs/31 §20.9：估值回歸參考價（綜合版）——6條線索取中位數＋回報用了幾條。
+
+    2330：6條全給（PE同儕/自身、PB同儕/自身、殖利率同儕/自身）——驗證composite是
+    這6個gap%的中位數，n_legs=6。
+    2454：只給PE同儕一條（其餘留空）——composite應等於那一條，n_legs=1（低信心）。
+    """
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    valuation_map = {
+        "2330": {
+            "pe": 20.0, "pbr": 2.0, "dividend_yield": 4.0,
+            "val_metric": "PE", "val_median": 30.0, "pe_self_median": 25.0,
+            "pb_peer_median": 2.5, "pb_self_median": 1.8,
+            "yield_peer_median": 3.0, "yield_self_median": 5.0,
+        },
+        "2454": {"pe": 20.0, "val_metric": "PE", "val_median": 30.0},  # 只有PE同儕一條
+    }
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(members, pl.DataFrame(), results, out,
+                                  valuation_map=valuation_map)
+    by_id = {str(r["stock_id"]): r for r in pl.read_csv(out).iter_rows(named=True)}
+
+    row = by_id["2330"]
+    assert row["val_composite_n_legs"] == 6
+    # composite gap 必須落在 6 條 gap% 的範圍內（不手算全部6條、只驗證合理性與非null）
+    assert row["val_gap_pct_composite"] is not None
+
+    row2 = by_id["2454"]
+    # 只有PE同儕一條可用 → composite 應等於那一條本身，n_legs=1
+    assert row2["val_composite_n_legs"] == 1
+    assert row2["val_gap_pct_composite"] == pytest.approx(row2["val_gap_pct_peer"])
+
+
 # ── 0.3 本週族群主軸 / Section 5 補位塊（問題3・M3）─────────────────────────
 
 

@@ -380,19 +380,25 @@ def run_group_analysis(settings: Path) -> None:
     from tw_screener.analysis.valuation import (
         build_valuation,
         compute_self_history_median,
+        compute_self_history_median_pb,
+        compute_self_history_median_yield,
         compute_self_history_pctile,
+        compute_valuation_legs,
     )
 
     val_df = client.load_latest_valuation_ratios()
     val_cfg = cfg.get("cp_value", {}).get("valuation", {})
+    val_membership = build_peer_membership(list_subindustries(), industry_df)
+    val_broad_membership = build_broad_industry_membership(industry_df)
+    val_min_peers = int(val_cfg.get("min_peers", 5))
     valuation = build_valuation(
         val_df,
-        build_peer_membership(list_subindustries(), industry_df),
-        min_peers=int(val_cfg.get("min_peers", 5)),
+        val_membership,
+        min_peers=val_min_peers,
         cheap_pctile=float(val_cfg.get("cheap_pctile", 30.0)),
         # 手標次產業樣本 <min_peers（如晶圓代工全市場僅4檔）退用TWSE粗產業別，
         # 讓這類股票不再永遠估值缺（2026-08-29，docs/31 §20.8）
-        broad_membership=build_broad_industry_membership(industry_df),
+        broad_membership=val_broad_membership,
     )
     # docs/31 §14：自身估值歷史百分位粗版代理（跟val_pctile的同儕橫斷面互補，不取代）——
     # 純揭露欄，任一步驟壞掉不擋主流程（同官方族群前5段的容錯慣例）。
@@ -435,6 +441,51 @@ def run_group_analysis(settings: Path) -> None:
         console.print(f"[yellow]  自身估值歷史中位數計算失敗，該段留空：{e}[/yellow]")
         valuation = valuation.with_columns(
             _pl.lit(None, dtype=_pl.Float64).alias("pe_self_median")
+        )
+    # docs/31 §20.9：估值回歸參考價（綜合版）額外4條線索——同儕PB/同儕殖利率（不論
+    # PE是否可用都額外算，跟build_valuation()的val_metric主鏡頭選擇平行、互不影響）
+    # ＋自身PB歷史/自身殖利率歷史中位數。純揭露段，任一步驟壞掉不擋主流程。
+    _composite_leg_cols = (
+        "pb_peer_median", "yield_peer_median", "pb_self_median", "pb_self_n",
+        "yield_self_median", "yield_self_n",
+    )
+    try:
+        legs = compute_valuation_legs(
+            val_df, val_membership, min_peers=val_min_peers,
+            broad_membership=val_broad_membership,
+        )
+        if not legs.is_empty():
+            valuation = valuation.join(legs, on="stock_id", how="left")
+        else:
+            valuation = valuation.with_columns(
+                _pl.lit(None, dtype=_pl.Float64).alias("pb_peer_median"),
+                _pl.lit(None, dtype=_pl.Float64).alias("yield_peer_median"),
+            )
+        pb_self = compute_self_history_median_pb(
+            val_history, min_snapshots=self_history_min_snapshots
+        )
+        if not pb_self.is_empty():
+            valuation = valuation.join(pb_self, on="stock_id", how="left")
+        else:
+            valuation = valuation.with_columns(
+                _pl.lit(None, dtype=_pl.Float64).alias("pb_self_median"),
+                _pl.lit(None, dtype=_pl.Int64).alias("pb_self_n"),
+            )
+        yield_self = compute_self_history_median_yield(
+            val_history, min_snapshots=self_history_min_snapshots
+        )
+        if not yield_self.is_empty():
+            valuation = valuation.join(yield_self, on="stock_id", how="left")
+        else:
+            valuation = valuation.with_columns(
+                _pl.lit(None, dtype=_pl.Float64).alias("yield_self_median"),
+                _pl.lit(None, dtype=_pl.Int64).alias("yield_self_n"),
+            )
+    except Exception as e:  # noqa: BLE001 — 純揭露段，任何一步壞掉不擋 group 報告主流程
+        console.print(f"[yellow]  估值回歸參考價（綜合版）額外線索計算失敗，該段留空：{e}[/yellow]")
+        valuation = valuation.with_columns(
+            *[_pl.lit(None, dtype=_pl.Int64 if c.endswith("_n") else _pl.Float64).alias(c)
+              for c in _composite_leg_cols if c not in valuation.columns]
         )
     valuation_map: dict[str, dict] = (
         {str(r["stock_id"]): r for r in valuation.iter_rows(named=True)}
