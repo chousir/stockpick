@@ -745,6 +745,145 @@ def walk_forward_momentum(
     )
 
 
+# ---------------------------------------------------------------------------
+# docs/31 §22.19 維度3：大戶集中度（個股層級，big_holder_pct 週對週 Δpp——非水位
+# 本身；big_holder_pct 只有 TDCC 公布日有值，故差分在「TDCC 公布日序列」上算，
+# 不在完整日頻 panel 上算，見§22.19說明）
+# ---------------------------------------------------------------------------
+
+BIGHOLDER_CELLS: tuple[str, ...] = ("hit", "miss")
+_BIGHOLDER_CELLS_SCHEMA: dict[str, type[pl.DataType]] = {
+    "date": pl.Date, "stock_id": pl.Utf8, "cell": pl.Utf8,
+}
+
+
+def build_bigholder_cells(
+    panel: pl.DataFrame,
+    chg_window_weeks: int = 1,
+    top_quantile: float = 0.2,
+    min_prev_pct: float = 1.0,
+    metric_col: str = "big_holder_pct",
+) -> pl.DataFrame:
+    """§22.19：個股 `metric_col`（`big_holder_pct`＝≥400 張大戶占集保庫存 %，或
+    `big_holder_1000_pct`＝千張大戶）的**週對週變化，單位為百分點 Δpp**（非相對
+    %——集中度本身已是 %，Δpp 是自然單位），當 TDCC 公布日橫斷面前 `top_quantile`
+    （集中度上升最快）→ `hit`，其餘 → `miss`。
+
+    **計算順序刻意先 `drop_nulls([metric_col])` 才 `shift`**——`big_holder_pct` 只有
+    TDCC 公布日有值（`panel.py` 用 exact `data_date`→`date` join、不 forward-fill），
+    先篩非 null 得到「TDCC 公布日序列」，`shift(chg_window_weeks)` 才是「上一個 TDCC
+    週」；若在完整日頻 panel 上 `shift` 會抓到相鄰日曆日的 null。與維度4（`build_
+    margin_cells` 在完整日頻上先差分）的順序相反，因兩者原始資料頻率不同。
+
+    `min_prev_pct`（預設 1.0%）：`chg_window_weeks` 週前的 `metric_col` 水位低於此值
+    的列排除在排名外——**排除集保庫存占比極小、大戶欄位本身意義薄弱的個股**（非
+    「防雜訊放大」：Δpp 不會在小分母上爆掉，與維度4 的 `min_prev_lots` 動機不同）。
+    預先寫死，非事後調整，見§22.19 pre-registration。
+
+    觸發／差分邏輯**刻意獨立重寫一份**，不重用 `data/tdcc.py` 的 `big_holder_wow`
+    ——那是「左 join 自最新週」的 production 最新快照 helper、非歷史序列（同全案
+    duplicate-small-helper 慣例，避免耦合到 production 程式碼路徑）。
+
+    Args:
+        panel: 需含 date/stock_id/`metric_col`/alpha{h}（同 panel.parquet 原始結構，
+            不套次產業 membership——本維度是個股層級訊號）。
+    """
+    need = {"date", "stock_id", metric_col}
+    if panel.is_empty() or not need.issubset(panel.columns):
+        return pl.DataFrame(schema=_BIGHOLDER_CELLS_SCHEMA)
+
+    snap = (
+        panel.drop_nulls([metric_col])
+        .sort(["stock_id", "date"])
+        .with_columns(
+            pl.col(metric_col).shift(chg_window_weeks).over("stock_id").alias("_prev")
+        )
+        .with_columns(
+            pl.when(pl.col("_prev") >= min_prev_pct)
+            .then(pl.col(metric_col) - pl.col("_prev"))
+            .otherwise(None)
+            .alias("_chg")
+        )
+        .drop_nulls(["_chg"])
+    )
+    if snap.is_empty():
+        return pl.DataFrame(schema=_BIGHOLDER_CELLS_SCHEMA)
+
+    ranked = snap.with_columns(
+        pl.col("_chg").rank(method="min", descending=True).over("date").alias("_rank"),
+        pl.col("_chg").count().over("date").alias("_n"),
+    ).with_columns(
+        (pl.col("_rank") <= (pl.col("_n") * top_quantile).ceil()).alias("_hit")
+    )
+    return ranked.with_columns(
+        pl.when(pl.col("_hit")).then(pl.lit("hit")).otherwise(pl.lit("miss")).alias("cell")
+    ).drop(["_prev", "_chg", "_rank", "_n", "_hit"])
+
+
+def bigholder_grid(
+    panel: pl.DataFrame,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    chg_window_weeks: int = 1,
+    top_quantile: float = 0.2,
+    min_prev_pct: float = 1.0,
+    metric_col: str = "big_holder_pct",
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§22.19 全樣本讀值：`hit`/`miss` 兩格 forward alpha 對照。"""
+    cells = build_bigholder_cells(
+        panel, chg_window_weeks=chg_window_weeks, top_quantile=top_quantile,
+        min_prev_pct=min_prev_pct, metric_col=metric_col,
+    )
+    return evaluate_signal_cells(cells, BIGHOLDER_CELLS, horizons, n_boot, seed, snapshot_gap_td)
+
+
+def bigholder_by_regime(
+    panel: pl.DataFrame,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    chg_window_weeks: int = 1,
+    top_quantile: float = 0.2,
+    min_prev_pct: float = 1.0,
+    metric_col: str = "big_holder_pct",
+    n_boot: int = 1000,
+    seed: int = 42,
+    regime_col: str = "regime",
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§22.19 regime 切片：`hit`/`miss` 兩格 × regime forward alpha。"""
+    cells = build_bigholder_cells(
+        panel, chg_window_weeks=chg_window_weeks, top_quantile=top_quantile,
+        min_prev_pct=min_prev_pct, metric_col=metric_col,
+    )
+    return evaluate_signal_cells_by_regime(
+        cells, BIGHOLDER_CELLS, horizons, n_boot, seed, regime_col, snapshot_gap_td
+    )
+
+
+def walk_forward_bigholder(
+    panel: pl.DataFrame,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    chg_window_weeks: int = 1,
+    top_quantile: float = 0.2,
+    min_prev_pct: float = 1.0,
+    metric_col: str = "big_holder_pct",
+    n_splits: int = 4,
+    min_train_frac: float = 0.4,
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§22.19 walk-forward：`build_bigholder_cells` ＋通用 `walk_forward_cells`。"""
+    cells = build_bigholder_cells(
+        panel, chg_window_weeks=chg_window_weeks, top_quantile=top_quantile,
+        min_prev_pct=min_prev_pct, metric_col=metric_col,
+    )
+    return walk_forward_cells(
+        cells, BIGHOLDER_CELLS, horizons, n_splits, min_train_frac, n_boot, seed, snapshot_gap_td
+    )
+
+
 _PAIRWISE_COMBO_SCHEMA: dict[str, type[pl.DataType]] = {
     "date": pl.Date, "stock_id": pl.Utf8, "cell": pl.Utf8, "regime": pl.Utf8,
 }

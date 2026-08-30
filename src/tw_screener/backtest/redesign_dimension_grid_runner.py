@@ -1,7 +1,7 @@
-"""docs/31 §22.5/§22.7/§22.10/§22.12/§22.15 編排——panel-only候選排列組合研究
-維度1（族群輪動）／維度1×維度2組合（族群輪動×法人流向）／維度4（融資水位，
-個股層級）／維度5（價格動能，個股層級）／維度間組合（§22.15，population限定
-進攻regime）。
+"""docs/31 §22.5/§22.7/§22.10/§22.12/§22.15/§22.19 編排——panel-only候選排列組合
+研究 維度1（族群輪動）／維度1×維度2組合（族群輪動×法人流向）／維度4（融資水位，
+個股層級）／維度5（價格動能，個股層級）／維度3（大戶集中度，個股層級，§22.19，
+TDCC快照低樣本初測）／維度間組合（§22.15，population限定進攻regime）。
 
 自 cli.py 薄殼呼叫。維度1/維度1×2的stock_rows組建方式跟`official_sector_
 grid_runner.py`／`flow_trigger_grid_runner.py`（group_source="hand"）完全
@@ -27,7 +27,7 @@ from rich.console import Console
 console = Console()
 
 _DIMENSIONS = (
-    "rotation", "rotation_flow_combo", "margin", "momentum",
+    "rotation", "rotation_flow_combo", "margin", "momentum", "bigholder",
     "combo_rotation_margin", "combo_rotation_momentum", "combo_margin_momentum",
     "combo_flow_margin", "combo_flow_momentum",
 )
@@ -65,13 +65,13 @@ def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension:
             價格動能，§22.12）｜"combo_rotation_margin"/"combo_rotation_momentum"/
             "combo_margin_momentum"（§22.15維度間組合，population限定進攻regime）｜
             "combo_flow_margin"/"combo_flow_momentum"（§22.17法人流向剩餘組合，
-            同樣population限定進攻regime）。維度3（大戶集中度）因TDCC快照限制
-            暫緩見§22.9。
+            同樣population限定進攻regime）｜"bigholder"（維度3大戶集中度，個股層級，
+            big_holder_pct週對週Δpp，§22.19——TDCC快照僅~10個公布日，本輪為低樣本
+            初測、不消耗假說預算、正式CI裁決遞延，見§22.19門檻）。
     """
     if dimension not in _DIMENSIONS:
         console.print(
-            f"[red]--dimension 目前只支援 {_DIMENSIONS}，收到 {dimension!r}——"
-            "維度3暫緩(§22.9)[/red]"
+            f"[red]--dimension 目前只支援 {_DIMENSIONS}，收到 {dimension!r}[/red]"
         )
         raise typer.Exit(1)
 
@@ -87,6 +87,9 @@ def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension:
     mc = rc.get("margin", {})
     chg_window = int(mc.get("chg_window_td", 5))
     min_prev_lots = float(mc.get("min_prev_lots", 50.0))
+    bc = rc.get("bigholder", {})
+    bh_chg_window_weeks = int(bc.get("chg_window_weeks", 1))
+    bh_min_prev_pct = float(bc.get("min_prev_pct", 1.0))
     panel_path = Path(
         cfg.get("backtest", {}).get("factor_lab", {}).get(
             "panel_path", "research/panel/panel.parquet"
@@ -145,6 +148,18 @@ def run_redesign_dimension_grid(settings: Path, out_dir: Path | None, dimension:
             panel, weekly, top_quantile=top_quantile, horizons=horizons,
             snapshot_gap_td=snapshot_gap_td, n_boot=n_boot, n_splits=n_splits,
             min_train_frac=min_train_frac, has_regime=has_regime, out=out,
+        )
+        return
+
+    if dimension == "bigholder":
+        # 維度3 不需要 weekly_snapshot_dates——TDCC 公布日（big_holder_pct 非 null 的
+        # 日期）本身就是快照日；也不需要 membership／官方族群指數，故在共用路徑
+        # （load_industry_mapping/load_sector_index_history 會 raise）之前 early-return。
+        _run_bigholder(
+            panel, chg_window_weeks=bh_chg_window_weeks, min_prev_pct=bh_min_prev_pct,
+            top_quantile=top_quantile, horizons=horizons, snapshot_gap_td=snapshot_gap_td,
+            n_boot=n_boot, n_splits=n_splits, min_train_frac=min_train_frac,
+            has_regime=has_regime, out=out,
         )
         return
 
@@ -904,6 +919,106 @@ def _run_momentum(
     lines += dec_lines
 
     md = out / f"redesign_dim5_momentum_{base_tag}.md"
+    md.write_text("\n".join(lines), encoding="utf-8")
+    console.print(f"[green]完成，報告見 {md}[/green]")
+
+
+def _run_bigholder(
+    panel: pl.DataFrame,
+    chg_window_weeks: int,
+    min_prev_pct: float,
+    top_quantile: float,
+    horizons: tuple[int, ...],
+    snapshot_gap_td: int,
+    n_boot: int,
+    n_splits: int,
+    min_train_frac: float,
+    has_regime: bool,
+    out: Path,
+) -> None:
+    from tw_screener.backtest import redesign_dimension_grid as rdg
+
+    grid = rdg.bigholder_grid(
+        panel, horizons=horizons, chg_window_weeks=chg_window_weeks,
+        top_quantile=top_quantile, min_prev_pct=min_prev_pct, n_boot=n_boot,
+        snapshot_gap_td=snapshot_gap_td,
+    )
+    if grid.is_empty():
+        console.print(
+            "[red]格為空——panel 無 big_holder_pct 非 null 資料（先跑 make fetch-tdcc "
+            "→ make build-panel），或 Δpp 差分後無可比週次[/red]"
+        )
+        raise typer.Exit(1)
+    wf = rdg.walk_forward_bigholder(
+        panel, horizons=horizons, chg_window_weeks=chg_window_weeks,
+        top_quantile=top_quantile, min_prev_pct=min_prev_pct, n_splits=n_splits,
+        min_train_frac=min_train_frac, n_boot=n_boot, snapshot_gap_td=snapshot_gap_td,
+    )
+    cells = rdg.build_bigholder_cells(
+        panel, chg_window_weeks=chg_window_weeks, top_quantile=top_quantile,
+        min_prev_pct=min_prev_pct,
+    )
+    # 千張大戶（big_holder_1000_pct）Δpp——描述性佐證，不進四步裁決，不另立正式
+    # 假說（同§22.12對vol_ratio的處置：一維度一假說，避免稀釋預算誠實度）。
+    grid_1000 = rdg.bigholder_grid(
+        panel, horizons=horizons, chg_window_weeks=chg_window_weeks,
+        top_quantile=top_quantile, min_prev_pct=min_prev_pct,
+        metric_col="big_holder_1000_pct", n_boot=n_boot, snapshot_gap_td=snapshot_gap_td,
+    )
+
+    base_tag = date.today().strftime("%Y%m%d")
+    grid.write_csv(out / f"redesign_dim3_bigholder_{base_tag}.csv")
+    if not wf.is_empty():
+        wf.write_csv(out / f"redesign_dim3_bigholder_wf_{base_tag}.csv")
+
+    n_weeks = cells["date"].n_unique() if not cells.is_empty() else 0
+    n_stocks = cells["stock_id"].n_unique() if not cells.is_empty() else 0
+    tdcc_dates = sorted(panel.drop_nulls(["big_holder_pct"])["date"].unique().to_list())
+    hit_nd = {
+        int(r["horizon"]): r["n_dates"]
+        for r in grid.filter(pl.col("cell") == "hit").iter_rows(named=True)
+    }
+    nd_line = "、".join(f"r+{h} n_dates={hit_nd.get(h, 0)}" for h in horizons)
+    lines = [
+        "# docs/31 §22.19：維度3（大戶集中度，個股層級）——panel-only候選排列組合"
+        "研究第5個候選維度",
+        "",
+        "> **低樣本初測，不消耗14個假說預算**（維持§22.18的8-9/14）。TDCC 集保快取"
+        f"僅 {len(tdcc_dates)} 個公布日（{tdcc_dates[0] if tdcc_dates else '—'} ~ "
+        f"{tdcc_dates[-1] if tdcc_dates else '—'}），WoW Δpp 差分再減 1、forward-return"
+        "截斷後可判日數遠低於 `moving_block_bootstrap_ci` 的 T≥10 下限——**正式 CI"
+        "四步裁決遞延至 §22.19 pre-registration 寫死的重跑門檻達標（r+20 hit 格"
+        "n_dates≥10 且 regime 切片非全 thin，實估需累積至 ~2027）**。本報告僅呈現"
+        "描述性讀值＋工具就位證明；門檻已於 docs/31 §22.19 執行前預先登記。",
+        "",
+        f"- 產出日：{date.today()}；chg_window_weeks={chg_window_weeks}（TDCC 公布週）、"
+        f"min_prev_pct={min_prev_pct:.1f}%（negligible-custody 排除門檻）、"
+        f"top_quantile={top_quantile:.0%}；{n_weeks} 個可判 TDCC 週、{n_stocks} 檔個股。",
+        f"- 各 horizon 實際存活可判日數：{nd_line}。",
+        "- 訊號＝`big_holder_pct`（≥400 張大戶占集保庫存 %）週對週 Δpp，橫斷面前 20%"
+        "（集中度上升最快）＝`hit`；不預設方向，由 CI95 符號決定解讀（本輪 CI 不足）。",
+        "- `mean`/`median`/`win_rate`＝原始個股alpha{h}，供量級參考；`ci_lo`/`ci_hi`是對"
+        "delta（cell當日均值−當日全樣本均值）做moving-block bootstrap CI。",
+        "",
+    ]
+    lines += _full_sample_table(
+        grid,
+        "## 全樣本讀值（hit=當週 big_holder_pct 週對週 Δpp 前20%〈集中度上升最快〉、miss=其餘）",
+    )
+    if not grid_1000.is_empty():
+        lines += _full_sample_table(
+            grid_1000,
+            "## 描述性佐證：改用 big_holder_1000_pct（千張大戶）Δpp 排名（不進裁決、"
+            "不算獨立假說，見§22.19）",
+        )
+    lines += _wf_table(wf, "hit", "## walk-forward（第4段＝§22.19保留驗證窗，不用於搜尋）")
+    dec_lines, _ = _decision_lines(
+        cells, "hit", wf, horizons, n_splits, min_train_frac, n_boot, snapshot_gap_td,
+        has_regime, "個股層級訊號，無次產業membership（big_holder_pct 僅 TDCC 公布日有值）",
+    )
+    lines += dec_lines
+
+    md = out / f"redesign_dim3_bigholder_{base_tag}.md"
     md.write_text("\n".join(lines), encoding="utf-8")
     console.print(f"[green]完成，報告見 {md}[/green]")
 

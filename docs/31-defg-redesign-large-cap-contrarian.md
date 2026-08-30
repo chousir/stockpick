@@ -1896,9 +1896,11 @@ G1/G5是否也該加市值下限，本輪未動，候選數本身尚屬合理（
   2026-06前完全沒有PE/月營收YoY/毛利率欄位）：§7.1政策旁路（讓已驗證左側filter
   打開F2位階gate的機制）。同樣不建議排進近期工作，卡點是資料深度不是工程。
 - **已結案的獨立研究線，跟候選生成無關**：Part 3（§22 panel-only維度研究，5維度
-  中4已測、3組合已測，**完全沒有接進任何生產CSV**，docs/11已有獨立警示框）；
-  Part 4（§23宏觀grid search，160組0候選，null結果，已收官）。兩者皆為已結案的
-  研究產出，不是待辦事項。
+  皆已建工具——維度1/2組合/4/5 完成標準四步測試、維度3 於 §22.19/§22.20 完成
+  pre-registration＋低樣本初測〈裁決遞延至 ~2027 累積達標〉；維度間組合 5 組已測
+  〈§22.16 三候選、§22.18 兩 null〉；**完全沒有接進任何生產CSV**，docs/11已有
+  獨立警示框）；Part 4（§23宏觀grid search，160組0候選，null結果，已收官）。
+  兩者皆為已結案／遞延的研究產出，不是待辦事項。
 
 **一句話總結**：docs/31的「候選生成」層（G1/G2/G4/G5/L6）已經落地且持續在跑，但
 「統計驗證」層（§7.4門檻）一個都還沒過關；「左側交易股」設計（L1-L6）只做出
@@ -2565,6 +2567,15 @@ G4/G5/L6卡在snapshot-only端點的處境完全相同（同一個「資料深�
 測試，避免在n=9上提前套統計工具（同§22.9「不勉強在n=1上硬套」的
 同一條紀律，數字變了但原則不變）。
 
+> **2026-08-30 更新（見 §22.19／§22.20）**：維度3 已寫 pre-registration
+> 並執行低樣本初測。上面「補進第 10 個快照＝達標」的判準**已被 §22.19
+> 訂正**——數的是快照數不是可用訊號日數；WoW Δpp 差分減 1 ＋ forward-return
+> 截斷後實測 r+10 只有 6 個 n_dates、r+20 只有 4、r+40 為 0，仍遠低於
+> bootstrap 的 T≥10 下限。工具（`build_bigholder_cells` 等）已就位，正式
+> CI 裁決依 §22.19 寫死的門檻遞延（r+20 hit `n_dates≥10` 且 regime 切片
+> 非全 thin，實估 ~2027）。維度3 不再是「未開工 backlog」，是「初測完成、
+> 裁決遞延」。
+
 ### 22.10 維度4（融資水位）pre-registration（2026-08-25，執行前寫死）
 
 **累積測試數：本次是14個假說預算中的第3個（3/14）**（維度3因§22.9緣故
@@ -3072,10 +3083,106 @@ r+20 CI[-0.24,+2.53]），比融資組合更弱，連步驟1都過不了；r+40�
 測過不重算——若含該組，5個維度間的可測組合已全數涵蓋）。
 
 **下一步（待使用者確認）**：維度3（大戶集中度）累積夠深後補測其獨立
-假說＋4個相關組合，湊滿14額度，目前仍是backlog（§22.9已述TDCC快照
-限制，估計2026-09中才夠格重測）。原始報告：
+假說＋4個相關組合，湊滿14額度（**2026-08-30 更新**：維度3 獨立假說的
+pre-registration＋低樣本初測已於 §22.19／§22.20 完成，工具就位、正式
+裁決遞延；4 個相關組合仍為 backlog）。原始報告：
 `research/redesign_dimension_grid/redesign_combo_flow_margin_20260826.md`／
 `redesign_combo_flow_momentum_20260826.md`（gitignored）。
+
+### 22.19 維度3（大戶集中度）pre-registration（2026-08-30，執行前寫死）
+
+**定位——訂正 §22.9 的達標判準**：§22.9／§22.16 追記說「補進第 10 個 TDCC
+快照＝`n_dates≥10` 達標可重啟」，這是**數快照數、不是數可用訊號日數**。實際上：
+WoW Δpp 差分吃掉最早 1 個快照（→ 9 個可判週）；再疊 forward-return 截斷
+（`alpha40` 需 entry＋41 個交易日，TDCC 起算才 2 個月）——實測 rebuild 後
+（`panel_build_20260830`，10 個 TDCC 公布日 2026-06-26 ~ 08-28）各 horizon 存活
+可判日數：**r+10 = 6、r+20 = 4、r+40 = 0**，全部低於 `moving_block_bootstrap_ci`
+的 `T<10 → (None, None)` 下限。
+
+**因此本節定位為「低樣本初測／工具就位」，不消耗 14 個假說預算**（維持 §22.18
+的 8-9/14）——precedent 是本專案自己的紀律：§22.9 拒絕在 n=1 上硬套統計工具、
+`l6_g4_watch.py` 上線時「只做記錄不做裁決」。正式 CI 四步裁決遞延到下方寫死的
+數值門檻達標。
+
+**訊號**：個股 `big_holder_pct`（≥400 張大戶占集保庫存 %）的**週對週變化，單位
+為百分點 Δpp**（不是相對 %——集中度本身已是 %，Δpp 是自然單位；相對 % 會過度
+加權低集中度個股）。在 TDCC 公布日的橫斷面上依 Δpp 降冪排名，前 `top_quantile`
+（20%，§22.3.2 統一規則）→ `hit`，其餘 → `miss`。**不預設方向**（集中度上升＝
+內部人／大戶加碼確認，或出貨派發風險，由 CI95 符號決定，同維度4/5 的中立態度）。
+
+**計算順序**：先 `panel.drop_nulls(["big_holder_pct"])`（只留 TDCC 公布日的列，
+因 `panel.py` 用 exact `data_date`→`date` join、不 forward-fill），per `stock_id`
+依 `date` 排序，`shift(1)` 取上一個 TDCC 週的值算 Δpp——**與維度4（在完整日頻
+panel 上先差分）順序相反**，因 `big_holder_pct` 本身只有週頻 TDCC 公布日有值，
+在日頻上 `shift` 會抓到相鄰日曆日的 null。
+
+**negligible-custody 排除**：`_prev`（上一個 TDCC 週的 `big_holder_pct` 水位）
+`< min_prev_pct`（預設 1.0%）的列排除在排名外——理由是**排除集保庫存占比極小、
+大戶欄位本身意義薄弱的個股**（不是「防雜訊放大」：Δpp 不會在小分母上爆掉，這點
+跟維度4 的 `min_prev_lots` 動機不同）。預先寫死，非事後調整。
+
+**`big_holder_1000_pct`（千張大戶）Δpp**：作為描述性佐證印出 hit/miss 兩格全樣本
+讀值，**不進四步裁決、不另立正式假說**（同 §22.12 對 `vol_ratio` 的處置——一維度
+一假說，避免「一維度兩訊號＝變相兩測試」稀釋預算誠實度）。
+
+**Population／覆蓋率聲明**（§22.3.2 要求，rebuild 後實測）：`big_holder_pct` 僅
+TDCC 公布日有值、**上市＋上櫃皆含**（TDCC 集保 OpenData 無市場別限制，實測非 null
+個股 1,977 檔、涵蓋 OTC roster）；`20260709`（週四公布）已成功落地 panel（該日為
+交易日、未被 exact-join 靜默丟）；population＝該 TDCC 週 Δpp 可算（連續兩個 TDCC
+週皆有值且 `_prev ≥ min_prev_pct`）的全部個股；缺值＝未命中，不丟列。
+
+**訊號側欄位自我檢查**：只用 `big_holder_pct`（TDCC 公布日資料本身即過去持股快照，
+無前視）；`big_holder_1000_pct` 同為 TDCC 落後欄位；`alpha{h}` 只當結果側。✅
+
+**統計方法／裁決規則**：與 §22.5／§22.10／§22.12 **完全相同**的四步（CI95→regime→
+前後半段→walk-forward 保留驗證窗），沿用 `evaluate_signal_cells` /
+`evaluate_signal_cells_by_regime` / `walk_forward_cells`，不另造統計邏輯。
+horizons／n_boot／seed／snapshot_gap_td／n_splits／min_train_frac 沿用 §22.5
+同一組 production 預設。
+
+**正式 CI 裁決的重跑門檻（數值寫死）**：`r+20` 的 `hit` 格 `n_dates ≥ 10`（bootstrap
+最低下限）**且** regime 切片非全部 `thin`（`REGIME_MIN_N = 30`）。達標前本節一律
+「初測、無正式裁決」；達標後用同一支指令 `backtest redesign-dimension-grid bigholder`
+重跑、把讀值升級進 §22.20 並補正式四步裁決。實估需 TDCC 每週 `make week` 持續累積
+到約 2027 年（`fundamentals` 那條最慢，`big_holder_pct` 是週頻、比 `fundamentals`
+快，但 forward-return 截斷仍要時間）。
+
+**本節不做**：不測 `big_holder_1000_pct` 當獨立假說；不做維度3 的維度間組合（同
+維度4/5 的延後邏輯，等本體有足夠深度再議）。
+
+### 22.20 維度3結果（2026-08-30 已執行——低樣本初測，無正式裁決）
+
+新增 `build_bigholder_cells()` / `bigholder_grid()` / `bigholder_by_regime()` /
+`walk_forward_bigholder()`（`redesign_dimension_grid.py`，個股層級，鏡射
+`build_margin_cells` 結構、去掉 `weekly_dates` 參數——TDCC 公布日**就是**快照日）
+＋ runner `bigholder` 分支（在 `load_industry_mapping` / `load_sector_index_history`
+的 `raise` 之前 early-return，維度3 不需要 membership／官方族群指數）＋ CLI
+`backtest redesign-dimension-grid bigholder` ＋ `settings.yaml`
+`redesign_dimension_grid.bigholder` 區塊。7 個新測試（含「差分在 TDCC 公布日序列
+上算、非日曆日」「negligible-custody 排除」「n_dates<10 時 CI 誠實回 None」），
+連同既有共 52 個、全量 `make test` 全綠。
+
+**實跑 2026-08-30 全樣本讀值**（9 個可判 TDCC 週、1,977 檔個股、top_quantile=20%、
+min_prev_pct=1.0%）：
+
+| horizon | n_dates | hit delta_mean | miss delta_mean | CI95 | 裁決 |
+|---|---|---|---|---|---|
+| r+10 | 6 | −0.48% | +0.15% | —（T<10 不計算） | 資料不足，裁決遞延 |
+| r+20 | 4 | −0.06% | +0.02% | —（T<10 不計算） | 資料不足，裁決遞延 |
+| r+40 | 0 | — | — | — | 無資料 |
+
+`hit`（集中度上升最快）格三個可讀 horizon 的原始 alpha `mean`／`median`／`win_rate`
+（r+10 −0.29%／−0.52%／47%）皆低於 `miss` 格（+0.74%／+0.14%／51%），**方向上
+偏向「大戶集中度快速上升 ≠ 後市較強」**——但 **n_dates=4~6、無 CI、無 regime 切片、
+無 walk-forward，這只是描述性方向，不是發現，不得引用為任何結論**。`big_holder_1000_pct`
+（千張大戶）描述性佐證方向不一致（r+20 hit +0.41% 略高於 miss），更說明樣本不足以
+分辨訊號與雜訊。walk-forward／regime 裁決段因可用週數切不出 split 全部誠實跳過。
+
+**結論**：工具已就位、pre-registration 已鎖死、第一眼讀值已印出；**正式裁決依 §22.19
+門檻遞延**。原始報告 `research/redesign_dimension_grid/redesign_dim3_bigholder_20260830.md`
+（gitignored）。至此 Part 3 的 **5 個候選維度全部已建工具**（維度1/2組合/4/5 已完成
+標準四步測試，維度3 為低樣本初測、裁決遞延）；維度間組合 5 組已測（§22.16 三候選、
+§22.18 兩 null）；維度3 相關組合仍為 backlog（等維度3 本體達標）。
 
 ## 23. 減量研究計畫 Part 4（backlog，本輪只寫規劃不執行）：宏觀風險參數
 grid search（n=3事件，使用者已拍板「做，但標示為候選假說」）

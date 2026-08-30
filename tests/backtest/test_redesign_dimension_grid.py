@@ -14,11 +14,15 @@ from tw_screener.backtest.official_sector_grid import (
     _aggregate_rank_velocity_cells,
 )
 from tw_screener.backtest.redesign_dimension_grid import (
+    BIGHOLDER_CELLS,
     MARGIN_CELLS,
     MOMENTUM_CELLS,
     PAIRWISE_COMBO_CELLS,
     ROTATION_CELLS,
     ROTATION_FLOW_CELLS,
+    bigholder_by_regime,
+    bigholder_grid,
+    build_bigholder_cells,
     build_flow_cells,
     build_margin_cells,
     build_momentum_cells,
@@ -35,6 +39,7 @@ from tw_screener.backtest.redesign_dimension_grid import (
     rotation_flow_by_regime,
     rotation_flow_grid,
     rotation_grid,
+    walk_forward_bigholder,
     walk_forward_margin,
     walk_forward_momentum,
     walk_forward_rotation,
@@ -575,3 +580,111 @@ def test_pairwise_combo_cells_feed_evaluate_signal_cells() -> None:
     both = grid.filter(pl.col("cell") == "both_hit").row(0, named=True)
     assert both["n"] == 1
     assert both["mean"] == pytest.approx(10.0)
+
+
+# ─── §22.19 維度3：大戶集中度（big_holder_pct 週對週 Δpp，個股層級）───
+
+
+def _bigholder_panel() -> pl.DataFrame:
+    """4檔個股×4個 TDCC 公布日（間距不規則：day 0/8/15/23，含明顯非週頻節奏）＋
+    中間夾 big_holder_pct=None 的日頻填充列。
+      1101：集中度逐週遞增 30→31→32→33（Δpp>0，應為 hit）
+      1102：持平 40（Δpp=0，miss）
+      1103：逐週遞減 25→24→23→22（Δpp<0，miss）
+      1104：集保庫存占比極低 0.5→0.6→0.7→0.8（_prev<min_prev_pct=1.0，應被排除）
+    """
+    tdcc_days = [0, 8, 15, 23]
+    series = {
+        "1101": [30.0, 31.0, 32.0, 33.0],
+        "1102": [40.0, 40.0, 40.0, 40.0],
+        "1103": [25.0, 24.0, 23.0, 22.0],
+        "1104": [0.5, 0.6, 0.7, 0.8],
+    }
+    rows: list[dict] = []
+    for offset in range(24):
+        d = date(2026, 6, 1) + timedelta(days=offset)
+        is_tdcc = offset in tdcc_days
+        wk = tdcc_days.index(offset) if is_tdcc else None
+        for sid, vals in series.items():
+            rows.append(
+                {
+                    "date": d,
+                    "stock_id": sid,
+                    "big_holder_pct": vals[wk] if wk is not None else None,
+                    "big_holder_1000_pct": (vals[wk] / 2.0) if wk is not None else None,
+                    "alpha10": {"1101": 1.5, "1102": -0.3, "1103": -0.8, "1104": 0.2}[sid],
+                    "alpha20": {"1101": 3.0, "1102": -0.5, "1103": -1.0, "1104": 0.4}[sid],
+                }
+            )
+    return pl.DataFrame(rows)
+
+
+def test_build_bigholder_cells_wow_diff_on_tdcc_series_not_calendar_days() -> None:
+    panel = _bigholder_panel()
+    cells = build_bigholder_cells(panel, chg_window_weeks=1, top_quantile=0.3, min_prev_pct=1.0)
+    # 只在 TDCC 公布日出現，且首個公布日（無前值）不在內：day 8/15/23 → 3 個日期
+    assert sorted(cells["date"].unique().to_list()) == [
+        date(2026, 6, 9), date(2026, 6, 16), date(2026, 6, 24)
+    ]
+    # 若實作在完整日頻上先 shift（未先 drop_nulls），_prev 會抓到中間的 null 日頻列
+    # → 全部被排除 → cells 應為空；非空即證明差分是在 TDCC 公布日序列上算。
+    assert not cells.is_empty()
+    # 1104 集保占比 <1% 被 min_prev_pct 排除
+    assert "1104" not in set(cells["stock_id"].unique().to_list())
+    per_stock = dict(
+        zip(cells["stock_id"].to_list(), cells["cell"].to_list(), strict=True)
+    )
+    assert per_stock["1101"] == "hit"  # Δpp = +1 每週，橫斷面最大
+    assert per_stock["1102"] == "miss"
+    assert per_stock["1103"] == "miss"
+
+
+def test_build_bigholder_cells_empty_when_missing_columns() -> None:
+    assert build_bigholder_cells(pl.DataFrame({"date": [date(2026, 1, 1)]})).is_empty()
+    assert build_bigholder_cells(pl.DataFrame(schema=_bigholder_panel().schema)).is_empty()
+
+
+def test_build_bigholder_cells_quantile_count_matches_ceil() -> None:
+    panel = _bigholder_panel()
+    cells = build_bigholder_cells(panel, top_quantile=0.5, min_prev_pct=1.0)
+    for d, sub in cells.group_by("date"):
+        n = sub.height  # 3 檔可排名（1104 已排除）
+        n_hit = sub.filter(pl.col("cell") == "hit").height
+        assert n_hit == -(-n // 2)  # ceil(n * 0.5)
+
+
+def test_build_bigholder_cells_metric_col_1000() -> None:
+    panel = _bigholder_panel()
+    cells = build_bigholder_cells(
+        panel, top_quantile=0.3, min_prev_pct=0.0, metric_col="big_holder_1000_pct"
+    )
+    assert not cells.is_empty()
+    per_stock = dict(
+        zip(cells["stock_id"].to_list(), cells["cell"].to_list(), strict=True)
+    )
+    assert per_stock["1101"] == "hit"  # 千張大戶占比同樣逐週遞增
+
+
+def test_bigholder_grid_schema_and_cells() -> None:
+    grid = bigholder_grid(_bigholder_panel(), horizons=(10, 20), n_boot=50)
+    assert set(grid.columns) == {
+        "horizon", "cell", "n", "n_dates", "mean", "median", "win_rate",
+        "delta_mean", "ci_lo", "ci_hi", "mean_h1", "mean_h2",
+    }
+    assert set(grid["cell"].to_list()).issubset(set(BIGHOLDER_CELLS))
+    # n_dates 少（<10）時 moving-block bootstrap 誠實回 None，不印基於 1-2 點的假 CI
+    assert grid.filter(pl.col("n_dates") < 10)["ci_lo"].null_count() == grid.filter(
+        pl.col("n_dates") < 10
+    ).height
+
+
+def test_bigholder_by_regime_and_walk_forward_run() -> None:
+    panel = _bigholder_panel().with_columns(pl.lit("進攻").alias("regime"))
+    by_reg = bigholder_by_regime(panel, horizons=(10,), n_boot=30)
+    assert "regime" in by_reg.columns
+    wf = walk_forward_bigholder(panel, horizons=(10,), n_splits=4, n_boot=30)
+    # 週數過少切不出 walk-forward 段 → 空表（schema 正確、不崩）
+    assert set(wf.columns) == {
+        "horizon", "cell", "split_id", "test_start", "test_end",
+        "test_n", "test_n_dates", "test_delta_mean", "test_ci_lo", "test_ci_hi",
+    }

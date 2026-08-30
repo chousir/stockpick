@@ -488,6 +488,9 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     margin:                        # §22.10維度4(融資水位，個股層級)專屬參數
       chg_window_td: 5               # 5交易日%變化窗，同專案margin_chg_5d/washout慣例
       min_prev_lots: 50.0            # 分母防雜訊門檻(張)，避免近0水位%變化雜訊主導排名
+    bigholder:                     # §22.19維度3(大戶集中度，個股層級)專屬參數
+      chg_window_weeks: 1           # WoW(1個TDCC公布週)Δpp；big_holder_pct只有TDCC公布日有值
+      min_prev_pct: 1.0            # 排除集保庫存占比<1%的negligible-custody個股(非防雜訊，見§22.19)
     output_dir: research/redesign_dimension_grid
   contrarian_efficacy:       # M-BR1 Phase 2 底部左側聯合桶檢驗（make contrarian-efficacy）
     horizons_td: [5, 10, 20, 40] # forward alpha 窗（交易日）
