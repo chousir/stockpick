@@ -440,6 +440,13 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     market_history_days: 90         # load_market_history回看天數（需≥ma60_window暖身）
     min_peers: 5                    # 同次產業同儕最低樣本數（val_pctile/gross_margin peer用）
     output_path: research/g1_g2_g5_watch/ledger.csv
+  valuation_gap:            # docs/31 §20.11：val_gap_pct_composite（估值回歸參考價綜合版）效度初測
+    min_peers: 5                    # 同儕中位數最低樣本（同 build_valuation 生產值）
+    min_snapshots: 8               # 自身歷史腿最低快照數（同 compute_self_history_median 生產值）
+    top_quantile: 0.2              # P3 cheap/rich 兩尾各取比例（§22.3.2 統一規則）
+    min_rows_per_day: 900          # 日線快取當日股數低於此值＝部分抓取日，排除（forward-return row-shift 防錯位）
+    market_history_days: 320       # load_market_history 回看天數（12 週快照×5＋40 前瞻＋MA60 暖身）
+    ledger_path: research/valuation_gap/ledger.csv  # 獨立薄 ledger（不動 g1_g2_g5_watch，§20.3/§20.4 先例）
   official_sector_watch:     # docs/31 §12：官方族群前5前瞻累積軌每週快照（手動指令，需每週跑）
     min_purity: 0.5                # docs/31 §10.10：穩健區間0.4-0.6取中點，非重新調參
     top_n_groups: 5                 # 同§10 top_n，維持可比較

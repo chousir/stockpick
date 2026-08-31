@@ -884,6 +884,108 @@ def walk_forward_bigholder(
     )
 
 
+# ---------------------------------------------------------------------------
+# docs/31 §20.11 估值缺口效度研究 P3：val_gap_pct_composite 水準的正負號分割
+# （個股層級，估值回歸參考價綜合缺口%——非 panel.parquet 欄位，來自
+# valuation_gap_panel.build_valuation_gap_panel 的重建面板，見§20.11說明）
+# ---------------------------------------------------------------------------
+
+VALUATION_GAP_CELLS: tuple[str, ...] = ("cheap", "rich")
+_VALUATION_GAP_CELLS_SCHEMA: dict[str, type[pl.DataType]] = {
+    "date": pl.Date, "stock_id": pl.Utf8, "cell": pl.Utf8, "regime": pl.Utf8,
+}
+
+
+def build_valuation_gap_cells(
+    panel: pl.DataFrame,
+    top_quantile: float = 0.2,
+    signal_col: str = "val_gap_pct_composite",
+) -> pl.DataFrame:
+    """§20.11 P3：`signal_col`（估值回歸參考價綜合缺口%，正＝估值高於現價＝相對
+    便宜）當週 ISO 橫斷面**最高** `top_quantile`（最便宜）→ `cheap`、**最低**
+    `top_quantile`（現價已跑贏估值）→ `rich`，中間不分派（不進 cell 表）。
+
+    與 `build_margin_cells`／`build_bigholder_cells`（單邊 hit/miss）不同，本維度
+    刻意**兩尾各取一格**——研究問題是「正 gap vs 負 gap 的前瞻報酬對照」（§20.11
+    主問題的正負號版本），單看「最便宜 vs 其餘」會把「中性估值」混進對照組稀釋。
+
+    Args:
+        panel: 需含 date/stock_id/`signal_col`/alpha{h}[/regime]（`build_valuation_
+            gap_panel` 輸出，本身已是 ISO 週頻，不需再篩 weekly_dates）。
+    """
+    need = {"date", "stock_id", signal_col}
+    if panel.is_empty() or not need.issubset(panel.columns):
+        return pl.DataFrame(schema=_VALUATION_GAP_CELLS_SCHEMA)
+    ranked = panel.drop_nulls([signal_col]).with_columns(
+        pl.col(signal_col).rank(method="min", descending=True).over("date").alias("_rk_hi"),
+        pl.col(signal_col).rank(method="min", descending=False).over("date").alias("_rk_lo"),
+        pl.col(signal_col).count().over("date").alias("_n"),
+    )
+    if ranked.is_empty():
+        return pl.DataFrame(schema=_VALUATION_GAP_CELLS_SCHEMA)
+    cut = (pl.col("_n") * top_quantile).ceil()
+    tagged = ranked.with_columns(
+        pl.when(pl.col("_rk_hi") <= cut).then(pl.lit("cheap"))
+        .when(pl.col("_rk_lo") <= cut).then(pl.lit("rich"))
+        .otherwise(None)
+        .alias("cell")
+    ).drop_nulls(["cell"])
+    keep = [c for c in tagged.columns if c not in ("_rk_hi", "_rk_lo", "_n")]
+    return tagged.select(keep)
+
+
+def valuation_gap_grid(
+    panel: pl.DataFrame,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_quantile: float = 0.2,
+    signal_col: str = "val_gap_pct_composite",
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§20.11 P3 全樣本讀值：`cheap`/`rich` 兩格 forward alpha 對照。"""
+    cells = build_valuation_gap_cells(panel, top_quantile=top_quantile, signal_col=signal_col)
+    return evaluate_signal_cells(
+        cells, VALUATION_GAP_CELLS, horizons, n_boot, seed, snapshot_gap_td
+    )
+
+
+def valuation_gap_by_regime(
+    panel: pl.DataFrame,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_quantile: float = 0.2,
+    signal_col: str = "val_gap_pct_composite",
+    n_boot: int = 1000,
+    seed: int = 42,
+    regime_col: str = "regime",
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§20.11 P3 regime 切片：`cheap`/`rich` 兩格 × regime forward alpha。"""
+    cells = build_valuation_gap_cells(panel, top_quantile=top_quantile, signal_col=signal_col)
+    return evaluate_signal_cells_by_regime(
+        cells, VALUATION_GAP_CELLS, horizons, n_boot, seed, regime_col, snapshot_gap_td
+    )
+
+
+def walk_forward_valuation_gap(
+    panel: pl.DataFrame,
+    horizons: tuple[int, ...] = (10, 20, 40),
+    top_quantile: float = 0.2,
+    signal_col: str = "val_gap_pct_composite",
+    n_splits: int = 4,
+    min_train_frac: float = 0.4,
+    n_boot: int = 1000,
+    seed: int = 42,
+    snapshot_gap_td: int = 5,
+) -> pl.DataFrame:
+    """§20.11 P3 walk-forward：`build_valuation_gap_cells` ＋通用 `walk_forward_cells`。"""
+    cells = build_valuation_gap_cells(panel, top_quantile=top_quantile, signal_col=signal_col)
+    return walk_forward_cells(
+        cells, VALUATION_GAP_CELLS, horizons, n_splits, min_train_frac, n_boot, seed,
+        snapshot_gap_td,
+    )
+
+
 _PAIRWISE_COMBO_SCHEMA: dict[str, type[pl.DataType]] = {
     "date": pl.Date, "stock_id": pl.Utf8, "cell": pl.Utf8, "regime": pl.Utf8,
 }
