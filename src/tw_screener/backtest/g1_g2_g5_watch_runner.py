@@ -45,6 +45,9 @@ def run_g1_g2_g5_watch(settings: Path) -> None:
     g2_mktcap_min = float(wc.get("g2_mktcap_min_billion", 300.0))
     g5_val_pctile_max = float(wc.get("g5_val_pctile_max", 40.0))
     g5_amount_min = float(wc.get("g5_amount_min_million", 300.0))
+    f2_pe_min = float(wc.get("f2_pe_min", 15.0))
+    f2_pe_max = float(wc.get("f2_pe_max", 30.0))
+    f2_mktcap_min = float(wc.get("f2_mktcap_min_billion", 300.0))
     out_path = Path(wc.get("output_path", "research/g1_g2_g5_watch/ledger.csv"))
 
     client = create_client(settings)
@@ -73,17 +76,20 @@ def run_g1_g2_g5_watch(settings: Path) -> None:
         g2_roe_min=g2_roe_min, g2_debt_max_pct=g2_debt_max,
         g2_current_min=g2_current_min, g2_mktcap_min_billion=g2_mktcap_min,
         g5_val_pctile_max=g5_val_pctile_max, g5_amount_min_million=g5_amount_min,
+        f2_pe_min=f2_pe_min, f2_pe_max=f2_pe_max,
+        f2_mktcap_min_billion=f2_mktcap_min,
     )
     ledger = upsert_ledger(out_path, snapshot)
     summary = ledger_progress_summary(ledger)
 
     console.print(
         f"[green]本週命中：g1={int(snapshot['g1'].sum())}、g2={int(snapshot['g2'].sum())}、"
-        f"g5={int(snapshot['g5'].sum())}（{snapshot.height} 檔，重複命中不去重計數）[/green]"
+        f"g5={int(snapshot['g5'].sum())}、f2={int(snapshot['f2'].sum())}"
+        f"（{snapshot.height} 檔，重複命中不去重計數）[/green]"
     )
     console.print(
         f"底帳累積 {summary['n_weeks']} 週｜g1 {summary['n_g1']}、g2 {summary['n_g2']}、"
-        f"g5 {summary['n_g5']} 筆（跨週不去重）→ {out_path}"
+        f"g5 {summary['n_g5']}、f2 {summary['n_f2']} 筆（跨週不去重）→ {out_path}"
     )
     console.print(
         "[yellow]fundamentals衍生欄位每季才更新一次——同季內連續週數值相同非bug"

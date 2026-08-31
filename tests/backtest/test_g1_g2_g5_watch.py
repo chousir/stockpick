@@ -11,6 +11,7 @@ from tw_screener.backtest.g1_g2_g5_watch import (
     LEDGER_SCHEMA,
     build_g1_g2_g5_snapshot,
     ledger_progress_summary,
+    select_f2prime_candidates,
     select_g1_candidates,
     select_g2_candidates,
     select_g5_candidates,
@@ -22,6 +23,7 @@ def _universe(rows: list[dict]) -> pl.DataFrame:
     schema = {
         "stock_id": pl.Utf8, "name": pl.Utf8,
         "market_cap_billion": pl.Float64, "cum_rev_yoy_pct": pl.Float64,
+        "pe_ratio": pl.Float64,  # F2'（§20.10）需要；缺 key 的舊測試列自動填 null
     }
     return pl.DataFrame(rows, schema=schema)
 
@@ -265,6 +267,119 @@ def test_select_g5_candidates_empty_snapshot() -> None:
     assert set(out.columns) == {"stock_id", "name"}
 
 
+# --- F2'（成長優質股，§7.2/§20.10）---------------------------------------------
+
+def _f2_fundamentals(gross: float, delta_op: float) -> pl.DataFrame:
+    return _fundamentals(
+        [{"stock_id": "2382", "quarter_label": "2026Q2", "net_margin_pct": None,
+          "delta_net_margin_pct": None, "op_margin_pct": 5.0, "delta_op_margin_pct": delta_op,
+          "gross_margin_pct": gross, "roe_q_pct": None, "debt_ratio_pct": None,
+          "current_ratio": None}]
+    )
+
+
+_F2_PEER = pl.DataFrame(
+    [{"stock_id": "2382", "subind_median": 10.0}],
+    schema={"stock_id": pl.Utf8, "subind_median": pl.Float64},
+)
+_EMPTY_VAL = pl.DataFrame(schema={"stock_id": pl.Utf8, "val_pctile": pl.Float64})
+
+
+def _f2_snap(pe: float | None, mktcap: float, gross: float = 12.0,
+             delta_op: float = 0.0) -> pl.DataFrame:
+    universe = _universe([{"stock_id": "2382", "name": "廣達",
+                           "market_cap_billion": mktcap, "cum_rev_yoy_pct": None,
+                           "pe_ratio": pe}])
+    return build_g1_g2_g5_snapshot(
+        universe, _f2_fundamentals(gross, delta_op), _F2_PEER, _EMPTY_VAL,
+        ma60_map={}, amount_map={},
+        week="2026-W35", data_date=date(2026, 8, 29),
+    )
+
+
+def test_f2_hit_requires_pe_band_peer_op_and_mktcap() -> None:
+    snap = _f2_snap(pe=22.0, mktcap=500.0, gross=12.0, delta_op=0.0)
+    row = snap.row(0, named=True)
+    assert row["f2"] is True
+    assert row["pe_ratio"] == 22.0
+
+
+def test_f2_pe_band_edges_inclusive() -> None:
+    assert _f2_snap(pe=15.0, mktcap=500.0).row(0, named=True)["f2"] is True
+    assert _f2_snap(pe=30.0, mktcap=500.0).row(0, named=True)["f2"] is True
+    assert _f2_snap(pe=14.9, mktcap=500.0).is_empty()   # 深度價值 → 不是 F2'
+    assert _f2_snap(pe=30.1, mktcap=500.0).is_empty()   # 太貴 → 不是 F2'
+
+
+def test_f2_requires_gross_margin_strictly_above_peer() -> None:
+    # 等於同儕中位（10.0）→ 不命中（§7.2「優於」＝嚴格大於，跟 G5 的 >= 不同）
+    assert _f2_snap(pe=22.0, mktcap=500.0, gross=10.0).is_empty()
+    assert _f2_snap(pe=22.0, mktcap=500.0, gross=10.01).row(0, named=True)["f2"] is True
+
+
+def test_f2_requires_op_margin_not_deteriorating() -> None:
+    assert _f2_snap(pe=22.0, mktcap=500.0, delta_op=-0.1).is_empty()
+    assert _f2_snap(pe=22.0, mktcap=500.0, delta_op=0.0).row(0, named=True)["f2"] is True
+
+
+def test_f2_market_cap_floor_300() -> None:
+    assert _f2_snap(pe=22.0, mktcap=299.0).is_empty()
+    assert _f2_snap(pe=22.0, mktcap=300.0).row(0, named=True)["f2"] is True
+
+
+def test_f2_null_inputs_do_not_hit() -> None:
+    assert _f2_snap(pe=None, mktcap=500.0).is_empty()
+    # peer median 為 null（同儕樣本不足）→ 不命中、不崩
+    universe = _universe([{"stock_id": "2382", "name": "廣達",
+                           "market_cap_billion": 500.0, "cum_rev_yoy_pct": None,
+                           "pe_ratio": 22.0}])
+    snap = build_g1_g2_g5_snapshot(
+        universe, _f2_fundamentals(12.0, 0.0),
+        pl.DataFrame(schema={"stock_id": pl.Utf8, "subind_median": pl.Float64}),
+        _EMPTY_VAL, ma60_map={}, amount_map={},
+        week="2026-W35", data_date=date(2026, 8, 29),
+    )
+    assert snap.is_empty()
+
+
+def test_select_f2prime_candidates_filters_to_f2_hits_only() -> None:
+    universe = _universe([
+        {"stock_id": "2382", "name": "廣達", "market_cap_billion": 500.0,
+         "cum_rev_yoy_pct": None, "pe_ratio": 22.0},
+        {"stock_id": "9999", "name": "小型深度價值", "market_cap_billion": 5.0,
+         "cum_rev_yoy_pct": None, "pe_ratio": 8.0},
+    ])
+    fundamentals = _fundamentals([
+        {"stock_id": "2382", "quarter_label": "2026Q2", "net_margin_pct": None,
+         "delta_net_margin_pct": None, "op_margin_pct": 5.0, "delta_op_margin_pct": 0.5,
+         "gross_margin_pct": 15.0, "roe_q_pct": None, "debt_ratio_pct": None,
+         "current_ratio": None},
+        {"stock_id": "9999", "quarter_label": "2026Q2", "net_margin_pct": None,
+         "delta_net_margin_pct": None, "op_margin_pct": 5.0, "delta_op_margin_pct": 0.5,
+         "gross_margin_pct": 15.0, "roe_q_pct": None, "debt_ratio_pct": None,
+         "current_ratio": None},
+    ])
+    peer = pl.DataFrame(
+        [{"stock_id": "2382", "subind_median": 10.0},
+         {"stock_id": "9999", "subind_median": 10.0}],
+        schema={"stock_id": pl.Utf8, "subind_median": pl.Float64},
+    )
+    snap = build_g1_g2_g5_snapshot(
+        universe, fundamentals, peer, _EMPTY_VAL,
+        ma60_map={}, amount_map={},
+        week="2026-W35", data_date=date(2026, 8, 29),
+    )
+    out = select_f2prime_candidates(snap)
+    assert out["stock_id"].to_list() == ["2382"]
+    assert set(out.columns) == {"stock_id", "name"}
+
+
+def test_select_f2prime_candidates_empty_snapshot() -> None:
+    out = select_f2prime_candidates(pl.DataFrame(schema=LEDGER_SCHEMA))
+    assert out.is_empty()
+    assert set(out.columns) == {"stock_id", "name"}
+
+
 def test_upsert_ledger_all_null_column_does_not_corrupt_later_weeks(tmp_path: Path) -> None:
     """同l6_g4_watch的回歸測試場景：某週某數值欄全null不可污染後續週的真實值。"""
     path = tmp_path / "ledger.csv"
@@ -302,16 +417,18 @@ def test_upsert_ledger_all_null_column_does_not_corrupt_later_weeks(tmp_path: Pa
 def test_ledger_progress_summary_counts() -> None:
     ledger = pl.DataFrame(
         [
-            {"week": "2026-W34", "g1": True, "g2": False, "g5": False},
-            {"week": "2026-W35", "g1": True, "g2": True, "g5": True},
+            {"week": "2026-W34", "g1": True, "g2": False, "g5": False, "f2": False},
+            {"week": "2026-W35", "g1": True, "g2": True, "g5": True, "f2": True},
         ],
-        schema={"week": pl.Utf8, "g1": pl.Boolean, "g2": pl.Boolean, "g5": pl.Boolean},
+        schema={"week": pl.Utf8, "g1": pl.Boolean, "g2": pl.Boolean, "g5": pl.Boolean,
+                "f2": pl.Boolean},
     )
     summary = ledger_progress_summary(ledger)
     assert summary["n_weeks"] == 2
     assert summary["n_g1"] == 2
     assert summary["n_g2"] == 1
     assert summary["n_g5"] == 1
+    assert summary["n_f2"] == 1
 
 
 def test_ledger_progress_summary_empty() -> None:

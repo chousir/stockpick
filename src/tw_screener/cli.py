@@ -936,7 +936,7 @@ def screen_run_all(
 
 
 # docs/31「D策略定義變更」＋2026-08-24使用者追加拍板：不用全部跟隨Goodinfo，用
-# 現有本地資料做filter，五式（G1/G2/G4/G5/L6）全部直接掛進`make week`
+# 現有本地資料做filter，五式（G1/G2/G4/G5/L6）＋F2'（§20.10）全部直接掛進`make week`
 # （`screen-redesign-local`），接受「未驗證、結果可能不理想」的代價，不再侷限只做
 # G2(=D的正式接班定義)/L6(唯一有實證歷史數字撐腰的左側filter)。全部**尚未通過
 # §7.4統計驗證門檻**（見docs/31 §20現況總表），screen_result輸出一律標
@@ -944,18 +944,22 @@ def screen_run_all(
 # Goodinfo同一套已知門檻，口徑落差有限）明確區分——不可混用同一個標記，見§19.3訂正
 # （field_map.py本地映射跟這裡的§4新設計filter是兩個不同機制）。L6只用l6_2cond
 # 讀法，不含l6_4cond額外兩條件（從未獨立驗證，見§9記載）。
+# 2026-08-31 追加 F2'（成長優質股，§7.2/§20.10：PE15-30∧毛利>同儕中位∧Δ營益率≥0∧
+# 市值≥300億）——寄生在 g1_g2_g5 snapshot（判準4欄有3欄已算），同樣 local_unvalidated。
 _REDESIGN_STRATEGY_IDS: dict[str, str] = {
     "g1": "g1_margin_expansion",
     "g2": "g2_quality_no_history",
     "g4": "g4_yoy_divergence",
     "g5": "g5_valuation_gap",
     "l6": "l6_yoy_pe_flow",
+    "f2": "f2_growth_quality",
 }
-_G1_G2_G5_IDS = {"g1", "g2", "g5"}
+# 走 build_g1_g2_g5_snapshot 那條分支的策略（F2' 判準寄生在同一份 snapshot，§20.10）
+_G1_G2_G5_IDS = {"g1", "g2", "g5", "f2"}
 
 
 def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):  # noqa: ANN001
-    """`screen run-local {g1,g2,g4,g5,l6}`的候選生成路徑（docs/31 D策略定義變更＋
+    """`screen run-local {g1,g2,g4,g5,l6,f2}`的候選生成路徑（docs/31 D策略定義變更＋
     2026-08-24追加拍板）。
 
     重用`group_runner.py`同一套已在跑的snapshot函式（`build_g1_g2_g5_snapshot`／
@@ -981,6 +985,7 @@ def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):
         from tw_screener.backtest.g1_g2_g5_watch import (
             build_g1_g2_g5_inputs,
             build_g1_g2_g5_snapshot,
+            select_f2prime_candidates,
             select_g1_candidates,
             select_g2_candidates,
             select_g5_candidates,
@@ -999,9 +1004,12 @@ def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):
             g2_mktcap_min_billion=float(wc.get("g2_mktcap_min_billion", 300.0)),
             g5_val_pctile_max=float(wc.get("g5_val_pctile_max", 40.0)),
             g5_amount_min_million=float(wc.get("g5_amount_min_million", 300.0)),
+            f2_pe_min=float(wc.get("f2_pe_min", 15.0)),
+            f2_pe_max=float(wc.get("f2_pe_max", 30.0)),
+            f2_mktcap_min_billion=float(wc.get("f2_mktcap_min_billion", 300.0)),
         )
         selector = {"g1": select_g1_candidates, "g2": select_g2_candidates,
-                    "g5": select_g5_candidates}[strategy]
+                    "g5": select_g5_candidates, "f2": select_f2prime_candidates}[strategy]
         return selector(snapshot)
 
     from tw_screener.backtest.l6_g4_watch import (
@@ -1050,7 +1058,7 @@ def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):
 def screen_run_local(
     strategy: str = typer.Argument(
         help="策略 ID，如 f_value_rebound（僅門檻可完全由官方資料覆蓋的策略可跑）；"
-        "或 g1／g2／g4／g5／l6（docs/31 §4新設計候選，統計驗證未過關，見下方說明）"
+        "或 g1／g2／g4／g5／l6／f2（docs/31 §4/§7.2新設計候選，統計驗證未過關，見下方說明）"
     ),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
@@ -1065,12 +1073,13 @@ def screen_run_local(
     多一欄 source=local，供之後週報／pick-outcome 辨識資料來源（本地口徑與 Goodinfo
     篩選器存在落差：市值股數月頻、PE/殖利率為官方 trailing 非 Goodinfo 自算，見 docs/02）。
 
-    strategy=g1／g2／g4／g5／l6 時走另一條路徑（docs/31 D策略定義變更＋2026-08-24
+    strategy=g1／g2／g4／g5／l6／f2 時走另一條路徑（docs/31 D策略定義變更＋2026-08-24
     使用者追加拍板：五式全部直接掛進`make week`，不用全部跟隨Goodinfo，用現有本地
-    資料做filter，接受未驗證/結果可能不理想）：皆為docs/31 §4全新設計、**尚未通過
-    統計驗證**（§20總表），輸出source=local_unvalidated（非f_value_rebound的
-    source=local），明確跟已知口徑落差的官方資料替代路徑區分開。已掛進`make week`
-    的`screen-redesign-local`步驟自動每週執行，這裡列出也可手動單獨重跑。
+    資料做filter，接受未驗證/結果可能不理想；F2' 於 2026-08-31 §20.10 追加同模式）：
+    皆為docs/31 §4/§7.2全新設計、**尚未通過統計驗證**（§20總表），輸出
+    source=local_unvalidated（非f_value_rebound的source=local），明確跟已知口徑落差
+    的官方資料替代路徑區分開。已掛進`make week`的`screen-redesign-local`步驟自動
+    每週執行，這裡列出也可手動單獨重跑。
     """
     import polars as pl
     import yaml as _yaml
@@ -1573,7 +1582,7 @@ def backtest_g1_g2_g5_watch_cmd(
 def backtest_redesign_prelim_read_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
-    """docs/31 §21.4：G1/G2/G4/G5/L6 初步（非§7.4正式驗證）forward alpha讀值——
+    """docs/31 §21.4：G1/G2/G4/G5/L6/F2' 初步（非§7.4正式驗證）forward alpha讀值——
     用既有ledger快照＋即時日線快取算，樣本量小、CI在樣本不足時為空，如實印出，
     不是有效訊號的驗證結果。輸出research/redesign_prelim_read/latest.md。"""
     from tw_screener.backtest.redesign_prelim_read import run_redesign_prelim_read

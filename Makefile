@@ -35,13 +35,13 @@ endif
 	                  # 改預設走本地等價定義（field_map.py已確認市值/PE/殖利率/累計月營收YoY四條件全覆蓋）。
 	                  # 想手動試D/E/G/F的Goodinfo原始定義，仍可手動跑`make screen STRATEGY=xxx`或
 	                  # `make screen-all GROUP=defg`（兩個target本身不動，只是不再被week自動呼叫）。
-	-$(MAKE) screen-redesign-local   # docs/31 §4 全新本地filter(G1/G2/G4/G5/L6)：2026-08-24拍板不用全部
+	-$(MAKE) screen-redesign-local   # docs/31 §4/§7.2 全新本地filter(G1/G2/G4/G5/L6/F2')：2026-08-24拍板不用全部
 	                                 # 跟隨Goodinfo，直接併進候選宇宙；未過統計驗證，候選數會明顯變大
 	$(MAKE) fetch-candidates-history
 	-$(MAKE) rotation   # 先跑輪動（group 的 2.8 雷達要讀 sector_rotation.csv 並列；失敗不擋主流程）
 	-$(MAKE) macro   # docs/25 v2 總經燈號（BAA10Y 主訊號＋揭露面板）；FRED 掛了不擋主流程
 	-$(MAKE) cp-value-candidates   # 個股 CP 補漲候選＋三重濾網（group 的 7. 分析請求要讀 cp_candidates.md；失敗不擋）
-	$(MAKE) group   # 官方族群前5(§13)/G1/G2/G4/G5/L6新設計候選揭露(§4/§9/§11)前瞻累積軌皆已內含在這步，不必另跑
+	$(MAKE) group   # 官方族群前5(§13)/G1/G2/G4/G5/L6/F2'新設計候選揭露(§4/§7.2/§9/§11)前瞻累積軌皆已內含在這步，不必另跑
 	-$(MAKE) snapshot-week   # WS-J.1 point-in-time 快照：凍結本週 concepts/watchlist/holdings/宇宙成員（失敗不擋主流程）
 	$(MAKE) week-check   # 尾段產物完整性檢查（規劃書 05 F4）：上面容錯步驟若無聲失敗，這裡點名
 	-$(MAKE) pick-outcome-brief   # WS-A3 上週 picks r+5 回饋一頁（輸入包；失敗不擋主流程）
@@ -82,12 +82,13 @@ endif
 screen-f-local:  ## 策略F(f_value_rebound)本地等價版：不打Goodinfo，2026-08-28起week預設走這個（docs/31 §20.6）
 	uv run tw-screener screen run-local f_value_rebound
 
-screen-redesign-local:  ## docs/31 §4 全新本地filter(G1/G2/G4/G5/L6)：不打Goodinfo，2026-08-24拍板直接掛進week，實驗性質未過§7.4統計驗證，結果可能不理想
+screen-redesign-local:  ## docs/31 §4/§7.2 全新本地filter(G1/G2/G4/G5/L6/F2')：不打Goodinfo，2026-08-24拍板直接掛進week，實驗性質未過§7.4統計驗證，結果可能不理想
 	-uv run tw-screener screen run-local g1
 	-uv run tw-screener screen run-local g2
 	-uv run tw-screener screen run-local g4
 	-uv run tw-screener screen run-local g5
 	-uv run tw-screener screen run-local l6
+	-uv run tw-screener screen run-local f2
 
 fetch-candidates-history:  ## 對本週篩選結果補抓 STOCK_DAY 歷史（MA20/60+斜率+動能，MONTHS=13 預設≈年線；首次 30-40 分鐘，過去月份永久快取）
 	uv run tw-screener data fetch-candidates-history --months $(or $(MONTHS),13)
@@ -101,13 +102,13 @@ macro:  ## docs/25 v2 總經燈號：抓 FRED（快取24h）→算 BAA10Y 主訊
 cp-value-candidates:  ## B3 個股 CP 候選清單（生產軌，產 reports/週次/cp_candidates.md+csv；docs/13）
 	uv run tw-screener cp candidates
 
-group:  ## 跑族群分析，產出 group_analysis.md（docs/31 §13 官方族群前5＋§4/§9/§11 G1/G2/G4/G5/L6 揭露欄前瞻累積軌皆已內含）
+group:  ## 跑族群分析，產出 group_analysis.md（docs/31 §13 官方族群前5＋§4/§7.2/§9/§11 G1/G2/G4/G5/L6/F2' 揭露欄前瞻累積軌皆已內含）
 	uv run tw-screener analysis group
 
 l6-g4-watch:  ## docs/31 §9 L6/G4 前瞻累積軌快照（week 已內含，可單獨重跑；不做裁決）
 	uv run tw-screener backtest l6-g4-watch
 
-g1-g2-g5-watch:  ## docs/31 §11 G1/G2/G5 前瞻累積軌快照（week 已內含，可單獨重跑；不做裁決）
+g1-g2-g5-watch:  ## docs/31 §11/§20.10 G1/G2/G5/F2' 前瞻累積軌快照（week 已內含，可單獨重跑；不做裁決）
 	uv run tw-screener backtest g1-g2-g5-watch
 
 week-check:  ## 產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（規劃書 05 F4；不擋流程）

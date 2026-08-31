@@ -574,7 +574,7 @@ def run_group_analysis(settings: Path) -> None:
         console.print(f"[yellow]  官方族群前5揭露欄計算失敗，該段留空：{e}[/yellow]")
         official_sector_map = {}
 
-    # docs/31 §4/§9/§11（2026-08-24 使用者要求）：G1/G2/G4/G5/L6 新設計候選揭露欄。
+    # docs/31 §4/§9/§11（2026-08-24 使用者要求）：G1/G2/G4/G5/L6/F2' 新設計候選揭露欄。
     # 這五式此前只累積在 gitignored 的 research/ 底帳（`g1-g2-g5-watch`／`l6-g4-watch`
     # 手動指令），使用者從未在週報實際看到。這裡把底帳計算搬進 group（比照上面
     # official_sector 段的整合模式）、順便自動 upsert 兩份底帳，並把命中旗標揭露成
@@ -609,6 +609,9 @@ def run_group_analysis(settings: Path) -> None:
                 g2_mktcap_min_billion=float(g1g2g5_cfg.get("g2_mktcap_min_billion", 300.0)),
                 g5_val_pctile_max=float(g1g2g5_cfg.get("g5_val_pctile_max", 40.0)),
                 g5_amount_min_million=float(g1g2g5_cfg.get("g5_amount_min_million", 300.0)),
+                f2_pe_min=float(g1g2g5_cfg.get("f2_pe_min", 15.0)),
+                f2_pe_max=float(g1g2g5_cfg.get("f2_pe_max", 30.0)),
+                f2_mktcap_min_billion=float(g1g2g5_cfg.get("f2_mktcap_min_billion", 300.0)),
             )
             upsert_g1g2g5_ledger(
                 Path(g1g2g5_cfg.get("output_path", "research/g1_g2_g5_watch/ledger.csv")),
@@ -629,7 +632,7 @@ def run_group_analysis(settings: Path) -> None:
             )
 
             for snap, tag_cols in (
-                (g1g2g5_snapshot, ("g1", "g2", "g5")),
+                (g1g2g5_snapshot, ("g1", "g2", "g5", "f2")),
                 (l6g4_snapshot, ("l6_2cond", "l6_4cond", "g4")),
             ):
                 for row in snap.iter_rows(named=True):
@@ -643,7 +646,7 @@ def run_group_analysis(settings: Path) -> None:
                     )
         console.print(f"  docs/31新設計候選觀察（未驗證）：{len(redesign_watch_map)} 檔命中")
     except Exception as e:  # noqa: BLE001 — 純揭露段，任何一步壞掉不擋 group 報告主流程
-        console.print(f"[yellow]  G1/G2/G4/G5/L6揭露欄計算失敗，該段留空：{e}[/yellow]")
+        console.print(f"[yellow]  G1/G2/G4/G5/L6/F2'揭露欄計算失敗，該段留空：{e}[/yellow]")
         redesign_watch_map = {}
 
     csv_path = output_path.parent / "candidates_enriched.csv"
