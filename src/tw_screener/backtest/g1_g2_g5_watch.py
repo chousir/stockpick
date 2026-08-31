@@ -1,17 +1,20 @@
-"""backtest/g1_g2_g5_watch.py — docs/31 §11：G1/G2/G5 前瞻累積軌每週快照。
+"""backtest/g1_g2_g5_watch.py — docs/31 §11/§20.10：G1/G2/G5/F2' 前瞻累積軌每週快照。
 
-跟`l6_g4_watch.py`同一種理由（§9 item3/4）：G1/G5 用到的`Δnet_margin`/`Δop_margin`
+跟`l6_g4_watch.py`同一種理由（§9 item3/4）：G1/G5/F2' 用到的`Δnet_margin`/`Δop_margin`
 只能拿到**一個**QoQ差分值（`fundamentals_*.parquet`目前只有2026Q1/Q2兩季），沒有
 時間序列深度可回測——但這是「只能前瞻累積、不能回溯」，不是「做不到」。本檔只做
 記錄，不做裁決。
 
-**三式定義（docs/31 §4.1，門檻可由 settings 覆寫）**：
+**四式定義（docs/31 §4.1/§7.2，門檻可由 settings 覆寫）**：
 - G1｜利潤率擴張優先：`Δnet_margin≥+1.5pp ∧ Δop_margin≥0 ∧ cum_rev_yoy_pct≥0 ∧
   ma60_dist_pct≤+15`。
 - G2｜單季ROE×資產負債表體質：`roe_q_pct≥3.5 ∧ debt_ratio_pct≤60 ∧ current_ratio≥1.2
   ∧ market_cap_billion≥300`（§11查核：欄位皆已在生產`fundamentals`快取，不需擴欄）。
 - G5｜估值未反映利潤率改善：`val_pctile≤40 ∧ gross_margin_pct≥同次產業中位 ∧
   Δop_margin≥0 ∧ amount_million≥300`。
+- F2'｜成長優質股（非深度價值，§7.2/§20.10）：`pe_ratio∈[15,30] ∧ gross_margin_pct
+  >同次產業中位（嚴格大於）∧ Δop_margin≥0 ∧ market_cap_billion≥300`。跟G5的區別：
+  G5用`val_pctile≤40`（相對便宜百分位），F2'用絕對PE中段帶（明確排除深度價值）。
 
 **cadence差異（跟L6/G4不同，讀底帳時要記住）**：`fundamentals`衍生欄位（net/op/gross
 margin、roe/debt/current_ratio、Δ）每季才更新一次（MOPS財報公告頻率）——同一季內
@@ -36,6 +39,7 @@ LEDGER_SCHEMA: dict[str, type[pl.DataType]] = {
     "cum_rev_yoy_pct": pl.Float64,
     "ma60_dist_pct": pl.Float64,
     "amount_million": pl.Float64,
+    "pe_ratio": pl.Float64,
     "val_pctile": pl.Float64,
     "fundamentals_quarter": pl.Utf8,     # 財報季別（如"2026Q2"），供未來判讀時對照
     "net_margin_pct": pl.Float64,
@@ -50,6 +54,7 @@ LEDGER_SCHEMA: dict[str, type[pl.DataType]] = {
     "g1": pl.Boolean,
     "g2": pl.Boolean,
     "g5": pl.Boolean,
+    "f2": pl.Boolean,
 }
 
 
@@ -70,6 +75,9 @@ def build_g1_g2_g5_snapshot(
     g2_mktcap_min_billion: float = 300.0,
     g5_val_pctile_max: float = 40.0,
     g5_amount_min_million: float = 300.0,
+    f2_pe_min: float = 15.0,
+    f2_pe_max: float = 30.0,
+    f2_mktcap_min_billion: float = 300.0,
 ) -> pl.DataFrame:
     """把全市場當週快照併成 G1/G2/G5 判準列，只回傳至少命中一式的股票。
 
@@ -86,7 +94,10 @@ def build_g1_g2_g5_snapshot(
     if universe.is_empty() or not need.issubset(universe.columns):
         return pl.DataFrame(schema=LEDGER_SCHEMA)
 
-    base = universe.select("stock_id", "name", "market_cap_billion", "cum_rev_yoy_pct")
+    base_cols = ["stock_id", "name", "market_cap_billion", "cum_rev_yoy_pct"]
+    if "pe_ratio" in universe.columns:  # F2'（§20.10）需要原始 PE；向後相容缺欄
+        base_cols.append("pe_ratio")
+    base = universe.select(base_cols)
     if not fundamentals.is_empty():
         base = base.join(
             fundamentals.select(
@@ -120,6 +131,7 @@ def build_g1_g2_g5_snapshot(
         debt = r.get("debt_ratio_pct")
         current = r.get("current_ratio")
         val_pctile = r.get("val_pctile")
+        pe = r.get("pe_ratio")
         ma60 = ma60_map.get(sid)
         amount = amount_map.get(sid)
 
@@ -142,7 +154,14 @@ def build_g1_g2_g5_snapshot(
             and delta_op is not None and delta_op >= 0
             and amount is not None and amount >= g5_amount_min_million
         )
-        if not (g1 or g2 or g5):
+        f2 = bool(
+            pe is not None and f2_pe_min <= pe <= f2_pe_max
+            and gross_margin is not None and peer_median is not None
+            and gross_margin > peer_median  # §7.2「優於」＝嚴格大於（跟 G5 的 >= 不同）
+            and delta_op is not None and delta_op >= 0
+            and mktcap is not None and mktcap >= f2_mktcap_min_billion
+        )
+        if not (g1 or g2 or g5 or f2):
             continue
         rows.append(
             {
@@ -154,6 +173,7 @@ def build_g1_g2_g5_snapshot(
                 "cum_rev_yoy_pct": cum_yoy,
                 "ma60_dist_pct": ma60,
                 "amount_million": amount,
+                "pe_ratio": pe,
                 "val_pctile": val_pctile,
                 "fundamentals_quarter": r.get("quarter_label"),
                 "net_margin_pct": net_margin,
@@ -168,6 +188,7 @@ def build_g1_g2_g5_snapshot(
                 "g1": g1,
                 "g2": g2,
                 "g5": g5,
+                "f2": f2,
             }
         )
     return pl.DataFrame(rows, schema=LEDGER_SCHEMA)
@@ -209,6 +230,19 @@ def select_g5_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
     if snapshot.is_empty() or "g5" not in snapshot.columns:
         return pl.DataFrame(schema={"stock_id": pl.Utf8, "name": pl.Utf8})
     return snapshot.filter(pl.col("g5")).select("stock_id", "name").unique("stock_id")
+
+
+def select_f2prime_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
+    """從 `build_g1_g2_g5_snapshot()` 輸出篩 `f2==True` 的列（docs/31 §7.2/§20.10，
+    2026-08-31 使用者拍板：F2'＝成長優質股〔非深度價值〕，`screen run-local f2`用）。
+
+    只回傳 `stock_id`/`name` 兩欄，呼叫端補其餘欄位並把`source`標成
+    `local_unvalidated`（F2' 同 G1/G5 仍在「分析層」，依賴`Δop_margin`、`fundamentals`
+    僅2季、零回測深度，不是統計驗證通過才上線，見§20.10）。
+    """
+    if snapshot.is_empty() or "f2" not in snapshot.columns:
+        return pl.DataFrame(schema={"stock_id": pl.Utf8, "name": pl.Utf8})
+    return snapshot.filter(pl.col("f2")).select("stock_id", "name").unique("stock_id")
 
 
 @dataclass(frozen=True)
@@ -346,11 +380,13 @@ def upsert_ledger(path: Path, new_rows: pl.DataFrame) -> pl.DataFrame:
 def ledger_progress_summary(ledger: pl.DataFrame) -> dict[str, object]:
     """底帳累積進度一行摘要（runner 印給人看，不是統計裁決）。"""
     if ledger.is_empty():
-        return {"n_weeks": 0, "weeks": [], "n_g1": 0, "n_g2": 0, "n_g5": 0}
+        return {"n_weeks": 0, "weeks": [], "n_g1": 0, "n_g2": 0, "n_g5": 0, "n_f2": 0}
+    n_f2 = int(ledger["f2"].fill_null(False).sum()) if "f2" in ledger.columns else 0
     return {
         "n_weeks": ledger["week"].n_unique(),
         "weeks": sorted(ledger["week"].unique().to_list()),
         "n_g1": int(ledger["g1"].fill_null(False).sum()),
         "n_g2": int(ledger["g2"].fill_null(False).sum()),
         "n_g5": int(ledger["g5"].fill_null(False).sum()),
+        "n_f2": n_f2,
     }

@@ -111,7 +111,7 @@ tw-screener data prune-cache          # 依 settings.cache 保留窗清舊快取
 tw-screener screen run STRATEGY [--dry-run]
 tw-screener screen run-all --group defg
 tw-screener screen doctor
-tw-screener screen run-local STRATEGY # 不打 Goodinfo，純官方資料本地篩選（目前僅 f_value_rebound 可跑，docs/02）
+tw-screener screen run-local STRATEGY # 不打 Goodinfo，純官方資料本地篩選（f_value_rebound=source=local；g1/g2/g4/g5/l6/f2=docs/31 §4/§7.2 新設計候選，source=local_unvalidated，docs/02）
 
 # analysis — 族群分析
 tw-screener analysis group / leaders [--week WEEK]

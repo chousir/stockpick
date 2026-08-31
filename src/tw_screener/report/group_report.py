@@ -32,6 +32,7 @@ _STRATEGY_LABEL: dict[str, str] = {
     "g4_yoy_divergence": "G4",
     "g5_valuation_gap": "G5",
     "l6_yoy_pe_flow": "L6",
+    "f2_growth_quality": "F2",  # §7.2/§20.10；不可 fallback 成 "F"（撞 f_value_rebound）
 }
 
 _STRATEGY_NAME: dict[str, str] = {
@@ -49,6 +50,7 @@ _STRATEGY_NAME: dict[str, str] = {
     "g4_yoy_divergence": "本地-YoY分歧",
     "g5_valuation_gap": "本地-估值落差",
     "l6_yoy_pe_flow": "本地-左側反彈",
+    "f2_growth_quality": "本地-成長優質",
 }
 
 _STRATEGY_DESCRIPTION: dict[str, str] = {
@@ -103,6 +105,10 @@ _STRATEGY_DESCRIPTION: dict[str, str] = {
     "l6_yoy_pe_flow": (
         "累計營收YoY≥20% + 本益比≤25"
         "（本地未驗證・唯一有實證歷史數字撐腰的左側filter，僅用§5.2實測二條件讀法）"
+    ),
+    "f2_growth_quality": (
+        "本益比 15–30 + 毛利率嚴格優於同次產業中位 + 營益率環比未惡化 + 市值≥300億"
+        "（本地未驗證・成長優質股〔非深度價值〕，§7.2/§20.10，跟G5的相對便宜百分位分工）"
     ),
 }
 
@@ -922,7 +928,7 @@ def _build_enriched_rows(
     中性/防禦regime下歷史上量不到效應，讀者需要這個context才不會誤判可信度。
 
     redesign_watch_map={stock_id: "g2,l6_2cond"}（docs/31 §4/§9/§11，2026-08-24 使用者
-    要求後新增）——G1/G2/G4/G5/L6 五式新設計候選命中旗標，逗號分隔、未命中留 None。
+    要求後新增）——G1/G2/G4/G5/L6/F2' 六式新設計候選命中旗標，逗號分隔、未命中留 None。
     **全部未經統計驗證**（G1/G4/G5 因 fundamentals 僅2季QoQ深度不足、G2/L6 樣本仍在
     累積中，見 docs/31 §9/§11/§19）——純觀察揭露，不進篩選/排序/pick.md 核心層。
     G3 已驗證未過關（docs/31 §9），不在此欄出現。
@@ -1283,7 +1289,7 @@ def _build_enriched_rows(
         official_sector_rank = osec.get("group_rank") if osec else None
         official_sector_trend_score = osec.get("trend_score") if osec else None
 
-        # docs/31 §4/§9/§11：G1/G2/G4/G5/L6 新設計候選觀察欄（純揭露非gate，未經統計
+        # docs/31 §4/§9/§11：G1/G2/G4/G5/L6/F2' 新設計候選觀察欄（純揭露非gate，未經統計
         # 驗證）——None＝本週未命中任何一式。
         redesign_watch = (redesign_watch_map or {}).get(sid)
 
@@ -1433,7 +1439,7 @@ def _build_enriched_rows(
                 "official_sector_rank": official_sector_rank,
                 "official_sector_trend_score": official_sector_trend_score,
                 "official_sector_regime": official_sector_regime,
-                # docs/31 §4/§9/§11：G1/G2/G4/G5/L6新設計候選觀察（純揭露非gate，未經
+                # docs/31 §4/§9/§11：G1/G2/G4/G5/L6/F2'新設計候選觀察（純揭露非gate，未經
                 # 統計驗證，G3已驗證未過關不在此欄）——None＝本週未命中任何一式。
                 "redesign_watch": redesign_watch,
                 "goodinfo_url": str(r.get("goodinfo_url", "")),
@@ -1598,7 +1604,7 @@ _CANONICAL_REUSE_FIELDS = (
     "official_sector_rank",
     "official_sector_trend_score",
     "official_sector_regime",
-    # docs/31 §4/§9/§11：G1/G2/G4/G5/L6新設計候選觀察，當週橫斷面判定，重疊股沿用 candidates 那筆
+    # docs/31 §4/§7.2/§9/§11：G1/G2/G4/G5/L6/F2' 新設計候選觀察，當週橫斷面判定
     "redesign_watch",
 )
 

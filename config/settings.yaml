@@ -424,7 +424,7 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     distressed_ret8w_max_pct: 0.0    # docs/31 §5.2「落難週」：前8週(≈40交易日)報酬<此值
     distress_market_history_days: 130  # 落難週三維計算所需日線窗（60日MA/低點+40日位移+緩衝）
     g4_mktcap_min_billion: 300.0      # docs/31 §20.4：G4候選生成路徑市值下限（同G2，2026-08-27新增）
-  g1_g2_g5_watch:            # docs/31 §11：G1/G2/G5 前瞻累積軌每週快照（手動指令，需每週跑）
+  g1_g2_g5_watch:            # docs/31 §11/§20.10：G1/G2/G5/F2' 前瞻累積軌每週快照（手動指令，需每週跑）
     g1_delta_net_margin_min: 1.5   # docs/31 §4.1 G1：Δnet_margin≥+1.5pp
     g1_ma60_max_pct: 15.0           # docs/31 §4.1 G1：above_ma60_pct≤+15
     g2_roe_min: 3.5                 # docs/31 §4.1 G2：roe_q_pct≥3.5
@@ -433,6 +433,9 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     g2_mktcap_min_billion: 300.0    # docs/31 §4.1 G2：market_cap_billion≥300
     g5_val_pctile_max: 40.0         # docs/31 §4.1 G5：val_pctile≤40
     g5_amount_min_million: 300.0    # docs/31 §4.1 G5：amount_million≥300
+    f2_pe_min: 15.0                 # docs/31 §7.2/§20.10 F2'：pe_ratio 下緣（含界）
+    f2_pe_max: 30.0                 # F2'：pe_ratio 上緣（明確排除深度價值，跟 G5 val_pctile 分工）
+    f2_mktcap_min_billion: 300.0    # F2'：市值下限（使用者拍板，同 G2；防母體過寬，§20.10）
     ma60_window: 60                 # G1 above_ma60_pct 的MA天數
     market_history_days: 90         # load_market_history回看天數（需≥ma60_window暖身）
     min_peers: 5                    # 同次產業同儕最低樣本數（val_pctile/gross_margin peer用）

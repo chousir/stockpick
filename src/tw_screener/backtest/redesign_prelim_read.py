@@ -1,4 +1,4 @@
-"""backtest/redesign_prelim_read.py — docs/31 §21.4：G1/G2/G4/G5/L6 初步（非規劃書
+"""backtest/redesign_prelim_read.py — docs/31 §21.4：G1/G2/G4/G5/L6/F2' 初步（非規劃書
 §7.4正式驗證）cross-sectional forward alpha讀值。
 
 用`research/g1_g2_g5_watch/ledger.csv`／`research/l6_g4_watch/ledger.csv`已經
@@ -140,14 +140,14 @@ def _read_ledger_csv(path: Path, schema: dict[str, type[pl.DataType]]) -> pl.Dat
 def format_prelim_report(g1g2g5_read: pl.DataFrame, l6g4_read: pl.DataFrame) -> str:
     """把兩份讀值組成一份markdown報告（docs/31 §21.4附產物）。"""
     lines = [
-        "# docs/31 §21.4：G1/G2/G4/G5/L6 初步（非驗證）forward alpha讀值",
+        "# docs/31 §21.4：G1/G2/G4/G5/L6/F2' 初步（非驗證）forward alpha讀值",
         "",
         "> **明確非規劃書§7.4正式驗證**——樣本量小、未做regime切片、`n_dates`",
         "> 才是真正獨立觀察數（`n`含同季內大量重疊列）；CI在樣本不足時為空白，",
         "> 不代表訊號無效，只代表現在還測不出來，等每週累積會自然變準。",
         "",
     ]
-    for title, df in (("G1/G2/G5（fundamentals衍生）", g1g2g5_read),
+    for title, df in (("G1/G2/G5/F2'（fundamentals衍生）", g1g2g5_read),
                        ("G4/L6（revenue/PE衍生）", l6g4_read)):
         lines.append(f"## {title}")
         lines.append("")
@@ -208,7 +208,9 @@ def run_redesign_prelim_read(settings: Path, out_path: Path | None = None) -> st
     l6g4_ledger = _read_ledger_csv(l6g4_path, L6G4_SCHEMA)
     price_history = load_market_history(cache_dir, n_days=250)
 
-    g1g2g5_read = compute_prelim_forward_alpha(g1g2g5_ledger, price_history, ("g1", "g2", "g5"))
+    g1g2g5_read = compute_prelim_forward_alpha(
+        g1g2g5_ledger, price_history, ("g1", "g2", "g5", "f2")
+    )
     l6g4_read = compute_prelim_forward_alpha(
         l6g4_ledger, price_history, ("g4", "l6_2cond", "l6_4cond")
     )

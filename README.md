@@ -27,12 +27,12 @@
  ③ fetch-tdcc                集保大戶持股比（容錯：TDCC 異常不擋，大戶欄退化 null）
  ④ doctor                    Goodinfo 健康檢查（只診斷不擋，2026-08-23 拍板，docs/31 §19.3；⑤仍會嘗試執行）
  ⑤ screen-all GROUP=defg     Goodinfo 跑 D/E/F/G 四策略 → screen_result_*.csv（純快照；被擋時逐策略印「本週未取得」，不中止流程）
- ⑥ screen-redesign-local     docs/31 §4 全新本地filter(G1/G2/G4/G5/L6)，不打Goodinfo→screen_result_*.csv（2026-08-24拍板直接掛進主流程，**實驗性質未過統計驗證**，容錯：失敗不擋）
+ ⑥ screen-redesign-local     docs/31 §4/§7.2 全新本地filter(G1/G2/G4/G5/L6/F2')，不打Goodinfo→screen_result_*.csv（2026-08-24拍板直接掛進主流程，F2'於§20.10追加，**實驗性質未過統計驗證**，容錯：失敗不擋）
  ⑦ fetch-candidates-history  對命中股聯集（含⑤⑥）補抓 13 個月個股日線（MA60/量比/動能用）
  ⑧ rotation                  ★ 次產業輪動（全市場宇宙・價格趨勢分數主鍵＋趨勢領頭板）→ sector_rotation.md/csv
  ⑨ macro                     docs/25 v2 總經燈號（BAA10Y 主訊號＋揭露面板，容錯：FRED 掛了不擋主流程）
  ⑩ cp-value-candidates       個股 CP 補漲候選＋C2 三重濾網 → cp_candidates.md（group Section 6 要讀）
- ⑪ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv（含揭露欄；docs/31 §13 官方族群前5＋§4/§9/§11 G1/G2/G4/G5/L6 新設計候選觀察欄與前瞻累積軌皆已內含）
+ ⑪ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv（含揭露欄；docs/31 §13 官方族群前5＋§4/§7.2/§9/§11 G1/G2/G4/G5/L6/F2' 新設計候選觀察欄與前瞻累積軌皆已內含）
  ⑫ snapshot-week             point-in-time 週快照：凍結 concepts/宇宙/持股 → data/snapshots/（容錯：失敗不擋）
  ⑬ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
  ⑭ pick-outcome-brief        上週 picks r+5/α/勝率＋偽陰性一頁 → 本週輸入包（容錯：失敗不擋）
@@ -42,20 +42,21 @@
  手動：make report STOCK_ID=XXXX → 個股深度報告
 ```
 
-> **候選宇宙現含兩種來源，規模差很大**：⑤ Goodinfo D/E/F/G（~87 檔）＋⑥ docs/31
-> 本地 G1/G2/G4/G5/L6（2026-08-24 拍板：不用全部跟隨 Goodinfo，用現有本地資料
-> 做 filter，直接掛進主流程，接受未驗證/結果可能不理想——實測單週命中數
-> g1=107／g2=44／g4=351／g5=21／l6=281 檔，門檻目前很鬆）。兩者一起流進
-> `candidates_enriched.csv`，`strategy` 欄用 G1/G2/G4/G5/L6 標籤跟 Goodinfo 的
+> **候選宇宙現含兩種來源，規模差很大**：⑤ Goodinfo D/E/F/G（~87 檔，已軟退場、
+> 預設流程改走本地）＋⑥ docs/31 本地 G1/G2/G4/G5/L6/F2'（2026-08-24 拍板：不用
+> 全部跟隨 Goodinfo，用現有本地資料做 filter，直接掛進主流程，接受未驗證/結果
+> 可能不理想——實測單週命中數 g1=107／g2=44／g4=351／g5=21／l6=281 檔，門檻目前
+> 很鬆；F2' 於 §20.10 追加，市值≥300億門檻）。兩者一起流進
+> `candidates_enriched.csv`，`strategy` 欄用 G1/G2/G4/G5/L6/F2' 標籤跟 Goodinfo 的
 > D/E/F/G 明確區分（見 `screen_result_*.csv` 的 `source` 欄：Goodinfo 來源無此欄、
-> F 本地替代路徑是 `local`、G1/G2/G4/G5/L6 是 `local_unvalidated`）。**候選數因此
+> F 本地替代路徑是 `local`、G1/G2/G4/G5/L6/F2' 是 `local_unvalidated`）。**候選數因此
 > 會比純 Goodinfo 時代明顯變大**，屬預期行為。
 >
-> `candidates_enriched.csv` 的 `redesign_watch` 欄（docs/31 §4/§9/§11，2026-08-24
-> 新增）＝G1/G2/G4/G5/L6 命中旗標（逗號分隔，未命中留白）——純觀察揭露，不影響
+> `candidates_enriched.csv` 的 `redesign_watch` 欄（docs/31 §4/§7.2/§9/§11，2026-08-24
+> 新增）＝G1/G2/G4/G5/L6/F2' 命中旗標（逗號分隔，未命中留白）——純觀察揭露，不影響
 > 排序/篩選/pick.md 核心層，跟⑥的候選生成是兩條獨立機制（前者是揭露欄，標註任何
-> 候選股是否也命中這五式；後者是這五式自己產生候選股）。**全部未經統計驗證**
-> （G3 已驗證未過關，不在此欄）。`research/g1_g2_g5_watch/`／
+> 候選股是否也命中這六式；後者是這六式自己產生候選股）。**全部未經統計驗證**
+> （G3 已驗證未過關，不在此欄）。`research/g1_g2_g5_watch/`（含 F2'）／
 > `research/l6_g4_watch/` 底帳（gitignored）跟著 `group`（步驟⑪）自動累積，
 > `make l6-g4-watch`／`make g1-g2-g5-watch` 只是可單獨重跑的手動工具。
 
@@ -125,7 +126,7 @@ make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退�
 | `candidates_enriched.csv`                            | **主要挑股宇宙**：全候選股 × 技術/籌碼/估值（官方 PE/PB/殖利率＋次產業相對便宜位階）/月營收/flags 排雷欄/揭露欄（flow_state・risk_kind・pullback_quality，純揭露非 gate） |
 | `cp_candidates.md`                                   | 個股 CP 補漲候選＋三重濾網（錢進＋沒漲＋相對便宜；埋伏/追突破/反轉三型態）＋末段短窗早訊號／過熱-退潮警示（限庫存/觀察・低信心）                                                 |
 | `holdings_enriched.csv` / `watchlist_enriched.csv` | 我的庫存/觀察清單（有維護才產，**無論如何都要分析**）                                                                                                                      |
-| `screen_result_*.csv`                                | 各策略原始入選快照（看「哪檔中哪些策略」用）——`{d,e,f,g}` 是 Goodinfo 四策略；`{g1_margin_expansion,g2_quality_no_history,g4_yoy_divergence,g5_valuation_gap,l6_yoy_pe_flow}` 是 docs/31 §4 本地新設計候選（不打 Goodinfo，`source=local_unvalidated`，**未過統計驗證**） |
+| `screen_result_*.csv`                                | 各策略原始入選快照（看「哪檔中哪些策略」用）——`{d,e,f,g}` 是 Goodinfo 四策略；`{g1_margin_expansion,g2_quality_no_history,g4_yoy_divergence,g5_valuation_gap,l6_yoy_pe_flow,f2_growth_quality}` 是 docs/31 §4/§7.2 本地新設計候選（不打 Goodinfo，`source=local_unvalidated`，**未過統計驗證**） |
 
 **⚙️ 不必貼**：`theme_strength.csv`（內容已在 Section 2.8）、`screen_log.md`（檔數統計）。
 
