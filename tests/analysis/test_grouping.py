@@ -776,6 +776,31 @@ def test_group_stocks_local_filter_shape_no_price_history_gives_null_not_zero():
         assert r["ma60_dist_pct"] is None
 
 
+def test_group_stocks_f2_growth_quality_flows_through_and_label_does_not_collide():
+    """docs/31 §20.10：F2' 的 screen_result 走過 group_stocks 後要生成
+    `in_f2_growth_quality` 命中欄，且標籤解析成 "F2" 不退化成 "F"（撞 f_value_rebound）
+    ——這正是 §20.2 記錄的 g1-g5 標籤碰撞坑，F2' 是新 strategy_id 同樣要防。"""
+    from tw_screener.report.group_report import _STRATEGY_LABEL
+
+    results = {
+        "f2_growth_quality": _make_local_filter_screener_df(
+            ["2330", "2454"], "f2_growth_quality"
+        ),
+        "f_value_rebound": _make_local_filter_screener_df(["3034"], "f_value_rebound"),
+    }
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    assert "in_f2_growth_quality" in members.columns
+    row = members.filter(pl.col("stock_id") == "2330").to_dicts()[0]
+    assert row["in_f2_growth_quality"] is True
+    assert row["in_f_value_rebound"] is False
+    # 標籤不碰撞：fallback 是 sid[0].upper() 會讓兩者都變 "F"
+    assert _STRATEGY_LABEL.get("f2_growth_quality", "f2_growth_quality"[0].upper()) == "F2"
+    assert _STRATEGY_LABEL.get("f_value_rebound", "f_value_rebound"[0].upper()) == "F"
+
+
 def test_group_stocks_close_zero_guard_does_not_produce_negative_100():
     """即使某處仍餵進close=0（防呆而非預期路徑），_compute_ma_dist的guard也要讓
     ma_dist_pct退化成None，不能算出-100.0這種看似合理的假訊號。"""
