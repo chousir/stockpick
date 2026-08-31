@@ -206,6 +206,21 @@ def _coverage_table(panel: pl.DataFrame, horizons: tuple[int, ...]) -> list[str]
         + "——全部 < `moving_block_bootstrap_ci` 的 `T≥10` 下限 → 本輪一律"
         "「初測、無正式裁決」。"
     )
+    # 構造性斷點：自身腿需 min_snapshots=8 → composite 在最早的 ~3 週只有 3 條
+    # 同儕腿（n_legs=3），之後才 6 條。跨 horizon 讀 P1/P2 時，長 horizon 的
+    # 樣本主要落在斷點前的 3 腿版本——那不是 pick.md 印的 6 腿數字。
+    break_dates = [
+        r["date"] for r in by_date.iter_rows(named=True)
+        if r["legs"] is not None and r["legs"] < 6
+    ]
+    if break_dates:
+        lines.append("")
+        lines.append(
+            f"> **構造性斷點**：{break_dates[-1]} 前 composite 只有 3 條同儕腿"
+            f"（`n_legs=3`），之後才 6 條——長 horizon（尤其 r+40）的樣本多落在"
+            f"斷點前，量到的是 3 腿 peer-only 版本、非 6 腿 composite；~2027 重跑時"
+            f"每週皆 `n_legs=6`，此混淆屬本輪特有。母體＝全市場橫斷面（非觀察清單）。"
+        )
     return lines
 
 
@@ -232,8 +247,10 @@ def _format_report(panel: pl.DataFrame, horizons: tuple[int, ...],
     L.append("## P0　per-次產業 gap% 基準分布（純描述、無假設檢定）")
     L.append("")
     L.append("> 直接回應「不同產業具備不同標準」：各次產業 `val_gap_pct_composite` "
-             "的 mean／median／正值比（win_rate＝gap>0 佔比）。**這是分布描述、"
-             "不是預測力證據。**")
+             "的 mean／median／正值比（win_rate＝gap>0 佔比）。**點估計（median）"
+             "可引用；CI 欄未做日期叢集校正**——`category_lift_table` 把同一檔的 "
+             "~12 週近重複快照當獨立抽樣，有效樣本 ≈ 檔數不是 stock-week 數"
+             "（如壽險 n=36＝3 檔×12 週），CI 欄不可當推論讀。")
     L.append("")
     p0 = category_lift_table(
         panel.filter(pl.col("sub_industry").is_not_null()),
@@ -242,7 +259,7 @@ def _format_report(panel: pl.DataFrame, horizons: tuple[int, ...],
     if p0.is_empty():
         L.append("（無次產業標籤，跳過）")
     else:
-        L.append("| 次產業 | n(stock-week) | mean gap% | CI95 | median gap% | gap>0 佔比 |")
+        L.append("| 次產業 | n(stock-week) | mean gap% | CI95(未校正) | median gap% | gap>0 佔比 |")
         L.append("|---|---|---|---|---|---|")
         for r in p0.iter_rows(named=True):
             L.append(
@@ -271,7 +288,9 @@ def _format_report(panel: pl.DataFrame, horizons: tuple[int, ...],
         )
     L.append("")
     L.append("> Fisher CI 在週頻快照×前瞻窗重疊下偏窄（docs/22 §7.2）——以 bootstrap／"
-             "非重疊 CI 為準；兩者在 `n_dates<10` 時空白。")
+             "非重疊 CI 為準；兩者在 `n_dates<10` 時空白。**見覆蓋率段的構造性斷點："
+             "r+40 全部、r+20 多數樣本落在 3 腿 peer-only 版本，那兩列不可當 6 腿 "
+             "composite 的長 horizon 證據；只有 r+10 較能代表 6 腿版本。**")
     L.append("")
     L.append("## P2　控制價格動能後的殘差 IC（同義反覆守門）")
     L.append("")

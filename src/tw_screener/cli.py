@@ -1597,7 +1597,8 @@ def backtest_valuation_gap_read_cmd(
 ) -> None:
     """docs/31 §20.11：`val_gap_pct_composite`（估值回歸參考價綜合版）效度初測
     P0–P5——重建 `valuation_ratios` ~12 週歷史面板＋fresh 日線 forward alpha。
-    **非正式裁決**：r+20 可判 ISO 週數 ≈4、r+40=0，CI 在樣本不足時空白，如實印出。
+    **非正式裁決**：可判 ISO 週數 r+10=9／r+20=8／r+40=3（且長 horizon 多落在
+    2026-07-03 前的 3 腿版本），全 < bootstrap T≥10 下限、CI 空白，如實印出。
     輸出 research/valuation_gap/read_<今日>.md。"""
     from tw_screener.backtest.valuation_gap_read import run_valuation_gap_read
 
