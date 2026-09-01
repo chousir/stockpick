@@ -413,6 +413,15 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     snapshot_gap_td: 5             # 週頻快照間隔（交易日，近似值）→ CI block長度換算用
     n_boot: 1000
     output_dir: research/g3_grid
+  target_price:              # docs/31 §20.13 Phase 1：實驗性機械式「目標價」校準回測（make 無自動掛，手動 backtest target-price-read）
+    pos_edges: [-8.0, 8.0]        # ma60_dist_pct 切 3 bin：貼低 / 中段 / 延伸（事前鎖定，跑完不得回調）
+    rs_edges: [-5.0, 5.0]          # rs_subind pp 切 3 bin：族群內落後 / 均勢 / 領先
+    rs_window: 20                  # rs_subind 回看窗（同 laggard_grid / g3_grid 口徑）
+    min_rows_per_day: 900          # 該交易日普通股列數下限——低於此＝部分抓取日、整日剔除
+    market_history_days: 1300      # 日線窗（need 2022 起 + 120td forward + warmup；約 5 年）
+    n_boot: 1000                   # pooled-null moving-block bootstrap 重抽次數
+    seed: 42                       # bootstrap 亂數種子（deterministic）
+    output_dir: research/target_price
   l6_g4_watch:               # docs/31 §9 item4：L6/G4 前瞻累積軌每週快照（手動指令，需每週跑）
     l6_yoy_min: 20.0              # docs/31 §5.2：月營收累計YoY≥20
     l6_pe_max: 25.0                # docs/31 §5.2：PE≤25

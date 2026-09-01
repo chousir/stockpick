@@ -1591,6 +1591,21 @@ def backtest_redesign_prelim_read_cmd(
     console.print(report)
 
 
+@backtest_app.command("target-price-read")
+def backtest_target_price_read_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """docs/31 §20.13 Phase 1：實驗性機械式「目標價」校準回測——fit 窗（2022-01~
+    2024-12，全交易日）建位階×族群內強弱 9 格 forward 報酬分位查表，test 窗（2025-01~，
+    週頻）投射並比對。主問題＝profile 分桶有沒有帶超出全市場基準的資訊，非「目標價
+    準不準」（同義反覆）。事前預期：僅 r+20 可裁決、r+60/r+120 樣本結構性不足。
+    輸出 research/target_price/calibration_<date>.md。"""
+    from tw_screener.backtest.target_price_read import run_target_price_read
+
+    report = run_target_price_read(settings)
+    console.print(report)
+
+
 @backtest_app.command("official-sector-watch")
 def backtest_official_sector_watch_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),

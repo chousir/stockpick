@@ -2072,6 +2072,70 @@ G1——F2' 確實帶進 G5 的「val_pctile≤40」門檻擋掉的一批合理�
 的子集。`strategy` 標籤顯示 `F2`（非 Goodinfo `F`）。`fundamentals` 僅 2 季 →
 f2 清單週間幾乎不動，同 G1/G5。
 
+### 20.13 實驗性機械式「目標價」——Phase 1 校準回測（2026-09-01）
+
+> **編號說明**：§20.11/§20.12（估值缺口綜合版效度研究）在分支
+> `feat/valuation-gap-efficacy-research`，尚未 merge main——建議先 merge 該分支。
+> 本節的「同義反覆」論證與 §20.11 對「gap% 變化率」的 明文不測 同一邏輯。
+
+**使用者要求**：「能不能再做一個目標價（不要管限制）？…假設你在某些時空下（歷史
+數據）透過目前有的數據（自己排列組合長或短期或哪幾項）配合自己知識跟搜索到的
+資料，可以預測一個目標價嗎？他可信度高嗎？…由於目標價需要深度自我判斷及分析，
+請僅以核心跟機會股票做這一項。」六項拍板：①放 pick.md `picks:begin/end` 外的實驗
+區塊、不進正式結論 ②web search 可餵前瞻 EPS/財測/產業展望、不抄分析師目標價
+③先回測機械式程序、再產本週 ④單一數字 + 信賴度評級 + 時間窗 + 一句依據 ⑤實驗
+區塊可用「目標價」字眼（鐵律 2 於此區塊豁免，非放寬）⑥機械版當主（可回測）、
+search-augmented 並列標「不可回測」。
+
+**探索結論**：基本面型目標價本地算不出（`fundamentals` 僅 2 季、無 TTM/前瞻 EPS；
+前瞻 EPS 已拒 3 次見 §15/§18、DCF 已拒 2 次見 §14.2/§18）。故機械版只能是
+**「歷史類比分布」**：profile（位階 × 族群內相對強弱）相似的股票，過去 N 個交易日
+報酬的歷史分位數——天氣預報式機率陳述，**不是基本面估值、不是擇時訊號**。
+
+**Phase 1 只做校準回測**（Phase 2 本週 production 待裁決後另開，見尾段）。
+
+#### pre-registration（動工前鎖定）
+
+程式：`backtest/target_price_panel.py` + `target_price_read.py`，CLI
+`backtest target-price-read`、`make target-price-read`。
+
+- **cell**：`ma60_dist_pct`（位階，切點 −8/+8）× `rs_subind`（族群內 20 日相對強弱，
+  切點 −5/+5 pp）＝ **9 格 + `_pooled`**（全市場、無 cell）。regime 不進 cell key、
+  當切片（比照 `laggard_cell_grid` / `g3_cell_grid` 的 `_by_regime`）。只 2 軸＝避免
+  動能類指標共線、避免小格。切點寫死 `config/settings.yaml`，**跑完不得回調**。
+- **fit 窗 2022-01~2024-12**（全交易日 anchor，**尾端再 embargo 掉 max(horizon)+5
+  ≈125 交易日**——否則 2024 下半年 anchor 的 r120 標籤會落進 test 窗、抬高 cell 版
+  表觀技能）建 9 格 + `_pooled` 的 r20/r60/r120 分位查表；**test 窗 2025-01~資料末**
+  （週頻 anchor，降前瞻窗重疊）投射 `close_t×(1+fit_P_k/100)` 並比對實際 r{h}。
+  fit/test 依日期硬切 + embargo、test 完全不參與建桶（`_assert_no_leak` 斷言）。
+- **價格腿 only**（forward 報酬不加回股利）：fit/test 雙邊同口徑、系統性偏誤抵銷；
+  惟 6 個月窗跨台股 7–8 月除息季 → 高殖利率股的機械數字**單向偏保守**（如實揭露）。
+- **主問題（#1，其餘描述性、非裁決）**：profile 分桶有沒有帶「超出 `_pooled` 基準」
+  的資訊？——**不是「目標價準不準」**：`target = close×(1+P60)` 使「達標」≡「r{h}>
+  P60」，是所 fit 分布的重述（§23.5 base-rate 天花板邏輯 / §20.11 同義反覆邏輯）。
+  - **#1(a) 條件校準**：fit 各 cell 依 P60 排序 vs test 該 cell 實際 r{h} 均值，
+    跨 9 cell Spearman rho（9 點無解析 CI、僅方向性）。
+  - **#1(b) pooled null**：test 每列 `err_cell=|realized−fit_cell_P50|`、
+    `err_pooled=|realized−fit_pooled_P50|`；配對差逐 test anchor date 取均值成序列，
+    `moving_block_bootstrap_ci`（block=ceil((h+1)/5)）。CI 整段<0 才算 cell 版顯著較準。
+- **裁決句（跑前寫定）**：
+  - #1(a) rho≥0.5 ∧ #1(b) CI 整段<0 → 「profile 分桶帶額外資訊，機械式目標價可作
+    r+20、高 tier 的實驗性參考」。
+  - #1(b) CI 跨 0 / 無法給（T<10 或 n_blocks<8）→ 「**profile 分桶無鑑別力/樣本
+    不足，只報全市場 regime-conditional 區間、不給 per-stock 單一數字**」。
+  - #1(a) rho≤−0.3 → 「cell 排序反轉，機械式目標價不可用」。
+  - 區間寬度 median >±25pp（r+20）→ 「區間過寬，即使有 cell 資訊也只報區間」。
+- **正式裁決重跑門檻**：r+20 的 #1(b) `n_dates≥10 且 n_blocks≥8`（本輪已達）＋
+  未來每季重跑觀察 rho / CI 是否翻正；**r+60/r+120 結構性遞延**（見覆蓋率）。
+- **明文不測**：不動態調 cell 切點直到校準變好（過擬合）；不做 <20 交易日 horizon；
+  不把方向命中率當顯著性證據（同義反覆）。
+
+#### 結果
+
+＿＿待跑（`backtest target-price-read`，下一 commit 補實測數字 + 結論 + Phase 2 定位）。
+事前預期：資料止於 2026-08 → r60/r120 test 獨立塊數個位數、結構性無裁決；只有 r20
+有正式裁決，而 r20 正是誠實定位裡「最接近雜訊」的 horizon——大概率落「無鑑別力」。
+
 ## 21. 減量研究計畫 Part 1：逐式目的定義＋參數可行性分級（2026-08-24）
 
 使用者要求「先定義好每個策略目的以及它可以使用那些參數來達到，再來看是不是
