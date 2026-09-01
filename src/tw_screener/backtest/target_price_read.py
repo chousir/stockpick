@@ -273,7 +273,7 @@ def pooled_null_ci(
         elif ci_lo > 0:
             verdict = "CI 整段 >0——cell 版顯著較差（反例）"
         else:
-            verdict = "CI 跨 0——profile 分桶無鑑別力，只報全市場區間"
+            verdict = "CI 跨 0——cell 版 P50 不比全市場 P50 準，只報全市場區間"
         rows.append(
             {
                 "horizon": h,
@@ -591,10 +591,21 @@ def _overall_verdict(
         if width is not None and width > 25:
             base += f"（惟區間寬度 {width:+.1f}pp>±25pp，投射區間仍須連同標示寬度呈現。）"
         return base
+    ordinal = rho is not None and rho >= 0.5
+    lead = (
+        f"cell 排序單調（rho={_f(rho)}，9 點無 CI、僅方向性）但 pooled null CI="
+        if ordinal
+        else f"條件校準未過關（rho={_f(rho)}、pooled null CI="
+    )
+    tail = (
+        "分桶帶方向性排序資訊、但不足以縮小投射誤差（cell 版 P50 vs "
+        "全市場 P50 的誤差差 CI 跨 0）"
+        if ordinal
+        else "**profile 分桶無鑑別力**"
+    )
     return (
-        f"- r+20 條件校準未過關（rho={_f(rho)}、pooled null CI="
-        f"[{_f(ci_lo)}, {_f(ci_hi)}] 跨/未達 0）——**profile 分桶無鑑別力**，"
-        "機械式目標價只報全市場 regime-conditional 區間、不給 per-stock 單一數字。"
+        f"- r+20 {lead}[{_f(ci_lo)}, {_f(ci_hi)}] 跨 0——{tail}，"
+        "機械式目標價**只報全市場 regime-conditional 區間、不給 per-stock 單一數字**。"
     )
 
 
