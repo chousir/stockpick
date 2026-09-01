@@ -102,7 +102,7 @@ macro:  ## docs/25 v2 總經燈號：抓 FRED（快取24h）→算 BAA10Y 主訊
 cp-value-candidates:  ## B3 個股 CP 候選清單（生產軌，產 reports/週次/cp_candidates.md+csv；docs/13）
 	uv run tw-screener cp candidates
 
-group:  ## 跑族群分析，產出 group_analysis.md（docs/31 §13 官方族群前5＋§4/§7.2/§9/§11 G1/G2/G4/G5/L6/F2' 揭露欄前瞻累積軌皆已內含）
+group:  ## 跑族群分析，產出 group_analysis.md（docs/31 §13 官方族群前5＋§4/§7.2/§9/§11 G1/G2/G4/G5/L6/F2' 揭露欄前瞻累積軌＋§20.11 估值缺口綜合版效度 ledger 皆已內含）
 	uv run tw-screener analysis group
 
 l6-g4-watch:  ## docs/31 §9 L6/G4 前瞻累積軌快照（week 已內含，可單獨重跑；不做裁決）

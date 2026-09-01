@@ -670,6 +670,29 @@ def run_group_analysis(settings: Path) -> None:
     canonical_rows = {row["stock_id"]: row for row in cand_rows}
     n_cand = len(cand_rows)
 
+    # docs/31 §20.11：估值缺口綜合版效度研究的獨立薄 ledger——把本週 §20.9 實際
+    # 印出的 6 腿 + composite 逐週累積（勿-prune），供 ~2027 正式裁決。純記錄、
+    # 不進篩選/排序；獨立於 g1_g2_g5_watch ledger（§20.3/§20.4 先例，不中途改其定義）。
+    try:
+        from tw_screener.backtest.valuation_gap_panel import (
+            build_ledger_snapshot,
+            upsert_valuation_gap_ledger,
+        )
+
+        vg_data_date = client.latest_trading_date()
+        if vg_data_date is not None and cand_rows:
+            vg_ledger_path = Path(
+                cfg.get("backtest", {}).get("valuation_gap", {}).get(
+                    "ledger_path", "research/valuation_gap/ledger.csv"
+                )
+            )
+            upsert_valuation_gap_ledger(
+                vg_ledger_path,
+                build_ledger_snapshot(cand_rows, week_tag, vg_data_date),
+            )
+    except Exception as e:  # noqa: BLE001 — 純記錄段，壞掉不擋 group 報告主流程
+        console.print(f"[yellow]  估值缺口 ledger upsert 失敗，略過：{e}[/yellow]")
+
     console.print(f"[green]報告輸出：{output_path}[/green]")
     console.print(f"  全候選股完整欄位 CSV：{csv_path}（{n_cand} 檔，供 ProPicks 全宇宙挑股）")
 

@@ -1903,6 +1903,11 @@ G1/G5是否也該加市值下限，本輪未動，候選數本身尚屬合理（
   〈§22.16 三候選、§22.18 兩 null〉；**完全沒有接進任何生產CSV**，docs/11已有
   獨立警示框）；Part 4（§23宏觀grid search，160組0候選，null結果，已收官）。
   兩者皆為已結案／遞延的研究產出，不是待辦事項。
+- **估值缺口綜合版（§20.9）效度研究**（2026-08-31，§20.11 pre-registration＋§20.12
+  低樣本初測）：重建工具 + P0–P5 就位、`research/valuation_gap/ledger.csv` 隨
+  `make week` 累積；`n_dates` 全 <10 → 無正式裁決，遞延約 2027（重跑門檻寫死於
+  §20.11）。初步跡象：composite 弱正向、控動能後未歸零、自身腿 > 同儕腿、
+  per-產業基準差異大。**不進 pick.md 核心層**，綜合缺口% 維持相對貴賤參考定位。
 - **已結案的獨立研究線（負結果）**：§20.13 實驗性機械式「目標價」Phase 1 校準回測
   （2026-09-01）——profile（位階×族群內相對強弱 9 格）歷史類比分布：r+20 cell 排序
   單調（rho +0.78）但相對 `_pooled` 全市場基準**不能縮小投射誤差**（pooled null CI
@@ -2024,6 +2029,14 @@ playbook/60已同步（黃區編輯，2026-08-29 backup）。
 2330綜合版+3.2%（6條）vs 之前單靠自身PE腿的+13.8%——中位數確實把單一線索
 的波動壓下來了，這是設計預期效果、非迴歸。
 
+> **2026-08-31 附記——效度尚未驗證**：`val_gap_pct_composite` 是否對前瞻報酬帶
+> 預測資訊、怎麼讀才對，**從未回測過**。使用者要求驗證＋切分產業＋研究「起漲階段
+> gap% 由大變小是否代表續漲」。→ §20.11 pre-registration（工具 + 判準事前寫死）、
+> §20.12 低樣本初測結果。**現況：綜合缺口% 維持「相對貴賤的機械式參考」定位，
+> 不得當擇時訊號讀，正式裁決遞延到約 2027**（`valuation_ratios` 快取深度使然）。
+> 已知的四個設計疑點（6 腿性質不一致取中位數、自身歷史僅 ~12 週、同儕分組粗、
+> 未驗證）記在 §20.11。
+
 ### 20.10 F2' 成長優質股候選生成（2026-08-31，使用者拍板）
 
 使用者問「docs/31 下一項可執行的任務」。逐節盤點後：§20.5 把未實作項目分類並各自
@@ -2077,11 +2090,168 @@ G1——F2' 確實帶進 G5 的「val_pctile≤40」門檻擋掉的一批合理�
 的子集。`strategy` 標籤顯示 `F2`（非 Goodinfo `F`）。`fundamentals` 僅 2 季 →
 f2 清單週間幾乎不動，同 G1/G5。
 
+### 20.11 `val_gap_pct_composite` 效度研究 pre-registration（2026-08-31，執行前寫死）
+
+**定位**：使用者要求驗證 §20.9 綜合缺口% 有沒有預測力、怎麼讀才對、切分產業。
+比照維度3（§22.19）——`valuation_ratios` 快取僅 ISO 週去重 **12 週**、6 腿綜合版
+最早存在於 2026-07-03、forward-return 截斷使可判 ISO 週數 **r+10=9／r+20=8／
+r+40=3**（實測，全 < `moving_block_bootstrap_ci` 的 `T≥10` 下限）→ 本輪＝
+「建重建工具 + 鎖死判準 + 印低樣本初測」，**正式四步裁決遞延到約 2027**。
+**不消耗 §22 的 14 測試預算**（precedent §23.4：宏觀 grid 亦不計入，「性質不同」
+——本線用 `valuation_ratios`/`fundamentals`、非 `panel.parquet` 動能/籌碼），
+但自帶固定 5 格子題 + 全部報告 + program-level 停損。
+
+**現行算法的四個疑點（研究要回答的）**：①6 腿性質不一致取中位數（2330 例：
+同儕 PB −66.6%／同儕殖利率 −45.5% 是台積電結構性品質溢價、非低估）②「自身
+歷史」實為「過去 ~12 週」③同儕分組粗（46 手標次產業 8 個 <5 檔，PE 有 10/46
+過不了 `min_peers=5`，退 38 類粗分類）——**「分更細」不是解法**，會讓更多股票
+落入粗分類兜底，真正的槓桿是離群腿處理 + per-產業校準 ④從未驗證。
+
+**主問題**：`val_gap_pct_composite` 在時點 `t` 是否對 `t+h` 的 forward alpha 帶
+橫斷面預測資訊，**且控制價格動能後仍有**。
+
+**訊號側欄位自我檢查**（§22.3.2）：訊號用 `val_gap_pct_*`（快照當日估值，落後）、
+`sub_industry`（靜態）、`ma60_dist_pct`（同期）、`trail_r20`（**自建 trailing 20
+交易日報酬，不用 `panel.py` 的前瞻 `r{h}`——那會把結果灌進訊號側，§22.2 的
+look-ahead bug**）。`alpha{h}` 只當結果側。✅
+
+**覆蓋率／母體聲明**（§22.3.2 要求，實測見 §20.12，此處先寫死已知邊界）：
+①母體＝全市場橫斷面（非 `watchlist.csv`——無日期欄、選擇偏誤）②`valuation_ratios`
+ISO 週去重 12 週③**綜合版構造在 2026-07-03 由 3 腿（純同儕）跳到 6 腿**（自身腿
+需 `min_snapshots=8`）——斷點前後的 composite 不是同一個東西，跨 horizon 讀值
+要分開看，長 horizon（r+40 全部、r+20 多數）落在斷點前④`regime_labels.parquet`
+需 `make regime-history` 更新、目前止於 2026-07-31，超出的週 regime 欄 null、
+P3 regime 切片會少那幾週⑤缺值＝未命中，不丟列。
+
+**重建工具**（`backtest/valuation_gap_panel.py`）：逐 ISO 週回放 12 個
+`valuation_ratios` 快照 → 既有純函式（`build_valuation`／`compute_valuation_legs`／
+`compute_self_history_median{,_pb,_yield}`／`implied_price_*`／
+`compute_composite_valuation_gap`）重算 6 腿 + composite；自身腿 point-in-time
+（`history.filter(date ≤ t)`）；**ISO 週去重**（27→12，防 §22.9 的「數快照數」
+反保守錯）；併 fresh `build_price_panel(load_market_history(...))` 的 `alpha{h}`
+（同 `redesign_prelim_read` 慣例，非 stale 的 `research/panel/panel.parquet`）。
+**正確性硬 gate**：重建面板的 2026-W35 列 `val_gap_pct_composite` 必須與
+`reports/2026-W35/candidates_enriched.csv` 生產值逐檔一致（不符＝先修工具，
+`tests/backtest/test_valuation_gap_panel.py::test_w35_anchor_matches_production`）。
+
+**固定 5 格子題（全部報告，不得事後加格）**：
+
+| 格 | 內容 | 工具 |
+|---|---|---|
+| **P0** | per-次產業 gap% 基準分布（各產業 composite 的 median／CI／正值比）——**純描述、無假設檢定**，回答「不同產業不同標準」 | `rotation_efficacy.category_lift_table` |
+| **P1** | `val_gap_pct_composite` vs `alpha{10,20,40}` pooled Spearman IC + Fisher CI + 非重疊子樣本 CI + moving-block bootstrap | `factor_lab.evaluate` |
+| **P2** | 同 P1 但 `controls=[ma60_dist_pct, trail_r20]`（**同義反覆守門**）——P2 殘差 IC 的 CI 跨 0 而 P1 不跨 → composite 只是動能再表述 | `factor_lab.residual_ic` |
+| **P3** | `cheap`（gap% 最高 20%）／`rich`（最低 20%）兩尾 cell，四步（CI95→regime→前後半→walk-forward） | `redesign_dimension_grid.valuation_gap_grid` 系列（新增 `build_valuation_gap_cells`；**不用** `redesign_prelim_read.compute_prelim_forward_alpha`——它對 ledger cohort 去均值會稀釋估值訊號） |
+| **P4** | 6 腿各自對 `alpha{h}` 的 IC（**描述性佐證，非 6 個獨立假設**，比照 §22.19 對 `big_holder_1000_pct` 的處置） | `factor_lab` IC only |
+| **P5** | per-次產業 P1（≥40 stock-week 的次產業內分別算 IC）——關係跨產業一致 or 變號/變幅 | grouped Spearman |
+
+**明文不測**（繞開陷阱）：「gap% 隨時間變化率預測續漲」——`gap = median/PE − 1`，
+上漲時 PE 擴張 → gap 機械式縮小，近乎同義反覆。留待 P1–P3 確認水準有訊號後
+另立 pre-registration（控制水準本身）。
+
+**裁決句（跑之前寫定，比照 §23.4 停損句法，跑完不論結果照這段寫）**：
+- **P2 殘差 IC CI95 排除 0 ∧ ≥2 regime 同向 ∧ 前後半同向** → 「composite 帶
+  獨立於動能的預測資訊，使用指引依正負號/幅度給出」。
+- **P2 CI 跨 0（而 P1 顯著）** → 「composite ≈ 動能代理；維持描述性估值脈絡欄，
+  **不得當擇時訊號讀**」。（依先驗最可能的結果。）
+- **P2 CI 排除 0 但方向相反（便宜→跑輸）** → 作為多頭訊號已否證。
+- 達標門檻未到前：一律「初測、無正式裁決」。
+
+**正式裁決重跑門檻（數值寫死）**：P2 焦點格 composite×`r+20` 的 `n_dates ≥ 10`
+**且** regime 切片非全 `thin`（`REGIME_MIN_N=30`）→ 用同一支
+`backtest valuation-gap-read` 重跑、把讀值升級進 §20.12 補正式四步裁決。實估
+約 2027（`valuation_ratios` 週頻累積 + forward-return 截斷）。
+
+**每週累積**：`research/valuation_gap/ledger.csv`（獨立薄 ledger，從 `group_runner`
+§20.9 計算區塊 upsert，**不動 `g1_g2_g5_watch` 的 `LEDGER_SCHEMA`**——§20.3/§20.4
+兩度拒絕中途改 ledger 定義）；掛進 `make week`。
+
+**本輪刻意不做**：改 `compute_composite_valuation_gap` 合成邏輯（等 P4）；per-產業
+門檻基礎設施（repo 目前無，要 P5 結果才知值不值得建）；動 `f_value_rebound`/
+G5/`build_valuation` 既有行為；把研究結論接進 candidates_enriched/pick.md 核心層。
+
+### 20.12 `val_gap_pct_composite` 效度初測結果（2026-08-31 已執行——低樣本，無正式裁決）
+
+`uv run tw-screener backtest valuation-gap-read` 實跑（非模擬），面板 12 ISO 週
+（2026-06-12 ~ 08-28）、每週 ~1950 檔。**W35 anchor：463/463 檔重建與生產
+`candidates_enriched.csv` 逐檔一致**（工具正確性 gate 通過；另補 1 檔 5903，
+生產當週因法人/產業別 fetch 短暫缺漏留 null、重建正確算出）。
+
+**母體＝全市場 ~1950 檔（非觀察清單）**：使用者原話是「針對觀察清單（多檔）」，
+本輪刻意改用全市場——`watchlist/watchlist.csv` 無日期欄、無 point-in-time
+成員資格、且 43 檔的選擇偏誤會污染 IC。全市場橫斷面是更乾淨的效度母體。
+
+**覆蓋率（實測，寫死）**：可判 ISO 週數 **r+10=9／r+20=8／r+40=3**——全部
+< `T≥10`，CI 一律空白。
+- **構造性斷點（重要，影響跨 horizon 讀法）**：6 腿綜合版存在於 ≥2026-07-03
+  （9 週），2026-07-03 前只有 3 條同儕腿（`n_legs=3`）。→ **`r+40` 的
+  P1/P2 讀值（n=1626＝778+612+236）100% 來自斷點前的 3 腿版本**；`r+20`
+  約 59%（5730/9618 列）來自斷點前。**這兩個 horizon 量到的不是 pick.md 印的
+  6 腿數字，是 3 腿 peer-only 版本**（P4 顯示 peer 腿 IC ~+0.04 vs self 腿
+  ~+0.20——兩種構造帶的訊號量級不同）。到 ~2027 重跑時每週都是 `n_legs=6`，
+  此混淆屬本輪特有。**只有 `r+10`（9 週裡 6 週是 6 腿）較能代表 6 腿版本。**
+- `regime_labels.parquet` 止於 2026-07-31（需 `make regime-history` 更新）→
+  P3 regime 切片靜默少掉 08-07 那週（r+10 的第 9 週），故 P3 regime 的
+  n_dates 比 P1 少 1。
+
+**P0（描述性——點估計可引用；CI 未做日期叢集校正，有效樣本≈檔數不是
+stock-week 數）**：全體 composite mean +12.3%／median +4.9%／gap>0 佔比 61%
+（分布右偏，長尾在正側）。**per-次產業差異大且係結構性**：
+PCB median +11.3%／設備或廠務工程 +9.1%／IC生產製造 +8.7% vs 壽險 −8.9%／
+遊戲軟體 −17.6%／組裝代工 −1.7%。壽險 gap>0 僅 8%、票券 100%——**證實
+「不同產業不同標準」，用單一 gap% 門檻跨產業比較會系統性 favor 高帳面折價
+的重資產/低成長產業**。（`category_lift_table` 的 bootstrap CI 把同一檔的
+~12 週近重複快照當獨立抽樣——壽險 n=36＝3 檔×12 週、票券 n=12＝1 檔，
+CI 欄不可當推論讀。）
+
+**P1（初測，無 CI）**：pooled IC r+10/20/40 ≈ **+0.08**（Fisher CI 正、但週頻
+重疊下偏窄不可信；非重疊子樣本 IC +0.05/+0.07/+0.04，r+40 CI 跨 0）。方向
+一致為正（便宜→前瞻報酬高），但 bootstrap CI 全空白。**r+20/r+40 見上方
+構造性斷點——那兩個數字主要是 3 腿 peer-only 版本，不可直接當 6 腿 composite
+的長 horizon 證據。**
+
+**P2（同義反覆守門，初測無 CI）**：控制 `ma60_dist_pct`+`trail_r20` 後殘差
+IC r+10/20/40 = **+0.038／+0.039／+0.049**——約 P1 的一半，**方向仍為正、
+未歸零**。近似 Fisher CI 未跨 0（但自由度高估、樣本重疊，不可當顯著）。
+→ 初步跡象：composite 帶「一部分」獨立於動能的資訊，但效應弱、無 CI，
+**不足以觸發任何裁決句**。
+
+**P3（cheap vs rich，初測無 CI）**：cheap 前瞻 alpha > rich，r+10 delta_mean
++0.73% vs −0.72%、r+20 +0.61% vs −0.58%，方向一致。**但前後半段極不穩**
+（r+20 cheap 後半 +6.75%、rich 後半 +8.18%——效應集中在單一 walk-forward
+段，正是 §13.4 記載的陷阱）。regime 切片：cheap 在進攻/中性為正、防禦翻負
+（r+10 防禦 −0.73%），但每格 n_dates ≤3、全 `thin`。walk-forward：ISO 週數
+不足以切，`walk_forward_splits` 回空。
+
+**P4（逐腿 IC，描述性佐證）**：**自身歷史腿遠比同儕腿帶方向**——
+`val_gap_pct_self` +0.20／`val_gap_pct_pb_self` +0.21／`val_gap_pct_yield_self`
++0.21（r+10，n_dates=6）vs 同儕腿 `val_gap_pct_peer` +0.04／`pb_peer` +0.05／
+`yield_peer` +0.02。初步指向「相對自己近期歷史便宜」比「相對同儕便宜」更有
+資訊——但自身腿 n_dates 僅 5-6，且這正是 §20.9 疑點①/③（同儕腿被結構溢價
+污染）的方向性佐證，**不升格成裁決**。
+
+**P5（per-次產業 IC，初測無 CI）**：r+10 達 40 stock-week 門檻的 34 個次產業裡
+**IC>0 有 30 個、IC<0 有 4 個**（工業電腦 −0.01／系統整合 −0.03／證券 −0.11／
+其他光電 −0.12）——方向大致一致（少數翻負），但**幅度差 10 倍**（機殼 +0.50、
+軟體設計 +0.37、被動元件 +0.32 vs PC/NB/平板 +0.00、手機相關 +0.03）。
+→ 支持「不同產業訊號強度不同」，但目前資料不支持「不同產業訊號變號」的強
+版本。
+
+**結論（照 §20.11 裁決句）**：`n_dates` 全部 <10，**無正式裁決**。方向性初步
+跡象＝「composite 弱正向、控制動能後未歸零、自身腿 > 同儕腿、per-產業一致
+偏正但強度不一」——全部僅供 ~2027 達標後對照，**本輪不升級進 pick.md，
+綜合缺口% 維持「相對貴賤機械式參考」定位**。工具就位、`ledger.csv` 隨
+`make week` 累積、重跑門檻寫死於 §20.11。原始讀值：
+`research/valuation_gap/read_<日期>.md`（gitignored）。
+
+**docs/11 判讀註同步**：決策卡估值缺口% 欄加註「效度未驗證（§20.11/§20.12），
+係相對貴賤參考非擇時訊號；跨產業比較時留意產業基準差異大（P0），大型
+半導體等同儕腿受結構溢價污染時看自身腿為主（P4 初步）」。
+
 ### 20.13 實驗性機械式「目標價」——Phase 1 校準回測（2026-09-01）
 
-> **編號說明**：§20.11/§20.12（估值缺口綜合版效度研究）在分支
-> `feat/valuation-gap-efficacy-research`，尚未 merge main——建議先 merge 該分支。
-> 本節的「同義反覆」論證與 §20.11 對「gap% 變化率」的 明文不測 同一邏輯。
+> 本節的「同義反覆」論證與 §20.11 對「gap% 變化率」的 明文不測 同一邏輯——
+> `target = close×(1+P60)` 使「達標」≡「forward 報酬 > P60」，是所 fit 分布的重述。
 
 **使用者要求**：「能不能再做一個目標價（不要管限制）？…假設你在某些時空下（歷史
 數據）透過目前有的數據（自己排列組合長或短期或哪幾項）配合自己知識跟搜索到的
