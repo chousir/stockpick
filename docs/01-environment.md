@@ -73,9 +73,9 @@ FINMIND_TOKEN=
 make init              # 初始化資料夾
 make sync              # uv sync 裝依賴
 make test              # 跑測試
-make screen-all GROUP=defg  # 跑指定組策略選股（主流程 D/E/F/G）
+make screen-all GROUP=defg  # 手動跑 Goodinfo D/E/F/G（2026-08-28 起不再被 week 自動呼叫，docs/31 §20.6）
 make group             # 族群分析
-make week GROUP=defg   # 完整週流程（fetch → screen → 補歷史 → group）
+make week GROUP=defg   # 完整週流程（fetch → screen-f-local + screen-redesign-local → 補歷史 → group）
 make clean-cache       # 清掉超過 7 天的快取
 ```
 

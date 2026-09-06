@@ -42,7 +42,7 @@ build-themes:    ## 爬 Yahoo 概念股 merge 進 config/concepts.yaml（DRY=1 �
 
 # ─── 選股 ───────────────────────────────────────
 screen STRATEGY=d_quality_leader: ## 跑單一策略
-screen-all GROUP=defg:            ## 跑指定組策略（defg 現行唯一主流程；abc/def 已退役）
+screen-all GROUP=defg:            ## 手動跑 Goodinfo D/E/F/G（2026-08-28 起不再被 week 自動呼叫，docs/31 §20.6）
 screen-dry STRATEGY=…:            ## 預演（不打網，只組 URL；＝ screen run --dry-run）
 doctor:          ## Goodinfo 健康檢查（被擋/改版→exit 1；規劃書 02 D1）
 
@@ -81,8 +81,8 @@ dash-test:       ## 後端 webapp 路由 pytest
 ① fetch-twse                    日線/法人/月營收/產業別/官方估值比 增量入快取
 ② fetch-institutional-history   回補近 20 日上市＋上櫃法人（斷檔自動補齊）
 ③ fetch-tdcc                    集保大戶持股比（容錯：TDCC 異常不擋，大戶欄退化 null）
-④ doctor                        Goodinfo 健康檢查（被擋/改版早停，不讓 screen-all 白跑）
-⑤ screen-all GROUP=defg         D/E/F/G 策略篩選 → screen_result_*.csv
+④ doctor                        Goodinfo 健康檢查（只診斷不擋；2026-08-28 起預設流程不呼叫 Goodinfo）
+⑤ screen-f-local + screen-redesign-local   F（本地等價，source=local）＋ F2'/G1/G2/G4/G5/L6（本地未驗證式）→ screen_result_*.csv。舊 Goodinfo D/E/G 軟退場（docs/31 §20.6）
 ⑥ fetch-candidates-history      對命中股聯集補抓 13 個月日線
 ⑦ rotation                      次產業輪動（容錯：失敗不擋主流程）
 ⑧ cp-value-candidates           個股 CP 補漲候選（容錯：失敗不擋）

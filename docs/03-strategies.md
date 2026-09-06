@@ -1,9 +1,17 @@
 # 03 — 策略定義
 
-> **現行主流程：`make week GROUP=defg`（D/E/F/G ProPicks 復刻組，見 Part B）。**
-> 以下 Part A 的「經典三角」A/B/C 為**早期實驗、已退役**（規劃書 04 A4）：YAML 檔已移至
+> ⚠️ **2026-08-28 更新（docs/31 §20.6）**：舊 Goodinfo 四式 **D/E/G 已軟退場**——
+> D（近四季 ROE＋連續配息 8 年）、E/G（連續季數-單季稅後淨利）結構性無官方 API 歷史
+> 查詢、永遠無法本地重建。`make week` 預設流程改跑 `screen-f-local`（F 官方 API 等價
+> 定義本地算）＋ `screen-redesign-local`（本地新設計式 F2'/G1/G2/G4/G5/L6，docs/31
+> §4/§7.2，`source=local_unvalidated`）。**Part B 以下的 D/E/G 定義只留作歷史參照**
+> （`config/strategies/{d,e,g}_*.yaml` 未刪，手動 `make screen-all GROUP=defg` /
+> `make screen STRATEGY=xxx` 不變）；G2 是 D 的正式本地接班（§20.1）。現行本地式的
+> 完整清單見 README「策略體系」與 docs/11 策略代號框。
+>
+> 以下 Part A 的「經典三角」A/B/C 為**更早的實驗、已退役**（規劃書 04 A4）：YAML 檔已移至
 > `config/strategies/archive/`，`GROUP=abc` **不再可跑**（會明確報退役）。本段僅留作
-> 歷史紀錄；新功能（法人籌碼、量比、均線、策略 G）只接 D/E/F/G。
+> 歷史紀錄。
 
 ## Part A：經典三角（A/B/C・已退役）
 
@@ -151,10 +159,12 @@ rules: []
 
 ---
 
-# Part B：ProPicks 復刻組（D/E/F/G）— 現行主流程
+# Part B：ProPicks 復刻組（D/E/F/G）— 歷史定義（D/E/G 已軟退場）
 
-> **現行主流程是 `make week GROUP=defg`（D/E/F/G）。** A/B/C「經典三角」已退役
-> （規劃書 04 A4）：YAML 移至 `config/strategies/archive/`，`GROUP=abc` 不再可跑。
+> ⚠️ **2026-08-28 起（docs/31 §20.6）**：`make week GROUP=defg` 預設流程**不再跑 Goodinfo
+> D/E/G**（結構性無法本地重建），改跑 `screen-f-local`＋`screen-redesign-local`。以下 D/E/G
+> 定義只留作歷史參照＋手動路徑（`make screen-all GROUP=defg` / `make screen STRATEGY=xxx`
+> 未動）。F 改走本地等價定義。現行本地式清單見 README「策略體系」／docs/11 策略代號框。
 
 D/E/F 是 ProPicks 復刻組，**每組混合多個 ProPicks 因子**（財務/成長/估值/動能），
 目標是逼近 Investing.com ProPicks AI 在台股的選股風格；**G（成長拉回）是 E 的逆勢
@@ -312,7 +322,7 @@ rules: []   # 刻意不放均線 rule；拉回 timing 在分析層做
 `make week` 強制要求 `GROUP`，無預設值。**現行主流程是 `GROUP=defg`**。
 
 ```bash
-make week GROUP=defg       # ★ 現行唯一主流程：D/E/F/G（含成長拉回 G）
+make week GROUP=defg       # ★ 現行唯一主流程（GROUP=defg 為必填 guard；2026-08-28 起實際跑 screen-f-local＋screen-redesign-local，不跑 Goodinfo D/E/G）
 make week GROUP=abc        # ❌ 已退役（規劃書 04 A4）：明確報退役、不跑
 make week GROUP=def        # ❌ 已退役：併入 defg
 make week                  # ❌ 報錯：請指定 GROUP=defg

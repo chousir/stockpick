@@ -33,8 +33,10 @@
 ### Step 1：抓資料 + 跑篩選 + 族群分析
 
 ```bash
-make week GROUP=defg   # 現行唯一主流程：D/E/F/G（ProPicks 復刻組＋成長拉回）
-# （abc/def 已退役，規劃書 04 A4）
+make week GROUP=defg   # 現行唯一主流程（GROUP=defg 為必填 guard）
+# 2026-08-28 起（docs/31 §20.6）：實跑 screen-f-local（F 本地等價）＋ screen-redesign-local
+#   （F2'/G1/G2/G4/G5/L6 本地未驗證式）；舊 Goodinfo D/E/G 已軟退場、不再自動跑
+# （abc/def 更早退役，規劃書 04 A4）
 ```
 
 等同於：
@@ -65,13 +67,13 @@ reports/YYYY-Www/
 **模式 2a（推薦）：ProPicks 風格全清單分析**
 
 把 `group_analysis.md` + `sector_rotation.md` + `candidates_enriched.csv` + `cp_candidates.md`
-+（若有）`holdings/watchlist_enriched.csv` + 4 個 `screen_result_*.csv` 貼到 Claude Opus 網頁對話，
++（若有）`holdings/watchlist_enriched.csv` + 所有 `screen_result_*.csv` 貼到 Claude Opus 網頁對話，
 配合範本 prompt 讓 AI 在「完整候選宇宙」中挑：
 
 - **任務 0（必做）**：庫存決策（續抱/加碼/減碼/停利/停損）＋觀察清單進場時機
   （判「可進場」者升格入任務 2 四路匯流來源 D——與策略命中同權競爭核心/機會層）
 - 精選進場清單（寧缺勿濫）+ 為何入選 + 進場思路 + 主要風險
-- 訊號交集（D∩E、E∩F、D∩E∩F）
+- 訊號交集（F 命中股 × 個股鏡頭；本地未驗證式彼此交集只陳列不詮釋——D∩E 等經典交集已隨 D/E/G 軟退場）
 - 本週市場節奏 + 居安思危訊號 + 異常崛起個股
 - 觀察名單（追蹤但不進場）
 

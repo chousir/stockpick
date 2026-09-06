@@ -5,7 +5,7 @@
 > 2026-07-08 重寫；舊版全文在 `playbook/_backup/CLAUDE.md.20260708`。修改本檔前先讀 playbook/40。
 
 ## 這個專案是什麼（30 秒版）
-台股週選股系統：Goodinfo 篩選＋TWSE/TPEX OpenAPI → 族群/輪動分析 → 週報與個股報告，**人做最終決策**。
+台股週選股系統：本地篩選（TWSE/TPEX OpenAPI）＋歷史 Goodinfo 定義參照 → 族群/輪動分析 → 週報與個股報告，**人做最終決策**。
 - 入口 `make help`（主要三指令）；測試 `make test 2>&1 | tail -20`。
 - 技術棧：Python 3.11+／uv／Polars（不用 pandas）／httpx／loguru／Pydantic。
 - 週報產物 `reports/2026-Wxx/`；規劃書 `docs/`（編號索引）；研究產物 `research/`（gitignored）。

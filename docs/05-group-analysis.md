@@ -22,15 +22,23 @@
 ```markdown
 # 2026-W21 族群分析報告
 
-## 0. 策略代號說明（主流程 D/E/F/G）
-- D 品質龍頭：市值≥100 億 + ROE≥15 + 配息 8 年 + 連 2 季淨利（6+ 月）
-- E 成長動能：市值≥100 億 + 營收 YoY≥20 + 連 2 季淨利 + 均線多頭（順勢，1–3 月）
-- F 價值反彈：市值≥100 億 + PER≤15 + 殖利率≥3 + 營收 YoY≥10（3–6 月）
-- G 成長拉回：同 E 基本面 + 季線上揚回踩（乖離 −5%~+10%）+ 量縮（逆勢，1–3 月）
+## 0. 策略代號說明
+
+> ⚠️ **2026-08-28 起（docs/31 §20.6）**：舊 Goodinfo D/E/G 已軟退場、`make week` 不再產出其
+> `screen_result`。現行本地篩選：**F**（價值反彈・官方 API 等價定義本地算，`source=local`）＋
+> **F2'/G1/G2/G4/G5/L6**（本地新設計式，`source=local_unvalidated`，docs/31 §4/§7.2）。
+> G2 是 D 的正式本地接班（§20.1）。以下 D/E/G 定義只留作歷史參照。
+
+- F 價值反彈：市值≥100 億 + PER≤15 + 殖利率≥3 + 累計月營收 YoY≥10（3–6 月，現行）
+- F2' 本地-成長優質股：PE 15–30 ∧ 毛利優於同儕 ∧ Δ營益率≥0 ∧ 市值≥300億（§20.10，現行）
+- G1/G2/G4/G5/L6：本地未驗證式，代號與定義見 README「策略體系」／docs/11 策略代號框（現行）
+- ~~D 品質龍頭：市值≥100 億 + ROE≥15 + 配息 8 年 + 連 2 季淨利~~（軟退場，G2 接班）
+- ~~E 成長動能：市值≥100 億 + 營收 YoY≥20 + 連 2 季淨利 + 均線多頭~~（軟退場）
+- ~~G 成長拉回：同 E 基本面 + 季線上揚回踩 + 量縮~~（軟退場）
 
 ## 1. 入選分布總覽
-- 策略 D 共 60 檔；E 共 25；F 共 65；G 共 22（有效拉回；宇宙 113）
-- 總聯集：142 檔（僅含有效策略命中股）
+- 各式命中檔數（動態、隨門檻變）＋交集，見 `group_analysis.md` Section 1；本地未驗證式門檻鬆、聯集常達數百檔
+- 總聯集：僅含有效命中股（去重）
 
 ## 2. 族群強度排名（前 10）
 
@@ -113,13 +121,15 @@ sigmoid 而非 clip：避免 5 日大漲 20% 仍只拿到 clip(10) 的天花板�
 - 兩者由 `TWSEClient.load_candidate_history()` 合併，算 5 日動能、MA20/60＋斜率；
   量比由 `load_volume_history()` 算（今日量 / 近 20 日均量）
 
-**完整 `make week GROUP=defg` 流程**：
+**完整 `make week GROUP=defg` 流程**（節錄；完整 14 步見 README／Makefile week target）：
 ```
 1. fetch-twse              → daily / T86 / 上櫃 TPEX 法人 / revenue / industry
-2. screen-all              → D/E/F/G 純跑 Goodinfo，各一份 CSV 為純結果快照
+2. screen-f-local          → F 官方 API 等價定義本地算（source=local）
+2b. screen-redesign-local  → F2'/G1/G2/G4/G5/L6 本地新設計式（source=local_unvalidated）
 3. fetch-candidates-history → 對聯集個股抓 stock_day（純加工資料層）
-4. group                   → 算 5 日中位 / 量比 / MA60 / 法人 + G 拉回過濾 → group_analysis.md
+4. group                   → 算 5 日中位 / 量比 / MA60 / 法人 → group_analysis.md
 ```
+（舊 `screen-all`＝跑 Goodinfo D/E/F/G，2026-08-28 起不再被 week 自動呼叫，手動仍可跑）
 
 **策略 CSV 一律是純 Goodinfo 結果快照**，不被任何後處理覆寫。
 （G 的 CSV 是基本面成長宇宙；拉回過濾只在 group 步驟標記於 group_analysis.md，不改 CSV。）
