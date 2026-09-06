@@ -90,6 +90,34 @@ def test_sync_happy_path_autofills_and_writes_both_ledgers(tmp_path):
     assert row["stock_id"] == "2344" and row["name"] == "華邦電" and row["reason"] == "過熱"
 
 
+def test_appendix_g_target_price_does_not_affect_sync(tmp_path):
+    """docs/31 §20.13 Phase 2：pick.md「附錄 G 實驗性目標價」（含「目標價」字眼）在
+    picks 區塊之外 → picks sync 完全不受影響（parser 只認 picks:begin/end）。"""
+    settings, week_dir = _setup_week(tmp_path)
+    appendix_g = (
+        "\n## 附錄 G — 實驗性目標價\n\n"
+        "| 股號 | 機械目標價(P50) | 信賴度 |\n|---|---|---|\n"
+        "| 3006 | 245.0 | 低 |\n"
+        "> search-augmented 目標價 260 元（不可回測）\n\n"
+    )
+    # 一份不含附錄 G、一份含（附錄 G 插在 picks 區塊之前）
+    _write_pick_md(week_dir, GOOD_BLOCK)
+    run_picks_sync(settings, WEEK)
+    picks_without = load_week_picks(week_dir).sort("stock_id")
+    excl_without = load_week_excluded(week_dir).sort("stock_id")
+
+    (week_dir / "pick.md").write_text(
+        f"# ProPicks {WEEK}\n\n一頁決策卡……\n{appendix_g}\n{GOOD_BLOCK}",
+        encoding="utf-8",
+    )
+    run_picks_sync(settings, WEEK)
+    picks_with = load_week_picks(week_dir).sort("stock_id")
+    excl_with = load_week_excluded(week_dir).sort("stock_id")
+
+    assert picks_with.equals(picks_without)
+    assert excl_with.equals(excl_without)
+
+
 def test_sync_rerun_is_idempotent(tmp_path):
     settings, week_dir = _setup_week(tmp_path)
     _write_pick_md(week_dir, GOOD_BLOCK)

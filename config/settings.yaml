@@ -123,10 +123,8 @@ report:
   artifact_check:                 # 規劃書 05 F4：make week 尾段產物完整性檢查（缺者 WARNING、不擋流程）
     machine:                      # make week 機器產物——只查最新週，缺＝該步驟無聲失敗
                                   # （cp_candidates.md 曾 W25–W27 連三週斷供無人知，即本清單動機）
-      - screen_result_d_quality_leader.csv
-      - screen_result_e_growth_momentum.csv
-      - screen_result_f_value_rebound.csv
-      - screen_result_g_growth_pullback.csv
+      - screen_result_f_value_rebound.csv        # F 本地等價（screen-f-local）
+      - screen_result_g4_yoy_divergence.csv      # G4 本地未驗證式（screen-redesign-local）——最穩定的一支
       - candidates_enriched.csv
       - group_analysis.md
       - sector_rotation.md
@@ -135,6 +133,7 @@ report:
       - theme_strength.csv
       - cp_candidates.md
       - inflection_ambush.md   # M4.2 候選源 E（委託書 M4）：零命中週也會產出，缺檔＝該步驟失敗
+      - target_price_experimental.md  # docs/31 §20.13 Phase 2（target-price-project）——runner 失敗不擋流程，靠這裡點名
     analyst:                      # 分析師產物——往週缺＝斷供 WARNING（W26 型）；最新週缺＝提醒
       - pick.md                   # excluded.csv 不列：當週可能真無旗標剔除，缺檔合法
       - picks.csv
@@ -416,7 +415,7 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     snapshot_gap_td: 5             # 週頻快照間隔（交易日，近似值）→ CI block長度換算用
     n_boot: 1000
     output_dir: research/g3_grid
-  target_price:              # docs/31 §20.13 Phase 1：實驗性機械式「目標價」校準回測（make 無自動掛，手動 backtest target-price-read）
+  target_price:              # docs/31 §20.13：實驗性機械式「目標價」（Phase 1 校準回測＝手動 backtest target-price-read）
     pos_edges: [-8.0, 8.0]        # ma60_dist_pct 切 3 bin：貼低 / 中段 / 延伸（事前鎖定，跑完不得回調）
     rs_edges: [-5.0, 5.0]          # rs_subind pp 切 3 bin：族群內落後 / 均勢 / 領先
     rs_window: 20                  # rs_subind 回看窗（同 laggard_grid / g3_grid 口徑）
@@ -425,6 +424,14 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     n_boot: 1000                   # pooled-null moving-block bootstrap 重抽次數
     seed: 42                       # bootstrap 亂數種子（deterministic）
     output_dir: research/target_price
+    project:                      # docs/31 §20.13 Phase 2：本週 production 實驗區塊（make week 自動掛，產 reports/<週次>/）
+      enabled: true
+      fit_lookup_path: config/target_price_fit_lookup.csv  # 凍結分位查表（Phase 1 fit 窗 2022-01~2024-12）
+      horizon_td: 20              # 唯一裁決-eligible horizon（Phase 1 §20.13）；不出 r+60/r+120 單一數字
+      thin_history_days: 200      # 薄面板窗（ma60 + rs_window 20 + 緩衝；只算當前 profile）
+      tier_cap: 低                 # 主裁決 pooled-null CI [−0.10,+0.03] 跨 0 ⇒ 機械腿信賴度封頂；CI 翻負才調
+      output_basename: target_price_experimental
+      close_reconcile_tol_pct: 1.0  # 面板 close vs candidates close 相對差 > 此值 → 逐股標揭露
   l6_g4_watch:               # docs/31 §9 item4：L6/G4 前瞻累積軌每週快照（手動指令，需每週跑）
     l6_yoy_min: 20.0              # docs/31 §5.2：月營收累計YoY≥20
     l6_pe_max: 25.0                # docs/31 §5.2：PE≤25

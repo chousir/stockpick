@@ -1606,6 +1606,23 @@ def backtest_target_price_read_cmd(
     console.print(report)
 
 
+@backtest_app.command("target-price-project")
+def backtest_target_price_project_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+    week: str = typer.Option("", "--week", help="週別標籤（如 2026-W36）；空＝最新一週"),
+) -> None:
+    """docs/31 §20.13 Phase 2：本週 production 實驗性機械式「目標價」。讀凍結 fit 分位
+    查表（config/target_price_fit_lookup.csv，Phase 1 fit 窗 2022-01~2024-12）＋當週薄
+    面板算的 profile（位階×族群內相對強弱 9 格），每檔輸出 close×(1+cell_P50)＋P25–P75
+    ＋全市場基準並列＋信賴度（**一律封頂「低」**，§20.13 主裁決）。產
+    reports/<週次>/target_price_experimental.{md,yaml}——與 picks sync 完全脫鉤、不進
+    pick.csv。search-augmented 腿由 pick.md 分析師子代理現場做。"""
+    from tw_screener.backtest.target_price_project import run_target_price_project
+
+    report = run_target_price_project(settings, week=week or None)
+    console.print(report)
+
+
 @backtest_app.command("valuation-gap-read")
 def backtest_valuation_gap_read_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),

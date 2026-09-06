@@ -2360,6 +2360,32 @@ playbook/60 + docs/06 例外條、daily-picks Step 4 改、`make week` 接線—
 `peg_like_ratio` 成長調整倍數，明文不可回測）為主要「有 per-stock 數字」的形式，
 但須標「無歷史驗證」。是否值得做由使用者定；本節結論已足以回答原始問題。
 
+#### Phase 2 拍板（2026-09-06・使用者覆寫，非「結論修正」）
+
+使用者拍板做**完整 Phase 2**，並要求機械腿仍給 **per-stock 數字**（不是只報全市場
+區間）＋並列 search-augmented 前瞻 EPS 版。**Phase 1 的統計裁決一字未變**——
+#1(b) r+20 pooled-null CI [−0.10,+0.03] 仍跨 0、#3 中位偏誤 +2.23pp、#4 區間寬
+±9.86pp。變的只是**使用者對「一個標了低信心的機械數字」的接受度**：他要那個數字
+拿來當人工判讀時的量級參照，接受它可信度低。`_overall_verdict()` 與 Phase 1 報告
+文字不動。
+
+落地（已 merge，commit 見 git log）：
+- 新 `src/tw_screener/backtest/target_price_project.py`（`project_week_targets` /
+  `_assert_edges_match` ＋ IO wrapper `run_target_price_project`），CLI
+  `backtest target-price-project`，`make week` 於 `group` 後容錯掛載（`-` 前綴）。
+- **凍結 fit 查表** `config/target_price_fit_lookup.csv`（＋ `.provenance.yaml`）——
+  自 Phase 1 `research/target_price/fit_lookup_20260901.csv` 一次性複製；runner 啟動
+  `_assert_edges_match` 比對 cell label 內嵌切點 vs settings，不符拒跑（落實「跑完
+  不得回調」）。
+- **機械腿 tier 一律封頂「低」**（settings `backtest.target_price.project.tier_cap`）：
+  實測 fit_lookup r+20 全 9 cell 的 n≥800、iqr≤25 ⇒ `confidence_tier()` 會回「高」，
+  與主裁決直接矛盾；`tier_raw` 仍寫進 yaml 供稽核。翻正解封門檻＝每季重跑 Phase 1，
+  r+20 #1(b) CI 整段 <0 且 #1(a) rho≥0.5。
+- 產物 `reports/<週次>/target_price_experimental.{md,yaml}`——**與 `picks sync` 完全
+  脫鉤**（parser 只認 `<!-- picks:begin -->`~`end`）、不進 picks.csv、不進正式結論。
+  pick.md 的實驗性目標價只存在於「附錄 G」（決策卡零行數影響）。
+- 只 r+20（唯一裁決-eligible，settings `horizon_td`）；不輸出 r+60/r+120 單一數字。
+
 ## 21. 減量研究計畫 Part 1：逐式目的定義＋參數可行性分級（2026-08-24）
 
 使用者要求「先定義好每個策略目的以及它可以使用那些參數來達到，再來看是不是
