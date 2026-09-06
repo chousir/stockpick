@@ -2736,14 +2736,27 @@ class TWSEClient:
           1. stock_day_{stock_id}_*.parquet（個股月線，需先呼叫 fetch_stock_history 補抓）
           2. daily_*.parquet（全市場日線累積；含所有股票，可能只有少數幾天）
 
-        回傳：含 stock_id / date / close 三欄，按 (stock_id, date) 排序、去重。
+        回傳：含 stock_id / date / close / change（漲跌價差，可能為 null，除權息安全網用）
+        四欄，按 (stock_id, date) 排序、去重。
         """
-        _empty_schema = {"stock_id": pl.Utf8, "date": pl.Date, "close": pl.Float64}
+        _empty_schema = {
+            "stock_id": pl.Utf8,
+            "date": pl.Date,
+            "close": pl.Float64,
+            "change": pl.Float64,
+        }
         if not stock_ids:
             return pl.DataFrame(schema=_empty_schema)
 
         stock_id_set = set(stock_ids)
         frames: list[pl.DataFrame] = []
+
+        def _sel(df: pl.DataFrame) -> pl.DataFrame:
+            # change 欄可能不在舊快取裡 → 補 null，維持四欄一致
+            cols = ["stock_id", "date", "close"]
+            if "change" in df.columns:
+                return df.select([*cols, "change"])
+            return df.select(cols).with_columns(pl.lit(None, dtype=pl.Float64).alias("change"))
 
         # 1. stock_day caches (one file per stock per month)
         for sid in stock_ids:
@@ -2751,7 +2764,7 @@ class TWSEClient:
                 try:
                     df = pl.read_parquet(f)
                     if {"stock_id", "date", "close"}.issubset(df.columns):
-                        frames.append(df.select(["stock_id", "date", "close"]))
+                        frames.append(_sel(df))
                 except Exception as e:  # noqa: BLE001 — 單檔壞不擋整批
                     logger.warning(f"讀取 {f} 失敗：{e}")
 
@@ -2761,9 +2774,7 @@ class TWSEClient:
                 df = pl.read_parquet(f)
                 if not {"stock_id", "date", "close"}.issubset(df.columns):
                     continue
-                df = df.filter(pl.col("stock_id").is_in(list(stock_id_set))).select(
-                    ["stock_id", "date", "close"]
-                )
+                df = _sel(df.filter(pl.col("stock_id").is_in(list(stock_id_set))))
                 if not df.is_empty():
                     frames.append(df)
             except Exception as e:  # noqa: BLE001 — 單檔壞不擋整批

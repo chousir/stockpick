@@ -53,8 +53,10 @@ def run_group_analysis(settings: Path) -> None:
     top_groups = int(ga_cfg.get("top_groups", 10))
     top_stocks = int(ga_cfg.get("top_stocks", 10))
     dividend_lookahead = int(ga_cfg.get("dividend_lookahead_days", 14))
+    dividend_lookback = int(ga_cfg.get("dividend_lookback_days", 20))
     macro_lookahead = int(ga_cfg.get("macro_lookahead_days", 30))
     vol_lookback = int(ga_cfg.get("vol_lookback_days", 20))
+    price_disc_pct = float(ga_cfg.get("price_discontinuity_pct", 15.0))
 
     week_tag, screener_results = load_latest_screener_results(settings)
     if not screener_results:
@@ -156,24 +158,56 @@ def run_group_analysis(settings: Path) -> None:
             + "；量價/籌碼可能來自不同快照，建議重抓對齊[/yellow]"
         )
 
-    dividends = filter_dividend_calendar(
-        client.fetch_dividend_calendar(), _date.today(), dividend_lookahead, candidate_ids
+    _cal_raw = client.fetch_dividend_calendar()
+    _fwd = filter_dividend_calendar(_cal_raw, _date.today(), dividend_lookahead, candidate_ids)
+
+    # 除息還原：聯集近日除權息快照，取近 dividend_lookback 天 ex_date（涵蓋動能/趨勢視窗），
+    # 把視窗內現金股利＋配股加回 momentum_5d/ret_10d，修正除息季假負與大額配股假崩盤。
+    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
+    recent_dividends = load_recent_dividends(
+        cache_dir, _date.today() - _timedelta(days=dividend_lookback)
+    )
+
+    # group_analysis「0.5 本週除權息」段雙向化：未來窗＋過去 lookback 天已發生（僅候選股）。
+    _past = recent_dividends.filter(
+        _pl.col("stock_id").is_in(candidate_ids)
+        & (_pl.col("ex_date") < _date.today())
+    ) if not recent_dividends.is_empty() else _pl.DataFrame()
+    _fwd = _fwd.with_columns(_pl.lit("未來").alias("window")) if not _fwd.is_empty() else _fwd
+    _past = _past.with_columns(_pl.lit("已發生").alias("window")) if not _past.is_empty() else _past
+    _frames = [f for f in (_past, _fwd) if not f.is_empty()]
+    dividends = (
+        _pl.concat(_frames, how="diagonal").sort("ex_date") if _frames else _pl.DataFrame()
     )
     if dividends.is_empty():
-        console.print(f"  本週除權息：候選股未來 {dividend_lookahead} 天內無除權息")
+        console.print(
+            f"  本週除權息：候選股未來 {dividend_lookahead} 天／過去 {dividend_lookback} 天內無"
+        )
     else:
-        console.print(f"  本週除權息：{len(dividends)} 檔候選股（未來 {dividend_lookahead} 天）")
+        _n_stock = int(dividends.filter(_pl.col("stock_dividend_ratio") > 0).height) if (
+            "stock_dividend_ratio" in dividends.columns
+        ) else 0
+        console.print(
+            f"  本週除權息：{len(dividends)} 檔候選股"
+            f"（過去 {dividend_lookback}／未來 {dividend_lookahead} 天；其中 {_n_stock} 檔含配股）"
+        )
 
-    # 除息還原：聯集近日除權息快照，取近 20 天 ex_date（涵蓋 5 交易日動能視窗），把視窗內
-    # 現金股利加回 momentum_5d，修正 6-8 月除息季的假負與排名失真。
-    cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
-    recent_dividends = load_recent_dividends(cache_dir, _date.today() - _timedelta(days=20))
     if not recent_dividends.is_empty():
-        n_exdiv = recent_dividends.filter(
-            _pl.col("stock_id").is_in(candidate_ids)
-        )["stock_id"].n_unique()
+        _rd_cand = recent_dividends.filter(_pl.col("stock_id").is_in(candidate_ids))
+        n_exdiv = _rd_cand["stock_id"].n_unique()
+        n_stock_div = (
+            int(_rd_cand.filter(_pl.col("stock_dividend_ratio") > 0).height)
+            if "stock_dividend_ratio" in _rd_cand.columns
+            else 0
+        )
         if n_exdiv:
-            console.print(f"  除息還原：近 20 天 {n_exdiv} 檔候選股除權息，動能加回現金股利")
+            _msg = (
+                f"  除權息還原：近 {dividend_lookback} 天 {n_exdiv} 檔候選股除權息，"
+                f"動能加回現金股利＋配股"
+            )
+            if n_stock_div:
+                _msg += f"（{n_stock_div} 檔含配股；結構欄如距均線/區間/法人張數仍未還原）"
+            console.print(_msg)
 
     from tw_screener.data.macro import filter_macro_calendar, load_macro_calendar
 
@@ -202,6 +236,7 @@ def run_group_analysis(settings: Path) -> None:
         vol_lookback=vol_lookback,
         dividends=recent_dividends,
         trajectory_cfg=cfg.get("trajectory", {}),  # F5 軌跡欄（沿舊 07 TR1）
+        price_disc_pct=price_disc_pct,             # 價格不連續安全網（除權息/減資/分割）
     )
 
     if groups.is_empty():
@@ -767,6 +802,7 @@ def run_group_analysis(settings: Path) -> None:
             name_map=name_map,
             vol_lookback=vol_lookback,
             dividends=recent_dividends,
+            price_disc_pct=price_disc_pct,
         )
         out_csv = output_path.parent / f"{label}_enriched.csv"
         n = write_named_list_csv(

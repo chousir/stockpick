@@ -112,6 +112,7 @@ def enrich_named_list(
     name_map: dict[str, str] | None = None,
     vol_lookback: int = 20,
     dividends: pl.DataFrame | None = None,
+    price_disc_pct: float = 15.0,
 ) -> tuple[pl.DataFrame, dict]:
     """把任意股票清單 enrich 成 (members, synth_screener)，reuse group_stocks 同套指標。
 
@@ -150,7 +151,10 @@ def enrich_named_list(
             console.print(f"[yellow]  {sid}：抓不到 OHLCV，跳過（可能下市或代號錯）[/yellow]")
             continue
         oh = oh.sort("date")
-        frames.append(oh.select(["stock_id", "date", "close", "trade_volume"]))
+        # change（漲跌價差）：除權息安全網 detect_price_discontinuity 用；舊快取可能缺 → 補 null
+        if "change" not in oh.columns:
+            oh = oh.with_columns(_pl.lit(None, dtype=_pl.Float64).alias("change"))
+        frames.append(oh.select(["stock_id", "date", "close", "trade_volume", "change"]))
         d = oh.tail(1).to_dicts()[0]
         close = float(d.get("close") or 0.0)
         chg = float(d.get("change") or 0.0)
@@ -184,6 +188,7 @@ def enrich_named_list(
         g_pullback=g_pullback,
         vol_lookback=vol_lookback,
         dividends=dividends,
+        price_disc_pct=price_disc_pct,
         skip_etf=False,  # 持股/觀察清單的 ETF 產輕量列（docs/21）；選股宇宙仍排除
     )
     # ETF 列 industry 標「ETF」（不混入「未分類」）；基本面/族群欄由後段誠實留 null

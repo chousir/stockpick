@@ -148,7 +148,8 @@ def compute_forward_returns(
         screens: load_historical_screens() 的輸出。
         price_history: 全市場日線（date/stock_id/close）。
         hold_weeks: 持有週數。
-        dividends: load_recent_dividends() 輸出（stock_id/ex_date/cash_dividend）；None → 不還原。
+        dividends: load_recent_dividends() 輸出（stock_id/ex_date/cash_dividend＋選填
+            stock_dividend_ratio）；None → 不還原。現金股利＋配股皆會加回報酬。
         trading_days_per_week: 週→交易日換算（預設 5）。
         clip_daily_return_pct: 大盤指數日報酬夾限。
 
@@ -224,9 +225,12 @@ def compute_forward_returns(
             continue
         exit_price = r["exit_price"]
         ret = (exit_price - entry_price) / entry_price * 100 if entry_price else None
-        # 除息還原：ex_date ∈ (entry_date, exit_date] 的現金股利 / entry_price
+        # 除權息還原：ex_date ∈ (entry_date, exit_date] 的現金股利＋配股（避免大額配股假崩盤，
+        # 如 6669 緯穎 2026-09-02）
         if ret is not None and dividends is not None and not dividends.is_empty():
-            addback = _div_addback(dividends, r["stock_id"], entry_date, exit_date, entry_price)
+            addback = _div_addback(
+                dividends, r["stock_id"], entry_date, exit_date, entry_price, exit_price
+            )
             ret += addback
         # 大盤同期報酬
         mkt_ret = _index_return(mkt, entry_date, exit_date)
@@ -274,22 +278,35 @@ def _make_row(
 
 
 def _div_addback(
-    dividends: pl.DataFrame, stock_id: str, entry_date, exit_date, entry_price: float
+    dividends: pl.DataFrame,
+    stock_id: str,
+    entry_date,
+    exit_date,
+    entry_price: float,
+    exit_price: float | None = None,
 ) -> float:
-    """(entry_date, exit_date] 內現金股利合計 / entry_price × 100（無則 0）。"""
+    """(entry_date, exit_date] 內除權息還原加成 %（無則 0）。
+
+    比照 momentum.compute_dividend_addback：delta = (Σs·exit_price + Σcash) / entry_price × 100。
+    `stock_dividend_ratio` 為選填欄，缺欄或 exit_price 缺時只還原現金部分。
+    """
     if not {"stock_id", "ex_date", "cash_dividend"}.issubset(dividends.columns) or not entry_price:
         return 0.0
-    total = (
-        dividends.filter(
-            (pl.col("stock_id").cast(pl.Utf8) == stock_id)
-            & pl.col("cash_dividend").is_not_null()
-            & (pl.col("cash_dividend") > 0)
-            & (pl.col("ex_date") > entry_date)
-            & (pl.col("ex_date") <= exit_date)
-        )["cash_dividend"]
-        .sum()
+    has_ratio = "stock_dividend_ratio" in dividends.columns
+    sub = dividends.filter(
+        (pl.col("stock_id").cast(pl.Utf8) == stock_id)
+        & (pl.col("ex_date") > entry_date)
+        & (pl.col("ex_date") <= exit_date)
     )
-    return float(total) / entry_price * 100 if total else 0.0
+    if sub.is_empty():
+        return 0.0
+    total_cash = float(sub["cash_dividend"].fill_null(0.0).sum() or 0.0)
+    total_ratio = (
+        float(sub["stock_dividend_ratio"].fill_null(0.0).sum() or 0.0) if has_ratio else 0.0
+    )
+    stock_val = total_ratio * exit_price if (exit_price and total_ratio > 0) else 0.0
+    delta = (stock_val + total_cash) / entry_price * 100
+    return delta if (total_cash > 0 or total_ratio > 0) else 0.0
 
 
 def _index_return(mkt: pl.DataFrame, entry_date, exit_date) -> float | None:

@@ -21,6 +21,7 @@ from tw_screener.analysis.momentum import (
     compute_dividend_addback,
     compute_n_day_return,
     compute_rolling_extrema,
+    detect_price_discontinuity,
 )
 
 _DEFAULT_WEIGHTS: dict[str, float] = {
@@ -33,6 +34,9 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
 _MOMENTUM_DAYS = 5
 # 修法6 趨勢窗：近 10 日報酬，供報表區分「健康回踩」vs「下跌反彈」（比照 _MOMENTUM_DAYS）。
 _TREND_DAYS = 10
+# 價格不連續安全網：近 _TREND_DAYS 日內單日報酬絕對值 > 此門檻且 change 無法解釋
+# → 標 price_discontinuity（除權息／減資／面額分割／停牌補跳，pick 階段「資料異常不判多空」）。
+_PRICE_DISC_PCT = 15.0
 # 法人近端窗：三大法人/外資/投信近 5/10 日累計，揭露 20 日累計蓋住的近端轉向（純揭露、非 gate）。
 # 修法6 起於外資；分析層補窗擴及投信(trust)/三大法人(inst=total_net)，比照外資同口徑。
 _INST_NEAR_WINDOWS = (5, 10)
@@ -338,6 +342,7 @@ def group_stocks(
     dividends: pl.DataFrame | None = None,
     trajectory_cfg: dict | None = None,
     skip_etf: bool = True,
+    price_disc_pct: float = _PRICE_DISC_PCT,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
     Group screened stocks by industry and compute group strength scores (動能主導).
@@ -354,9 +359,10 @@ def group_stocks(
         與輸入的 volume_history 列數無關 → 不論餵幾天都是一致的 N 日均量。
     g_pullback: 策略 G 的拉回 setup 門檻（見 _DEFAULT_G_PULLBACK）；若 screener 含
         in_g_growth_pullback，G 的有效命中會被收斂為「基本面命中 ∧ 季線上揚 ∧ 乖離帶內 ∧ 量縮」。
-    dividends: 含 stock_id / ex_date / cash_dividend（load_recent_dividends 的回傳）；提供時把
-        5 日視窗內現金股利加回 momentum_5d/rs（除息還原），並輸出 div_addback_pct / ex_div_cash。
-        未提供 → 兩欄為 0，momentum 維持原始價格報酬。
+    dividends: 含 stock_id / ex_date / cash_dividend（＋選填 stock_dividend_ratio；
+        load_recent_dividends 的回傳）；提供時把 5 日視窗內的現金股利＋配股加回
+        momentum_5d/rs（除權息還原），並輸出 div_addback_pct / ex_div_cash /
+        ex_div_stock_ratio。未提供 → 三欄為 0，momentum 維持原始價格報酬。
 
     Returns (groups_df, enriched_stocks_df):
     - groups_df: industry-level stats sorted by score desc (filtered by min_group_size)
@@ -450,17 +456,20 @@ def group_stocks(
         ]
     )
 
-    # 除息還原：6-8 月除息季，除息日股價缺口會讓 momentum_5d 假負並把除息股壓到排名後段。
-    # 把視窗內現金股利加回報酬（價＋息），momentum_5d/rs 一併還原；div_addback_pct/ex_div_cash
-    # 供報表標註「已還原除息」。此處 stock_df 仍與 stock_ids 同序，可用 positional Series 對齊。
+    # 除權息還原：除權息日股價缺口會讓 momentum_5d 假負並把該股壓到排名後段（現金除息季
+    # 6-8 月尤甚；大額配股／盈餘轉增資更會造成 −50%↑ 假崩盤，如 6669 緯穎 2026-09-02）。
+    # 把視窗內現金股利＋配股加回報酬（價＋息＋配股），momentum_5d/rs 一併還原；
+    # div_addback_pct/ex_div_cash/ex_div_stock_ratio 供報表標註「已還原除權息」。
+    # 此處 stock_df 仍與 stock_ids 同序，可用 positional Series 對齊。
     if dividends is not None and not dividends.is_empty():
         addback = compute_dividend_addback(
             stock_ids, price_history, dividends, n=_MOMENTUM_DAYS
         )
     else:
         addback = {}
-    add_vals = [addback.get(sid, (0.0, 0.0))[0] for sid in stock_ids]
-    cash_vals = [addback.get(sid, (0.0, 0.0))[1] for sid in stock_ids]
+    add_vals = [addback.get(sid, (0.0, 0.0, 0.0))[0] for sid in stock_ids]
+    cash_vals = [addback.get(sid, (0.0, 0.0, 0.0))[1] for sid in stock_ids]
+    stock_ratio_vals = [addback.get(sid, (0.0, 0.0, 0.0))[2] for sid in stock_ids]
     add_series = pl.Series("_div_add", add_vals, dtype=pl.Float64)
     stock_df = stock_df.with_columns(
         [
@@ -468,6 +477,7 @@ def group_stocks(
             (pl.col("rs") + add_series).alias("rs"),
             pl.Series("div_addback_pct", add_vals, dtype=pl.Float64),
             pl.Series("ex_div_cash", cash_vals, dtype=pl.Float64),
+            pl.Series("ex_div_stock_ratio", stock_ratio_vals, dtype=pl.Float64),
         ]
     )
 
@@ -479,12 +489,28 @@ def group_stocks(
     stock_df = stock_df.with_columns(pl.Series("ret_10d", ret10_vals, dtype=pl.Float64))
     if dividends is not None and not dividends.is_empty():
         add10 = compute_dividend_addback(stock_ids, price_history, dividends, n=_TREND_DAYS)
-        add10_vals = [add10.get(sid, (0.0, 0.0))[0] for sid in stock_ids]
+        add10_vals = [add10.get(sid, (0.0, 0.0, 0.0))[0] for sid in stock_ids]
         stock_df = stock_df.with_columns(
             (pl.col("ret_10d") + pl.Series("_ret10_add", add10_vals, dtype=pl.Float64)).alias(
                 "ret_10d"
             )
         )
+
+    # 價格不連續安全網（除權息／減資／面額分割／停牌補跳）：近 _TREND_DAYS 日內單日報酬
+    # 絕對值 > price_disc_pct 且 change 無法解釋 → 標 price_discontinuity（pick 階段強制
+    # 「資料異常、本週不判多空」）。需 price_history 帶 change 欄；無則靜默略過（不誤報）。
+    disc_map = detect_price_discontinuity(
+        stock_ids, price_history, lookback=_TREND_DAYS, threshold_pct=price_disc_pct
+    )
+    disc_vals = [bool(sid in disc_map) for sid in stock_ids]
+    disc_detail = [
+        f"{disc_map[sid][1]} {disc_map[sid][0]:+.1f}%" if sid in disc_map else None
+        for sid in stock_ids
+    ]
+    stock_df = stock_df.with_columns(
+        pl.Series("price_discontinuity", disc_vals, dtype=pl.Boolean),
+        pl.Series("price_disc_detail", disc_detail, dtype=pl.Utf8),
+    )
 
     # M-修法7（7a）進場區間：近 20/60 日收盤 min/max（絕對價）。
     # 供 T3 結構價（前波低 low_60d）與回檔深度檢核；不除息還原、與 close/MA 同口徑。

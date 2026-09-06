@@ -184,6 +184,41 @@ def test_forward_return_dividend_addback():
     assert abs(row["return_pct"] - 0.0) < 1e-6
 
 
+def test_forward_return_stock_dividend_addback():
+    """大額配股（如 6669 型）→ exit_price 蒸發、配股還原 (s·exit + cash)/entry。"""
+    screens = pl.DataFrame(
+        {
+            "week_tag": ["2026-W35"],
+            "screened_at": [date(2026, 9, 1)],
+            "stock_id": ["6669"],
+            "name": ["緯穎"],
+            "close": [7800.0],
+            "change_pct": [0.0],
+            "strategy_id": ["f_value_rebound"],
+        }
+    )
+    # entry idx1=7800；exit idx6=2600（配股後價格 ÷≈3）
+    px = _price_series(
+        "6669", date(2026, 9, 1), [7800, 7800, 2700, 2600, 2650, 2600, 2600]
+    )
+    divs = pl.DataFrame(
+        {
+            "stock_id": ["6669"],
+            "ex_date": [date(2026, 9, 3)],
+            "cash_dividend": [0.0],
+            "stock_dividend_ratio": [1.9828],
+        }
+    )
+    out = compute_forward_returns(
+        screens, px, hold_weeks=1, dividends=divs, trading_days_per_week=5
+    )
+    row = out.row(0, named=True)
+    # 純價 (2600-7800)/7800 = -66.7%；配股加回 1.9828*2600/7800*100 = +66.1% → 約 -0.6%
+    raw = (2600.0 - 7800.0) / 7800.0 * 100
+    addback = 1.9828 * 2600.0 / 7800.0 * 100
+    assert abs(row["return_pct"] - (raw + addback)) < 1e-6
+
+
 def test_forward_return_excess_vs_market():
     # 目標股漲 10%；眾多持平股稀釋等權大盤 → 大盤微漲、超額 = 報酬 − 大盤（恆等式）。
     target = _price_series("2330", date(2026, 5, 4), [100, 100, 101, 102, 103, 104, 110])

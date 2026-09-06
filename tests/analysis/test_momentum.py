@@ -12,6 +12,7 @@ from tw_screener.analysis.momentum import (
     compute_dividend_addback,
     compute_n_day_return,
     compute_rolling_extrema,
+    detect_price_discontinuity,
 )
 
 
@@ -133,14 +134,17 @@ def test_rolling_extrema_empty_and_missing_cols():
 # ─── compute_dividend_addback ─────────────────────────────────────────────────
 
 
-def _divs(rows: list[tuple[str, date, float]]) -> pl.DataFrame:
-    return pl.DataFrame(
-        {
-            "stock_id": [r[0] for r in rows],
-            "ex_date": [r[1] for r in rows],
-            "cash_dividend": [r[2] for r in rows],
-        }
-    )
+def _divs(rows: list[tuple]) -> pl.DataFrame:
+    """rows: (stock_id, ex_date, cash) 或 (stock_id, ex_date, cash, stock_dividend_ratio)。"""
+    has_ratio = any(len(r) >= 4 for r in rows)
+    data = {
+        "stock_id": [r[0] for r in rows],
+        "ex_date": [r[1] for r in rows],
+        "cash_dividend": [r[2] for r in rows],
+    }
+    if has_ratio:
+        data["stock_dividend_ratio"] = [r[3] if len(r) >= 4 else 0.0 for r in rows]
+    return pl.DataFrame(data)
 
 
 def test_dividend_addback_in_window():
@@ -151,9 +155,45 @@ def test_dividend_addback_in_window():
     divs = _divs([("3036", date(2026, 6, 8), 7.0)])
     result = compute_dividend_addback(["3036"], history, divs, n=5)
     assert "3036" in result
-    addback_pct, total_cash = result["3036"]
+    addback_pct, total_cash, stock_ratio = result["3036"]
     assert addback_pct == pytest.approx(5.0)
     assert total_cash == pytest.approx(7.0)
+    assert stock_ratio == pytest.approx(0.0)
+
+
+def test_stock_dividend_addback_large_ratio():
+    """大額配股（如 6669 緯穎 2026-09-02，配股 1.9828 股/股）→ 還原掉假崩盤。
+
+    c_back=7800、c_now=2565、s=1.9828、cash=0
+    delta = (s*c_now + cash) / c_back * 100 = 1.9828*2565/7800*100 ≈ +65.2
+    原始 5 日報酬 (2565-7800)/7800*100 ≈ -67.1 → 還原後 ≈ -1.9%
+    """
+    history = _make_history(
+        "6669", [7800.0, 7115.0, 2610.0, 2475.0, 2565.0, 2565.0], start=date(2026, 9, 1)
+    )
+    divs = _divs([("6669", date(2026, 9, 2), 0.0, 1.9827946)])
+    result = compute_dividend_addback(["6669"], history, divs, n=5)
+    assert "6669" in result
+    addback_pct, total_cash, stock_ratio = result["6669"]
+    assert total_cash == pytest.approx(0.0)
+    assert stock_ratio == pytest.approx(1.9827946)
+    # c_back=7800（9/1），c_now=2565（末列）
+    assert addback_pct == pytest.approx(1.9827946 * 2565.0 / 7800.0 * 100, rel=1e-6)
+    raw_ret = (2565.0 - 7800.0) / 7800.0 * 100
+    assert raw_ret + addback_pct == pytest.approx(-1.9, abs=0.5)
+
+
+def test_stock_dividend_plus_cash_addback():
+    """權息並存（配股＋現金）：delta = (s*c_now + cash) / c_back * 100。"""
+    history = _make_history("9999", [100.0, 99.0, 92.0, 93.0, 94.0], start=date(2026, 6, 6))
+    divs = _divs([("9999", date(2026, 6, 8), 2.0, 0.1)])
+    addback_pct, total_cash, stock_ratio = compute_dividend_addback(
+        ["9999"], history, divs, n=5
+    )["9999"]
+    assert total_cash == pytest.approx(2.0)
+    assert stock_ratio == pytest.approx(0.1)
+    # c_back=100（6/6），c_now=94（末列）
+    assert addback_pct == pytest.approx((0.1 * 94.0 + 2.0) / 100.0 * 100)
 
 
 def test_dividend_ex_date_at_window_start_excluded():
@@ -172,12 +212,24 @@ def test_dividend_before_window_excluded():
     assert "3036" not in compute_dividend_addback(["3036"], history, divs, n=5)
 
 
-def test_stock_dividend_zero_cash_excluded():
-    """純配股（cash=0）不在現金還原範圍。"""
+def test_stock_dividend_zero_cash_zero_ratio_excluded():
+    """cash=0 且無配股率（或配股率 0）→ 不還原、不出現在結果。"""
     history = _make_history("1312", [50.0, 49.0, 48.0, 49.0, 50.0, 51.0],
                             start=date(2026, 6, 6))
-    divs = _divs([("1312", date(2026, 6, 8), 0.0)])
+    divs = _divs([("1312", date(2026, 6, 8), 0.0)])  # 無 stock_dividend_ratio 欄
     assert "1312" not in compute_dividend_addback(["1312"], history, divs, n=5)
+
+
+def test_stock_dividend_ratio_column_absent_falls_back_to_cash_only():
+    """dividends 缺 stock_dividend_ratio 欄 → 行為同舊版（只還原現金），不報錯。"""
+    history = _make_history("3036", [140.0, 138.0, 130.0, 131.0, 132.0, 133.0],
+                            start=date(2026, 6, 6))
+    divs = _divs([("3036", date(2026, 6, 8), 7.0)])
+    addback_pct, total_cash, stock_ratio = compute_dividend_addback(
+        ["3036"], history, divs, n=5
+    )["3036"]
+    assert addback_pct == pytest.approx(5.0)
+    assert stock_ratio == pytest.approx(0.0)
 
 
 def test_multiple_dividends_in_window_summed():
@@ -185,8 +237,11 @@ def test_multiple_dividends_in_window_summed():
     history = _make_history("2327", [100.0, 98.0, 96.0, 97.0, 98.0, 99.0],
                             start=date(2026, 6, 6))
     divs = _divs([("2327", date(2026, 6, 8), 3.0), ("2327", date(2026, 6, 10), 1.0)])
-    addback_pct, total_cash = compute_dividend_addback(["2327"], history, divs, n=5)["2327"]
+    addback_pct, total_cash, stock_ratio = compute_dividend_addback(
+        ["2327"], history, divs, n=5
+    )["2327"]
     assert total_cash == pytest.approx(4.0)
+    assert stock_ratio == pytest.approx(0.0)
     assert addback_pct == pytest.approx(4.0)  # (3+1)/100*100
 
 
@@ -199,6 +254,66 @@ def test_dividend_addback_missing_columns_returns_empty():
     history = _make_history("3036", [140.0, 138.0, 133.0], start=date(2026, 6, 6))
     bad = pl.DataFrame({"stock_id": ["3036"], "ex_date": [date(2026, 6, 8)]})  # no cash
     assert compute_dividend_addback(["3036"], history, bad) == {}
+
+
+# ─── detect_price_discontinuity ──────────────────────────────────────────────
+
+
+def _hist_ch(stock_id: str, rows: list[tuple[float, float | None]], start=date(2026, 9, 1)):
+    """rows: (close, change)。change=None ＝ 除權息日 TWSE 不給漲跌價差。"""
+    return pl.DataFrame(
+        {
+            "stock_id": [stock_id] * len(rows),
+            "date": [date(start.year, start.month, start.day + i) for i in range(len(rows))],
+            "close": [r[0] for r in rows],
+            "change": [r[1] for r in rows],
+        }
+    )
+
+
+def test_price_discontinuity_ex_rights_null_change():
+    """6669 型：配股日 close 7800→2610、change 為 null → 命中。"""
+    hist = _hist_ch(
+        "6669",
+        [(7800.0, 5.0), (7115.0, -685.0), (2610.0, None), (2475.0, -135.0), (2565.0, 90.0)],
+    )
+    result = detect_price_discontinuity(["6669"], hist, lookback=10, threshold_pct=15.0)
+    assert "6669" in result
+    worst_ret, disc_date = result["6669"]
+    assert worst_ret < -60  # (2610-7115)/7115
+    assert disc_date == "2026-09-03"
+
+
+def test_price_discontinuity_bulk_change_zeroed():
+    """全市場 daily 快取把除權息日 change 填 0（非 null）→ 仍靠「change 無法解釋跳空」命中。"""
+    hist = _hist_ch(
+        "9999",
+        [(100.0, 1.0), (99.0, -1.0), (40.0, 0.0), (41.0, 1.0), (42.0, 1.0)],
+    )
+    result = detect_price_discontinuity(["9999"], hist, lookback=10, threshold_pct=15.0)
+    assert "9999" in result
+
+
+def test_price_discontinuity_normal_limit_move_not_flagged():
+    """漲跌停 ±10%：單日 −9.9%、change 與跳空一致 → 不命中（非資料異常）。"""
+    hist = _hist_ch(
+        "2330",
+        [(1000.0, 5.0), (901.0, -99.0), (900.0, -1.0), (905.0, 5.0)],
+    )
+    assert detect_price_discontinuity(["2330"], hist, threshold_pct=15.0) == {}
+
+
+def test_price_discontinuity_no_change_column_returns_empty():
+    """price_history 無 change 欄 → 無法判別成因，回空（不誤報）。"""
+    hist = _make_history("6669", [7800.0, 7115.0, 2610.0, 2475.0, 2565.0], start=date(2026, 9, 1))
+    assert detect_price_discontinuity(["6669"], hist, threshold_pct=15.0) == {}
+
+
+def test_price_discontinuity_outside_lookback_ignored():
+    """跳空日在 lookback 窗之外 → 不命中。"""
+    rows = [(7800.0, 5.0), (2610.0, None)] + [(2600.0 + i, 1.0) for i in range(15)]
+    hist = _hist_ch("6669", rows)
+    assert detect_price_discontinuity(["6669"], hist, lookback=5, threshold_pct=15.0) == {}
 
 
 # ─── aggregate_group_momentum ─────────────────────────────────────────────────
@@ -285,12 +400,14 @@ def _naive_dividend_addback(stock_ids, price_history, dividends, n=5):
         set(dividends.columns)
     ):
         return {}
+    has_ratio = "stock_dividend_ratio" in dividends.columns
     div_by_stock = {}
     for r in dividends.iter_rows(named=True):
-        cash, ex = r.get("cash_dividend"), r.get("ex_date")
-        if cash is None or cash <= 0 or ex is None:
+        cash, ex = r.get("cash_dividend") or 0.0, r.get("ex_date")
+        ratio = (r.get("stock_dividend_ratio") or 0.0) if has_ratio else 0.0
+        if ex is None or (cash <= 0 and ratio <= 0):
             continue
-        div_by_stock.setdefault(str(r["stock_id"]), []).append((ex, float(cash)))
+        div_by_stock.setdefault(str(r["stock_id"]), []).append((ex, float(cash), float(ratio)))
     result = {}
     ph_sorted = price_history.sort("date")
     for stock_id in stock_ids:
@@ -304,12 +421,20 @@ def _naive_dividend_addback(stock_ids, price_history, dividends, n=5):
         date_back = stock_df["date"][-(gap + 1)]
         latest = stock_df["date"][-1]
         c_back = stock_df["close"][-(gap + 1)]
+        c_now = stock_df["close"][-1]
         if c_back is None or c_back == 0:
             continue
-        total_cash = sum(cash for ex, cash in events if date_back < ex <= latest)
-        if total_cash <= 0:
+        in_win = [(cash, ratio) for ex, cash, ratio in events if date_back < ex <= latest]
+        total_cash = sum(cash for cash, _ in in_win)
+        total_ratio = sum(ratio for _, ratio in in_win)
+        if total_cash <= 0 and total_ratio <= 0:
             continue
-        result[stock_id] = (float(total_cash / c_back * 100), float(total_cash))
+        stock_val = total_ratio * float(c_now) if (c_now is not None and total_ratio > 0) else 0.0
+        result[stock_id] = (
+            float((stock_val + total_cash) / c_back * 100),
+            float(total_cash),
+            float(total_ratio),
+        )
     return result
 
 
