@@ -1363,6 +1363,13 @@ def _build_enriched_rows(
                 "val_gap_pct_peer": val_gap_pct_peer,
                 "val_implied_price_self": val_implied_price_self,
                 "val_gap_pct_self": val_gap_pct_self,
+                # docs/31 §20.13「2026-09-06 修訂」：pick.md 附錄 G search-augmented 腿
+                # 的「目標 PE」輸入——self 腿＝自身歷史中位 PE（深度看 pe_self_n，~2028
+                # 前只是「PE vs 近一季」），peer 腿＝同產業中位 PE，**只在 val_metric=="PE"
+                # 時給值**（虧損股 val_median 是 PB 中位、掛 pe_ 名稱會誤導 → null）。
+                # 純供人工 search-augmented 試算，不進 candidates 排序、不進 val_gap 綜合。
+                "pe_self_median": pe_self_median,
+                "pe_peer_median": val_median if val_metric == "PE" else None,
                 # docs/31 §20.9：估值回歸參考價（綜合版）——同儕PB/自身PB/同儕殖利率/
                 # 自身殖利率4條額外線索（gap_pct only，implied_price留在函式內部不
                 # 逐一輸出，避免CSV欄位爆量），加上上面PE兩條取中位數合成的綜合缺口%
@@ -1562,6 +1569,8 @@ _CANONICAL_REUSE_FIELDS = (
     "val_gap_pct_peer",
     "val_implied_price_self",
     "val_gap_pct_self",
+    "pe_self_median",
+    "pe_peer_median",
     "val_gap_pct_pb_peer",
     "val_gap_pct_pb_self",
     "val_gap_pct_yield_peer",

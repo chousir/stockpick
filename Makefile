@@ -6,7 +6,7 @@
         build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid contrarian-efficacy flow-inflection margin-factors \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check snapshot-week \
-        target-price-read target-price-project
+        target-price-read
 
 .DEFAULT_GOAL := help
 
@@ -20,7 +20,7 @@ help:  ## 列主要指令（裸打 make 即顯示）
 	@echo ""
 	@echo "進階指令：見 Makefile 各進階區段或 README「指令總覽」"
 
-week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-f-local → screen-redesign-local → fetch-candidates-history → rotation → macro → cp-value-candidates → group → target-price-project → snapshot-week → week-check → pick-outcome-brief
+week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-f-local → screen-redesign-local → fetch-candidates-history → rotation → macro → cp-value-candidates → group → snapshot-week → week-check → pick-outcome-brief
 ifndef GROUP
 	@echo "❌ 請指定 GROUP=defg（現行唯一主流程；abc/def 已退役）"
 	@exit 1
@@ -43,7 +43,6 @@ endif
 	-$(MAKE) macro   # docs/25 v2 總經燈號（BAA10Y 主訊號＋揭露面板）；FRED 掛了不擋主流程
 	-$(MAKE) cp-value-candidates   # 個股 CP 補漲候選＋三重濾網（group 的 7. 分析請求要讀 cp_candidates.md；失敗不擋）
 	$(MAKE) group   # 官方族群前5(§13)/G1/G2/G4/G5/L6/F2'新設計候選揭露(§4/§7.2/§9/§11)前瞻累積軌皆已內含在這步，不必另跑
-	-$(MAKE) target-price-project   # docs/31 §20.13 Phase 2 實驗性目標價（需 candidates_enriched.csv；產 reports/<週次>/target_price_experimental.*；失敗不擋主流程）
 	-$(MAKE) snapshot-week   # WS-J.1 point-in-time 快照：凍結本週 concepts/watchlist/holdings/宇宙成員（失敗不擋主流程）
 	$(MAKE) week-check   # 尾段產物完整性檢查（規劃書 05 F4）：上面容錯步驟若無聲失敗，這裡點名
 	-$(MAKE) pick-outcome-brief   # WS-A3 上週 picks r+5 回饋一頁（輸入包；失敗不擋主流程）
@@ -184,11 +183,8 @@ laggard-grid:  ## WS-D 族群內強弱：2×2×位階 forward 報酬格（產 re
 contrarian-efficacy:  ## M-BR1 Phase 2 底部左側聯合桶（轉買×貼近低）forward alpha 檢驗＋§1 硬門檻裁決（產 research/contrarian_efficacy/）
 	uv run tw-screener backtest contrarian-efficacy
 
-target-price-read:  ## docs/31 §20.13 Phase 1 實驗性機械式目標價校準回測（backlog 研究，僅 r+20 可裁決，產 research/target_price/）
+target-price-read:  ## docs/31 §20.13 Phase 1 實驗性機械式目標價校準回測（backlog 研究，季頻重跑看 r+20 rho/CI；產 research/target_price/）
 	uv run tw-screener backtest target-price-read
-
-target-price-project:  ## docs/31 §20.13 Phase 2 本週實驗性機械式目標價（week 自動跑；產 reports/<週次>/target_price_experimental.{md,yaml}；不進 picks.csv）
-	uv run tw-screener backtest target-price-project
 
 macro-regime-validate:  ## M-Macro2 as-of 回放驗證＋門檻敏感度＋DEXJPUS tail-event 重測（需先跑過三輪研究，產 research/macro_regime_screening/round4）
 	uv run tw-screener backtest macro-regime-validate

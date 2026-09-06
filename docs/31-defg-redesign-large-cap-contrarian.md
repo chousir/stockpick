@@ -1911,8 +1911,9 @@ G1/G5是否也該加市值下限，本輪未動，候選數本身尚屬合理（
 - **已結案的獨立研究線（負結果）**：§20.13 實驗性機械式「目標價」Phase 1 校準回測
   （2026-09-01）——profile（位階×族群內相對強弱 9 格）歷史類比分布：r+20 cell 排序
   單調（rho +0.78）但相對 `_pooled` 全市場基準**不能縮小投射誤差**（pooled null CI
-  跨 0）；r+60/r+120 塊數不足無裁決。結論：機械式目標價不給 per-stock 數字，最多
-  全市場 regime-conditional 區間且標低信心。Phase 2（本週 production）視使用者意願另開。
+  跨 0）；r+60/r+120 塊數不足無裁決。**2026-09-06 修訂**：使用者評估 Phase 2 產物後
+  拍板機械腿下架，附錄 G 只留 search-augmented（前瞻 EPS × 自身/同儕中位 PE）；Phase 1
+  校準回測工具與季頻重跑保留、rho/CI 翻正才重議（§20.13「2026-09-06 修訂」小節）。
 
 **一句話總結**：docs/31的「候選生成」層（G1/G2/G4/G5/L6/F2'）已經落地且持續在跑，但
 「統計驗證」層（§7.4門檻）一個都還沒過關；「左側交易股」設計（L1-L6）只做出
@@ -2385,6 +2386,41 @@ playbook/60 + docs/06 例外條、daily-picks Step 4 改、`make week` 接線—
   脫鉤**（parser 只認 `<!-- picks:begin -->`~`end`）、不進 picks.csv、不進正式結論。
   pick.md 的實驗性目標價只存在於「附錄 G」（決策卡零行數影響）。
 - 只 r+20（唯一裁決-eligible，settings `horizon_td`）；不輸出 r+60/r+120 單一數字。
+
+#### 2026-09-06 修訂：機械腿下架、search-augmented 目標 PE 改自身/同儕中位 PE
+
+使用者評估 Phase 2 產物後拍板：**機械腿（歷史類比 9 格分位）非常不準確、下架；
+search-augmented（前瞻 EPS × 目標 PE）保留但改算法**。兩點要記清楚免得有人重建：
+
+- **(a) 這次改動來自「修正輸入 + 使用者偏好」，不是新驗證。** Phase 1 的統計 ledger
+  一字未動——#1(b) r+20 pooled-null CI [−0.10, +0.03] 仍跨 0、#3 中位偏誤 +2.23pp、
+  #4 區間寬 ±9.86pp。使用者對「機械腿貼著現價、沒有個別化資訊」的判讀，本質就是
+  #1(b) 主裁決的白話版（分桶與全市場基準統計無法區分）。
+- **(b) 只下架 production runner，Phase 1 研究工具與季頻重跑保留。**
+  移除：`src/tw_screener/backtest/target_price_project.py` 及其測試、CLI
+  `backtest target-price-project`、`config/target_price_fit_lookup.csv`(+`.provenance.yaml`)、
+  `settings backtest.target_price.project` 子區塊、`make week` 掛點、
+  `artifact_check.machine` 的 `target_price_experimental.md`、產物
+  `reports/<週次>/target_price_experimental.{md,yaml}`。
+  **保留**：`target_price_panel.py` / `target_price_read.py` / `backtest target-price-read`
+  / `make target-price-read` / `settings backtest.target_price`（Phase 1 校準回測）。
+  **重開條件**（寫死於此）：季頻重跑 Phase 1，r+20 的 #1(a) rho≥0.5 **且** #1(b)
+  CI 整段 <0 → 才重議機械腿是否回附錄 G。
+
+- **search-augmented 新算法**（舊版 `目標 PE = peg_like_ratio × 前瞻年增率%` 因
+  `peg_like_ratio` 分母是單月營收 YoY、量綱不一致、對 AI 伺服器鏈系統性失真而廢棄）：
+  - `search_augmented_target = 前瞻 EPS（web search 具名來源）× 目標 PE`
+  - 目標 PE 依序：`candidates_enriched.pe_self_median`（自身歷史中位 PE，深度看
+    `pe_self_n`，`valuation_ratios` 2026-06 才起累、~2028 前實質是「PE vs 近一季」）
+    → 深度不足退 `pe_peer_median`（同產業中位 PE，**僅 `val_metric=="PE"`**，帶
+    景氣循環股同儕 PE 偏低但書）→ 皆 null 標「無法計算」。
+  - **代數上 `前瞻EPS × pe_self_median ≡ val_implied_price_self × (前瞻EPS / 當期EPS)`**
+    ——即決策卡「估值缺口%(綜合)」裡自身 PE 那條線索的前瞻重縮放，**不是獨立第二
+    估計**（附錄 G 讀法提醒逐字寫明，防 §22.16 型雙重計數誤讀）。
+  - 新增 `candidates_enriched` 欄位 `pe_self_median` / `pe_peer_median`（純供人工
+    附錄 G 試算，不進 candidates 排序、不進 `val_gap` 綜合）。
+- **仍不消耗 §22 假說預算**（precedent §23.4）；附錄 G 仍在 `picks:begin/end` 外、
+  `picks sync` 不消費、不進 F2 位階查核。
 
 ## 21. 減量研究計畫 Part 1：逐式目的定義＋參數可行性分級（2026-08-24）
 

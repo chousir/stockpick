@@ -72,17 +72,19 @@ Prompt 內容要包含：「讀 `.claude/commands/macro-scan.md` 並完整依其
   `inflection_ambush.md`、`holdings_enriched.csv`（若存在）、`watchlist_enriched.csv`
   （若存在）、**所有 `screen_result_*.csv`**（2026-08-28 起為本地篩選 F/F2/G1/G2/G4/G5/L6，
   檔數不固定；舊 Goodinfo D/E/G 已軟退場、不會有其 CSV，這是預期、不是缺檔）、
-  `pick_outcome_brief.md`（若存在）、`target_price_experimental.yaml`（若存在・附錄 G 用）、
-  剛寫好的 `macro_risk_latest.yaml`（若存在）。」
-- 「**附錄 G 實驗性目標價（docs/31 §20.13 Phase 2）**：若 `reports/<週次>/target_price_experimental.yaml`
-  存在，對你**最終選入核心＋機會層**的個股，在「附錄 G」（排附錄 F 後、資料品質披露前）逐檔列：
-  (1) 機械腿——直接抄 yaml 的 `target_mechanical`/`p25`/`p75`/`target_pooled`/`basis`，信賴度固定
-  『低』、時間窗『20 交易日≈1 個月』；(2) search-augmented 腿——web search 取前瞻營收/EPS 與財測
-  （**不得抄券商目標價**，守 docs/11「外部查證」規則），依 docs/11『附錄 G』公式
-  （`目標PE = peg_like_ratio × 前瞻年增率`；`目標價 = 前瞻EPS × 目標PE`）算，標『不可回測・無歷史
-  驗證』＋來源日期；`peg_like_ratio` 為 null 或查無前瞻數字 → 標『無法計算』。抬頭放 docs/11 附錄 G
-  的固定免責語。**附錄 G 不進決策卡、不進 picks 區塊、不影響 F2 查核與 `picks sync`。** yaml 檔缺席
-  → 附錄 G 只寫一行『runner 產物缺席，本週略過』。」
+  `pick_outcome_brief.md`（若存在）、剛寫好的 `macro_risk_latest.yaml`（若存在）。」
+- 「**附錄 G 實驗性目標價（docs/31 §20.13「2026-09-06 修訂」）**：對你**最終選入核心＋機會層**的
+  個股，在「附錄 G」（排附錄 F 後、資料品質披露前）逐檔列 **search-augmented 目標價**
+  （機械腿已下架，不要再找 `target_price_experimental.yaml`）：
+  `目標價 = 前瞻EPS × 目標PE`，其中——
+  目標 PE 依序取 `candidates_enriched.csv` 的 `pe_self_median`（同列標 `pe_self_n`，並註明
+  『~2028 前實質是 PE vs 近一季』）→ null 退 `pe_peer_median`（僅 `val_metric==PE`，帶景氣循環股但書）
+  → 皆 null 標『無法計算』；
+  前瞻 EPS 用 web search 取公司財測或具名券商前瞻 EPS/營收（**不得抄券商目標價**，守 docs/11
+  「外部查證」規則）＋來源日期，查無 → 標『無法計算』。
+  抬頭放 docs/11 附錄 G 固定免責語，表下逐字附讀法提醒（『這張表唯一比決策卡多的資訊是前瞻 EPS
+  的修正幅度，其餘是 val_gap_pct_self 已在說的話，不要當互相佐證』）。
+  **附錄 G 不進決策卡、不進 picks 區塊、不影響 F2 查核與 `picks sync`。**」
 - 「**寫檔前自己查核 F2 位階紀律**：`picks:` 區塊裡每一筆 `layer: core` 的股票，
   對照 `candidates_enriched.csv` 的 `ext_ma60_pct` 欄，必須 ≤ `config/settings.yaml`
   的 `picks.core_ext_ma60_max_pct`（現行 +15%）。超過的股票**不能放進 core 層**——

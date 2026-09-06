@@ -424,6 +424,10 @@ def test_valuation_implied_price_columns_peer_and_self_legs(tmp_path):
     # close=100、PE 20 回歸自身歷史中位25 → implied_price_self=125、gap_pct_self=+25%
     assert row["val_implied_price_self"] == pytest.approx(125.0)
     assert row["val_gap_pct_self"] == pytest.approx(25.0)
+    # docs/31 §20.13「2026-09-06 修訂」：附錄 G search-augmented 腿的目標 PE 輸入欄——
+    # val_metric=="PE" → 兩欄皆給值（pe_peer_median=val_median、pe_self_median 原樣）
+    assert row["pe_self_median"] == pytest.approx(25.0)
+    assert row["pe_peer_median"] == pytest.approx(30.0)
 
     # 2454：PB基準，close=100、PB 4 回歸同產業PB中位5 → implied_price_peer=125、gap=+25%
     row2 = by_id["2454"]
@@ -432,6 +436,10 @@ def test_valuation_implied_price_columns_peer_and_self_legs(tmp_path):
     # self腿v1只做PE基準，2454無pe_self_median → 留null，不硬算
     assert row2["val_implied_price_self"] is None
     assert row2["val_gap_pct_self"] is None
+    # val_metric!="PE"（PB基準、多為虧損股）→ pe_peer_median 不可掛 PB 中位、留 null；
+    # pe_self_median 亦缺 → 附錄 G 該檔走「無法計算」路徑
+    assert row2["pe_self_median"] is None
+    assert row2["pe_peer_median"] is None
 
 
 def test_valuation_composite_gap_uses_available_legs(tmp_path):
