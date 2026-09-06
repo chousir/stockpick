@@ -36,7 +36,8 @@ cell_n_r20:
   "位階延伸>8｜族群內領先>5": 63616
   "_pooled": 539024
 
-# Phase 1 主裁決（§20.13）——runner 據此把機械腿 tier 封頂「低」：
+# runner 據此把機械腿 tier 封頂「低」（confidence_tier 對這些大 cell 會回「中」或「高」，
+# 與 Phase 1 主裁決矛盾）。Phase 1 主裁決（§20.13）：
 #   #1(b) r+20 pooled-null 配對差 mean −0.04pp、CI [−0.10, +0.03] 跨 0
 #     ⇒ 用 cell 的 P50 取代全市場 P50 沒有 measurably 縮小 per-stock 投射誤差
 #   #3 r+20 中位偏誤 +2.23pp（test 窗 2025–2026 報酬系統性高於 fit 分布 P50 ⇒ 數字偏低）

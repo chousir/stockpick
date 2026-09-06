@@ -2378,9 +2378,9 @@ playbook/60 + docs/06 例外條、daily-picks Step 4 改、`make week` 接線—
   `_assert_edges_match` 比對 cell label 內嵌切點 vs settings，不符拒跑（落實「跑完
   不得回調」）。
 - **機械腿 tier 一律封頂「低」**（settings `backtest.target_price.project.tier_cap`）：
-  實測 fit_lookup r+20 全 9 cell 的 n≥800、iqr≤25 ⇒ `confidence_tier()` 會回「高」，
-  與主裁決直接矛盾；`tier_raw` 仍寫進 yaml 供稽核。翻正解封門檻＝每季重跑 Phase 1，
-  r+20 #1(b) CI 整段 <0 且 #1(a) rho≥0.5。
+  fit_lookup r+20 的 cell n 動輒數萬、iqr ~10 ⇒ `confidence_tier()` 會回「中」（regime
+  標籤缺覆蓋時）或「高」（regime 覆蓋且大 cell），與主裁決直接矛盾；`tier_raw` 仍寫進
+  yaml 供稽核。翻正解封門檻＝每季重跑 Phase 1，r+20 #1(b) CI 整段 <0 且 #1(a) rho≥0.5。
 - 產物 `reports/<週次>/target_price_experimental.{md,yaml}`——**與 `picks sync` 完全
   脫鉤**（parser 只認 `<!-- picks:begin -->`~`end`）、不進 picks.csv、不進正式結論。
   pick.md 的實驗性目標價只存在於「附錄 G」（決策卡零行數影響）。
