@@ -17,16 +17,16 @@
   TWSE/TPEX OpenAPI │ 日線 daily_*  法人 institutional_*(上市+上櫃)  月營收  產業別  官方估值比 valuation_ratios_* │
                     │ 融資融券 margin_*(上市)  財報體質 fundamentals_*(負債比/ROE/純益率)   │
   TDCC 集保         │ 大戶持股比 tdcc_*（≥400 張/≥1000 張＋WoW，規劃書 02 D3）        │
-  Goodinfo（限速爬蟲）│ 策略篩選結果（YAML 條件 → URL → HTML → CSV）                │
+  Goodinfo（限速爬蟲）│ 個股報告被動連結＋手動 screen；**預設週流程不再呼叫（§20.6）**  │
   Yahoo 概念股       │ config/concepts.yaml 主題標籤（手標次產業＋自動爬概念股）      │
                     └──────────────────────────┬───────────────────────────────┘
                                                ▼
- make week GROUP=defg ＝ 一條指令串起以下十四步：
+ make week GROUP=defg ＝ 一條指令串起以下十四步（GROUP=defg 只是必填 guard，2026-08-28 起不再作策略選擇）：
  ① fetch-twse                日線/法人/月營收/產業別/官方估值比(PE/PB/殖利率) 增量入快取
  ② fetch-institutional-history 回補近 20 日上市＋上櫃法人（隔幾天沒跑也自動補齊）
  ③ fetch-tdcc                集保大戶持股比（容錯：TDCC 異常不擋，大戶欄退化 null）
- ④ doctor                    Goodinfo 健康檢查（只診斷不擋，2026-08-23 拍板，docs/31 §19.3；⑤仍會嘗試執行）
- ⑤ screen-all GROUP=defg     Goodinfo 跑 D/E/F/G 四策略 → screen_result_*.csv（純快照；被擋時逐策略印「本週未取得」，不中止流程）
+ ④ doctor                    Goodinfo 健康檢查（只診斷不擋；2026-08-28 起預設流程不再呼叫 Goodinfo，doctor 純觀察用途、給想手動 screen run 時先確認站台）
+ ⑤ screen-f-local            F（價值反彈）本地等價定義（市值/PE/殖利率/累計月營收 YoY 四條件，field_map.py 全覆蓋）→ screen_result_f_value_rebound.csv（source=local）。**舊 Goodinfo D/E/G 已軟退場（docs/31 §20.6）——結構性無法本地重建，預設流程不再嘗試爬取；歷史定義留 config/strategies/{d,e,g}_*.yaml、手動 make screen-all GROUP=defg 不變**
  ⑥ screen-redesign-local     docs/31 §4/§7.2 全新本地filter(G1/G2/G4/G5/L6/F2')，不打Goodinfo→screen_result_*.csv（2026-08-24拍板直接掛進主流程，F2'於§20.10追加，**實驗性質未過統計驗證**，容錯：失敗不擋）
  ⑦ fetch-candidates-history  對命中股聯集（含⑤⑥）補抓 13 個月個股日線（MA60/量比/動能用）
  ⑧ rotation                  ★ 次產業輪動（全市場宇宙・價格趨勢分數主鍵＋趨勢領頭板）→ sector_rotation.md/csv
@@ -42,15 +42,14 @@
  手動：make report STOCK_ID=XXXX → 個股深度報告
 ```
 
-> **候選宇宙現含兩種來源，規模差很大**：⑤ Goodinfo D/E/F/G（~87 檔，已軟退場、
-> 預設流程改走本地）＋⑥ docs/31 本地 G1/G2/G4/G5/L6/F2'（2026-08-24 拍板：不用
-> 全部跟隨 Goodinfo，用現有本地資料做 filter，直接掛進主流程，接受未驗證/結果
-> 可能不理想——實測單週命中數 g1=107／g2=44／g4=351／g5=21／l6=281 檔，門檻目前
-> 很鬆；F2' 於 §20.10 追加，市值≥300億門檻）。兩者一起流進
-> `candidates_enriched.csv`，`strategy` 欄用 G1/G2/G4/G5/L6/F2' 標籤跟 Goodinfo 的
-> D/E/F/G 明確區分（見 `screen_result_*.csv` 的 `source` 欄：Goodinfo 來源無此欄、
-> F 本地替代路徑是 `local`、G1/G2/G4/G5/L6/F2' 是 `local_unvalidated`）。**候選數因此
-> 會比純 Goodinfo 時代明顯變大**，屬預期行為。
+> **候選宇宙現全為本地篩選（2026-08-28 起）**：⑤ F（價值反彈・官方 API 等價定義本地算，
+> `source=local`，本週唯一「經典策略等級」訊號）＋⑥ docs/31 本地 G1/G2/G4/G5/L6/F2'
+> （2026-08-24 拍板：不用全部跟隨 Goodinfo，用現有本地資料做 filter，直接掛進主流程，
+> 接受未驗證/結果可能不理想——實測單週命中數 g1≈107／g2≈44／g4≈351／g5≈21／l6≈281 檔，
+> 門檻目前很鬆；F2' 於 §20.10 追加，市值≥300億門檻，`source=local_unvalidated`）。
+> 全部流進 `candidates_enriched.csv`，`strategy` 欄用 F/F2/G1/G2/G4/G5/L6 標籤。
+> **舊 Goodinfo D/E/G 已軟退場（docs/31 §20.6，結構性無法本地重建），預設流程不再產出其
+> `screen_result`；候選數比純 Goodinfo 時代明顯變大**，屬預期行為。
 >
 > `candidates_enriched.csv` 的 `redesign_watch` 欄（docs/31 §4/§7.2/§9/§11，2026-08-24
 > 新增）＝G1/G2/G4/G5/L6/F2' 命中旗標（逗號分隔，未命中留白）——純觀察揭露，不影響
@@ -469,23 +468,27 @@ make dash                # uv run tw-screener serve：單一 FastAPI 同時服�
 
 ## 策略體系
 
-現行主流程 `make week GROUP=defg`，跑 **D/E/F/G** 四組（GROUP 必填、無預設）。
+現行主流程 `make week GROUP=defg`（GROUP 必填、無預設；`GROUP=defg` 只是 guard，2026-08-28 起不再作策略選擇）。**預設流程全為本地篩選、不打 Goodinfo**（docs/31 §20.6）。
 
-### D/E/F/G ProPicks 復刻組（現行主力）
+### 現行本地篩選組
 
-D/E/F 對標 Investing.com ProPicks，共用「市值≥100 億」；**G 是 E 的逆勢孿生**：
+| 代號 | 名稱 | 條件概念 | source | 驗證狀態 |
+| ---- | ---- | -------- | ------ | -------- |
+| **F** | 價值反彈 | 市值≥100 億 + PER≤15 + 殖利率≥3 + 累計月營收 YoY≥10（官方 API 等價定義本地算） | `local` | 等價 Goodinfo F 定義（唯一「經典策略等級」訊號） |
+| **F2'** | 本地-成長優質股 | PE 15–30 ∧ 毛利優於同儕 ∧ Δ營益率≥0 ∧ 市值≥300億（§20.10） | `local_unvalidated` | 未過 §7.4 |
+| **G1** | 利潤率擴張 | 本地算利潤率擴張訊號 | `local_unvalidated` | 未過 §7.4 |
+| **G2** | 本地-品質龍頭 | 單季 ROE × 資產負債表體質（D 的正式接班，§20.1，市值≥300億） | `local_unvalidated` | 未過 §7.4 |
+| **G4** | 單月對累計 YoY 正向分歧 | 市值≥300億（§20.4） | `local_unvalidated` | 未過 §7.4 |
+| **G5** | 估值未反映利潤率改善 | 成交額≥300M | `local_unvalidated` | 未過 §7.4 |
+| **L6** | 左側反彈 | YoY≥20 ∧ PE≤25，落難週母體版（§20.3，市值≥100億＋落難四維） | `local_unvalidated` | 未過 §7.4 |
 
-| 策略                 | 條件概念                                             | 對標 / 角色          | 持有時間 |
-| -------------------- | ---------------------------------------------------- | -------------------- | -------- |
-| **D 品質龍頭** | 市值≥100 億 + ROE≥15 + 配息 8 年 + 連 2 季淨利     | TWCH15 台灣晶片冠軍  | 6+ 月    |
-| **E 成長動能** | 市值≥100 億 + 營收 YoY≥20 + 連 2 季淨利 + 均線多頭 | Tech Titans（順勢）  | 1–3 月  |
-| **F 價值反彈** | 市值≥100 億 + PER≤15 + 殖利率≥3 + 營收 YoY≥10    | Top Value Stocks     | 3–6 月  |
-| **G 成長拉回** | 同 E 基本面 + 季線上揚回踩（乖離 −5%~+10%）+ 量縮   | E 的逆勢孿生（低接） | 1–3 月  |
+> F2'/G1/G2/G4/G5/L6 皆 `source=local_unvalidated`、門檻偏鬆、候選宇宙暴增到數百檔——當觀察線索、不當篩選/排序依據（docs/11 策略代號框、docs/31 §7.4）。
 
-> **E 順勢、G 逆勢**：G 的拉回過濾在分析層用快取 MA60/量比計算；G 的 CSV 是基本面宇宙，
-> 有效拉回命中見 `group_analysis.md` 標 G 者。
+### 舊 Goodinfo D/E/G（已軟退場，2026-08-28）
 
-### A/B/C 經典三角（已退役）
+D（近四季 ROE＋連續配息 8 年）、E/G（連續季數-單季稅後淨利）三式的官方 API 判準結構性無歷史查詢、**永遠無法在本地重建**（docs/31 §20.6）。`make week` 預設流程不再嘗試 Goodinfo 爬取，不產出 `screen_result_{d,e,g}_*.csv`。歷史定義保留在 `config/strategies/{d,e,g}_*.yaml`，手動路徑 `make screen-all GROUP=defg` / `make screen STRATEGY=xxx` 不變。G2 是 D 的正式本地接班。
+
+### A/B/C 經典三角（更早退役）
 
 早期實驗，已退役（規劃書 04 A4）：YAML 移至 `config/strategies/archive/`，
 `GROUP=abc` 不再可跑（會明確報退役）。僅留作歷史紀錄，

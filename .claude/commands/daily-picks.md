@@ -70,8 +70,9 @@ Prompt 內容要包含：「讀 `.claude/commands/macro-scan.md` 並完整依其
 - 「依 docs/11 §Step A 的清單，讀 `reports/<週次>/` 下這些檔案：`group_analysis.md`、
   `sector_rotation.md`、`candidates_enriched.csv`、`cp_candidates.md`、
   `inflection_ambush.md`、`holdings_enriched.csv`（若存在）、`watchlist_enriched.csv`
-  （若存在）、4 個 `screen_result_*.csv`、`pick_outcome_brief.md`（若存在）、
-  剛寫好的 `macro_risk_latest.yaml`（若存在）。」
+  （若存在）、**所有 `screen_result_*.csv`**（2026-08-28 起為本地篩選 F/F2/G1/G2/G4/G5/L6，
+  檔數不固定；舊 Goodinfo D/E/G 已軟退場、不會有其 CSV，這是預期、不是缺檔）、
+  `pick_outcome_brief.md`（若存在）、剛寫好的 `macro_risk_latest.yaml`（若存在）。」
 - 「**寫檔前自己查核 F2 位階紀律**：`picks:` 區塊裡每一筆 `layer: core` 的股票，
   對照 `candidates_enriched.csv` 的 `ext_ma60_pct` 欄，必須 ≤ `config/settings.yaml`
   的 `picks.core_ext_ma60_max_pct`（現行 +15%）。超過的股票**不能放進 core 層**——
