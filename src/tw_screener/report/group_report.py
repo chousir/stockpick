@@ -713,13 +713,16 @@ def _build_context(
     if dividend_events is not None and not dividend_events.is_empty():
         for r in dividend_events.iter_rows(named=True):
             cash = r.get("cash_dividend")
+            ratio = r.get("stock_dividend_ratio")
             dividend_rows.append(
                 {
+                    "window": r.get("window", "未來"),
                     "ex_date": r["ex_date"].isoformat() if r.get("ex_date") else "",
                     "stock_id": r.get("stock_id", ""),
                     "name": r.get("name", ""),
                     "type": r.get("type", ""),
                     "cash_dividend": f"{cash:.2f}" if cash is not None else "-",
+                    "stock_ratio": f"{ratio:.4f}" if (ratio is not None and ratio > 0) else "-",
                 }
             )
 
@@ -786,7 +789,7 @@ def render_group_report(
     """Render group_analysis.md to output_path using Jinja2 template.
 
     members: rank_within_groups 的回傳；含 rank_in_group / leader_score / momentum_5d。
-    dividend_events: 候選股未來窗內除權息（filter_dividend_calendar 的回傳）；None/空則不渲染該段。
+    dividend_events: 候選股除權息（過去已發生＋未來窗，各列帶 window 欄）；None/空則不渲染該段。
     themes_long: load_themes() 的 (stock_id, theme, kind) long table；None/空則主題排名留空。
     regime: regime.describe_regime() 的顯示 dict（規劃書 03 V2）；None 則不渲染大盤姿態段。
     portfolio: portfolio.describe_portfolio_check() 的顯示 dict（規劃書 03 V3）；
@@ -1293,11 +1296,23 @@ def _build_enriched_rows(
         # 驗證）——None＝本週未命中任何一式。
         redesign_watch = (redesign_watch_map or {}).get(sid)
 
-        # 除息還原：5 日視窗內現金股利已加回 momentum_5d（修假負）；標旗供人工查證
+        # 除權息還原：5 日視窗內現金股利＋配股已加回 momentum_5d（修假負／假崩盤）；標旗供人工查證
         ex_div_cash = _num(r.get("ex_div_cash"), 2)
         div_addback_pct = _num(r.get("div_addback_pct"), 2)
+        ex_div_stock_ratio = _num(r.get("ex_div_stock_ratio"), 4)
         if ex_div_cash is not None and ex_div_cash > 0:
             flags.append(f"除息還原{ex_div_cash}元")
+        if ex_div_stock_ratio is not None and ex_div_stock_ratio > 0:
+            flags.append(f"除權還原配股{ex_div_stock_ratio}")
+
+        # 價格不連續安全網（除權息/減資/面額分割/停牌補跳）：close 序列跨 ex 日跳空、
+        # momentum/距均線/區間高低/PE 皆失真 → 標旗，pick 階段「資料異常、本週不判多空」。
+        price_discontinuity = bool(r.get("price_discontinuity"))
+        price_disc_detail = r.get("price_disc_detail") or ""
+        if price_discontinuity:
+            flags.append(
+                f"價格不連續({price_disc_detail})" if price_disc_detail else "價格不連續"
+            )
 
         rows.append(
             {
@@ -1313,7 +1328,10 @@ def _build_enriched_rows(
                 "momentum_5d_pct": mom,  # 已含除息還原（見 div_addback_pct）
                 "ret_10d_pct": ret_10d,  # 近10日報酬(除息還原)：≥−3%＝健康回踩、<−5%＝下跌反彈
                 "ex_div_cash": ex_div_cash,            # 5 日內現金股利合計（元），無＝空
-                "div_addback_pct": div_addback_pct,    # 還原加回 momentum 的百分點
+                "div_addback_pct": div_addback_pct,    # 還原加回 momentum 的百分點（現金＋配股）
+                "ex_div_stock_ratio": ex_div_stock_ratio,  # 5 日內配股率合計（新股/原股），無＝空
+                "price_discontinuity": price_discontinuity or None,  # True＝跨 ex 日跳空、讀數失真
+                "price_disc_detail": price_disc_detail or None,      # "YYYY-MM-DD ±X%"
                 "change_pct": _num(r.get("change_pct"), 2),
                 "close": close,
                 "vol_ratio": vr if (vr or 0) > 0 else None,
@@ -1518,6 +1536,9 @@ _CANONICAL_REUSE_FIELDS = (
     "ret_10d_pct",
     "ex_div_cash",
     "div_addback_pct",
+    "ex_div_stock_ratio",
+    "price_discontinuity",
+    "price_disc_detail",
     "change_pct",
     "vol_ratio",
     "ma20_dist_pct",

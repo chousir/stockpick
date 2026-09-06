@@ -207,7 +207,10 @@ group_analysis:
   top_groups: 10
   top_stocks: 10
   dividend_lookahead_days: 14   # 除權息前瞻窗（日曆日，約 10 交易日）
+  dividend_lookback_days: 20    # 除權息「過去已發生」窗（日曆日）：group_analysis 除權息段雙向列
   macro_lookahead_days: 30      # 總經事件前瞻窗（日曆日，涵蓋雙雷／法說／結算）
+  price_discontinuity_pct: 15.0 # 價格不連續安全網：近 10 交易日單日報酬絕對值 > 此值且 change 無法解釋
+                                # → 標 price_discontinuity（除權息/減資/面額分割/停牌補跳），pick 階段不判多空
   vol_lookback_days: 20         # 量比均量視窗（交易日）；每檔只取今日前最近 N 天平均，與輸入列數脫鉤
   radar:                        # 輪動雷達（Section 2.8 領先鏡頭 + Section 6 深度解讀驅動）
     vol_surge_ratio: 1.5        # 量比 ≥ 此值算「量能放大」（領先訊號之一）
