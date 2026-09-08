@@ -347,6 +347,17 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
     cheap_pctile: 30.0       # 次產業升冪百分位 ≤ 此值標「相對便宜」（0=次產業內最便宜；PE 主、PB 補虧損股）
     max_rows: 40             # cp_valuation.md 列出前 N（依百分位遞增）；≤0 不截
     self_history_min_snapshots: 8  # docs/31 §14：自身PE歷史百分位至少要幾筆快照才計算（目前約10週/23筆深度）
+    dcf:                     # docs/31 §20.13「2026-09-07 修訂」：pick.md 附錄 G「綜合估值區間」的 M3 DCF 腿參數
+                            # ——由 pick.md 合成階段（Opus）手動套用，非 pipeline 計算；此處集中管理不寫死在 prompt
+      equity_risk_premium_pct: 5.5   # 台股股權風險溢酬假設（無本地資料源，人工假設）
+      terminal_growth_pct: 2.0       # 永續成長率（寫死、不逐檔調——DCF 最敏感的輸入）
+      stage1_years: 10               # 明確預測期年數（其後套永續期末值）
+      sensitivity_step_pct: 1.0      # 敏感度四角：WACC 與永續成長各 ±此值
+      discount_rate_floor_pct: 8.0   # 折現率地板——TW 10Y 殖利率 ~1.6% 過低，不設地板 WACC−g 分母會趨零/失真
+      min_wacc_terminal_spread_pct: 3.0  # WACC − 永續成長率 的最小 spread（含敏感度四角）——同上理由
+      exclude_industries: ["銀行", "保險", "證券", "金融保險", "金控"]  # FCF 無意義 → 該檔只用 M1/M2、註明排除原因
+      exclude_if_quarterly_loss: true          # 近 4 季有單季虧損 → 排除 DCF
+      exclude_if_rev_yoy_swing_pp: 40.0        # 近 3 年營收年增率波動 > 此值(pp) → 極端週期、排除 DCF
 
 backtest:                    # 規劃書 03 V1 策略回測閉環（make backtest-strategies）
   strategies:
