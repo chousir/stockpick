@@ -73,18 +73,23 @@ Prompt 內容要包含：「讀 `.claude/commands/macro-scan.md` 並完整依其
   （若存在）、**所有 `screen_result_*.csv`**（2026-08-28 起為本地篩選 F/F2/G1/G2/G4/G5/L6，
   檔數不固定；舊 Goodinfo D/E/G 已軟退場、不會有其 CSV，這是預期、不是缺檔）、
   `pick_outcome_brief.md`（若存在）、剛寫好的 `macro_risk_latest.yaml`（若存在）。」
-- 「**附錄 G 實驗性目標價（docs/31 §20.13「2026-09-06 修訂」）**：對你**最終選入核心＋機會層**的
-  個股，在「附錄 G」（排附錄 F 後、資料品質披露前）逐檔列 **search-augmented 目標價**
-  （機械腿已下架，不要再找 `target_price_experimental.yaml`）：
-  `目標價 = 前瞻EPS × 目標PE`，其中——
-  目標 PE 依序取 `candidates_enriched.csv` 的 `pe_self_median`（同列標 `pe_self_n`，並註明
-  『~2028 前實質是 PE vs 近一季』）→ null 退 `pe_peer_median`（僅 `val_metric==PE`，帶景氣循環股但書）
-  → 皆 null 標『無法計算』；
-  前瞻 EPS 用 web search 取公司財測或具名券商前瞻 EPS/營收（**不得抄券商目標價**，守 docs/11
-  「外部查證」規則）＋來源日期，查無 → 標『無法計算』。
-  抬頭放 docs/11 附錄 G 固定免責語，表下逐字附讀法提醒（『這張表唯一比決策卡多的資訊是前瞻 EPS
-  的修正幅度，其餘是 val_gap_pct_self 已在說的話，不要當互相佐證』）。
-  **附錄 G 不進決策卡、不進 picks 區塊、不影響 F2 查核與 `picks sync`。**」
+- 「**附錄 G 綜合估值區間（docs/31 §20.13「2026-09-07 修訂」・機械腿與 search-augmented
+  單公式皆已下架，不要再找 `target_price_experimental.yaml`）**：範圍＝你的**持股個股**
+  （`holdings_enriched.csv` 中 `asset_type==stock`）＋ 本週**核心＋機會層**，去重、排 ETF（~13 檔）。
+  在「附錄 G」（排附錄 F 後、資料品質披露前）逐檔跑 docs/11「附錄 G」規格的**固定方法清單**：
+  M1 回顧倍數法（引用 `candidates_enriched.csv` 的 `val_implied_price_self`/`_peer`、PB 兩腿 gap%，不重算）；
+  M2 前瞻倍數法（web search 具名前瞻 EPS × ｛自身、同儕｝中位 PE，**不抄券商目標價**，守「外部查證」規則）；
+  M3 DCF（**僅適用時**——排除 `settings.yaml` `cp_value.valuation.dcf.exclude_industries` 的銀行/保險/證券/金控、
+  近 4 季有虧損、營收年增率波動 >±40pp；輸入全 web search＝近 3 年營業現金流−capex、前瞻營收成長、
+  TW 10Y 公債殖利率現值；永續成長率 2%、ERP 5.5% 讀 settings，不逐檔調；輸出內在價值＋WACC/永續成長
+  各 ±1% 的敏感度四角＋假設全列；命中排除規則就註明原因、只用 M1/M2）；
+  M4 你綜合 M1–M3 的 4–7 個數字 → 給**一個區間（低端~高端，非單點）**＋『哪個方法在這檔最可信、為什麼』
+  ＋**信心分級**（高＝≥3 法落 ±15% 內∧前瞻 EPS 來自 FactSet/多分析師∧DCF 可算；中＝落 ±30% 內或前瞻單一來源；
+  低＝發散 >±30% 或前瞻弱/缺或只剩自身倍數一條）。
+  抬頭放 docs/11 附錄 G 固定免責語＋逐字讀法提醒。
+  **M4 綜合估值區間寫成決策卡新增欄『綜合估值區間 vs 現價』**（格式『−5%~+22%（中）』＝區間相對現價、
+  括號信心；ETF 標『未取得(ETF)』），與『估值缺口%(綜合)』同位階為參考欄。
+  **禁『公允價值/目標價/合理價』字眼；不進 picks 區塊、不改層級/進場階梯/停損、不影響 F2 查核與 `picks sync`。**」
 - 「**寫檔前自己查核 F2 位階紀律**：`picks:` 區塊裡每一筆 `layer: core` 的股票，
   對照 `candidates_enriched.csv` 的 `ext_ma60_pct` 欄，必須 ≤ `config/settings.yaml`
   的 `picks.core_ext_ma60_max_pct`（現行 +15%）。超過的股票**不能放進 core 層**——
