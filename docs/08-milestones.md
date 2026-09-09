@@ -1081,6 +1081,8 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
   （`test_w35_anchor_matches_production` 進本 milestone 前即為既有 RED 452，非本次回歸；
   Open item 3。）
 
-**分支待 merge 進 main（鐵律 3，待使用者拍板）。** `FINMIND_TOKEN` 已設、全量回補已跑、
-正式裁決已出——使用者 review 分支即可拍板。
-**下一步**：Phase 2（真 DCF，`M-Val-FinMind2`）依 §20.14 sketch 另立。
+**已 merge 進 main（2026-09-09，merge commit `bd330bb`，使用者已拍板同意）**，
+`feat/finmind-per-valuation-history` 分支已刪除。`FINMIND_TOKEN` 已設、全量回補已跑、
+正式對帳三判準全過（路徑 a）。
+**下一步**：Phase 2（真 DCF，`M-Val-FinMind2`）依 §20.14 sketch 另立；季頻重跑
+`make backfill-finmind-per` 延伸深度。

@@ -2570,7 +2570,8 @@ W35 面板、比對 `reports/2026-W35/candidates_enriched.csv` 的 `val_gap_pct_
   PE 自身腿對慢性虧損股仍是「獲利期切片的中位」。綜合版取 6 腿中位、PB/殖利率補足，
   整體淨改善。慢性虧損股本就該看 PBR 不看 PE。
 - **`FINMIND_TOKEN` 已由使用者設定（2026-09-09）**、全量回補已跑（上「全量回補 + 正式
-  裁決」節）。**待使用者 review 分支＋拍板 merge 進 main**（鐵律 3）。
+  裁決」節）。**已 merge 進 main（2026-09-09，merge commit `bd330bb`，使用者拍板）**，
+  `feat/finmind-per-valuation-history` 分支已刪。
 
 ## 21. 減量研究計畫 Part 1：逐式目的定義＋參數可行性分級（2026-08-24）
 
