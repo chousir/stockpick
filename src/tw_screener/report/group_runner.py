@@ -437,8 +437,13 @@ def run_group_analysis(settings: Path) -> None:
     )
     # docs/31 §14：自身估值歷史百分位粗版代理（跟val_pctile的同儕橫斷面互補，不取代）——
     # 純揭露欄，任一步驟壞掉不擋主流程（同官方族群前5段的容錯慣例）。
+    # docs/31 §20.14：FinMind PER 深度歷史（2005-10 起）＋ TWSE 逐日快照合併，重疊日 TWSE 勝。
+    # data/cache/finmind/ 未回補時 load_merged_valuation_history 自動退回純 TWSE。
+    from tw_screener.data.finmind import load_merged_valuation_history
+
+    _finmind_cache_dir = Path(cfg["paths"]["cache_dir"]) / "finmind"
     try:
-        val_history = client.load_valuation_ratios_history()
+        val_history = load_merged_valuation_history(client, _finmind_cache_dir)
         self_history_min_snapshots = int(val_cfg.get("self_history_min_snapshots", 8))
         self_history = compute_self_history_pctile(
             val_history, min_snapshots=self_history_min_snapshots

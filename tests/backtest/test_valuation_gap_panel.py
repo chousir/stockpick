@@ -164,6 +164,10 @@ def test_w35_anchor_matches_production() -> None:
     from tw_screener.data.twse import create_client
 
     client = create_client(Path("config/settings.yaml"))
+    # docs/31 §20.14 Open item 3：此錨為「TWSE 基準」回歸錨，刻意不併 FinMind——
+    # reports/2026-W35/candidates_enriched.csv 是 FinMind 整合前產生的基準，把重建指向
+    # merged history 只會讓紅測數字漂移、測不到東西。FinMind-inclusive 錨待使用者重跑
+    # W35 後另立。（本測進本 milestone 前即為既有 RED，非本次回歸。）
     val_history = client.load_valuation_ratios_history()
     ind = load_industry_mapping(_CACHE)
     panel = build_valuation_gap_panel(

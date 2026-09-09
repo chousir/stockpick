@@ -374,6 +374,89 @@ def data_backfill_universe_history(
     console.print(f"[green]回補完成：成功 {done}、失敗 {failed}[/green]")
 
 
+@data_app.command("backfill-finmind-per")
+def data_backfill_finmind_per(
+    limit: int = typer.Option(0, "--limit", help="只跑前 N 檔（測試用；0=全部）"),
+    start: str = typer.Option(
+        "", "--start", help="回補起始日 YYYY-MM-DD；預設讀 settings.finmind.per_start_date"
+    ),
+    force: bool = typer.Option(False, "--force", help="略過 24h TTL、強制重抓每一檔"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """一次性回補全次產業成員的 FinMind TaiwanStockPER 逐日 PE/PBR/殖利率歷史（~20 年）。
+
+    為何需要：TWSE `BWIBBU_d` / TPEX `peratio` 皆「只回最新一交易日、不可回補」，
+    `valuation_ratios_*.parquet` 從 2026-06-12 才起累、~13 ISO 週深度 → 自身估值歷史腿
+    樣本長期不足、附錄 G M1/M2 對半導體低獲利基期股失真。FinMind 2005-10 起逐日補齊
+    （docs/31 §20.14）。宇宙＝`list_subindustries()` 全成員（與 backfill-universe-history
+    同一組，讓 §20.11 重建面板可 join）。免費層一次一檔、限速
+    settings.finmind.request_interval_sec；~1130 檔 × 1 call ≈ 註冊 600/hr → ~2.5h、
+    未註冊 300/hr → ~5h。建議掛背景；24h TTL 內已抓到的檔走快取 fast-path、天然可續跑。
+    深度歷史不會變 → 回補後不需每週刷新，季頻重跑本指令延伸深度即可（不接 make week）。
+    """
+    import yaml
+
+    from tw_screener.analysis.sector_universe import list_subindustries
+    from tw_screener.data.finmind import create_client
+
+    client = create_client(settings)
+    with open(settings, encoding="utf-8") as fh:
+        start_date = start or yaml.safe_load(fh)["finmind"]["per_start_date"]
+
+    members = list_subindustries()
+    if members.is_empty():
+        console.print("[red]缺 concepts.yaml 次產業成員[/red]")
+        raise typer.Exit(1)
+
+    # 依次產業成員數由多到少排序、跨次產業去重（比照 backfill-universe-history）
+    counts = members.group_by("sub_industry").len()
+    ordered = (
+        members.join(counts, on="sub_industry")
+        .sort("len", descending=True)["stock_id"]
+        .to_list()
+    )
+    seen: set[str] = set()
+    targets: list[str] = []
+    for sid in ordered:
+        if sid not in seen:
+            seen.add(sid)
+            targets.append(sid)
+    if limit > 0:
+        targets = targets[:limit]
+    console.print(
+        f"[bold]FinMind PER 回補：{len(targets)} 檔（起始 {start_date}）[/bold]"
+    )
+
+    done = failed = empty = 0
+    consecutive_empty = 0  # 連續 5 檔無資料 → 疑似額度用盡／API 掛，停（鐵律 1 精神）
+    for i, sid in enumerate(targets, 1):
+        try:
+            df = client.fetch_taiwan_stock_per(sid, start_date=start_date, force=force)
+            if df.is_empty():
+                empty += 1
+                consecutive_empty += 1
+            else:
+                done += 1
+                consecutive_empty = 0
+            if i % 25 == 0 or i == len(targets):
+                console.print(
+                    f"  進度 {i}/{len(targets)}（最新：{sid} {len(df)} 列）"
+                )
+        except Exception as e:  # noqa: BLE001 — 單檔失敗不該中斷整批
+            failed += 1
+            consecutive_empty += 1
+            console.print(f"[yellow]  {sid} 失敗：{e}[/yellow]")
+        if consecutive_empty >= 5:
+            console.print(
+                f"[red]連續 5 檔無資料（進度 {i}/{len(targets)}）——疑似 FinMind 額度用盡"
+                "／API 異常，停止本輪。稍後（或設 FINMIND_TOKEN）重跑，已抓到的走快取續跑。[/red]"
+            )
+            break
+    console.print(
+        f"[green]回補完成：有資料 {done}、空 {empty}、失敗 {failed}[/green]"
+    )
+
+
 @data_app.command("backfill-daily-history")
 def data_backfill_daily_history(
     start: str = typer.Option(..., "--start", help="回補起始日（YYYY-MM-DD，含）"),
@@ -1618,6 +1701,20 @@ def backtest_valuation_gap_read_cmd(
     from tw_screener.backtest.valuation_gap_read import run_valuation_gap_read
 
     report = run_valuation_gap_read(settings)
+    console.print(report)
+
+
+@backtest_app.command("finmind-reconcile")
+def backtest_finmind_reconcile_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """docs/31 §20.14：FinMind PER vs TWSE 官方估值比對帳——重疊交易日逐檔配對 PE/PBR，
+    對三個事前寫死判準（PE 中位比值 ∈ [0.97,1.03]、離群股 <5%、覆蓋率 ≥95%）。
+    過 → 1b 走路徑 (a)；不過 → 路徑 (b)。需先 `make backfill-finmind-per`。
+    輸出 research/finmind_reconciliation_<date>.md。"""
+    from tw_screener.backtest.finmind_reconcile import run_finmind_reconcile
+
+    report = run_finmind_reconcile(settings)
     console.print(report)
 
 

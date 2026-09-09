@@ -17,6 +17,7 @@
   TWSE/TPEX OpenAPI │ 日線 daily_*  法人 institutional_*(上市+上櫃)  月營收  產業別  官方估值比 valuation_ratios_* │
                     │ 融資融券 margin_*(上市)  財報體質 fundamentals_*(負債比/ROE/純益率)   │
   TDCC 集保         │ 大戶持股比 tdcc_*（≥400 張/≥1000 張＋WoW，規劃書 02 D3）        │
+  FinMind（開源 API）│ 估值歷史深度 finmind/per_*（2005-10 起逐日 PE/PBR/殖利率，§20.14）│
   Goodinfo（限速爬蟲）│ 個股報告被動連結＋手動 screen；**預設週流程不再呼叫（§20.6）**  │
   Yahoo 概念股       │ config/concepts.yaml 主題標籤（手標次產業＋自動爬概念股）      │
                     └──────────────────────────┬───────────────────────────────┘
@@ -219,6 +220,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make snapshot-week`                                    | point-in-time 週快照：凍結 concepts/宇宙/持股到 data/snapshots/（docs/23 WS-J.1） | week 已內含，可單獨重跑     |
 | `make backfill-daily-history START=… END=…`         | bulk 逐日全市場歷史（TWSE MI_INDEX，一日一請求；上櫃無 bulk 走逐檔） | 面板延伸冷啟動（比逐檔快）    |
 | `make backfill-institutional-history START=… END=…` | 逐日上市法人歷史（TWSE T86，一日一請求；顯式起迄不依賴 latest 錨點） | 面板法人冷啟動（build-panel 前）|
+| `make backfill-finmind-per`                            | 全成員 FinMind PER 歷史（~1132 檔×1 call、2.5-5h，24h TTL 可續跑；`LIMIT`/`START` 選填，docs/31 §20.14） | 自身估值歷史腿冷啟動＋季頻延伸深度 |
 | `make doctor`                                          | Goodinfo 健康檢查（week 已內含，只診斷不擋，可單獨重跑）| 懷疑被擋/改版時                      |
 | `uv run tw-screener screen run-local f_value_rebound`  | Goodinfo 被擋時的手動退路：純用 TWSE/TPEX 官方快取跑 F 策略（唯一目前可完全本地化的策略，docs/31 §19.3；D/E/G 因表外條件無法本地化，未接進 `make week`） | doctor 顯示 BLOCKED 時想至少拿到 F 的候選 |
 | `make fetch-tdcc`                                      | TDCC 集保大戶持股比（week 已內含）                   | 大戶欄空值時單獨補                   |
@@ -528,7 +530,7 @@ make typecheck   # mypy
 | [`CLAUDE.md`](./CLAUDE.md)                                                                   | Claude Code 行為守則（工程原則 + 專案規則 + 分析師人設）                                                            |
 | [`docs/00-architecture.md`](./docs/00-architecture.md)                                       | 系統架構、資料流、模組職責                                                                                          |
 | [`docs/01-environment.md`](./docs/01-environment.md)                                         | 環境設定、依賴管理、devcontainer                                                                                    |
-| [`docs/02-data-sources.md`](./docs/02-data-sources.md)                                       | Goodinfo 爬蟲規範、證交所 OpenAPI、合規限速                                                                         |
+| [`docs/02-data-sources.md`](./docs/02-data-sources.md)                                       | Goodinfo 爬蟲規範、證交所 OpenAPI、FRED、FinMind、合規限速                                                          |
 | [`docs/03-strategies.md`](./docs/03-strategies.md)                                           | D/E/F/G 主策略 + A/B/C（已退役）、GROUP 機制、YAML 規範                                                             |
 | [`docs/04-screener-spec.md`](./docs/04-screener-spec.md)                                     | 選股模組規格                                                                                                        |
 | [`docs/05-group-analysis.md`](./docs/05-group-analysis.md)                                   | 族群分析、族群內排名                                                                                                |

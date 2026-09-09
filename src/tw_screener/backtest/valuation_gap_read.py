@@ -149,7 +149,12 @@ def run_valuation_gap_read(
     )
 
     client = create_client(settings)
-    val_history = client.load_valuation_ratios_history()
+    # docs/31 §20.14：FinMind PER 深度歷史併入（重疊日 TWSE 勝）；未回補時自動退回純 TWSE。
+    from tw_screener.data.finmind import load_merged_valuation_history
+
+    val_history = load_merged_valuation_history(
+        client, Path(cfg["paths"]["cache_dir"]) / "finmind"
+    )
     industry_df = load_industry_mapping(cache_dir)
     membership = build_peer_membership(list_subindustries(), industry_df)
     broad_membership = build_broad_industry_membership(industry_df)

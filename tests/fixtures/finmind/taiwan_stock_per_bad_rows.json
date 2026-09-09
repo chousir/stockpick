@@ -1,0 +1,8 @@
+{"msg":"success","status":200,"data":[
+  {"date":"2020-03-02","stock_id":"1234","dividend_yield":4.5,"PER":12.3,"PBR":1.4},
+  {"date":"not-a-date","stock_id":"1234","dividend_yield":4.5,"PER":12.3,"PBR":1.4},
+  {"stock_id":"1234","dividend_yield":4.5,"PER":12.3,"PBR":1.4},
+  {"date":"2020-03-03","dividend_yield":4.5,"PER":12.3,"PBR":1.4},
+  {"date":"2020-03-04","stock_id":"1234","dividend_yield":"N/A","PER":"-","PBR":-2.0},
+  {"date":"2020-03-05","stock_id":"1234","dividend_yield":0.0,"PER":0.0,"PBR":1.5}
+]}

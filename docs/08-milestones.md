@@ -1050,3 +1050,36 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
    回補可行性、TDCC level 1-11 與 `holders` 啟用、OTC 全市場日線缺口）
 
 **分支未開**（本輪僅完成研究與 docs/31/02 落地，未動生產程式碼）。
+
+---
+
+## M-Val-FinMind1：FinMind 連接器 + PER 估值歷史整合（規劃書 31 §20.14・分支 `feat/finmind-per-valuation-history`）— 2026-09-09
+
+> 對應規劃書 [docs/31 §20.14](31-defg-redesign-large-cap-contrarian.md)。附錄 G 第 3 版
+> 上線後，自身估值歷史腿只有 `valuation_ratios_*` 從 2026-06-12 起累的 ~13 ISO 週深度
+> （`BWIBBU_d`／`peratio` 不可回補），`pe_self_median` 實質是「PE vs 近一季」、附錄 G
+> M1/M2 對半導體低獲利基期股失真。接 FinMind `TaiwanStockPER`（2005-10 起逐日）補到 20 年。
+
+- **`src/tw_screener/data/finmind.py`**（新）：逐段比照 `fred.py`——`_PER_SCHEMA`／
+  `_parse_taiwan_stock_per`（虧損股 PER=0.0 → None 回歸鎖）／`FinMindClient`（節流／
+  指數退避／斷路器／body `status` 非 200 當失敗）／`_load_finmind_token`（選填、缺席不
+  raise）／`create_client`／`load_finmind_per_history`／`load_merged_valuation_history`
+  （TWSE 逐日快照＋FinMind 深度，重疊日 TWSE 勝、FinMind 封頂在 TWSE 最新日）。
+- **`config/settings.yaml`**：新增頂層 `finmind:` 扁平區塊。
+- **CLI／Makefile**：`data backfill-finmind-per`（迴圈比照 `backfill-universe-history`）＋
+  `backtest finmind-reconcile`（三判準對帳）。**不加 `fetch-finmind-per`、不接 `make week`**。
+- **1b 接線**：`group_runner.py`／`valuation_gap_read.py` 的 `val_history` 來源切到
+  `load_merged_valuation_history`（FinMind 目錄不存在 → 自動退回純 TWSE）。
+- **文件同步**：docs/02 新增「FinMind 開源 API」段、docs/31 §20.14、docs/07 CLI 兩條、
+  docs/01 `FINMIND_TOKEN`、docs/00:80、CLAUDE.md 第 3 行、README、
+  `research/finmind_feasibility_2026-09-07.md`＋memory 修正「長格式」敘述。
+- 驗收：`pytest -q` 1345 passed（+26：`test_finmind.py` 21 ＋ `test_finmind_reconcile.py`
+  5）；ruff/mypy 零淨增；`make backfill-finmind-per LIMIT=60` 冷啟成功、
+  `backtest finmind-reconcile` 三判準初測全過（PE 比值中位 1.0000）。
+  （`test_w35_anchor_matches_production` 進本 milestone 前即為既有 RED 452，非本次回歸；
+  Open item 3。）
+
+**分支待 merge 進 main（鐵律 3，待使用者拍板）。** 先決：使用者讀 finmindtrade.com
+資料條款、（選）設 `FINMIND_TOKEN`、跑全量 `make backfill-finmind-per`（~1132 檔，
+註冊 ~2.5h／未註冊 ~5h）→ 重跑 `backtest finmind-reconcile` 出正式三判準裁決。
+**下一步**：Phase 2（真 DCF，`M-Val-FinMind2`）依 §20.14 sketch 另立。

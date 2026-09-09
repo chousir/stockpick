@@ -38,6 +38,7 @@ fetch-tdcc:      ## TDCC 集保戶股權分散表（大戶持股比，規劃書 
 fetch-candidates-history:         ## 對本週入選股補抓 STOCK_DAY 歷史（MONTHS=13 預設）
 fetch-institutional-history:      ## 回補近 N 日上市＋上櫃三大法人（DAYS=20 預設）
 backfill-universe-history:        ## ⏳ 一次性回補全部次產業成員日線（~1500 檔，8-12 小時）
+backfill-finmind-per:             ## ⏳ 一次性回補全成員 FinMind PER 歷史（~1132 檔×1 call、2.5-5h，24h TTL 可續跑；LIMIT/START 選填，季頻重跑，docs/31 §20.14）
 build-themes:    ## 爬 Yahoo 概念股 merge 進 config/concepts.yaml（DRY=1 預演）
 
 # ─── 選股 ───────────────────────────────────────
@@ -131,6 +132,7 @@ tw-screener cp candidates / calibrate / valuation
 
 # backtest / picks — 驗證閉環（規劃書 03 V1、05 F1）
 tw-screener backtest strategies
+tw-screener backtest finmind-reconcile          # FinMind PER vs TWSE 官方估值三判準對帳（docs/31 §20.14）
 tw-screener picks sync --week 2026-Www          # 解析 pick.md 尾端區塊整批落底帳（主流程）
 tw-screener picks record --week 2026-Www --stock XXXX --layer core   # 單檔補記
 tw-screener picks outcome [--diff]

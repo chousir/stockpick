@@ -160,6 +160,9 @@ backfill-daily-history:  ## ⏳ 一次性逐日回補全市場歷史日線（MI_
 backfill-institutional-history:  ## ⏳ 一次性逐日回補上市法人歷史（T86，一天一請求；顯式 START/END 不依賴錨點，供面板法人冷啟動；START=2022-01-01 END=2025-06-05 必填）
 	uv run tw-screener data backfill-institutional-history --start $(START) --end $(END)
 
+backfill-finmind-per:  ## ⏳ 一次性回補全次產業成員 FinMind PER 歷史（~1130 檔×1 call，註冊2.5h/未註冊5h，24h TTL 可中斷續跑；LIMIT/START 選填；季頻重跑，不接 make week，docs/31 §20.14）
+	uv run tw-screener data backfill-finmind-per $(if $(START),--start $(START),) $(if $(LIMIT),--limit $(LIMIT),)
+
 fetch-margin-history:  ## 回補近 N 個交易日上市融資融券（DAYS=20 可調，舊版 MI_MARGN 可回查歷史）
 	uv run tw-screener data fetch-margin-history --days $(or $(DAYS),20)
 

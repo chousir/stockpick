@@ -113,6 +113,23 @@ tpex:
   base_url: "https://www.tpex.org.tw"
   notes: "單位仟股 / 仟元（parser 自動 ×1000 對齊 TWSE）"
 
+# FinMind 開源 API（https://api.finmindtrade.com/api/v4/data）：估值歷史深度補充。
+# TaiwanStockPER 2005-10 起逐日 PE/PBR/殖利率 → 自身估值歷史腿從 ~13 週補到 20 年。
+# docs/02「FinMind 開源 API」段、docs/31 §20.14。資料條款「教育／非商業」，本專案＝
+# 個人週選股自用。token 選填（未註冊 300 req/hr、註冊 600），存 .env 的 FINMIND_TOKEN=
+# （不進 git、不 log；讀取見 finmind._load_finmind_token）。用 httpx 直打、不裝 finmind
+# pip 套件 → 不新增依賴（鐵律 4）。dataset 名字串屬 API 契約、留在 finmind.py 常數。
+# 快取 data/cache/finmind/per_<stock_id>.parquet：pruner 非遞迴、碰不到子目錄 → 天然
+# prune-safe，刻意留在此不搬去 data/macro_regime/（可 backfill 重建，與 valuation_history 不同）。
+finmind:
+  base_url: "https://api.finmindtrade.com/api/v4/data"
+  user_agent: "tw-stock-screener/0.1"
+  request_interval_sec: 6        # 註冊 600 req/hr → 6 秒安全；未註冊建議調 12
+  cache_ttl_hours: 24            # 每次回全歷史 → per-(dataset,stock_id) 整檔覆寫，比照 fred
+  max_retries: 2                 # 連錯 3 次（含首次）即停（fetch_all_per 逐檔累計）
+  timeout_sec: 30.0
+  per_start_date: "2005-01-01"   # TaiwanStockPER 最早約 2005-10；給寬起點讓 API 自截
+
 report:
   default_top_n: 10
   llm:                            # 規劃書 04 A7：個股報告 LLM 配置（builder 讀取，不寫死）

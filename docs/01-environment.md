@@ -60,7 +60,7 @@ make init                  # 初始化 data/、reports/ 等資料夾
 # Anthropic API（Claude Code 用）
 ANTHROPIC_API_KEY=sk-ant-xxx
 
-# 若之後用 FinMind 補資料
+# FinMind 估值歷史（docs/31 §20.14）——選填：未註冊 300 req/hr、註冊 600；缺席走未註冊額度
 FINMIND_TOKEN=
 
 # 證交所 OpenAPI 不需 token
