@@ -1073,13 +1073,14 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 - **文件同步**：docs/02 新增「FinMind 開源 API」段、docs/31 §20.14、docs/07 CLI 兩條、
   docs/01 `FINMIND_TOKEN`、docs/00:80、CLAUDE.md 第 3 行、README、
   `research/finmind_feasibility_2026-09-07.md`＋memory 修正「長格式」敘述。
-- 驗收：`pytest -q` 1345 passed（+26：`test_finmind.py` 21 ＋ `test_finmind_reconcile.py`
-  5）；ruff/mypy 零淨增；`make backfill-finmind-per LIMIT=60` 冷啟成功、
-  `backtest finmind-reconcile` 三判準初測全過（PE 比值中位 1.0000）。
+- 驗收：`pytest -q` 1347 passed（+28：`test_finmind.py` 23 ＋ `test_finmind_reconcile.py` 5）；
+  ruff/mypy 零淨增；全量 `make backfill-finmind-per` 1002/1132 有資料、130 無 PER、
+  0 失敗；`backtest finmind-reconcile` **正式三判準全過**（26,927 配對、PE 比值中位
+  1.0000、離群 0/803、覆蓋 100% → 路徑 a）。半導體低基期股 `pe_self_median` 修正巨大
+  （如 5471 57.9→15.3、8028 66.4→33.0、`pe_self_n` ~26→數千）。
   （`test_w35_anchor_matches_production` 進本 milestone 前即為既有 RED 452，非本次回歸；
   Open item 3。）
 
-**分支待 merge 進 main（鐵律 3，待使用者拍板）。** 先決：使用者讀 finmindtrade.com
-資料條款、（選）設 `FINMIND_TOKEN`、跑全量 `make backfill-finmind-per`（~1132 檔，
-註冊 ~2.5h／未註冊 ~5h）→ 重跑 `backtest finmind-reconcile` 出正式三判準裁決。
+**分支待 merge 進 main（鐵律 3，待使用者拍板）。** `FINMIND_TOKEN` 已設、全量回補已跑、
+正式裁決已出——使用者 review 分支即可拍板。
 **下一步**：Phase 2（真 DCF，`M-Val-FinMind2`）依 §20.14 sketch 另立。

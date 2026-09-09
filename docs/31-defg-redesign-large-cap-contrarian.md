@@ -2478,7 +2478,7 @@ search-augmented（前瞻 EPS × 目標 PE）保留但改算法**。兩點要記
 | 階段 | 本輪 | 內容 |
 |---|---|---|
 | **1a** | ✅ | FinMind 連接器（`src/tw_screener/data/finmind.py`，逐段比照 `fred.py`）＋ `TaiwanStockPER` 全次產業成員回補（~20 年逐日）＋ 對帳報告。純工程、零生產接線。比照 M-Macro2b「只累積不驗證」前例。 |
-| **1b** | ✅ | `load_merged_valuation_history()` 合成函式（TWSE 近端權威＋FinMind 深度，dedup key `(stock_id,date)`、重疊日 TWSE 勝）→ 切進 3 個 call-site（`group_runner`／`valuation_gap_read`／`valuation_gap_panel`）→ 自身估值歷史腿 `pe_self_median`／`pb_self_median`／`yield_self_median`／`pe_self_pctile` 從 ~13 週變 20 年。接線方式由對帳判準決定（下）。 |
+| **1b** | ✅ | `load_merged_valuation_history()` 合成函式（TWSE 近端權威＋FinMind 深度，dedup key `(stock_id,date)`、重疊日 TWSE 勝、FinMind 封頂在 TWSE 最新日）→ 切進 `group_runner`／`valuation_gap_read` 兩處（`valuation_gap_panel` 收 `val_history` 為參數，隨 `valuation_gap_read` 一起）→ 自身估值歷史腿 `pe_self_median`／`pb_self_median`／`yield_self_median`／`pe_self_pctile` 從 ~13 週變 20 年。接線方式由對帳判準決定（下，實測全過＝路徑 a）。 |
 | **Phase 2（真 DCF）** | ❌ 只列 sketch | 見下方。另立 milestone `M-Val-FinMind2`、另開分支、另拍板。 |
 | **① 分析師共識腿** | ❌ 明文不做 | 免費層拿不到（FinMind 無 consensus/前瞻 dataset）；付費 TEJ 才有，不在本 arc。維持附錄 G ~13 檔/週 web search。 |
 
@@ -2529,35 +2529,48 @@ W35 面板、比對 `reports/2026-W35/candidates_enriched.csv` 的 `val_gap_pct_
 漂移、測不到東西）；FinMind-inclusive 錨待使用者重跑 W35 後另立。實測本 milestone 前後
 皆為 452，證明 1b 接線未動此測。
 
+#### 全量回補 + 正式裁決（2026-09-09 夜）
+
+- **回補**：`make backfill-finmind-per` 全 1132 檔跑完 —— 有資料 **1002**、無 PER（FinMind
+  `{"data":[]}`，多為興櫃/TDR/新股）130、請求失敗 0。合併歷史 52,931 列 → **3,833,379 列**
+  （72×），日期涵蓋 2005-09 → 2026-09。
+- **正式對帳裁決**（`backtest finmind-reconcile`，全市場、26,927 配對、803 檔有可比 PE、
+  35 個重疊交易日）：FinMind PER 與 TWSE `BWIBBU_d` **逐筆完全相同**——PE 比值中位
+  **1.0000**、IQR 1.000–1.000、離群股 **0/803**、覆蓋率 **100%**、虧損股表述分歧 **0**。
+  PBR 同（1000 檔、比值 1.0000）。**三判準全數通過 → 路徑 (a) 定案**（FinMind `TaiwanStockPER`
+  確定就是 TWSE 官方 feed，1b 現行接法正確、`current_ratio` 續用 TWSE `off_pe` 無混基準問題）。
+- **自身估值歷史腿 before/after**：通過 `min_snapshots=8` 的檔數 PE 1506→**1733**、
+  殖利率 1459→**1701**、PB 1972→1975（PB 本就幾乎全過，變的是**深度**：`pb_self_n`
+  從 ~26 → ~5000）。半導體低獲利基期股 `pe_self_median` 修正幅度巨大（`pe_self_n` ~26 → 數千）：
+
+  | 股號 | TWSE-only（n≈26） | merged（n≈2000–5000） |
+  |---|---|---|
+  | 5471 | 57.89 | **15.30** |
+  | 6187 | 70.41 | **20.26** |
+  | 8028 | 66.43 | **32.98** |
+  | 2408 | 35.66 | **9.31** |
+  | 3006 | 24.10 | 16.27 |
+
+  —— 附錄 G M1/M2 對這類股的「看起來相對自己歷史很便宜」失真已由此修掉。
+
+- **§20.11**：`backtest valuation-gap-read` 的 `n_dates` 觀察值待下次跑（本 milestone 不觸發
+  正式 §20.12 四步裁決，Open item 2）。
+
 #### 執行狀態
 
 - 2026-09-09：規劃書落地、開分支 `feat/finmind-per-valuation-history`。1a 連接器
   （`data/finmind.py`）＋`finmind:` settings＋`data backfill-finmind-per` CLI/Makefile＋
   `tests/data/test_finmind.py`（21 測全綠）＋1b 接線（`group_runner`/`valuation_gap_read`
   切 `load_merged_valuation_history`）＋`backtest finmind-reconcile`（三判準對帳工具）
-  ＋文件同步（docs/02/07/01/00、CLAUDE.md、README、feasibility+memory 訂正）皆完成。
-  `pytest -q` 1345 passed（+26）、ruff/mypy 零淨增（唯一 FAIL＝既有 RED `test_w35_anchor`）。
-- **對帳初測（2026-09-09，59 檔子集、35 個重疊交易日、1595 配對）**：FinMind PER 與
-  TWSE `BWIBBU_d` **逐筆相同**——PE 比值中位 **1.0000**、IQR 1.000–1.000、離群股 0/42、
-  覆蓋率 100%；PBR 同（比值 1.0000）。強烈跡象＝FinMind `TaiwanStockPER` 就是拿 TWSE
-  官方 feed，基準不一致風險趨近零。**三判準初測全過 → 現行 1b 接法（路徑 a）成立**，
-  待全量回補後重跑 `backtest finmind-reconcile` 出正式裁決確認。
-- **PE 腿深度不如 PB/殖利率腿**（59 檔子集實測）：FinMind 沿用 TWSE「虧損→PE null」慣例
-  → PBR 逐日全有（中位 ~4700 列≈19 年、覆蓋 100%），但 **PE 只在有正盈餘的期間有值**
-  （整體覆蓋 73.6%、中位 ~3266 列≈13 年；52/59 檔仍 ≥4 年，最薄的是慢性虧損股如 5302
-  僅 126 列）。含意：接 FinMind 後 **PB／殖利率自身腿完整補到 ~19 年、PE 自身腿補到
-  ~13 年且對慢性虧損股仍是「獲利期切片的中位」**——附錄 G M1/M2 直接讀 `pe_self_median`
-  的股票（尤其半導體低基期股）改善幅度小於「13 週 → 20 年」的字面；綜合版取 6 腿中位、
-  PB/殖利率補足，整體仍是淨改善。慢性虧損股本就該看 PBR 不看 PE。
-- **1b 已接線但生產上尚無效果**：`data/cache/finmind/` 目前只有 59 檔（初測子集），
-  `load_merged_valuation_history` 對其餘 ~1070 檔候選回傳的仍近乎純 TWSE →
-  下週 `candidates_enriched.csv` 的 `pe_self_median` 等實質不變，要等全量回補才生效。
-- **待使用者**：讀 finmindtrade.com 條款＋（選）設 `FINMIND_TOKEN`＋跑全量
-  `make backfill-finmind-per`（~1130 檔）→ 重跑 `backtest finmind-reconcile` 出正式三判準
-  裁決（過→路徑 a 已是現行接法；不過→改路徑 b）→ 拍板 merge 進 main。
-- 更新點：全量回補後補「回補檔數／深度／對帳三判準結果／路徑 a-or-b」；1b 生效後補
-  「半導體股 `pe_self_n` before-after／`backtest valuation-gap-read` 新 `n_dates`（觀察，
-  不觸發正式 §20.12 四步裁決）」。
+  ＋`backtest finmind-reconcile` 全量正式裁決（三判準全過、路徑 a）＋文件同步
+  （docs/02/07/01/00、CLAUDE.md、README、feasibility+memory 訂正）皆完成。
+  `pytest -q` 1347 passed（+28）、ruff/mypy 零淨增（唯一 FAIL＝既有 RED `test_w35_anchor`，非本次回歸）。
+- **PE 腿深度不如 PB/殖利率腿**：FinMind 沿用 TWSE「虧損→PE null」慣例 → PBR 逐日全有
+  （~19 年），但 **PE 只在有正盈餘期間有值**——含意：PB／殖利率自身腿完整補到 ~19 年、
+  PE 自身腿對慢性虧損股仍是「獲利期切片的中位」。綜合版取 6 腿中位、PB/殖利率補足，
+  整體淨改善。慢性虧損股本就該看 PBR 不看 PE。
+- **`FINMIND_TOKEN` 已由使用者設定（2026-09-09）**、全量回補已跑（上「全量回補 + 正式
+  裁決」節）。**待使用者 review 分支＋拍板 merge 進 main**（鐵律 3）。
 
 ## 21. 減量研究計畫 Part 1：逐式目的定義＋參數可行性分級（2026-08-24）
 
