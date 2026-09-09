@@ -11,6 +11,7 @@
 | TWSE ISIN (`isin.twse.com.tw/isin/C_public.jsp?strMode=4`) | 上櫃公司產業分類 | HTML（MS950 編碼） | 完全合法 |
 | Yahoo 股市 (`tw.stock.yahoo.com`) | 概念股/趨勢主題成分（多標籤主題） | 爬蟲（合規限速；**只爬概念股**） | 灰色，需自律 |
 | FRED (`api.stlouisfed.org/fred/series/observations`) | 總經指標（BAA10Y 主訊號＋揭露面板，docs/25 M-Macro1） | 官方 REST API（免費 key） | 完全合法 |
+| FinMind (`api.finmindtrade.com/api/v4/data`) | 估值歷史深度（`TaiwanStockPER` 2005-10 起逐日 PE/PBR/殖利率，docs/31 §20.14） | 開源 REST API（免費 token 選填） | 開源、資料條款「教育／非商業」（個人自用） |
 
 ## Goodinfo 爬蟲規範（重要，違反會被擋）
 
@@ -345,6 +346,57 @@ timeout_sec: 30
 FRED 序列的公開歷史範圍可能被**追溯限縮**（非端點失效）——`BAMLH0A0HYM2` 於 2026/4 起被限縮到僅
 約 3 年歷史，直接導致原設計的 3 年滾動窗無法計分，已改用 `BAA10Y` 取代。抓取失敗或歷史長度不足
 須明確報錯／降級「資料不足」，不可靜默假裝有值（docs/25 §5 風險 10）。
+
+---
+
+## FinMind 開源 API（估值歷史深度，2026-09 新增，docs/31 §20.14）
+
+`data/finmind.py` 的資料源。定位：補 `analysis/valuation.py` 自身估值歷史腿的深度——
+TWSE `BWIBBU_d`／TPEX `peratio` 皆「只回最新一交易日、不可回補」，`valuation_ratios_*`
+快取從 2026-06-12 才起累（~13 ISO 週）。FinMind `TaiwanStockPER` 提供 **2005-10 起逐日
+PE/PBR/殖利率**。與上方 Goodinfo/TWSE/FRED 資料流平行、互不依賴。
+
+### 端點與 token
+`https://api.finmindtrade.com/api/v4/data`（JSON，`dataset`＝`TaiwanStockPER`＋`data_id`
+＝股號＋`start_date`＋選填 `token`）。程式碼 Apache 2.0；**資料條款寫明「教育／非商業
+用途」**——本專案＝使用者個人每週選股自用。token 免費註冊（未註冊 300 req/hr、註冊 600），
+存 `.env` 的 `FINMIND_TOKEN=<token>`（不進 git、不印出／不 log；讀取見
+`finmind._load_finmind_token`）。**與 FRED 不同：token 缺席不是錯誤**，`create_client`
+不 raise、走未註冊額度。用 httpx 直打、**不裝 `finmind` pip 套件** → 不新增依賴（鐵律 4）。
+dataset 名字串屬 API 契約、留在 `finmind.py` 常數（比照 twse.py 端點路徑）。
+
+### 抓取合規（鐵律 1 精神外推；比照 FRED，官方開放資料、門檻比 Goodinfo 鬆）
+```yaml
+# config/settings.yaml → finmind
+request_interval_sec: 6      # 註冊 600 req/hr → 6 秒安全；未註冊建議調 12
+cache_ttl_hours: 24          # 每次回全歷史 → per-(dataset,stock_id) 整檔覆寫（比照 fred）
+max_retries: 2               # 連錯 3 次（含首次）即停（fetch_all_per 逐檔累計）
+concurrency: 1               # 嚴格序列（fetch_all_per 依序抓，非並發）
+user_agent: "tw-stock-screener/0.1"
+timeout_sec: 30.0
+```
+每次請求回傳某 (dataset, stock_id) 的**全歷史**（非增量）→ 快取粒度是
+`data/cache/finmind/per_<stock_id>.parquet` 整檔覆蓋。深度歷史（pre-2026-06）不會變、
+近端由 TWSE 逐日快照覆蓋 → 回補後不需每週刷新（**不接 `make week`**），季頻重跑
+`make backfill-finmind-per` 延伸深度即可。
+
+### 落地路徑刻意留在 `data/cache/finmind/`
+`data prune-cache` 的 `select_prune_candidates` 是**非遞迴** `glob("*.parquet")` ＋
+prefix 白名單 → 碰不到子目錄（`data/cache/fred/` 今天就靠這點存活）。與
+`valuation_history.py`（刻意搬到 `data/macro_regime/`）不同：那份的理由是「上游不可
+回補、砍了永遠拿不回」，FinMind **可以** `backfill-finmind-per` 重建，該理由不成立
+→ 留在子目錄、天然 prune-safe。**未來若把 pruner 改成遞迴，記得排除 finmind/。**
+
+### 已知風險
+社群專案、無 SLA，免責聲明明說不保證正確／不延遲。虧損股 FinMind 寫 `PER = 0.0`
+（parser `_to_float_or_none` 一律轉 None，守「缺值→null 不當 0」）。**資料基準差異**：
+FinMind PE 與 TWSE `BWIBBU_d` 的 trailing-EPS 認定／時點可能不同 → 「當前」橫斷面一律
+TWSE 權威（`load_latest_valuation_ratios` 不動、附錄 G 現價 PE 仍 TWSE），FinMind 只餵
+`compute_self_history_*`（股票 vs 自己過去，對系統性水位偏移不敏感）；
+`load_merged_valuation_history` 併表時**重疊日 TWSE 勝**、且把 FinMind 封頂在 TWSE 最新
+快照日（不讓 FinMind 更新頻率快過本地時汙染下游錨點）。兩來源系統性差異由
+`backtest finmind-reconcile` 事前寫死的三判準把關（§20.14）。FinMind 若停更／關閉，
+失去增量——但已落地的 parquet 留著。
 
 ---
 

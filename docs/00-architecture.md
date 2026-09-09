@@ -72,12 +72,14 @@
 | `src/tw_screener/report/builder.py` | 個股報告 builder（API 模式 / 草稿模式） | anthropic, jinja2 |
 | `src/tw_screener/backtest/` | 策略勝率回測（骨架，2026-08 後實作） | polars |
 | `src/tw_screener/data/fred.py` | FRED 官方 API 抓取＋24h快取（總經序列） | httpx |
+| `src/tw_screener/data/finmind.py` | FinMind 開源 API 抓取＋24h快取（`TaiwanStockPER` 估值歷史深度，docs/31 §20.14） | httpx |
 | `src/tw_screener/analysis/macro_regime.py` | 總經燈號：BAA10Y 單訊號計分＋揭露面板（docs/25 M-Macro1） | polars |
 | `src/tw_screener/cli.py` | CLI 入口（Typer） | typer |
 
 ## 為什麼這樣分層
 
-1. **資料層獨立**：之後想換 FinMind、TEJ、券商 API，只改 Layer 1，不影響選股邏輯。
+1. **資料層獨立**：FinMind 估值歷史已接（`data/finmind.py`，docs/31 §20.14）；之後想加
+   TEJ、券商 API，只改 Layer 1，不影響選股邏輯。
 2. **策略外抽 YAML**：你想加新策略不用寫 Python，改 YAML。
 3. **族群分析在選股之後**：因為「族群強度」要看當週入選分布，不是事前定義。
 4. **個股報告獨立**：產報告是 Claude Code 互動式做的，不是 batch job，不能跟前面 pipeline 綁死。
