@@ -2542,6 +2542,16 @@ W35 面板、比對 `reports/2026-W35/candidates_enriched.csv` 的 `val_gap_pct_
   覆蓋率 100%；PBR 同（比值 1.0000）。強烈跡象＝FinMind `TaiwanStockPER` 就是拿 TWSE
   官方 feed，基準不一致風險趨近零。**三判準初測全過 → 現行 1b 接法（路徑 a）成立**，
   待全量回補後重跑 `backtest finmind-reconcile` 出正式裁決確認。
+- **PE 腿深度不如 PB/殖利率腿**（59 檔子集實測）：FinMind 沿用 TWSE「虧損→PE null」慣例
+  → PBR 逐日全有（中位 ~4700 列≈19 年、覆蓋 100%），但 **PE 只在有正盈餘的期間有值**
+  （整體覆蓋 73.6%、中位 ~3266 列≈13 年；52/59 檔仍 ≥4 年，最薄的是慢性虧損股如 5302
+  僅 126 列）。含意：接 FinMind 後 **PB／殖利率自身腿完整補到 ~19 年、PE 自身腿補到
+  ~13 年且對慢性虧損股仍是「獲利期切片的中位」**——附錄 G M1/M2 直接讀 `pe_self_median`
+  的股票（尤其半導體低基期股）改善幅度小於「13 週 → 20 年」的字面；綜合版取 6 腿中位、
+  PB/殖利率補足，整體仍是淨改善。慢性虧損股本就該看 PBR 不看 PE。
+- **1b 已接線但生產上尚無效果**：`data/cache/finmind/` 目前只有 59 檔（初測子集），
+  `load_merged_valuation_history` 對其餘 ~1070 檔候選回傳的仍近乎純 TWSE →
+  下週 `candidates_enriched.csv` 的 `pe_self_median` 等實質不變，要等全量回補才生效。
 - **待使用者**：讀 finmindtrade.com 條款＋（選）設 `FINMIND_TOKEN`＋跑全量
   `make backfill-finmind-per`（~1130 檔）→ 重跑 `backtest finmind-reconcile` 出正式三判準
   裁決（過→路徑 a 已是現行接法；不過→改路徑 b）→ 拍板 merge 進 main。
