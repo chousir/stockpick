@@ -428,32 +428,37 @@ def data_backfill_finmind_per(
     )
 
     done = failed = empty = 0
-    consecutive_empty = 0  # 連續 5 檔無資料 → 疑似額度用盡／API 掛，停（鐵律 1 精神）
+    # 連續 3 次「請求失敗」（HTTP/額度）→ 停（鐵律 1）；`{"data":[]}`（FinMind 沒這檔
+    # PER）不計入——見 FinMindClient.last_request_failed。
+    consecutive_fail = 0
     for i, sid in enumerate(targets, 1):
         try:
             df = client.fetch_taiwan_stock_per(sid, start_date=start_date, force=force)
-            if df.is_empty():
+            if client.last_request_failed:
+                failed += 1
+                consecutive_fail += 1
+            elif df.is_empty():
                 empty += 1
-                consecutive_empty += 1
+                consecutive_fail = 0
             else:
                 done += 1
-                consecutive_empty = 0
+                consecutive_fail = 0
             if i % 25 == 0 or i == len(targets):
                 console.print(
                     f"  進度 {i}/{len(targets)}（最新：{sid} {len(df)} 列）"
                 )
         except Exception as e:  # noqa: BLE001 — 單檔失敗不該中斷整批
             failed += 1
-            consecutive_empty += 1
+            consecutive_fail += 1
             console.print(f"[yellow]  {sid} 失敗：{e}[/yellow]")
-        if consecutive_empty >= 5:
+        if consecutive_fail >= 3:
             console.print(
-                f"[red]連續 5 檔無資料（進度 {i}/{len(targets)}）——疑似 FinMind 額度用盡"
-                "／API 異常，停止本輪。稍後（或設 FINMIND_TOKEN）重跑，已抓到的走快取續跑。[/red]"
+                f"[red]連續 3 次請求失敗（進度 {i}/{len(targets)}）——疑似 FinMind 額度用盡"
+                "／API 異常，停止本輪。稍後重跑，已抓到的走快取續跑。[/red]"
             )
             break
     console.print(
-        f"[green]回補完成：有資料 {done}、空 {empty}、失敗 {failed}[/green]"
+        f"[green]回補完成：有資料 {done}、無 PER {empty}、請求失敗 {failed}[/green]"
     )
 
 

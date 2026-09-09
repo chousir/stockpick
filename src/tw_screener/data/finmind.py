@@ -140,6 +140,10 @@ class FinMindClient:
         self.max_retries = max_retries
         self.timeout_sec = timeout_sec
         self._last_req: float = 0.0
+        # 上一次 fetch_* 是否為「請求失敗」（HTTP error／額度用盡／status 非 200）。
+        # 用來讓斷路器只對真正的失敗計數——FinMind 對「這檔沒 PER 資料」是正常回
+        # `{"data":[]}`（HTTP 200），那不是異常、不該觸發停止（如興櫃新股整群）。
+        self.last_request_failed: bool = False
 
     def _throttle(self) -> None:
         """限速：確保連續請求間隔 ≥ interval_sec（鐵律 1 精神外推到 FinMind）。"""
@@ -213,6 +217,7 @@ class FinMindClient:
         或解析後為空 → 回空表（schema=_PER_SCHEMA），呼叫端自行判斷。
         force=True（CLI `--force`）→ 略過 TTL、強制重打。每次回全歷史 → 命中即整檔覆寫。
         """
+        self.last_request_failed = False
         cache_file = self.cache_dir / f"per_{stock_id}.parquet"
         if not force and is_fresh(cache_file, self.ttl_hours):
             logger.info(f"命中快取 {cache_file}")
@@ -220,6 +225,7 @@ class FinMindClient:
 
         payload = self._request(_DATASET_TAIWAN_STOCK_PER, stock_id, start_date)
         if payload is None:
+            self.last_request_failed = True
             if cache_file.exists():
                 logger.warning(
                     f"FinMind PER {stock_id} 抓取失敗，回退舊快取（可能已過 TTL）"
@@ -230,7 +236,8 @@ class FinMindClient:
 
         df = _parse_taiwan_stock_per(payload)
         if df.is_empty():
-            logger.warning(f"FinMind PER {stock_id} 解析後為空")
+            # `{"data":[]}`＝FinMind 沒有這檔的 PER（興櫃新股等），HTTP 200、非異常
+            logger.info(f"FinMind PER {stock_id} 無資料（data=[]）")
             return df
         save_parquet(df.sort("date"), cache_file)
         return df
@@ -241,10 +248,11 @@ class FinMindClient:
         start_date: str = "2005-01-01",
         force: bool = False,
     ) -> dict[str, pl.DataFrame]:
-        """依序抓多檔 PER（concurrency=1，鐵律 1 精神），連續失敗／空結果達 3 次即停止後續。
+        """依序抓多檔 PER（concurrency=1，鐵律 1 精神），連續**請求失敗** 3 次即停止後續。
 
         已成功的仍回傳；停止後尚未輪到的改讀舊快取（不因中途停而整批放棄），無舊快取回空表。
-        「連續失敗」同時涵蓋 HTTP 失敗與解析後為空。force=True 見 fetch_taiwan_stock_per。
+        「連續失敗」＝`last_request_failed`（HTTP error／額度用盡／status 非 200）——**不**
+        包含 `{"data":[]}`（FinMind 沒這檔的 PER，正常）。force=True 見 fetch_taiwan_stock_per。
         """
         result: dict[str, pl.DataFrame] = {}
         consecutive_errors = 0
@@ -260,11 +268,11 @@ class FinMindClient:
                 continue
             df = self.fetch_taiwan_stock_per(sid, start_date=start_date, force=force)
             result[sid] = df
-            if df.is_empty():
+            if self.last_request_failed:
                 consecutive_errors += 1
                 if consecutive_errors >= 3:
                     logger.warning(
-                        "FinMind 連續 3 次抓取失敗／空結果，停止後續抓取（鐵律 1 精神）"
+                        "FinMind 連續 3 次請求失敗，停止後續抓取（鐵律 1 精神）"
                     )
                     stopped = True
             else:

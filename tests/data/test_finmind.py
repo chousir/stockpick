@@ -221,46 +221,73 @@ def test_fetch_per_status_402_treated_as_failure(
     assert df.is_empty()
 
 
-def test_fetch_all_per_circuit_breaker(
+def test_fetch_all_per_circuit_breaker_on_request_failures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """連續 3 次空結果 → 停止後續抓取（鐵律 1 精神）。"""
+    """連續 3 次「請求失敗」（last_request_failed）→ 停止後續（鐵律 1 精神）。"""
     cache_dir = tmp_path / "finmind"
     cache_dir.mkdir()
     calls: list[str] = []
+    client = _client(cache_dir)
 
     def _fake_fetch(sid: str, start_date: str = "", force: bool = False) -> pl.DataFrame:
         calls.append(sid)
+        client.last_request_failed = True  # 模擬 HTTP/額度失敗
         return pl.DataFrame(schema=finmind._PER_SCHEMA)
 
-    client = _client(cache_dir)
     monkeypatch.setattr(client, "fetch_taiwan_stock_per", _fake_fetch)
     result = client.fetch_all_per(["A", "B", "C", "D", "E"])
     assert len(result) == 5
     assert calls == ["A", "B", "C"]  # 第 3 次觸發停止，D/E 不再打
-    assert all(df.is_empty() for df in result.values())
 
 
-def test_fetch_all_per_resets_counter_on_success(
+def test_fetch_all_per_empty_data_does_not_trip_breaker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`{"data":[]}`（FinMind 沒這檔 PER，非異常）連續多檔也不該觸發斷路器。"""
+    cache_dir = tmp_path / "finmind"
+    cache_dir.mkdir()
+    calls: list[str] = []
+    client = _client(cache_dir)
+
+    def _fake_fetch(sid: str, start_date: str = "", force: bool = False) -> pl.DataFrame:
+        calls.append(sid)
+        client.last_request_failed = False  # 請求成功、只是沒資料
+        return pl.DataFrame(schema=finmind._PER_SCHEMA)
+
+    monkeypatch.setattr(client, "fetch_taiwan_stock_per", _fake_fetch)
+    client.fetch_all_per(["A", "B", "C", "D", "E"])
+    assert calls == ["A", "B", "C", "D", "E"]  # 全部都打，沒停
+
+
+def test_fetch_taiwan_stock_per_empty_data_not_marked_failed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cache_dir = tmp_path / "finmind"
     cache_dir.mkdir()
-    good = pl.DataFrame(
-        {"date": [date(2020, 1, 2)], "stock_id": ["X"],
-         "pe": [10.0], "pbr": [1.0], "dividend_yield": [2.0]},
-        schema=finmind._PER_SCHEMA,
+
+    class _Resp:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"msg": "success", "status": 200, "data": []}
+
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp())
+    client = _client(cache_dir, max_retries=0)
+    df = client.fetch_taiwan_stock_per("7853")
+    assert df.is_empty()
+    assert client.last_request_failed is False  # data=[] 不算失敗
+
+
+def test_fetch_taiwan_stock_per_http_failure_marked_failed(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "finmind"
+    cache_dir.mkdir()
+    client = _client(
+        cache_dir, base_url="http://127.0.0.1:1", max_retries=0, timeout_sec=1.0
     )
-    seq = {"A": good, "B": pl.DataFrame(schema=finmind._PER_SCHEMA),
-           "C": pl.DataFrame(schema=finmind._PER_SCHEMA), "D": good,
-           "E": pl.DataFrame(schema=finmind._PER_SCHEMA)}
-    client = _client(cache_dir)
-    monkeypatch.setattr(
-        client, "fetch_taiwan_stock_per",
-        lambda sid, start_date="", force=False: seq[sid],
-    )
-    result = client.fetch_all_per(["A", "B", "C", "D", "E"])
-    assert not result["D"].is_empty()  # D 成功前只有 2 連空、未觸發停止
+    client.fetch_taiwan_stock_per("9999")
+    assert client.last_request_failed is True
 
 
 # ── load_finmind_per_history / load_merged_valuation_history ─────────────────
