@@ -1086,3 +1086,45 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 正式對帳三判準全過（路徑 a）。
 **下一步**：Phase 2（真 DCF，`M-Val-FinMind2`）依 §20.14 sketch 另立；季頻重跑
 `make backfill-finmind-per` 延伸深度。
+
+---
+
+## M-Val-FinMind2：機械式 DCF 模組（規劃書 31 §20.15・分支 `feat/finmind-dcf`）— 2026-09-10
+
+> 對應規劃書 [docs/31 §20.15](31-defg-redesign-large-cap-contrarian.md)。附錄 G M3 的 DCF
+> 至此仍 100% 人工（Opus 逐檔 web search FCF、手算兩階段）。W36 範例：只 3/13 檔適用、
+> 都跟倍數法大幅分歧。改接 FinMind 3 個財報 dataset → `analysis/dcf.py` 產完全機械、
+> 護欄兜住的 `dcf_intrinsic_est` ＋敏感度網格，餵 M3 當機械錨點。使用者 2026-09-10 拍板
+> 3 決策：算出數字／全市場回補／接進 make week + candidates 欄。
+
+- **`src/tw_screener/data/finmind.py`** 擴充：`_parse_finmind_long` 共用長格式 parser ＋
+  `fetch_cashflows/financials/balancesheet` ＋ `load_*_history`。CashFlows 累計 YTD、
+  Financials 單季、BalanceSheet 濾 `_per` 列。parser 保持笨（不 de-cumulate／不 TTM）。
+- **`src/tw_screener/analysis/dcf.py`**（新・純函式）：`annual_fcf_history`（Q4=FY，
+  `fcf = ocf − |capex|`）／`annual_revenue_history`／`quarterly_profit_flags`／
+  `conservative_growth_rate`（CAGR×0.7 clip[0,15]）／`fcf_base`（min(近3年均,最近年)）／
+  `cost_of_equity`／`dcf_intrinsic_value`（兩階段 FCFE，對手算值 214.19 鎖死）／
+  `dcf_with_guardrails`（8 config key 一字不動；排除 gate：金融→產業未知→近4季虧損→
+  營收波動→資料不足→FCF為負；逐角 clamp）／`build_dcf_inputs`。**8% 折現率地板恆綁定
+  → 單一風險參數模型**。
+- **`src/tw_screener/backtest/finmind_financials_reconcile.py`**（新）：FinMind Financials
+  vs 本地 `fundamentals_*.parquet` 四判準對帳（中位比值∈[0.97,1.03]、離群股<10%、EPS
+  符號一致≥98%、覆蓋率≥95%）。過→接 candidates 欄；不過→只留 `dcf_inputs.csv`。
+- **`config/settings.yaml`**：`finmind.{cashflow,financials,balancesheet}_start_date`＝2013；
+  `cp_value.valuation.dcf` 加 `risk_free_rate_pct: 1.6`（帶地板恆綁定算式註解）＋
+  `mechanical_growth_{years,haircut,cap_pct}`。**8 個護欄 key 不動。不加 default_beta。**
+- **CLI／Makefile**：`data backfill-finmind-financials`（~1130×3 call、跨 call 斷路器）＋
+  `backtest finmind-financials-reconcile`。**不接 make week。**
+- **`make week` 接線**：`group_runner.py` 新純揭露段（FinMind 財報快取缺 → 3 欄 typed-null）＋
+  `reports/<週>/dcf_inputs.csv` 研究檔；`group_report.py` `_build_enriched_rows` 加 3 欄
+  ＋ `_CANONICAL_REUSE_FIELDS`。
+- **docs/11 M3 改寫**：Opus 不再 web search FCF／不重算 DCF 本體——讀 `dcf_intrinsic_est` +
+  `dcf_inputs.csv` 當機械錨點，只 web search 前瞻營收成長、必要時從 Stage-1 成長 3 點
+  讀值/內插。信心 rubric「DCF 可算」→「可算**且與倍數法同向 ±15%**」。daily-picks Step 4 同步。
+- **Pre-registered 退場門檻**（§20.15）：季頻對帳連續 2 季不過、或使用者覆盤判定系統性發散
+  → `dcf_intrinsic_est` 退出 candidates_enriched.csv（只留研究檔）。
+- **文件同步**：docs/31 §20.15、docs/08（本條）、docs/02 FinMind 段、docs/07 CLI 兩條、README。
+- 驗收：`pytest -q` 1375 passed（+28：`test_dcf.py` ＋ `test_finmind.py` parser 測試含
+  capex 符號鎖）；ruff 零淨增；`test_w35_anchor_matches_production` 仍為既有 RED（非本次回歸）。
+
+**狀態**：程式＋測試＋文件完成。**全量 backfill、正式對帳裁決、merge 進 main 待辦。**

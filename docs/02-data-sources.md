@@ -11,7 +11,7 @@
 | TWSE ISIN (`isin.twse.com.tw/isin/C_public.jsp?strMode=4`) | 上櫃公司產業分類 | HTML（MS950 編碼） | 完全合法 |
 | Yahoo 股市 (`tw.stock.yahoo.com`) | 概念股/趨勢主題成分（多標籤主題） | 爬蟲（合規限速；**只爬概念股**） | 灰色，需自律 |
 | FRED (`api.stlouisfed.org/fred/series/observations`) | 總經指標（BAA10Y 主訊號＋揭露面板，docs/25 M-Macro1） | 官方 REST API（免費 key） | 完全合法 |
-| FinMind (`api.finmindtrade.com/api/v4/data`) | 估值歷史深度（`TaiwanStockPER` 2005-10 起逐日 PE/PBR/殖利率，docs/31 §20.14） | 開源 REST API（免費 token 選填） | 開源、資料條款「教育／非商業」（個人自用） |
+| FinMind (`api.finmindtrade.com/api/v4/data`) | 估值歷史深度（`TaiwanStockPER` 2005-10 起逐日 PE/PBR/殖利率，§20.14）＋機械式 DCF 財報（現金流/財報/資產負債 3 dataset，§20.15） | 開源 REST API（免費 token 選填） | 開源、資料條款「教育／非商業」（個人自用） |
 
 ## Goodinfo 爬蟲規範（重要，違反會被擋）
 
@@ -397,6 +397,28 @@ TWSE 權威（`load_latest_valuation_ratios` 不動、附錄 G 現價 PE 仍 TWS
 快照日（不讓 FinMind 更新頻率快過本地時汙染下游錨點）。兩來源系統性差異由
 `backtest finmind-reconcile` 事前寫死的三判準把關（§20.14）。FinMind 若停更／關閉，
 失去增量——但已落地的 parquet 留著。
+
+### Phase 2：3 個財報 dataset（機械式 DCF，2026-09 新增，docs/31 §20.15）
+
+`analysis/dcf.py` 的資料源。全是**長格式** `{date, stock_id, type, value}`（`TaiwanStockPER` 是
+寬表的例外）；`date` 是日曆季末 `YYYY-MM-DD`（非 ROC，不 +1911）。
+
+| dataset | 節奏 | 用到的 type code | 起點 |
+|---|---|---|---|
+| `TaiwanStockCashFlowsStatement` | **累計 YTD**（Q4 列＝全年） | `CashFlowsFromOperatingActivities`（＝`NetCashInflowFromOperatingActivities`，實測逐筆同）、`PropertyAndPlantAndEquipment`（capex，**負值**） | ~2012Q1 |
+| `TaiwanStockFinancialStatements` | **單季**（FinMind 已 de-cumulate；4 季加總＝全年） | `Revenue`／`OperatingIncome`／`IncomeAfterTaxes`／`EPS` | 1990+ |
+| `TaiwanStockBalanceSheet` | 季末快照（另發 `<type>_per` 占比列，parser field_map 不收→自然濾掉） | `CashAndCashEquivalents`／`ShorttermBorrowings`（部分股/年缺→視為 0）／`BondsPayable`／`LongtermBorrowings`／`Equity`／`Liabilities`／`TotalAssets` | 2011+ |
+
+`config/settings.yaml → finmind.{cashflow,financials,balancesheet}_start_date`（統一 2013）。
+回補 `make backfill-finmind-financials`（~1130×3 call ≈ 註冊 5.6h）；財報季頻更新 → 季頻重跑、
+**不接 `make week`**（make week 純讀快取）。快取 `data/cache/finmind/{cashflow,financials,
+balancesheet}_<stock_id>.parquet`。
+
+**品質**：FinMind Financials 與本地 `fundamentals_*.parquet`（TWSE MOPS）**2 季全市場對帳＝逐項
+相同**（`revenue_m` = FinMind `revenue`/1e6、`eps` 完全一致）→ 財報同一份官方資料。
+`backtest finmind-financials-reconcile` 四判準把關（§20.15）。`TaiwanStock10Year`（TW 10Y 公債
+殖利率）需付費 sponsor 層——拿不到，DCF 折現率靠 8% 地板兜住（§20.15：地板恆綁定 → 每檔
+折現率都 8.0%、`dcf_intrinsic_est` 是單一風險參數模型）。
 
 ---
 

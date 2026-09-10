@@ -6,7 +6,8 @@
         build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid contrarian-efficacy flow-inflection margin-factors \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check snapshot-week \
-        target-price-read
+        target-price-read \
+        backfill-finmind-per backfill-finmind-financials finmind-reconcile finmind-financials-reconcile
 
 .DEFAULT_GOAL := help
 
@@ -162,6 +163,15 @@ backfill-institutional-history:  ## ⏳ 一次性逐日回補上市法人歷史�
 
 backfill-finmind-per:  ## ⏳ 一次性回補全次產業成員 FinMind PER 歷史（~1130 檔×1 call，註冊2.5h/未註冊5h，24h TTL 可中斷續跑；LIMIT/START 選填；季頻重跑，不接 make week，docs/31 §20.14）
 	uv run tw-screener data backfill-finmind-per $(if $(START),--start $(START),) $(if $(LIMIT),--limit $(LIMIT),)
+
+backfill-finmind-financials:  ## ⏳ 一次性回補全市場 FinMind 3 財報 dataset（現金流/財報/資產負債，~1130×3 call，註冊5.6h/未註冊11h，24h TTL 可續跑；LIMIT 選填；季頻重跑，不接 make week，docs/31 §20.15）
+	uv run tw-screener data backfill-finmind-financials $(if $(LIMIT),--limit $(LIMIT),)
+
+finmind-reconcile:  ## FinMind PER vs TWSE 官方估值比對帳（docs/31 §20.14，需先 backfill-finmind-per）
+	uv run tw-screener backtest finmind-reconcile
+
+finmind-financials-reconcile:  ## FinMind 財報 vs 本地 fundamentals 對帳（docs/31 §20.15，需先 backfill-finmind-financials）
+	uv run tw-screener backtest finmind-financials-reconcile
 
 fetch-margin-history:  ## 回補近 N 個交易日上市融資融券（DAYS=20 可調，舊版 MI_MARGN 可回查歷史）
 	uv run tw-screener data fetch-margin-history --days $(or $(DAYS),20)

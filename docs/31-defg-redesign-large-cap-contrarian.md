@@ -2573,6 +2573,49 @@ W35 面板、比對 `reports/2026-W35/candidates_enriched.csv` 的 `val_gap_pct_
   裁決」節）。**已 merge 進 main（2026-09-09，merge commit `bd330bb`，使用者拍板）**，
   `feat/finmind-per-valuation-history` 分支已刪。
 
+### 20.15 機械式 DCF——M-Val-FinMind2（2026-09-10）
+
+**觸發**：§20.14 Phase 2 sketch。附錄 G M3 的 DCF 至此仍 100% 人工——`daily-picks.md` Step 4 的 Opus 子代理逐檔 web search 近 3 年「營業現金流 − capex」、前瞻成長、TW 10Y 殖利率、手算兩階段 DCF。W36 範例：DCF 只 3/13 檔適用、且都跟倍數法大幅分歧（web-searched FCF 不可靠 ＋ ~475 檔規模不可能人工）。使用者 2026-09-10 拍板 3 決策：**算出 `dcf_intrinsic_est` 數字**（非只備輸入）／**全市場 ~1130 檔**回補／**接進 `make week` + candidates 欄**。分支 `feat/finmind-dcf`。
+
+**紅線不變**：`dcf_intrinsic_est` 不是公允價／目標價／合理價，不進任何排序 / `picks:` / `picks sync` / F2 位階 / 進場階梯 / 停損。附錄 G「綜合估值區間」仍是 Opus M4 judgement，固定免責「無歷史驗證、不可回測」照留。
+
+#### 本 session 查證（實打使用者 token）
+
+| dataset | 格式 | 節奏 | 關鍵 type code |
+|---|---|---|---|
+| `TaiwanStockCashFlowsStatement` | 長格式 | **累計 YTD**（Q4 列＝全年） | `CashFlowsFromOperatingActivities`＝`NetCashInflowFromOperatingActivities`（實測逐筆同，收成 `ocf`/`ocf_alt` 由 dcf.py coalesce）；`PropertyAndPlantAndEquipment`（capex，**負值**）。2012Q1 起 |
+| `TaiwanStockFinancialStatements` | 長格式 | **單季**（FinMind 已 de-cumulate；2024 四季 Revenue 加總 2,892bn ≈ TSMC 實際） | `Revenue`／`OperatingIncome`／`IncomeAfterTaxes`／`EPS` |
+| `TaiwanStockBalanceSheet` | 長格式（另發 `<type>_per` 占比列，field_map 不收→自然濾掉） | 季末快照 | `CashAndCashEquivalents`／`ShorttermBorrowings`（**部分股/年缺 → 視為 0**）／`BondsPayable`／`LongtermBorrowings`／`Equity`／`Liabilities`／`TotalAssets` |
+
+- **資料品質**：FinMind Financials 2330 2026Q1（Revenue 1,134,103M、EPS 22.08）**與本地 `fundamentals_2026Q1.parquet` 逐項相同**（`revenue_m` = FinMind `revenue`/1e6）→ 財報＝同一份官方 MOPS 資料。
+- **`TaiwanStock10Year`（TW 10Y 殖利率）需付費 sponsor 層**（第 4 次確認）→ 折現率 8% 地板兜住。
+- **金融股**：industry_code 17「金融保險」（40 檔）涵蓋銀行/保險/金控/證券；Financials vocab 不同（`IncomeAfterTax` 無 s、含中文 type code `保險其他營業成本`），BalanceSheet 無 3 個債務 code。→ 產業 gate 必須先於「近 4 季虧損」gate（`test_exclude_financial_before_loss_gate` 鎖）。5871 中租（產業別「其他」）會漏過——單一噪音列、非分類破損。
+- **shares**：用既有 `shares_map`（TWSE 已發行普通股數，`group_runner.py:385`），**不用** FinMind `OrdinaryShare`（面額依賴）。
+- **淨現金系統性低估**：`CashAndCashEquivalents` 不含短投／流動金融資產（台股大型股常大量持有）→ 淨現金偏低、方向保守（低估內在值）。已知偏差、不追更多 code。
+
+#### 8% 折現率地板**恆綁定**
+
+`rf 1.6% + β(=1.0)·ERP 5.5% = 7.1% < 8.0%` → β 要 >1.16（或 rf >6.4%）才破地板。`min_wacc_terminal_spread_pct: 3pp` 在最差角落 spread 仍 4pp、也不綁定。→ **每檔折現率都 = 8.0%**，`dcf_intrinsic_est` 是**單一風險參數模型**，跨股變異全來自 FCF／成長／淨負債／股數。這正是 §20.13「護欄是 DCF 能被翻案的唯一理由」的具體形態。故 settings 只加 `risk_free_rate_pct: 1.6`（帶此算式註解），**不加 `default_beta`／`beta_by_broad_industry`**（地板恆綁定 → 逐產業 β 是死 config）。`cost_of_equity()` 傳字面 `beta=1.0`，`dcf_rate_binding` 旗標讓「地板不再綁定」那天看得見。
+
+#### 實作
+
+- **`data/finmind.py` 擴充**：`_parse_finmind_long(payload, field_map, schema)` 共用核心 ＋ `fetch_cashflows/financials/balancesheet` ＋ `load_*_history`。date 是日曆季末（非 ROC）。parser 保持笨——照抄所有季別，不 de-cumulate／不 TTM／不挑 FY。快取前綴 `cashflow_/financials_/balancesheet_{sid}.parquet`（同 `data/cache/finmind/`，pruner 非遞迴 → prune-safe）。
+- **`analysis/dcf.py`（新・純函式）**：`annual_fcf_history`（取 quarter==4 列，`fcf = coalesce(ocf,ocf_alt) − |capex|`）／`annual_revenue_history`（4 季加總）／`quarterly_profit_flags`／`conservative_growth_rate`（近 5 年營收 CAGR × 0.7，clip [0,15]，<3 年→None）／`fcf_base`（min(近3年均, 最近年)）／`cost_of_equity`／`dcf_intrinsic_value`（兩階段 FCFE，單元測試對手算值 214.19 鎖死）／`dcf_with_guardrails`（8 config key 一字不動；排除 gate 順序：金融→產業未知→近4季虧損→營收波動→FCF/成長/股數不足→FCF為負；逐角 clamp 折現率不排除）／`build_dcf_inputs`（全市場組裝）。
+- **敏感度網格**（進 `reports/<週>/dcf_inputs.csv`，不進 candidates_enriched）：`(WACC ±1%) × (g_term ±1%)` 四角 **＋ Stage-1 成長 3 點**（conservative × {0.5, 0.75, 1.0}）——讓 Opus 在「前瞻成長 < 保守外推」時讀值/內插、不手算整套 DCF（否則本 milestone 白做）。研究 CSV 落 `reports/<週次>/` 而非 `research/dcf/`：Opus 每週讀 `reports/<週次>/`。
+- **`data backfill-finmind-financials`**：宇宙同 backfill-finmind-per；每檔依序抓 3 dataset、跨 3 call 累計斷路器。~1130×3 ≈ 3390 req ≈ 註冊 5.6h。不接 make week。
+- **`finmind_financials_reconcile.py`**：FinMind Financials 單季 Revenue/EPS vs 本地 `fundamentals_*.parquet`。**事前寫死判準**：Revenue 中位比值 ∈ [0.97,1.03]；`|ratio−1|>0.10` 股票 <10%（比 PER 的 5% 鬆，de-cumulate 有誤差）；EPS 符號一致率 ≥98%；非金融股覆蓋率 ≥95%。**過** → `dcf_intrinsic_est` 進 `candidates_enriched.csv`；**不過** → 只留 `dcf_inputs.csv` 研究檔、docs/11 M3 改讀研究檔。
+- **`make week` 接線**：`group_runner.py` 新純揭露段（try/except，FinMind 財報快取缺 → 3 欄 typed-null）；`group_report.py` `_build_enriched_rows` 加 `dcf_intrinsic_est`/`dcf_applicable`/`dcf_exclude_reason` 3 欄 ＋ `_CANONICAL_REUSE_FIELDS`。
+- **docs/11 M3 改寫**：Opus 不再 web search FCF、不重算 DCF 本體——讀 `dcf_intrinsic_est` + `dcf_inputs.csv` 當機械錨點，只 web search 具名前瞻營收成長率、必要時從 Stage-1 成長 3 點讀值/內插。信心 rubric「DCF 可算」→「DCF 可算**且與倍數法同向（±15%）**」（機械化後「可算」幾乎恆真）。
+
+#### Pre-registered 退場門檻（ExitPlanMode 批准即定案）
+
+`dcf_intrinsic_est` 退出 `candidates_enriched.csv`（只留 `dcf_inputs.csv` 研究檔）的觸發：**季頻 `finmind-financials-reconcile` 連續 2 季判準不過**，或**使用者在覆盤（retro-review / pick-outcome）判定機械 DCF 與其他方法系統性發散、無參考價值**。退場＝改 3 欄不 join、docs/11 M3 改讀研究檔；不刪模組、不刪回補。（比照 §20.13 機械目標價腿「做了又推翻」的教訓——先寫好中止條件。）
+
+#### 狀態
+
+- 分支 `feat/finmind-dcf`。程式＋測試完成（`tests/analysis/test_dcf.py` 新、`tests/data/test_finmind.py` 加 parser 測試含 capex 符號鎖）。`pytest -q` 1375 passed（+28）、唯一 FAIL＝既有 RED `test_w35_anchor`（非本次回歸）。
+- **全量 backfill、正式對帳裁決、merge 進 main：待辦**（見本節末更新）。
+
 ## 21. 減量研究計畫 Part 1：逐式目的定義＋參數可行性分級（2026-08-24）
 
 使用者要求「先定義好每個策略目的以及它可以使用那些參數來達到，再來看是不是

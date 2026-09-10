@@ -442,6 +442,31 @@ def test_valuation_implied_price_columns_peer_and_self_legs(tmp_path):
     assert row2["pe_peer_median"] is None
 
 
+def test_dcf_columns_from_valuation_map(tmp_path):
+    """docs/31 §20.15（M-Val-FinMind2）：機械式 DCF 三欄從 valuation_map 帶進 CSV；
+    valuation_map 缺這些 key（＝ FinMind 財報快取未回補）→ 三欄留 null、不報錯。"""
+    results = {"a_breakout": _screener_df(["2330", "2454"], [3.0, 2.0])}
+    _, members = group_stocks(
+        results, pl.DataFrame(), pl.DataFrame(), industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    valuation_map = {
+        "2330": {
+            "pe": 20.0, "dcf_intrinsic_est": 1373.5,
+            "dcf_applicable": True, "dcf_exclude_reason": "",
+        },
+        "2454": {"pe": 15.0},  # DCF 段整個缺席（快取未回補）
+    }
+    out = tmp_path / "candidates_enriched.csv"
+    write_candidates_enriched_csv(
+        members, pl.DataFrame(), results, out, valuation_map=valuation_map
+    )
+    by_id = {str(r["stock_id"]): r for r in pl.read_csv(out).iter_rows(named=True)}
+    assert by_id["2330"]["dcf_intrinsic_est"] == pytest.approx(1373.5)
+    assert by_id["2330"]["dcf_applicable"] is True
+    assert by_id["2454"]["dcf_intrinsic_est"] is None
+    assert by_id["2454"]["dcf_applicable"] is None
+
+
 def test_valuation_composite_gap_uses_available_legs(tmp_path):
     """docs/31 §20.9：估值回歸參考價（綜合版）——6條線索取中位數＋回報用了幾條。
 
