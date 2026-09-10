@@ -2609,7 +2609,9 @@ W35 面板、比對 `reports/2026-W35/candidates_enriched.csv` 的 `val_gap_pct_
 
 #### Pre-registered 退場門檻（ExitPlanMode 批准即定案）
 
-`dcf_intrinsic_est` 退出 `candidates_enriched.csv`（只留 `dcf_inputs.csv` 研究檔）的觸發：**季頻 `finmind-financials-reconcile` 連續 2 季判準不過**，或**使用者在覆盤（retro-review / pick-outcome）判定機械 DCF 與其他方法系統性發散、無參考價值**。退場＝改 3 欄不 join、docs/11 M3 改讀研究檔；不刪模組、不刪回補。（比照 §20.13 機械目標價腿「做了又推翻」的教訓——先寫好中止條件。）
+`dcf_intrinsic_est` 退出 `candidates_enriched.csv`（只留 `dcf_inputs.csv` 研究檔）的觸發：**季頻 `finmind-financials-reconcile` 連續 2 季判準不過**，或**使用者在覆盤（retro-review / pick-outcome）判定機械 DCF 與其他方法系統性發散、無參考價值**。退場＝**手動改 `group_runner.py` 純揭露段：`build_dcf_inputs` 仍算、但 `valuation.join(...)` 那行拿掉、只 `write_csv`**，docs/11 M3 改讀研究檔；不刪模組、不刪回補。**沒有 config 開關**——刻意，比照 §20.13 機械目標價腿「做了又推翻」的教訓，退場是一次性人工決定、留痕在 git。
+
+**對帳判準說明**：Revenue 中位比值是主判別（FinMind vs 本地 MOPS 是否同一份）。EPS 符號一致率 ≥98% 是**地板檢查**（幾乎每檔每季都獲利、符號預設一致），不是判別器；留著是為了抓「FinMind de-cumulate 把某季 EPS 算成負」這種明顯壞損。
 
 #### 狀態
 

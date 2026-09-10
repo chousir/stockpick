@@ -1119,9 +1119,10 @@ def _build_enriched_rows(
         # → 單一風險參數模型。**不是**公允價／目標價，不進排序 / picks / F2 位階 / 停損；
         # 純供人工附錄 G M3 當機械錨點（明細＋敏感度網格在 reports/<週>/dcf_inputs.csv）。
         dcf_intrinsic_est = _num(vrow.get("dcf_intrinsic_est"), 2) if vrow else None
-        # 原樣帶 True/False/None（None＝FinMind 財報快取未回補，非「不適用」）
+        # 三欄原樣帶（不 coerce）：dcf_applicable None＝FinMind 財報快取未回補（非「不適用」）、
+        # True＝算得出、False＝命中排除 gate（dcf_exclude_reason 給原因）。
         dcf_applicable = vrow.get("dcf_applicable") if vrow else None
-        dcf_exclude_reason = (vrow.get("dcf_exclude_reason") or "") if vrow else ""
+        dcf_exclude_reason = vrow.get("dcf_exclude_reason") if vrow else None
         # docs/31 §20.9：估值回歸參考價（綜合版）——額外4條線索（同儕PB/自身PB/同儕
         # 殖利率/自身殖利率，跟build_valuation()的val_metric主鏡頭選擇平行、互不影響，
         # 不論PE是否可用都算）＋上面PE兩條，共最多6條，取中位數合成。殖利率腿用反向
