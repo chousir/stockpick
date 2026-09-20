@@ -527,6 +527,49 @@ def run_group_analysis(settings: Path) -> None:
             *[_pl.lit(None, dtype=_pl.Int64 if c.endswith("_n") else _pl.Float64).alias(c)
               for c in _composite_leg_cols if c not in valuation.columns]
         )
+    # docs/31 §20.15（M-Val-FinMind2）：機械式 DCF 純揭露欄。護欄常數讀 cp_value.valuation.dcf
+    # （8 key 一字不動）。FinMind 財報快取（data/cache/finmind/{cashflow,financials,
+    # balancesheet}_*.parquet）未回補 → 3 欄 typed-null，主流程不受影響。**不進**排序 /
+    # picks / F2 位階 / 進場階梯 / 停損。敏感度網格 + 全假設另寫 reports/<週>/dcf_inputs.csv。
+    dcf_inputs_df = _pl.DataFrame()
+    try:
+        from tw_screener.analysis.dcf import build_dcf_inputs
+        from tw_screener.data.finmind import (
+            load_balancesheet_history,
+            load_cashflow_history,
+            load_financials_history,
+        )
+
+        _dcf_cfg = val_cfg.get("dcf", {})
+        _cf_hist = load_cashflow_history(_finmind_cache_dir)
+        _fin_hist = load_financials_history(_finmind_cache_dir)
+        _bs_hist = load_balancesheet_history(_finmind_cache_dir)
+        if _cf_hist.is_empty() and _fin_hist.is_empty():
+            raise RuntimeError("FinMind 財報快取缺席（先跑 make backfill-finmind-financials）")
+        dcf_inputs_df = build_dcf_inputs(
+            _cf_hist, _fin_hist, _bs_hist, shares_map, industry_df, _dcf_cfg,
+            risk_free_rate_pct=float(_dcf_cfg.get("risk_free_rate_pct", 1.6)),
+            erp_pct=float(_dcf_cfg.get("equity_risk_premium_pct", 5.5)),
+        )
+        valuation = valuation.join(
+            dcf_inputs_df.select(
+                "stock_id", "dcf_intrinsic_est", "dcf_applicable", "dcf_exclude_reason"
+            ),
+            on="stock_id", how="left",
+        )
+    except Exception as e:  # noqa: BLE001 — 純揭露段，任何一步壞掉不擋 group 報告主流程
+        console.print(f"[yellow]  機械式 DCF 計算失敗，該段留空：{e}[/yellow]")
+        valuation = valuation.with_columns(
+            _pl.lit(None, dtype=_pl.Float64).alias("dcf_intrinsic_est"),
+            _pl.lit(None, dtype=_pl.Boolean).alias("dcf_applicable"),
+            _pl.lit(None, dtype=_pl.Utf8).alias("dcf_exclude_reason"),
+        )
+    if not dcf_inputs_df.is_empty():
+        try:
+            dcf_inputs_df.write_csv(output_path.parent / "dcf_inputs.csv")
+        except OSError as exc:
+            console.print(f"[yellow]  dcf_inputs.csv 落地失敗（不影響報告）：{exc}[/yellow]")
+
     valuation_map: dict[str, dict] = (
         {str(r["stock_id"]): r for r in valuation.iter_rows(named=True)}
         if not valuation.is_empty()

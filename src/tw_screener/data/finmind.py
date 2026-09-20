@@ -4,10 +4,15 @@
 create_client 工廠。每次請求回傳某 dataset＋stock_id 的**全歷史**（非增量），故快取粒度
 是 per-(dataset,stock_id) 整檔覆蓋、24h TTL，沿用既有 cache.is_fresh 慣例。
 
-目前只用 `TaiwanStockPER`（2005-10 起逐日 PE/PBR/殖利率）補自身估值歷史腿的深度——
+Phase 1（§20.14）：`TaiwanStockPER`（2005-10 起逐日 PE/PBR/殖利率）補自身估值歷史腿的深度——
 TWSE `BWIBBU_d`／TPEX `peratio` 皆「只回最新一交易日、不可回補」，`valuation_ratios_*`
 快取從 2026-06-12 才起累。`load_merged_valuation_history()` 把 FinMind 深度歷史與 TWSE
 逐日快照合併，重疊日 TWSE 勝（§20.14 權威規則：當前橫斷面一律 TWSE，FinMind 只補歷史）。
+
+Phase 2（§20.15，M-Val-FinMind2）：3 個長格式財報 dataset（CashFlowsStatement／
+FinancialStatements／BalanceSheet）餵 `analysis/dcf.py` 的機械式 DCF。`_parse_finmind_long`
+共用核心＋`fetch_cashflows/financials/balancesheet` 具名 wrapper＋`load_*_history`。parser
+保持笨（不 de-cumulate／不 TTM），語意判斷全在 dcf.py。
 
 合規（鐵律 1 精神外推；官方開放資料、門檻比 Goodinfo 鬆）：concurrency=1、請求間隔
 ≥ settings.finmind.request_interval_sec、同 (dataset,stock_id) 24h 快取、連錯 3 次停。
@@ -44,6 +49,63 @@ _PER_SCHEMA: dict[str, type[pl.DataType]] = {
     "pbr": pl.Float64,
     "dividend_yield": pl.Float64,
 }
+
+
+# ── Phase 2（M-Val-FinMind2）：財報 / 現金流 / 資產負債 3 個長格式 dataset ──────────
+# 這 3 個 dataset 回傳 `{date, stock_id, type, value, origin_name}` 長格式（PER 是寬表，
+# 例外）。date 是**日曆季末** `YYYY-MM-DD`（非 ROC，不 +1911）→ quarter=(月-1)//3+1。
+# parser 保持笨：照抄所有季別，不 de-cumulate／不 TTM／不挑 FY——那些邏輯在 analysis/dcf.py。
+#   - CashFlows：值為**累計 YTD**（Q4 列＝全年），2012Q1 起
+#   - Financials：值為**單季**（FinMind 已 de-cumulate），4 季加總＝全年
+#   - BalanceSheet：季末快照；另發 `<type>_per`（占總資產 %）列，field_map 未收 → 自然濾掉
+_DATASET_CASHFLOWS = "TaiwanStockCashFlowsStatement"
+_DATASET_FINANCIALS = "TaiwanStockFinancialStatements"
+_DATASET_BALANCESHEET = "TaiwanStockBalanceSheet"
+
+# type code → 短欄名。OCF 兩個等價 code（實測 2330/2317 逐筆相同）分別收成 ocf / ocf_alt，
+# 由 dcf.py coalesce（parser 不做業務判斷）。capex `PropertyAndPlantAndEquipment` 為**負值**
+# （「取得不動產、廠房及設備」現金流出）。
+_CASHFLOWS_FIELD_MAP: dict[str, str] = {
+    "CashFlowsFromOperatingActivities": "ocf",
+    "NetCashInflowFromOperatingActivities": "ocf_alt",
+    "PropertyAndPlantAndEquipment": "capex",
+}
+_FINANCIALS_FIELD_MAP: dict[str, str] = {
+    "Revenue": "revenue",
+    "OperatingIncome": "operating_income",
+    "IncomeAfterTaxes": "income_after_tax",
+    "EPS": "eps",
+}
+_BALANCESHEET_FIELD_MAP: dict[str, str] = {
+    "CashAndCashEquivalents": "cash",
+    "ShorttermBorrowings": "st_debt",
+    "BondsPayable": "bonds_payable",
+    "LongtermBorrowings": "lt_debt",
+    "Equity": "equity",
+    "Liabilities": "liabilities",
+    "TotalAssets": "total_assets",
+}
+
+
+def _long_schema(cols: list[str]) -> dict[str, type[pl.DataType]]:
+    """(stock_id, year, quarter) 主鍵 ＋ 各數值欄 Float64 的寬表 schema。"""
+    s: dict[str, type[pl.DataType]] = {
+        "stock_id": pl.Utf8,
+        "year": pl.Int64,
+        "quarter": pl.Int64,
+    }
+    for c in cols:
+        s[c] = pl.Float64
+    return s
+
+
+_CASHFLOWS_WIDE_SCHEMA = _long_schema(["ocf", "ocf_alt", "capex"])
+_FINANCIALS_WIDE_SCHEMA = _long_schema(
+    ["revenue", "operating_income", "income_after_tax", "eps"]
+)
+_BALANCESHEET_WIDE_SCHEMA = _long_schema(
+    ["cash", "st_debt", "bonds_payable", "lt_debt", "equity", "liabilities", "total_assets"]
+)
 
 
 def _to_float_or_none(raw: Any, *, drop_non_positive: bool) -> float | None:
@@ -93,6 +155,46 @@ def _parse_taiwan_stock_per(payload: dict[str, Any]) -> pl.DataFrame:
             ),
         })
     return pl.DataFrame(rows, schema=_PER_SCHEMA)
+
+
+def _parse_finmind_long(
+    payload: dict[str, Any],
+    field_map: dict[str, str],
+    schema: dict[str, type[pl.DataType]],
+) -> pl.DataFrame:
+    """解析 FinMind 長格式 `{date,stock_id,type,value}` → (stock_id, year, quarter, 寬欄…)。
+
+    `field_map` 沒有的 `type` 整列略過（`<type>_per` 占比列因此自然被濾掉）。
+    `date` 解析失敗或無 `stock_id` 的列 warn 後略過（不 raise）。同一 (stock_id,year,quarter)
+    的多個 type 併進同一列；沒出現的欄留 None（誠實，不當 0）。空 → `pl.DataFrame(schema=schema)`。
+    """
+    data = payload.get("data") or []
+    rec: dict[tuple[str, int, int], dict[str, float | None]] = {}
+    for r in data:
+        col = field_map.get(str(r.get("type")))
+        if col is None:
+            continue
+        try:
+            d = date.fromisoformat(str(r["date"]))
+            sid = str(r["stock_id"]).strip()
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning(f"略過無效 FinMind 長格式列：{r!r} — {e}")
+            continue
+        if not sid:
+            logger.warning(f"略過無 stock_id 的 FinMind 長格式列：{r!r}")
+            continue
+        key = (sid, d.year, (d.month - 1) // 3 + 1)
+        rec.setdefault(key, {})[col] = _to_float_or_none(
+            r.get("value"), drop_non_positive=False
+        )
+    if not rec:
+        return pl.DataFrame(schema=schema)
+    base = {c: None for c in schema}
+    rows = [
+        {**base, "stock_id": k[0], "year": k[1], "quarter": k[2], **v}
+        for k, v in rec.items()
+    ]
+    return pl.DataFrame(rows, schema=schema).sort(["stock_id", "year", "quarter"])
 
 
 def _load_finmind_token(dotenv_path: Path = Path(".env")) -> str | None:
@@ -278,6 +380,104 @@ class FinMindClient:
             else:
                 consecutive_errors = 0
         return result
+
+    # ── Phase 2：財報 / 現金流 / 資產負債（M-Val-FinMind2）─────────────────────
+    def _fetch_dataset(
+        self,
+        dataset: str,
+        prefix: str,
+        schema: dict[str, type[pl.DataType]],
+        field_map: dict[str, str],
+        stock_id: str,
+        start_date: str,
+        force: bool,
+    ) -> pl.DataFrame:
+        """抓單檔長格式 dataset 全歷史 → `{prefix}_{stock_id}.parquet`（比照 PER 抓法）。
+
+        抓取失敗且有舊快取 → 回退舊快取；失敗且無舊快取，或解析後為空 → 回空表。
+        `last_request_failed` 只由「請求失敗」（HTTP error／額度／status 非 200）設 True，
+        `{"data":[]}`（FinMind 沒這檔的該 dataset）不算。
+        """
+        self.last_request_failed = False
+        cache_file = self.cache_dir / f"{prefix}_{stock_id}.parquet"
+        if not force and is_fresh(cache_file, self.ttl_hours):
+            logger.info(f"命中快取 {cache_file}")
+            return load_parquet(cache_file)
+
+        payload = self._request(dataset, stock_id, start_date)
+        if payload is None:
+            self.last_request_failed = True
+            if cache_file.exists():
+                logger.warning(f"FinMind {dataset} {stock_id} 抓取失敗，回退舊快取")
+                return load_parquet(cache_file)
+            logger.warning(f"FinMind {dataset} {stock_id} 抓取失敗，且無舊快取")
+            return pl.DataFrame(schema=schema)
+
+        df = _parse_finmind_long(payload, field_map, schema)
+        if df.is_empty():
+            logger.info(f"FinMind {dataset} {stock_id} 無資料（data=[]）")
+            return df
+        save_parquet(df, cache_file)
+        return df
+
+    def fetch_cashflows(
+        self, stock_id: str, start_date: str = "2013-01-01", force: bool = False
+    ) -> pl.DataFrame:
+        """單檔現金流量表 → (stock_id, year, quarter, ocf, ocf_alt, capex)；值為累計 YTD。"""
+        return self._fetch_dataset(
+            _DATASET_CASHFLOWS, "cashflow", _CASHFLOWS_WIDE_SCHEMA,
+            _CASHFLOWS_FIELD_MAP, stock_id, start_date, force,
+        )
+
+    def fetch_financials(
+        self, stock_id: str, start_date: str = "2013-01-01", force: bool = False
+    ) -> pl.DataFrame:
+        """單檔財報 → (…, revenue, operating_income, income_after_tax, eps)；值為單季。"""
+        return self._fetch_dataset(
+            _DATASET_FINANCIALS, "financials", _FINANCIALS_WIDE_SCHEMA,
+            _FINANCIALS_FIELD_MAP, stock_id, start_date, force,
+        )
+
+    def fetch_balancesheet(
+        self, stock_id: str, start_date: str = "2013-01-01", force: bool = False
+    ) -> pl.DataFrame:
+        """單檔資產負債表 → cash / st_debt / bonds_payable / lt_debt / equity / total_assets …。"""
+        return self._fetch_dataset(
+            _DATASET_BALANCESHEET, "balancesheet", _BALANCESHEET_WIDE_SCHEMA,
+            _BALANCESHEET_FIELD_MAP, stock_id, start_date, force,
+        )
+
+
+def _load_finmind_wide_history(
+    cache_dir: Path, prefix: str, schema: dict[str, type[pl.DataType]]
+) -> pl.DataFrame:
+    """純讀**全部**已回補的 `{prefix}_*.parquet`（不打網）；無快取回空表（schema=schema）。"""
+    files = sorted(Path(cache_dir).glob(f"{prefix}_*.parquet"))
+    if not files:
+        return pl.DataFrame(schema=schema)
+    frames = [load_parquet(f) for f in files]
+    return (
+        pl.concat(frames, how="diagonal_relaxed")
+        .unique(subset=["stock_id", "year", "quarter"], keep="last")
+        .sort(["stock_id", "year", "quarter"])
+    )
+
+
+def load_cashflow_history(cache_dir: Path) -> pl.DataFrame:
+    """全部 cashflow_*.parquet（M-Val-FinMind2）。"""
+    return _load_finmind_wide_history(cache_dir, "cashflow", _CASHFLOWS_WIDE_SCHEMA)
+
+
+def load_financials_history(cache_dir: Path) -> pl.DataFrame:
+    """全部 financials_*.parquet（M-Val-FinMind2）。"""
+    return _load_finmind_wide_history(cache_dir, "financials", _FINANCIALS_WIDE_SCHEMA)
+
+
+def load_balancesheet_history(cache_dir: Path) -> pl.DataFrame:
+    """全部 balancesheet_*.parquet（M-Val-FinMind2）。"""
+    return _load_finmind_wide_history(
+        cache_dir, "balancesheet", _BALANCESHEET_WIDE_SCHEMA
+    )
 
 
 def load_finmind_per_history(cache_dir: Path) -> pl.DataFrame:

@@ -462,6 +462,102 @@ def data_backfill_finmind_per(
     )
 
 
+@data_app.command("backfill-finmind-financials")
+def data_backfill_finmind_financials(
+    limit: int = typer.Option(0, "--limit", help="只跑前 N 檔（測試用；0=全部）"),
+    force: bool = typer.Option(False, "--force", help="略過 24h TTL、強制重抓每一檔"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """一次性回補全市場 FinMind 3 個財報 dataset（現金流量表／財報／資產負債表），餵機械式 DCF。
+
+    docs/31 §20.15（M-Val-FinMind2）。宇宙＝`list_subindustries()` 全成員（與
+    backfill-finmind-per 同一組）。每檔依序抓 3 個 dataset（一起落地）；免費層一次一檔、
+    限速 settings.finmind.request_interval_sec。~1130 檔 × 3 call ≈ 3390 req、註冊 600/hr
+    → ~5.6h、未註冊 300/hr → ~11h。建議掛背景；24h TTL 內已抓到的走快取 fast-path、
+    天然可續跑。財報季頻更新 → 季頻重跑本指令即可，**不接 make week**（make week 純讀快取）。
+
+    斷路器：連續 3 次「請求失敗」（HTTP/額度，跨 3 個 dataset call 累計）→ 停本輪（鐵律 1）。
+    `{"data":[]}`（FinMind 沒這檔的某 dataset）不計入。
+    """
+    import yaml
+
+    from tw_screener.analysis.sector_universe import list_subindustries
+    from tw_screener.data.finmind import create_client
+
+    client = create_client(settings)
+    with open(settings, encoding="utf-8") as fh:
+        fm_cfg = yaml.safe_load(fh)["finmind"]
+    cf_start = fm_cfg.get("cashflow_start_date", "2013-01-01")
+    fin_start = fm_cfg.get("financials_start_date", "2013-01-01")
+    bs_start = fm_cfg.get("balancesheet_start_date", "2013-01-01")
+
+    members = list_subindustries()
+    if members.is_empty():
+        console.print("[red]缺 concepts.yaml 次產業成員[/red]")
+        raise typer.Exit(1)
+    counts = members.group_by("sub_industry").len()
+    ordered = (
+        members.join(counts, on="sub_industry")
+        .sort("len", descending=True)["stock_id"]
+        .to_list()
+    )
+    seen: set[str] = set()
+    targets: list[str] = []
+    for sid in ordered:
+        if sid not in seen:
+            seen.add(sid)
+            targets.append(sid)
+    if limit > 0:
+        targets = targets[:limit]
+    console.print(
+        f"[bold]FinMind 財報回補：{len(targets)} 檔 × 3 dataset[/bold]"
+    )
+
+    done = failed = empty = 0
+    consecutive_fail = 0
+    stopped = False
+    for i, sid in enumerate(targets, 1):
+        got_any = False
+        for label, fetch in (
+            ("cashflow", lambda s: client.fetch_cashflows(s, cf_start, force)),
+            ("financials", lambda s: client.fetch_financials(s, fin_start, force)),
+            ("balancesheet", lambda s: client.fetch_balancesheet(s, bs_start, force)),
+        ):
+            try:
+                df = fetch(sid)
+            except Exception as e:  # noqa: BLE001 — 單檔單 dataset 失敗不中斷整批
+                failed += 1
+                consecutive_fail += 1
+                console.print(f"[yellow]  {sid} {label} 失敗：{e}[/yellow]")
+            else:
+                if client.last_request_failed:
+                    failed += 1
+                    consecutive_fail += 1
+                elif not df.is_empty():
+                    got_any = True
+                    consecutive_fail = 0
+                else:
+                    consecutive_fail = 0
+            if consecutive_fail >= 3:
+                stopped = True
+                break
+        if got_any:
+            done += 1
+        elif not stopped:
+            empty += 1
+        if i % 25 == 0 or i == len(targets):
+            console.print(f"  進度 {i}/{len(targets)}（最新：{sid}）")
+        if stopped:
+            console.print(
+                f"[red]連續 3 次請求失敗（進度 {i}/{len(targets)}）——疑似額度用盡／API 異常，"
+                "停止本輪。稍後重跑，已抓到的走快取續跑。[/red]"
+            )
+            break
+    console.print(
+        f"[green]回補完成：有資料 {done}、無資料 {empty}、請求失敗 {failed}[/green]"
+    )
+
+
 @data_app.command("backfill-daily-history")
 def data_backfill_daily_history(
     start: str = typer.Option(..., "--start", help="回補起始日（YYYY-MM-DD，含）"),
@@ -1720,6 +1816,24 @@ def backtest_finmind_reconcile_cmd(
     from tw_screener.backtest.finmind_reconcile import run_finmind_reconcile
 
     report = run_finmind_reconcile(settings)
+    console.print(report)
+
+
+@backtest_app.command("finmind-financials-reconcile")
+def backtest_finmind_financials_reconcile_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """docs/31 §20.15：FinMind Financials（單季）vs 本地 fundamentals_*.parquet 全市場對帳。
+
+    配對 Revenue / EPS，對事前寫死判準（中位比值 ∈ [0.97,1.03]、離群股 <10%、
+    EPS 符號一致率 ≥98%、覆蓋率 ≥95%）。過 → dcf_intrinsic_est 進 candidates_enriched.csv；
+    不過 → 只留 reports/<週>/dcf_inputs.csv 研究檔。需先 `make backfill-finmind-financials`。
+    輸出 research/finmind_financials_reconciliation_<date>.md。"""
+    from tw_screener.backtest.finmind_financials_reconcile import (
+        run_finmind_financials_reconcile,
+    )
+
+    report = run_finmind_financials_reconcile(settings)
     console.print(report)
 
 

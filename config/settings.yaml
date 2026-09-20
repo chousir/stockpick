@@ -129,6 +129,12 @@ finmind:
   max_retries: 2                 # 連錯 3 次（含首次）即停（fetch_all_per 逐檔累計）
   timeout_sec: 30.0
   per_start_date: "2005-01-01"   # TaiwanStockPER 最早約 2005-10；給寬起點讓 API 自截
+  # Phase 2（M-Val-FinMind2，docs/31 §20.15）：3 個長格式財報 dataset 回補起點。
+  # 統一 2013：機械式 DCF 的近 5 年營收 CAGR 需要往前的完整年空間；CashFlows 2330 最早 ~2012Q1。
+  # 快取前綴 cashflow_/financials_/balancesheet_{sid}.parquet，同 data/cache/finmind/。
+  cashflow_start_date: "2013-01-01"
+  financials_start_date: "2013-01-01"
+  balancesheet_start_date: "2013-01-01"
 
 report:
   default_top_n: 10
@@ -375,6 +381,15 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
       exclude_industries: ["銀行", "保險", "證券", "金融保險", "金控"]  # FCF 無意義 → 該檔只用 M1/M2、註明排除原因
       exclude_if_quarterly_loss: true          # 近 4 季有單季虧損 → 排除 DCF
       exclude_if_rev_yoy_swing_pp: 40.0        # 近 3 年營收年增率波動 > 此值(pp) → 極端週期、排除 DCF
+      # ── 以下為 M-Val-FinMind2（機械式 DCF，docs/31 §20.15）新增，非上方凍結的護欄 8 key ──
+      risk_free_rate_pct: 1.6   # TW 10Y 公債殖利率（TaiwanStock10Year 需付費 → 人工季頻更新）。
+                                # 註：rf 1.6 + β(=1.0)·ERP 5.5 = 7.1% < 8.0% 折現率地板 →
+                                # 地板恆綁定，此值目前不影響任何 dcf_intrinsic_est
+                                # （要 rf>6.4% 或 β>1.16 才生效）。不加 default_beta：地板恆綁定
+                                # → 逐產業 β 是死 config。
+      mechanical_growth_years: 5      # 保守外推：近 N 年完整年營收 CAGR
+      mechanical_growth_haircut: 0.7  # CAGR × 此係數（保守）
+      mechanical_growth_cap_pct: 15.0 # Stage-1 成長率上限（clip [0, 此值]）
 
 backtest:                    # 規劃書 03 V1 策略回測閉環（make backtest-strategies）
   strategies:

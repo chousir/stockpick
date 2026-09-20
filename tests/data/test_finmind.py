@@ -12,10 +12,20 @@ import pytest
 
 from tw_screener.data import finmind
 from tw_screener.data.finmind import (
+    _BALANCESHEET_FIELD_MAP,
+    _BALANCESHEET_WIDE_SCHEMA,
+    _CASHFLOWS_FIELD_MAP,
+    _CASHFLOWS_WIDE_SCHEMA,
+    _FINANCIALS_FIELD_MAP,
+    _FINANCIALS_WIDE_SCHEMA,
     FinMindClient,
     _load_finmind_token,
+    _parse_finmind_long,
     _parse_taiwan_stock_per,
     create_client,
+    load_balancesheet_history,
+    load_cashflow_history,
+    load_financials_history,
     load_finmind_per_history,
     load_merged_valuation_history,
 )
@@ -86,6 +96,110 @@ def test_parse_per_bad_rows_skipped_and_non_positive_to_none() -> None:
     r5 = df.filter(pl.col("date") == date(2020, 3, 5))
     assert r5["pe"].item() is None  # 0.0 ≤ 0
     assert r5["pbr"].item() == pytest.approx(1.5)  # 正值保留
+
+
+# ── _parse_finmind_long（Phase 2：3 個長格式財報 dataset）───────────────────
+
+
+def test_parse_cashflows_q4_is_fy() -> None:
+    """CashFlows 累計 YTD：Q4 列的 ocf 就是全年（parser 不 de-cumulate，照抄）。"""
+    df = _parse_finmind_long(
+        _load_json("cashflows_2330.json"), _CASHFLOWS_FIELD_MAP, _CASHFLOWS_WIDE_SCHEMA
+    )
+    assert set(df.columns) == {"stock_id", "year", "quarter", "ocf", "ocf_alt", "capex"}
+    fy23 = df.filter((pl.col("year") == 2023) & (pl.col("quarter") == 4))
+    assert fy23["ocf"].item() == pytest.approx(1_241_967_347_000.0)
+    # Q1 < Q4（確認是累計而非單季）
+    q1 = df.filter((pl.col("year") == 2023) & (pl.col("quarter") == 1))["ocf"].item()
+    assert q1 < fy23["ocf"].item()
+
+
+def test_parse_cashflows_capex_sign_negative() -> None:
+    """回歸鎖：capex（PropertyAndPlantAndEquipment）為**負值**。
+
+    FinMind 慣例若某日翻成正值，`fcf = ocf − |capex|` 會被無聲加倍 → 這個斷言讓它大聲報錯。
+    """
+    df = _parse_finmind_long(
+        _load_json("cashflows_2330.json"), _CASHFLOWS_FIELD_MAP, _CASHFLOWS_WIDE_SCHEMA
+    )
+    assert (df["capex"].drop_nulls() < 0).all()
+
+
+def test_parse_cashflows_ocf_alt_matches_primary() -> None:
+    """兩個 OCF code（primary `ocf` / alt `ocf_alt`）實測逐筆相同。"""
+    df = _parse_finmind_long(
+        _load_json("cashflows_2330.json"), _CASHFLOWS_FIELD_MAP, _CASHFLOWS_WIDE_SCHEMA
+    )
+    paired = df.filter(pl.col("ocf").is_not_null() & pl.col("ocf_alt").is_not_null())
+    assert paired.height > 0
+    assert (paired["ocf"] - paired["ocf_alt"]).abs().max() == pytest.approx(0.0)
+
+
+def test_parse_financials_per_quarter() -> None:
+    """Financials 單季：4 季 Revenue 加總 ≈ 全年（2023 ≈ 2,162bn）。"""
+    df = _parse_finmind_long(
+        _load_json("financials_2330.json"), _FINANCIALS_FIELD_MAP, _FINANCIALS_WIDE_SCHEMA
+    )
+    fy23 = df.filter(pl.col("year") == 2023)["revenue"].sum()
+    assert fy23 == pytest.approx(2_161_735_841_000.0, rel=1e-6)
+    # 單季 EPS 每季 < 全年加總（確認非累計）
+    q = df.filter((pl.col("year") == 2024) & (pl.col("quarter") == 3))["eps"].item()
+    assert 0 < q < 20
+
+
+def test_parse_balancesheet_filters_per_rows() -> None:
+    """`<type>_per` 占比列不在 field_map → 不落表；只留絕對金額欄。"""
+    df = _parse_finmind_long(
+        _load_json("balancesheet_2330.json"),
+        _BALANCESHEET_FIELD_MAP,
+        _BALANCESHEET_WIDE_SCHEMA,
+    )
+    assert "equity" in df.columns
+    assert not any(c.endswith("_per") for c in df.columns)
+    latest = df.sort(["year", "quarter"]).tail(1)
+    assert latest["cash"].item() > 0
+    assert latest["total_assets"].item() > latest["equity"].item()
+
+
+def test_parse_long_skips_unmapped_and_bad_rows() -> None:
+    payload = {
+        "msg": "success",
+        "status": 200,
+        "data": [
+            {"date": "2024-03-31", "stock_id": "9999", "type": "Revenue", "value": 100.0},
+            {"date": "2024-03-31", "stock_id": "9999", "type": "SomeUnmapped", "value": 5.0},
+            {"date": "bad-date", "stock_id": "9999", "type": "Revenue", "value": 1.0},
+            {"stock_id": "9999", "type": "Revenue", "value": 1.0},
+            {"date": "2024-06-30", "type": "Revenue", "value": 1.0},
+        ],
+    }
+    df = _parse_finmind_long(payload, _FINANCIALS_FIELD_MAP, _FINANCIALS_WIDE_SCHEMA)
+    assert df.height == 1
+    assert df["revenue"].item() == pytest.approx(100.0)
+    assert df["operating_income"].item() is None
+
+
+def test_parse_long_empty() -> None:
+    df = _parse_finmind_long({"data": []}, _FINANCIALS_FIELD_MAP, _FINANCIALS_WIDE_SCHEMA)
+    assert df.is_empty()
+    assert set(df.columns) == set(_FINANCIALS_WIDE_SCHEMA)
+
+
+def test_load_wide_history_dedup(tmp_path: Path) -> None:
+    """同 (stock_id, year, quarter) 重複時 keep last；無檔回空表。"""
+    assert load_cashflow_history(tmp_path).is_empty()
+    df_a = pl.DataFrame(
+        {"stock_id": ["1"], "year": [2024], "quarter": [4], "revenue": [10.0],
+         "operating_income": [1.0], "income_after_tax": [1.0], "eps": [0.1]},
+        schema=_FINANCIALS_WIDE_SCHEMA,
+    )
+    df_b = df_a.with_columns(pl.lit(20.0).alias("revenue"))
+    df_a.write_parquet(tmp_path / "financials_1.parquet")
+    df_b.write_parquet(tmp_path / "financials_1b.parquet")
+    got = load_financials_history(tmp_path)
+    assert got.height == 1
+    assert got["revenue"].item() == pytest.approx(20.0)
+    assert load_balancesheet_history(tmp_path).is_empty()
 
 
 # ── _load_finmind_token ────────────────────────────────────────────────────

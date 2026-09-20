@@ -1115,6 +1115,14 @@ def _build_enriched_rows(
             close, _num(off_pe, 4), pe_self_median
         )
         val_gap_pct_self = implied_price_gap_pct(val_implied_price_self, close)
+        # docs/31 §20.15（M-Val-FinMind2）：機械式 DCF per-share 內在值。8% 折現率地板恆綁定
+        # → 單一風險參數模型。**不是**公允價／目標價，不進排序 / picks / F2 位階 / 停損；
+        # 純供人工附錄 G M3 當機械錨點（明細＋敏感度網格在 reports/<週>/dcf_inputs.csv）。
+        dcf_intrinsic_est = _num(vrow.get("dcf_intrinsic_est"), 2) if vrow else None
+        # 三欄原樣帶（不 coerce）：dcf_applicable None＝FinMind 財報快取未回補（非「不適用」）、
+        # True＝算得出、False＝命中排除 gate（dcf_exclude_reason 給原因）。
+        dcf_applicable = vrow.get("dcf_applicable") if vrow else None
+        dcf_exclude_reason = vrow.get("dcf_exclude_reason") if vrow else None
         # docs/31 §20.9：估值回歸參考價（綜合版）——額外4條線索（同儕PB/自身PB/同儕
         # 殖利率/自身殖利率，跟build_valuation()的val_metric主鏡頭選擇平行、互不影響，
         # 不論PE是否可用都算）＋上面PE兩條，共最多6條，取中位數合成。殖利率腿用反向
@@ -1370,6 +1378,14 @@ def _build_enriched_rows(
                 # 純供人工 search-augmented 試算，不進 candidates 排序、不進 val_gap 綜合。
                 "pe_self_median": pe_self_median,
                 "pe_peer_median": val_median if val_metric == "PE" else None,
+                # docs/31 §20.15（M-Val-FinMind2）：機械式 DCF。8% 折現率地板恆綁定 → 跨股
+                # 變異全來自 FCF/成長/淨負債/股數，不含個股風險區分。純供人工附錄 G M3 試算，
+                # 不進排序 / val_gap / picks / F2 位階 / 進場階梯 / 停損。dcf_applicable=false
+                # 時 dcf_exclude_reason 說明排除原因（金融業／近4季虧損／營收波動過大等）。
+                # 敏感度網格＋全假設在 reports/<週次>/dcf_inputs.csv。
+                "dcf_intrinsic_est": dcf_intrinsic_est,
+                "dcf_applicable": dcf_applicable,
+                "dcf_exclude_reason": dcf_exclude_reason,
                 # docs/31 §20.9：估值回歸參考價（綜合版）——同儕PB/自身PB/同儕殖利率/
                 # 自身殖利率4條額外線索（gap_pct only，implied_price留在函式內部不
                 # 逐一輸出，避免CSV欄位爆量），加上上面PE兩條取中位數合成的綜合缺口%
@@ -1571,6 +1587,9 @@ _CANONICAL_REUSE_FIELDS = (
     "val_gap_pct_self",
     "pe_self_median",
     "pe_peer_median",
+    "dcf_intrinsic_est",
+    "dcf_applicable",
+    "dcf_exclude_reason",
     "val_gap_pct_pb_peer",
     "val_gap_pct_pb_self",
     "val_gap_pct_yield_peer",

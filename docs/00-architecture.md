@@ -72,7 +72,8 @@
 | `src/tw_screener/report/builder.py` | 個股報告 builder（API 模式 / 草稿模式） | anthropic, jinja2 |
 | `src/tw_screener/backtest/` | 策略勝率回測（骨架，2026-08 後實作） | polars |
 | `src/tw_screener/data/fred.py` | FRED 官方 API 抓取＋24h快取（總經序列） | httpx |
-| `src/tw_screener/data/finmind.py` | FinMind 開源 API 抓取＋24h快取（`TaiwanStockPER` 估值歷史深度，docs/31 §20.14） | httpx |
+| `src/tw_screener/data/finmind.py` | FinMind 開源 API 抓取＋24h快取（`TaiwanStockPER` 估值歷史深度 §20.14；現金流/財報/資產負債 3 dataset 餵機械式 DCF §20.15） | httpx |
+| `src/tw_screener/analysis/dcf.py` | 機械式 DCF（附錄 G M3，護欄兜住、8% 折現率地板恆綁定，docs/31 §20.15） | polars |
 | `src/tw_screener/analysis/macro_regime.py` | 總經燈號：BAA10Y 單訊號計分＋揭露面板（docs/25 M-Macro1） | polars |
 | `src/tw_screener/cli.py` | CLI 入口（Typer） | typer |
 

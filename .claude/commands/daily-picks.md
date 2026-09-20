@@ -79,12 +79,13 @@ Prompt 內容要包含：「讀 `.claude/commands/macro-scan.md` 並完整依其
   在「附錄 G」（排附錄 F 後、資料品質披露前）逐檔跑 docs/11「附錄 G」規格的**固定方法清單**：
   M1 回顧倍數法（引用 `candidates_enriched.csv` 的 `val_implied_price_self`/`_peer`、PB 兩腿 gap%，不重算）；
   M2 前瞻倍數法（web search 具名前瞻 EPS × ｛自身、同儕｝中位 PE，**不抄券商目標價**，守「外部查證」規則）；
-  M3 DCF（**僅適用時**——排除 `settings.yaml` `cp_value.valuation.dcf.exclude_industries` 的銀行/保險/證券/金控、
-  近 4 季有虧損、營收年增率波動 >±40pp；輸入全 web search＝近 3 年營業現金流−capex、前瞻營收成長、
-  TW 10Y 公債殖利率現值；永續成長率 2%、ERP 5.5% 讀 settings，不逐檔調；輸出內在價值＋WACC/永續成長
-  各 ±1% 的敏感度四角＋假設全列；命中排除規則就註明原因、只用 M1/M2）；
+  M3 DCF（**機械計算，docs/31 §20.15**——讀 `candidates_enriched.csv` 的 `dcf_intrinsic_est`/
+  `dcf_applicable`/`dcf_exclude_reason` ＋ `reports/<週次>/dcf_inputs.csv`（敏感度網格＋全假設）當機械錨點；
+  **不重算 DCF 本體**——只 web search 具名前瞻營收成長率，若前瞻 < `growth_pct` 欄就從 `dcf_inputs.csv`
+  的 Stage-1 成長 3 點讀值/內插；`dcf_applicable=false` 就照 `dcf_exclude_reason` 註明、只用 M1/M2；
+  折現率恆 8.0%＝單一風險參數模型、永續 2%、淨現金系統性低估——低信心腿）；
   M4 你綜合 M1–M3 的 4–7 個數字 → 給**一個區間（低端~高端，非單點）**＋『哪個方法在這檔最可信、為什麼』
-  ＋**信心分級**（高＝≥3 法落 ±15% 內∧前瞻 EPS 來自 FactSet/多分析師∧DCF 可算；中＝落 ±30% 內或前瞻單一來源；
+  ＋**信心分級**（高＝≥3 法落 ±15% 內∧前瞻 EPS 來自 FactSet/多分析師∧DCF 可算且與倍數法同向 ±15%；中＝落 ±30% 內或前瞻單一來源；
   低＝發散 >±30% 或前瞻弱/缺或只剩自身倍數一條）。
   抬頭放 docs/11 附錄 G 固定免責語＋逐字讀法提醒。
   **M4 綜合估值區間寫成決策卡新增欄『綜合估值區間 vs 現價』**（格式『−5%~+22%（中）』＝區間相對現價、
