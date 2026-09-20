@@ -1130,3 +1130,38 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 - **2026-09-20 全量回補＋正式對帳**：回補 1127 檔有資料／5 檔無資料／失敗 0（中途一次 DNS 斷線觸發斷路器、重跑續完）。**初跑四判準全未過，查明是對帳程式比錯**——本地 fundamentals 為累計 YTD（Q2＝Q1+Q2）被當單季比、覆蓋率分母含宇宙外個股。修量測不動門檻（本地還原單季＋分母限回補宇宙，`test_finmind_financials_reconcile.py` +5 測試）後重跑：Revenue 中位 1.0000／離群 0.0%／EPS 符號 99.9%／覆蓋 100.0% → **四判準全過，`dcf_intrinsic_est` 留在 candidates**。初跑與修正對照、誠實註記（判準是失敗後才修量測、僅 2 季樣本）見 docs/31 §20.15〔對帳裁決〕。
 
 **狀態**：程式＋測試＋文件＋全量回補＋正式對帳裁決完成（2026-09-20）。**已 merge 進 main（88197ca，2026-09-20；`feat/finmind-dcf` 分支保留、未刪、未 push）。**
+
+---
+
+## M-Fund-SingleQ：本地 fundamentals 累計 YTD → 讀取層還原單季（分支 `fix/fundamentals-single-quarter`）— 2026-09-20
+
+> 起因：M-Val-FinMind2 對帳時查出本地 `fundamentals_*.parquet` 的 `revenue_m`／`eps` 是**累計 YTD**
+> （Q2＝Q1+Q2），跟 FinMind 單季比才發現；接著實測 `net/op_margin_pct` 975/975 吻合 YTD 推導、
+> `roe_q_pct`（＝eps/bvps）874/975 吻合 YTD 推導。欄名／docs／報告標籤全寫「單季」＝名實不符。
+> 使用者 2026-09-20 拍板方案 A（還原單季，門檻不動）。
+
+**設計決策（勿「簡化」掉）**
+1. **parquet 保持原始累計值、只在讀取層還原**。`finmind_financials_reconcile` 直接 glob 讀 parquet 並自己
+   期望 YTD 輸入；若改在寫入端還原，對帳會二次扣減、剛過的四判準轉紅。
+2. 全 repo **只留一個還原函式** `twse.decumulate_fundamentals()`；reconcile 改 import 它、刪 `_decumulate_local`
+   （reconcile 既有 5 測試不動＝等價性檢查）。
+3. `load_latest_fundamentals`（`make week`／個股報告真正走的路徑）也要還原——改讀全部季檔（原只讀 `files[-1]`）；
+   **前一季檔缺／該股前一季缺 → null，不回退成累計值**。`fundamentals_*` 不在 pruner 家族內
+   （`test_cache.py:238` 鎖住）→ 前一季檔不會被清掉。
+4. 還原規則：Q1 原值；Qn＝Qn−Q(n−1)（revenue_m、eps）；利潤率（gross/op/pretax/net）＝營收加權
+   `(m_n·R_n − m_{n−1}·R_{n−1})/(R_n−R_{n−1})`，ΔR≤0→null；`roe_q_pct`＝單季 eps／bvps 重算。
+   `bvps`／`debt_ratio_pct`／`current_ratio` 為期末時點值，不動。`gross_margin_pct` 與 op/net 同一 MOPS
+   營益分析端點（t187ap17）同一列，**推定同為累計（結構推論，非逐檔實證）**。
+5. G1/G2/G5 底帳口徑會在本 milestone 前後斷裂（同欄名、不同定義）→ `LEDGER_SCHEMA` 加 `fund_basis`
+   （`ytd`＝本 milestone 前列、`single_q`＝之後）；驗證底帳時兩批不得混算。
+
+**Pre-registered 預測（事前寫死，事後對照，不合理化）**——Q2 資料、不含 G2 的 300 億市值腿：
+| 項目 | 現行（累計） | 預測（單季） |
+|---|---|---|
+| G2 ROE∧負債比∧流動比 通過檔數 | 382 | **251 ±5**（被灌水 133 檔出局） |
+| G1 `Δnet_margin ≥ +1.5pp` 通過檔數 | 652 | **830 ±10**（**變鬆，屬已知連帶，使用者「門檻不動」下接受**） |
+| `Δop_margin ≥ 0` 通過檔數 | 1082 | **1080 ±3** |
+
+**行為連帶的消費端（完工清單逐一確認）**：`analysis/contrarian.py`（薄利降級 `net_margin_pct<thin_margin_pct`）、
+`analysis/valuation.py`（深度價值 gate `min_gross_margin_pct=25`）、`report/group_report.py`／`data_fetcher.py`
+（標籤本就寫「單季」——修後才名實相符）、`g1_g2_g5_watch.py`、docs/02 §單季表、docs/31 §11。
