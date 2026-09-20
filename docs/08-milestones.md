@@ -1130,3 +1130,64 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 - **2026-09-20 全量回補＋正式對帳**：回補 1127 檔有資料／5 檔無資料／失敗 0（中途一次 DNS 斷線觸發斷路器、重跑續完）。**初跑四判準全未過，查明是對帳程式比錯**——本地 fundamentals 為累計 YTD（Q2＝Q1+Q2）被當單季比、覆蓋率分母含宇宙外個股。修量測不動門檻（本地還原單季＋分母限回補宇宙，`test_finmind_financials_reconcile.py` +5 測試）後重跑：Revenue 中位 1.0000／離群 0.0%／EPS 符號 99.9%／覆蓋 100.0% → **四判準全過，`dcf_intrinsic_est` 留在 candidates**。初跑與修正對照、誠實註記（判準是失敗後才修量測、僅 2 季樣本）見 docs/31 §20.15〔對帳裁決〕。
 
 **狀態**：程式＋測試＋文件＋全量回補＋正式對帳裁決完成（2026-09-20）。**已 merge 進 main（88197ca，2026-09-20；`feat/finmind-dcf` 分支保留、未刪、未 push）。**
+
+---
+
+## M-Fund-SingleQ：本地 fundamentals 累計 YTD → 讀取層還原單季（分支 `fix/fundamentals-single-quarter`）— 2026-09-20
+
+> 起因：M-Val-FinMind2 對帳時查出本地 `fundamentals_*.parquet` 的 `revenue_m`／`eps` 是**累計 YTD**
+> （Q2＝Q1+Q2），跟 FinMind 單季比才發現；接著實測 `net/op_margin_pct` 975/975 吻合 YTD 推導、
+> `roe_q_pct`（＝eps/bvps）874/975 吻合 YTD 推導。欄名／docs／報告標籤全寫「單季」＝名實不符。
+> 使用者 2026-09-20 拍板方案 A（還原單季，門檻不動）。
+
+**設計決策（勿「簡化」掉）**
+1. **parquet 保持原始累計值、只在讀取層還原**。`finmind_financials_reconcile` 直接 glob 讀 parquet 並自己
+   期望 YTD 輸入；若改在寫入端還原，對帳會二次扣減、剛過的四判準轉紅。
+2. 全 repo **只留一個還原函式** `twse.decumulate_fundamentals()`；reconcile 改 import 它、刪 `_decumulate_local`
+   （reconcile 既有 5 測試不動＝等價性檢查）。
+3. `load_latest_fundamentals`（`make week`／個股報告真正走的路徑）也要還原——改讀全部季檔（原只讀 `files[-1]`）；
+   **前一季檔缺／該股前一季缺 → null，不回退成累計值**。`fundamentals_*` 不在 pruner 家族內
+   （`test_cache.py:238` 鎖住）→ 前一季檔不會被清掉。
+4. 還原規則：Q1 原值；Qn＝Qn−Q(n−1)（revenue_m、eps）；利潤率（gross/op/pretax/net）＝營收加權
+   `(m_n·R_n − m_{n−1}·R_{n−1})/(R_n−R_{n−1})`，ΔR≤0→null；`roe_q_pct`＝單季 eps／bvps 重算。
+   `bvps`／`debt_ratio_pct`／`current_ratio` 為期末時點值，不動。`gross_margin_pct` 與 op/net 同一 MOPS
+   營益分析端點（t187ap17）同一列，**推定同為累計（結構推論，非逐檔實證）**。
+5. G1/G2/G5 底帳口徑會在本 milestone 前後斷裂（同欄名、不同定義）→ `LEDGER_SCHEMA` 加 `fund_basis`
+   （`ytd`＝本 milestone 前列、`single_q`＝之後）；驗證底帳時兩批不得混算。
+
+**Pre-registered 預測（事前寫死，事後對照，不合理化）**——Q2 資料、不含 G2 的 300 億市值腿：
+| 項目 | 現行（累計） | 預測（單季） |
+|---|---|---|
+| G2 ROE∧負債比∧流動比 通過檔數 | 382 | **251 ±5**（被灌水 133 檔出局） |
+| G1 `Δnet_margin ≥ +1.5pp` 通過檔數 | 652 | **830 ±10**（**變鬆，屬已知連帶，使用者「門檻不動」下接受**） |
+| `Δop_margin ≥ 0` 通過檔數 | 1082 | **1080 ±3** |
+
+**行為連帶的消費端（完工清單逐一確認）**：`analysis/contrarian.py`（薄利降級 `net_margin_pct<thin_margin_pct`）、
+`analysis/valuation.py`（深度價值 gate `min_gross_margin_pct=25`）、`report/group_report.py`／`data_fetcher.py`
+（標籤本就寫「單季」——修後才名實相符）、`g1_g2_g5_watch.py`、docs/02 §單季表、docs/31 §11。
+
+**完成（2026-09-20）**
+- `twse.decumulate_fundamentals()`（純函式，全 repo 唯一還原點）＋ `TWSEClient._load_fundamentals_single_quarter()`；
+  `load_latest_fundamentals`／`load_fundamentals_history` 都走它（前者改讀全部季檔）；reconcile 改 import、刪 `_decumulate_local`。
+- `g1_g2_g5_watch.LEDGER_SCHEMA` 加 `fund_basis`（舊列讀入補 `ytd`、新列 `single_q`）。
+- **實測對照預測（真實快取，經 loader）**：G2 三腿 **251**（預測 251±5）／Δnet≥1.5pp **830**（830±10）／Δop≥0 **1080**（1080±3）——
+  全中。2330 Q2 讀出營收 1,270,380 百萬、EPS 27.25＝FinMind 單季值。Q2 `roe_q_pct` null 48 檔（無 bvps／缺 Q1 等，誠實 null）。
+- **外部獨立驗證（非自洽預測）**：Q2 單季還原值 vs FinMind 單季（真實快取）——營收 973 檔中位比值 **1.000000**（僅 7 檔偏離 >0.1%，
+  全是營收 ≤2 百萬的小型股四捨五入）；淨利率 967/973 檔 ≤0.5pp（中位差 0.005pp）；營益率 969/973；EPS 919/976 檔差 ≤0.011 元，
+  24 檔差 >0.05（MOPS 較大 9／FinMind 較大 15，無方向性偏誤；成因**未查明**，如 5386：MOPS 還原 −0.12 vs FinMind 14.22）。
+  `gross_margin_pct` FinMind 無毛利欄，仍為結構推論。
+- **真實資料端到端**（底帳副本、未動真實檔）：讀入真實底帳 1022 列全標 `ytd`；`build_g1_g2_g5_inputs`→snapshot→`upsert_ledger` 產 370 檔
+  `single_q` 列並存。命中數（含市值等全條件）：W38 累計口徑 g1 245／g2 42／g5 20／f2 23 → 單季口徑 g1 324／g2 35／g5 20／f2 25
+  （G1 變鬆、G2 變緊，方向同預測）。重跑 `make finmind-financials-reconcile`（改用共用函式後）四判準仍全過，數字不變。
+- 加固：`decumulate_fundamentals` 有利潤率無 `revenue_m` → Q2+ 利潤率 null（不放行累計值）；reconcile 載入端補 (stock,year,quarter) 去重。
+- 測試：`test_twse.py` 重寫 history delta 測試（期望值由 fixture 手算：Δnet +2.0／Δop +0.5）＋新增 latest 單季、前一季缺→null、
+  三季鏈／ΔR=0／bvps≤0／跨年 edge case；`test_g1_g2_g5_watch.py` +2（fund_basis）；reconcile 5 測試**未改**即過（等價性）。
+- 消費端逐一確認：報告／prompt／`group_report`／`data_fetcher` 的「單季」標籤修後名實相符，無需改字；
+  `contrarian` 薄利降級與 `valuation` 深度價值毛利 gate 讀到的是單季值（Q2 起門檻語意回歸原意，數值分布改變，見下）；
+  docs/02、docs/31 §11 已加口徑更正註記。
+- **未涵蓋／後續**：(a) `research/g1_g2_g5_watch/ledger.csv` 既有 W34–W38 列（Q2 累計口徑）下次 `make week` upsert 時才會被標 `ytd`；
+  (b) 未重跑歷史週報、也未評估 `min_gross_margin_pct=25`／`thin_margin_pct` 在單季分布下是否需重校（門檻未動，屬未校準）；
+  (c) `gross_margin_pct` 為結構推論、非逐檔實證。
+
+**狀態**：程式＋測試＋文件完成；驗收 `pytest -q` 1385 passed／ruff 全過／唯一 FAIL＝既有 RED `test_w35_anchor`（非本次回歸）。**merge 進 main 待使用者拍板。**
+

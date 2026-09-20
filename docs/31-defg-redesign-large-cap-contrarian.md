@@ -981,6 +981,14 @@ QoQ差分（G2定義本身就是單季快照條件）。G1/G5需要的`Δnet_mar
 面對的問題同構：**不是不能算，是只能前瞻累積，不能回溯**。比照L6/G4模式，三式合併
 建一條`g1_g2_g5_watch`前瞻軌，本輪只記錄不裁決。
 
+> **⚠️ 口徑更正（2026-09-20，M-Fund-SingleQ；docs/08）**：本節與 §4.1 當時假設 `fundamentals` 的
+> `roe_q_pct`／margin 是「單季」，**實測全是累計 YTD**（Q2＝Q1+Q2；`roe_q_pct`＝累計 EPS/每股淨值）。
+> 讀取層已改為還原單季（`twse.decumulate_fundamentals`；Q1 原值不變，故 W34–W38 的 Q2 底帳列受影響）。
+> 連帶：G2 的 ROE∧負債比∧流動比腿 Q2 通過數 382→251（被灌水 133 檔出局）；G1 `Δnet_margin≥1.5pp`
+> 652→830（累計差分被壓縮約一半，修後變鬆）；`Δop_margin≥0` 1082→1080。門檻數字未動。
+> **底帳口徑斷裂**：`research/g1_g2_g5_watch/ledger.csv` 新增 `fund_basis` 欄——舊列標 `ytd`、新列 `single_q`；
+> 後續統計驗證**必須把兩批分開**（`ytd` 列的財報欄定義不同，不得與 `single_q` 列混算命中率）。
+
 **新欄位缺口與作法**（比照§9 item3查核精神，動工前列清楚）：
 - `roe_q_pct`/`debt_ratio_pct`/`current_ratio`/`net_margin_pct`/`op_margin_pct`/
   `gross_margin_pct`：已在`fundamentals_*.parquet`，`load_latest_fundamentals()`已有

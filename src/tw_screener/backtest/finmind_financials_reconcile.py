@@ -1,8 +1,8 @@
 """FinMind 財報 vs 本地 fundamentals 對帳（docs/31 §20.15，機械式 DCF 接線前置門檻）。
 
 在 FinMind Financials（單季）與本地 `fundamentals_*.parquet`（TWSE MOPS，**累計 YTD**——
-Q2＝Q1+Q2；比對前先逐檔減前一季還原成單季）都有的 (stock_id, year, quarter) 上，逐檔配對
-Revenue / EPS，統計系統性差異。**事前寫死的判準**：
+Q2＝Q1+Q2；比對前經 `twse.decumulate_fundamentals` 還原成單季）都有的
+(stock_id, year, quarter) 上，逐檔配對 Revenue / EPS，統計系統性差異。**事前寫死的判準**：
 
 1. 配對 Revenue 中位比值（finmind / local）∈ [0.97, 1.03]
 2. `|ratio − 1| > 0.10` 的股票 < 10%（比 PER 的 5% 鬆——FinMind 對財報 de-cumulate 有誤差）
@@ -24,6 +24,8 @@ from pathlib import Path
 import polars as pl
 import yaml
 
+from tw_screener.data.twse import decumulate_fundamentals
+
 # 事前寫死判準（§20.15）——改這裡等於改門檻，需回 docs/31 §20.15 同步
 REVENUE_MEDIAN_RATIO_LOW = 0.97
 REVENUE_MEDIAN_RATIO_HIGH = 1.03
@@ -36,33 +38,6 @@ _FINANCIAL_INDUSTRY = "金融保險"
 
 def _pct(x: float) -> str:
     return f"{x * 100:.1f}%"
-
-
-def _decumulate_local(local_fundamentals: pl.DataFrame) -> pl.DataFrame:
-    """本地 revenue_m／eps 為累計 YTD → 還原單季：Q1 原值、Qn＝Qn − Q(n−1)。
-
-    前一季缺 → null（不猜、不沿用累計值；該列自然落出配對與覆蓋率分母）。
-    """
-    prev = local_fundamentals.select(
-        "stock_id", "year",
-        (pl.col("quarter") + 1).alias("quarter"),
-        pl.col("revenue_m").alias("prev_rev_m"),
-        pl.col("eps").alias("prev_eps"),
-    )
-    return (
-        local_fundamentals.join(prev, on=["stock_id", "year", "quarter"], how="left")
-        .with_columns(
-            pl.when(pl.col("quarter") == 1)
-            .then(pl.col("revenue_m"))
-            .otherwise(pl.col("revenue_m") - pl.col("prev_rev_m"))
-            .alias("loc_rev_m"),
-            pl.when(pl.col("quarter") == 1)
-            .then(pl.col("eps"))
-            .otherwise(pl.col("eps") - pl.col("prev_eps"))
-            .alias("loc_eps"),
-        )
-        .select("stock_id", "year", "quarter", "loc_rev_m", "loc_eps")
-    )
 
 
 def build_reconciliation(
@@ -82,7 +57,11 @@ def build_reconciliation(
         (pl.col("revenue") / 1e6).alias("fm_rev_m"),
         pl.col("eps").alias("fm_eps"),
     ).filter(pl.col("stock_id").is_in(list(local_fundamentals["stock_id"].unique())))
-    loc = _decumulate_local(local_fundamentals)
+    loc = decumulate_fundamentals(local_fundamentals).select(
+        "stock_id", "year", "quarter",
+        pl.col("revenue_m").alias("loc_rev_m"),
+        pl.col("eps").alias("loc_eps"),
+    )
     joined = fm.join(loc, on=["stock_id", "year", "quarter"], how="inner")
     n_pairs = joined.height
 
@@ -255,7 +234,9 @@ def _load_local_fundamentals(cache_dir: Path) -> pl.DataFrame:
     files = sorted(glob.glob(str(cache_dir / "twse" / "fundamentals_*.parquet")))
     if not files:
         return pl.DataFrame()
-    return pl.concat([pl.read_parquet(f) for f in files], how="diagonal_relaxed")
+    local = pl.concat([pl.read_parquet(f) for f in files], how="diagonal_relaxed")
+    # decumulate_fundamentals 前提：(stock_id, year, quarter) 已去重
+    return local.unique(subset=["stock_id", "year", "quarter"], keep="last", maintain_order=True)
 
 
 def run_finmind_financials_reconcile(
