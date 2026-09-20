@@ -13,6 +13,7 @@ from tw_screener.backtest.g1_g2_g5_watch import (
     ledger_progress_summary,
     select_f2prime_candidates,
     select_g1_candidates,
+    select_g1_candidates_large_cap,
     select_g2_candidates,
     select_g5_candidates,
     upsert_ledger,
@@ -455,3 +456,36 @@ def test_ledger_progress_summary_counts() -> None:
 def test_ledger_progress_summary_empty() -> None:
     summary = ledger_progress_summary(pl.DataFrame(schema=LEDGER_SCHEMA))
     assert summary["n_weeks"] == 0
+
+
+# ─── 2026-09-20：G1 候選生成加市值≥300億門檻（§20.16） ───
+
+
+def test_select_g1_candidates_large_cap_filters_small_cap_out() -> None:
+    """兩檔都命中 g1 旗標，差異只來自市值 gate；旗標本身（底帳口徑）不變。"""
+    universe = _universe([
+        {"stock_id": "1101", "name": "大型股", "market_cap_billion": 350.0, "cum_rev_yoy_pct": 5.0},
+        {"stock_id": "1102", "name": "小型股", "market_cap_billion": 10.0, "cum_rev_yoy_pct": 5.0},
+    ])
+    row = {"quarter_label": "2026Q2", "net_margin_pct": 8.0, "delta_net_margin_pct": 2.0,
+           "op_margin_pct": 10.0, "delta_op_margin_pct": 0.5, "gross_margin_pct": 20.0,
+           "roe_q_pct": 1.0, "debt_ratio_pct": 70.0, "current_ratio": 0.5}
+    fundamentals = _fundamentals([{"stock_id": "1101", **row}, {"stock_id": "1102", **row}])
+    empty_peer = pl.DataFrame(schema={"stock_id": pl.Utf8, "subind_median": pl.Float64})
+    empty_val = pl.DataFrame(schema={"stock_id": pl.Utf8, "val_pctile": pl.Float64})
+    snap = build_g1_g2_g5_snapshot(
+        universe, fundamentals, empty_peer, empty_val,
+        ma60_map={"1101": 5.0, "1102": 5.0}, amount_map={},
+        week="2026-W38", data_date=date(2026, 9, 18),
+    )
+    assert set(select_g1_candidates(snap)["stock_id"].to_list()) == {"1101", "1102"}
+    assert snap.filter(pl.col("g1")).height == 2  # 底帳旗標不受 gate 影響
+    out = select_g1_candidates_large_cap(snap, market_cap_min_billion=300.0)
+    assert out["stock_id"].to_list() == ["1101"]
+    assert set(out.columns) == {"stock_id", "name"}
+
+
+def test_select_g1_candidates_large_cap_empty_snapshot() -> None:
+    out = select_g1_candidates_large_cap(pl.DataFrame(schema=LEDGER_SCHEMA))
+    assert out.is_empty()
+    assert set(out.columns) == {"stock_id", "name"}

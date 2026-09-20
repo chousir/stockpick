@@ -1170,7 +1170,7 @@ def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):
             build_g1_g2_g5_inputs,
             build_g1_g2_g5_snapshot,
             select_f2prime_candidates,
-            select_g1_candidates,
+            select_g1_candidates_large_cap,
             select_g2_candidates,
             select_g5_candidates,
         )
@@ -1192,8 +1192,12 @@ def _run_redesign_local_screen(strategy: str, cfg: dict, client, week_tag: str):
             f2_pe_max=float(wc.get("f2_pe_max", 30.0)),
             f2_mktcap_min_billion=float(wc.get("f2_mktcap_min_billion", 300.0)),
         )
-        selector = {"g1": select_g1_candidates, "g2": select_g2_candidates,
-                    "g5": select_g5_candidates, "f2": select_f2prime_candidates}[strategy]
+        if strategy == "g1":  # docs/31 §20.16：G1 候選生成加市值下限（旗標／底帳不動）
+            return select_g1_candidates_large_cap(
+                snapshot, market_cap_min_billion=float(wc.get("g1_mktcap_min_billion", 300.0))
+            )
+        selector = {"g2": select_g2_candidates, "g5": select_g5_candidates,
+                    "f2": select_f2prime_candidates}[strategy]
         return selector(snapshot)
 
     from tw_screener.backtest.l6_g4_watch import (
