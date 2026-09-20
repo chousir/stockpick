@@ -134,7 +134,7 @@ data/cache/goodinfo/
 
 > **⚠️ 上表「單季」端點實回累計 YTD（2026-09-20 實證）**：營收／EPS／毛利率／營益率／純益率在 Q2 是 Q1+Q2
 > 累計值（2330 Q2 營收 2,404,500 百萬＝Q1 1,134,100＋Q2 1,270,400；`net/op_margin_pct` 975/975 吻合 YTD
-> 推導；`gross_margin_pct` 與其同端點同列，推定同為累計）。`fundamentals_*.parquet` **保持原始累計**；
+> 推導；`gross_margin_pct` 與其同端點同列，已於 2026-09-20 以 FinMind `GrossProfit` 逐檔實證同為累計，見 docs/31 §20.16 (c)）。`fundamentals_*.parquet` **保持原始累計**；
 > 單季值由讀取層 `twse.decumulate_fundamentals()` 還原（Q1 原值；Qn＝Qn−Q(n−1)；利潤率營收加權；
 > `roe_q_pct`＝單季 EPS/bvps）。前一季缺→單季欄 null、不回退累計。`bvps`／負債比／流動比為期末時點值，不動。
 > 直接讀 parquet 的程式（如 `finmind_financials_reconcile`）須自行還原或呼叫該函式。

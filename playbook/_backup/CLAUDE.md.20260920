@@ -39,7 +39,7 @@
 ## Milestone 紀律
 - 一次只做一個 milestone。做完＝驗收指令跑過＋完成清單給使用者＋停下等指示，不主動跳下一個。
 - 一 milestone＝一條 feature 分支＝一顆 `--no-ff` merge bubble（分支上 commit 可多可小）。
-- 收尾 ritual（驗收跑過之後）：commit → 提醒使用者 /clear，並註明「尚未 push」。commit 依使用者既往指示不必再問；**一律不 push**（使用者 2026-09-20 指示：最後自己 push），**merge 進 main 仍必問**（鐵律 3），依據見 playbook/90 的 2026-07-08、2026-09-20 條。
+- 收尾 ritual（驗收跑過之後）：commit → push → 提醒使用者 /clear。此二步依使用者既往指示不必再問；**merge 進 main 仍必問**（鐵律 3），依據見 playbook/90 的 2026-07-08 條。
 - 「做完」包含文件同步：改了行為/欄位/章節，同 commit 內把 README、docs/、src/**/prompts/ 的舊引用一次改完（本 repo 歷史最高頻錯誤，見 playbook/90）。
 
 ## 工程速查

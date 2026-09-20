@@ -2700,6 +2700,22 @@ W35 面板、比對 `reports/2026-W35/candidates_enriched.csv` 的 `val_gap_pct_
   「毛利率 ≥ 營益率」恆等式違反數——假設毛利率為累計並還原：**3 檔**；假設毛利率已是單季（Q2 原值對單季營益率）：**12 檔**；
   累計對累計基準：3 檔。方向支持「累計」，但**仍是間接證據，結論維持「推定累計、未逐檔實證」**；要實證需另抓 FinMind 毛利欄（新增抓取，未做）。
 
+  > **更正與實證（2026-09-20，使用者同意新抓取）**：上段「FinMind 快取無毛利欄」**不正確**——FinMind
+  > `TaiwanStockFinancialStatements` 有 `GrossProfit`／`CostOfGoodsSold`，是我們 `_FINANCIALS_FIELD_MAP`
+  > 沒收（快取因此無此欄）。研究腳本（`research/gross_margin_verify/`，gitignore；判準事前寫死於該處 `PREREG.md`）
+  > 抽樣 seed=20260920 隨機 300 檔（本地 Q1、Q2 皆有毛利率者）打 FinMind，可用 297 檔；`Rev−COGS==GP` 296/297。
+  > 本地讀**原始**快取（不經還原）：
+  > - **G0 對照（Q1 累計≡單季）**：中位絕對差 0.0026pp、≤0.5pp 占比 99.0% → PASS（兩來源毛利率定義一致）。
+  > - **Q2 判別**：可分辨（累計／單季預測差 ≥1pp）**167/297 檔**；符合累計（≤0.3pp）**163/167＝97.6%**，符合單季 **1/167＝0.6%**
+  >   → 事前判準「累計成立」（≥90% 且 <10%）。兩者皆不符 3 檔（3176／4743／6994），原因未查明。
+  > - **端對端**（`decumulate_fundamentals` 輸出 vs FinMind 單季）：n=297、中位絕對差 **0.0052pp**、≤0.5pp 占比 99.7%（最大差 4198：
+  >   1.53pp，原因未查明）；`min_gross_margin_pct=25` gate 不一致 **0/297**（若把累計原始值當單季則 17/297）。
+  >
+  > **結論**：`gross_margin_pct` 是累計 YTD 由「結構推論」升為**逐檔實證（Q2 一期、300 檔抽樣、可分辨 167 檔）**；`decumulate_fundamentals`
+  > 對毛利率的還原正確，**無 bug、程式不動**。限制：本地快取僅 2026Q1／Q2，只有 Q2 一期可判別；Q3／Q4 需快取出現後以同一腳本重跑。
+  > `gross_margin_pct` 欄位的 FinMind 毛利欄**未進 production parser**（未改 `_FINANCIALS_FIELD_MAP`、未重抓全市場；需要時下次季頻
+  > `backfill-finmind-financials` 前再決定，屬另案）。
+
 
 ## 21. 減量研究計畫 Part 1：逐式目的定義＋參數可行性分級（2026-08-24）
 
