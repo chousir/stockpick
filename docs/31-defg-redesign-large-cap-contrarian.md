@@ -2603,7 +2603,7 @@ W35 面板、比對 `reports/2026-W35/candidates_enriched.csv` 的 `val_gap_pct_
 - **`analysis/dcf.py`（新・純函式）**：`annual_fcf_history`（取 quarter==4 列，`fcf = coalesce(ocf,ocf_alt) − |capex|`）／`annual_revenue_history`（4 季加總）／`quarterly_profit_flags`／`conservative_growth_rate`（近 5 年營收 CAGR × 0.7，clip [0,15]，<3 年→None）／`fcf_base`（min(近3年均, 最近年)）／`cost_of_equity`／`dcf_intrinsic_value`（兩階段 FCFE，單元測試對手算值 214.19 鎖死）／`dcf_with_guardrails`（8 config key 一字不動；排除 gate 順序：金融→產業未知→近4季虧損→營收波動→FCF/成長/股數不足→FCF為負；逐角 clamp 折現率不排除）／`build_dcf_inputs`（全市場組裝）。
 - **敏感度網格**（進 `reports/<週>/dcf_inputs.csv`，不進 candidates_enriched）：`(WACC ±1%) × (g_term ±1%)` 四角 **＋ Stage-1 成長 3 點**（conservative × {0.5, 0.75, 1.0}）——讓 Opus 在「前瞻成長 < 保守外推」時讀值/內插、不手算整套 DCF（否則本 milestone 白做）。研究 CSV 落 `reports/<週次>/` 而非 `research/dcf/`：Opus 每週讀 `reports/<週次>/`。
 - **`data backfill-finmind-financials`**：宇宙同 backfill-finmind-per；每檔依序抓 3 dataset、跨 3 call 累計斷路器。~1130×3 ≈ 3390 req ≈ 註冊 5.6h。不接 make week。
-- **`finmind_financials_reconcile.py`**：FinMind Financials 單季 Revenue/EPS vs 本地 `fundamentals_*.parquet`。**事前寫死判準**：Revenue 中位比值 ∈ [0.97,1.03]；`|ratio−1|>0.10` 股票 <10%（比 PER 的 5% 鬆，de-cumulate 有誤差）；EPS 符號一致率 ≥98%；非金融股覆蓋率 ≥95%。**過** → `dcf_intrinsic_est` 進 `candidates_enriched.csv`；**不過** → 只留 `dcf_inputs.csv` 研究檔、docs/11 M3 改讀研究檔。
+- **`finmind_financials_reconcile.py`**：FinMind Financials 單季 Revenue/EPS vs 本地 `fundamentals_*.parquet`（**本地為累計 YTD，比對前逐檔減前一季還原單季**；前一季缺→該列不入比對，見下〔2026-09-20 裁決〕）。**事前寫死判準**：Revenue 中位比值 ∈ [0.97,1.03]；`|ratio−1|>0.10` 股票 <10%（比 PER 的 5% 鬆，de-cumulate 有誤差）；EPS 符號一致率 ≥98%；非金融股覆蓋率 ≥95%（**分母＝回補宇宙〔`list_subindustries()` 成員〕內的本地非金融股**；全本地分母另列揭露）。**門檻數字全程未動。****過** → `dcf_intrinsic_est` 進 `candidates_enriched.csv`；**不過** → 只留 `dcf_inputs.csv` 研究檔、docs/11 M3 改讀研究檔。
 - **`make week` 接線**：`group_runner.py` 新純揭露段（try/except，FinMind 財報快取缺 → 3 欄 typed-null）；`group_report.py` `_build_enriched_rows` 加 `dcf_intrinsic_est`/`dcf_applicable`/`dcf_exclude_reason` 3 欄 ＋ `_CANONICAL_REUSE_FIELDS`。
 - **docs/11 M3 改寫**：Opus 不再 web search FCF、不重算 DCF 本體——讀 `dcf_intrinsic_est` + `dcf_inputs.csv` 當機械錨點，只 web search 具名前瞻營收成長率、必要時從 Stage-1 成長 3 點讀值/內插。信心 rubric「DCF 可算」→「DCF 可算**且與倍數法同向（±15%）**」（機械化後「可算」幾乎恆真）。
 
@@ -2613,10 +2613,28 @@ W35 面板、比對 `reports/2026-W35/candidates_enriched.csv` 的 `val_gap_pct_
 
 **對帳判準說明**：Revenue 中位比值是主判別（FinMind vs 本地 MOPS 是否同一份）。EPS 符號一致率 ≥98% 是**地板檢查**（幾乎每檔每季都獲利、符號預設一致），不是判別器；留著是為了抓「FinMind de-cumulate 把某季 EPS 算成負」這種明顯壞損。
 
+#### 對帳裁決（2026-09-20，全量回補 1127 檔有資料／5 檔 FinMind 無資料／請求失敗 0 之後）
+
+**初跑（比對邏輯有兩處錯位）四判準全數未過**：Revenue 中位比值 0.7728、離群股 99.9%、EPS 符號 97.6%、覆蓋率 50.6%。查因——**不是 FinMind 資料有問題，是對帳程式比錯東西**：
+
+1. **本地 `fundamentals_*.parquet` 的 revenue_m／eps 是累計 YTD**（2330：本地 Q2 營收 2,404,500 百萬＝Q1 1,134,100＋Q2 1,270,400；EPS 49.33＝22.08＋27.25），模組卻當單季比 → Q1 比值≈1、Q2 比值≈0.5，混出中位 0.77／IQR 0.53–1.00。
+2. **覆蓋率分母錯位**：FinMind 只回補宇宙內 1132 檔，分母卻是本地全部非金融股（1977 檔）→ 結構性 ≈50%。
+
+**修法（使用者 2026-09-20 選 A）**：只改量測、不改門檻——本地先減前一季還原單季（`_decumulate_local`）、覆蓋率分母限回補宇宙；初跑結果照實留此段，不覆蓋。改後重跑（`research/finmind_financials_reconciliation_2026-09-20.md`）：
+
+| 判準（事前寫死） | 初跑（錯位） | 修正後 |
+|---|---|---|
+| Revenue 中位比值 ∈ [0.97,1.03] | 0.7728 ❌ | **1.0000** ✅（IQR 1.000–1.000，n=1947／974 檔） |
+| 離群股 <10% | 99.9% ❌ | **0.0%** ✅（0/974） |
+| EPS 符號一致 ≥98% | 97.6% ❌ | **99.9%** ✅（n=1953） |
+| 覆蓋率 ≥95% | 50.6% ❌ | **100.0%** ✅（分母 1947；〔揭露〕全本地分母 50.7%） |
+
+**裁決：四判準全過 → `dcf_intrinsic_est` 留在 `candidates_enriched.csv`**（`group_runner` 純揭露段本就預設接上，過＝不需改程式；退場才需手動拿掉 join）。誠實註記：(a) 判準是初跑失敗**之後**才修量測——修正邏輯（YTD 還原）有 2330／2317／1101 逐檔手算與測試鎖（`tests/backtest/test_finmind_financials_reconcile.py`），且修後比值是**恰為 1.0000**（同一份 MOPS 源），非「調到剛好過門檻」；(b) 樣本只有 2026Q1／Q2 兩季（本地 fundamentals 僅此二季），季別覆蓋淺——Q3 起累積後每季重跑，退場門檻（連 2 季不過）照舊；(c) 覆蓋率 100% 部分來自構造（回補宇宙＝分母宇宙），有實質資訊的是 3 個配對判準；(d) 本次**只驗證了 revenue／eps 為累計 YTD**，同檔其他欄（`roe_q_pct` 等「單季」命名欄）是否亦為 YTD 口徑**未驗證**。
+
 #### 狀態
 
 - 分支 `feat/finmind-dcf`。程式＋測試完成（`tests/analysis/test_dcf.py` 新、`tests/data/test_finmind.py` 加 parser 測試含 capex 符號鎖）。`pytest -q` 1375 passed（+28）、唯一 FAIL＝既有 RED `test_w35_anchor`（非本次回歸）。
-- **全量 backfill、正式對帳裁決、merge 進 main：待辦**（見本節末更新）。
+- 全量 backfill＋正式對帳裁決：**已完成（2026-09-20，四判準全過，見上〔對帳裁決〕）**。**merge 進 main：待使用者拍板。**
 
 ## 21. 減量研究計畫 Part 1：逐式目的定義＋參數可行性分級（2026-08-24）
 

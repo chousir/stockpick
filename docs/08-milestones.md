@@ -1108,8 +1108,8 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
   營收波動→資料不足→FCF為負；逐角 clamp）／`build_dcf_inputs`。**8% 折現率地板恆綁定
   → 單一風險參數模型**。
 - **`src/tw_screener/backtest/finmind_financials_reconcile.py`**（新）：FinMind Financials
-  vs 本地 `fundamentals_*.parquet` 四判準對帳（中位比值∈[0.97,1.03]、離群股<10%、EPS
-  符號一致≥98%、覆蓋率≥95%）。過→接 candidates 欄；不過→只留 `dcf_inputs.csv`。
+  vs 本地 `fundamentals_*.parquet`（累計 YTD，先還原單季）四判準對帳（中位比值∈[0.97,1.03]、離群股<10%、EPS
+  符號一致≥98%、覆蓋率≥95%〔分母＝回補宇宙〕）。過→接 candidates 欄；不過→只留 `dcf_inputs.csv`。
 - **`config/settings.yaml`**：`finmind.{cashflow,financials,balancesheet}_start_date`＝2013；
   `cp_value.valuation.dcf` 加 `risk_free_rate_pct: 1.6`（帶地板恆綁定算式註解）＋
   `mechanical_growth_{years,haircut,cap_pct}`。**8 個護欄 key 不動。不加 default_beta。**
@@ -1127,4 +1127,6 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 - 驗收：`pytest -q` 1375 passed（+28：`test_dcf.py` ＋ `test_finmind.py` parser 測試含
   capex 符號鎖）；ruff 零淨增；`test_w35_anchor_matches_production` 仍為既有 RED（非本次回歸）。
 
-**狀態**：程式＋測試＋文件完成。**全量 backfill、正式對帳裁決、merge 進 main 待辦。**
+- **2026-09-20 全量回補＋正式對帳**：回補 1127 檔有資料／5 檔無資料／失敗 0（中途一次 DNS 斷線觸發斷路器、重跑續完）。**初跑四判準全未過，查明是對帳程式比錯**——本地 fundamentals 為累計 YTD（Q2＝Q1+Q2）被當單季比、覆蓋率分母含宇宙外個股。修量測不動門檻（本地還原單季＋分母限回補宇宙，`test_finmind_financials_reconcile.py` +5 測試）後重跑：Revenue 中位 1.0000／離群 0.0%／EPS 符號 99.9%／覆蓋 100.0% → **四判準全過，`dcf_intrinsic_est` 留在 candidates**。初跑與修正對照、誠實註記（判準是失敗後才修量測、僅 2 季樣本）見 docs/31 §20.15〔對帳裁決〕。
+
+**狀態**：程式＋測試＋文件＋全量回補＋正式對帳裁決完成（2026-09-20）。**merge 進 main 待使用者拍板。**

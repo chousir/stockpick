@@ -416,7 +416,7 @@ balancesheet}_<stock_id>.parquet`。
 
 **品質**：FinMind Financials 與本地 `fundamentals_*.parquet`（TWSE MOPS）**2 季全市場對帳＝逐項
 相同**（`revenue_m` = FinMind `revenue`/1e6、`eps` 完全一致）→ 財報同一份官方資料。
-`backtest finmind-financials-reconcile` 四判準把關（§20.15）。`TaiwanStock10Year`（TW 10Y 公債
+`backtest finmind-financials-reconcile` 四判準把關（§20.15；本地 fundamentals 為累計 YTD、對帳先還原單季，2026-09-20 正式對帳四判準全過）。`TaiwanStock10Year`（TW 10Y 公債
 殖利率）需付費 sponsor 層——拿不到，DCF 折現率靠 8% 地板兜住（§20.15：地板恆綁定 → 每檔
 折現率都 8.0%、`dcf_intrinsic_est` 是單一風險參數模型）。
 

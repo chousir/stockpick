@@ -1,12 +1,13 @@
 """FinMind 財報 vs 本地 fundamentals 對帳（docs/31 §20.15，機械式 DCF 接線前置門檻）。
 
-在 FinMind Financials（單季）與本地 `fundamentals_*.parquet`（TWSE MOPS，單季）都有的
-(stock_id, year, quarter) 上，逐檔配對 Revenue / EPS，統計系統性差異。**事前寫死的判準**：
+在 FinMind Financials（單季）與本地 `fundamentals_*.parquet`（TWSE MOPS，**累計 YTD**——
+Q2＝Q1+Q2；比對前先逐檔減前一季還原成單季）都有的 (stock_id, year, quarter) 上，逐檔配對
+Revenue / EPS，統計系統性差異。**事前寫死的判準**：
 
 1. 配對 Revenue 中位比值（finmind / local）∈ [0.97, 1.03]
 2. `|ratio − 1| > 0.10` 的股票 < 10%（比 PER 的 5% 鬆——FinMind 對財報 de-cumulate 有誤差）
 3. EPS 符號一致率 ≥ 98%
-4. FinMind Revenue 對非金融股的覆蓋率 ≥ 95%
+4. FinMind Revenue 對非金融股的覆蓋率 ≥ 95%（分母＝回補宇宙〔次產業成員〕內的本地非金融股）
 
 過 → `dcf_intrinsic_est` 進 `candidates_enriched.csv`；不過 → 只留 `reports/<週>/dcf_inputs.csv`
 研究檔、docs/11 M3 改讀研究檔。輸出 `research/finmind_financials_reconciliation_<date>.md`。
@@ -37,26 +38,51 @@ def _pct(x: float) -> str:
     return f"{x * 100:.1f}%"
 
 
+def _decumulate_local(local_fundamentals: pl.DataFrame) -> pl.DataFrame:
+    """本地 revenue_m／eps 為累計 YTD → 還原單季：Q1 原值、Qn＝Qn − Q(n−1)。
+
+    前一季缺 → null（不猜、不沿用累計值；該列自然落出配對與覆蓋率分母）。
+    """
+    prev = local_fundamentals.select(
+        "stock_id", "year",
+        (pl.col("quarter") + 1).alias("quarter"),
+        pl.col("revenue_m").alias("prev_rev_m"),
+        pl.col("eps").alias("prev_eps"),
+    )
+    return (
+        local_fundamentals.join(prev, on=["stock_id", "year", "quarter"], how="left")
+        .with_columns(
+            pl.when(pl.col("quarter") == 1)
+            .then(pl.col("revenue_m"))
+            .otherwise(pl.col("revenue_m") - pl.col("prev_rev_m"))
+            .alias("loc_rev_m"),
+            pl.when(pl.col("quarter") == 1)
+            .then(pl.col("eps"))
+            .otherwise(pl.col("eps") - pl.col("prev_eps"))
+            .alias("loc_eps"),
+        )
+        .select("stock_id", "year", "quarter", "loc_rev_m", "loc_eps")
+    )
+
+
 def build_reconciliation(
     finmind_financials: pl.DataFrame,
     local_fundamentals: pl.DataFrame,
     financial_sids: set[str],
+    universe_sids: set[str],
 ) -> dict:
     """配對 FinMind vs 本地的 Revenue / EPS（純函式）。
 
-    finmind_financials：(stock_id, year, quarter, revenue[原始 TWD], eps, …)
-    local_fundamentals：(stock_id, year, quarter, revenue_m[百萬], eps, …)
+    finmind_financials：(stock_id, year, quarter, revenue[原始 TWD], eps, …)，單季
+    local_fundamentals：(stock_id, year, quarter, revenue_m[百萬], eps, …)，累計 YTD
+    universe_sids：回補宇宙（次產業成員）——覆蓋率分母只算這批，因 DCF 只對它們計算
     """
     fm = finmind_financials.select(
         "stock_id", "year", "quarter",
         (pl.col("revenue") / 1e6).alias("fm_rev_m"),
         pl.col("eps").alias("fm_eps"),
     ).filter(pl.col("stock_id").is_in(list(local_fundamentals["stock_id"].unique())))
-    loc = local_fundamentals.select(
-        "stock_id", "year", "quarter",
-        pl.col("revenue_m").alias("loc_rev_m"),
-        pl.col("eps").alias("loc_eps"),
-    )
+    loc = _decumulate_local(local_fundamentals)
     joined = fm.join(loc, on=["stock_id", "year", "quarter"], how="inner")
     n_pairs = joined.height
 
@@ -88,18 +114,24 @@ def build_reconciliation(
     ).height
     eps_sign_consistency = n_eps_agree / n_eps if n_eps else 0.0
 
-    # 覆蓋率：本地有正 revenue_m 的非金融 (stock, y, q)，FinMind 也有 revenue
+    # 覆蓋率：本地有正單季 revenue 的非金融 (stock, y, q)，FinMind 也有 revenue。
+    # 判準分母限回補宇宙；全本地分母另列供揭露（回補本就不含宇宙外個股）
     loc_nonfin = loc.filter(
         ~pl.col("stock_id").is_in(list(financial_sids))
         & pl.col("loc_rev_m").is_not_null()
         & (pl.col("loc_rev_m") > 0)
     )
-    loc_with_fm = loc_nonfin.join(
-        fm.select("stock_id", "year", "quarter", "fm_rev_m"),
-        on=["stock_id", "year", "quarter"], how="left",
+    fm_keys = fm.filter(pl.col("fm_rev_m").is_not_null()).select(
+        "stock_id", "year", "quarter"
     )
-    fm_present = loc_with_fm.filter(pl.col("fm_rev_m").is_not_null())
-    coverage = fm_present.height / loc_nonfin.height if loc_nonfin.height else 0.0
+
+    def _coverage(denom: pl.DataFrame) -> float:
+        hit = denom.join(fm_keys, on=["stock_id", "year", "quarter"], how="inner")
+        return hit.height / denom.height if denom.height else 0.0
+
+    loc_universe = loc_nonfin.filter(pl.col("stock_id").is_in(list(universe_sids)))
+    coverage = _coverage(loc_universe)
+    coverage_all_local = _coverage(loc_nonfin)
 
     return {
         "n_pairs": n_pairs,
@@ -115,7 +147,9 @@ def build_reconciliation(
         "eps_sign_consistency": eps_sign_consistency,
         "n_eps_pairs": n_eps,
         "coverage": coverage,
-        "n_coverage_denom": loc_nonfin.height,
+        "n_coverage_denom": loc_universe.height,
+        "coverage_all_local": coverage_all_local,
+        "n_coverage_denom_all_local": loc_nonfin.height,
     }
 
 
@@ -142,7 +176,7 @@ def evaluate_criteria(stats: dict) -> tuple[bool, list[tuple[str, bool, str]]]:
     ))
     c4 = stats["coverage"] >= REVENUE_COVERAGE_MIN
     checks.append((
-        f"FinMind Revenue 對非金融股覆蓋率 ≥ {_pct(REVENUE_COVERAGE_MIN)}",
+        f"FinMind Revenue 對回補宇宙內非金融股覆蓋率 ≥ {_pct(REVENUE_COVERAGE_MIN)}",
         c4, f"{_pct(stats['coverage'])}（分母 {stats['n_coverage_denom']}）",
     ))
     return all(c for _, c, _ in checks), checks
@@ -193,7 +227,11 @@ def _format_report(stats: dict, is_partial: bool) -> list[str]:
     )
     lines.append(
         f"- FinMind Revenue 對非金融股覆蓋率：**{_pct(stats['coverage'])}**"
-        f"（分母 {stats['n_coverage_denom']}）"
+        f"（分母＝回補宇宙內非金融 {stats['n_coverage_denom']}）"
+    )
+    lines.append(
+        f"- 〔揭露〕全本地非金融分母：{_pct(stats['coverage_all_local'])}"
+        f"（分母 {stats['n_coverage_denom_all_local']}；宇宙外個股本就未回補，不入判準）"
     )
     lines.append("")
     lines.append("## 判準")
@@ -224,7 +262,10 @@ def run_finmind_financials_reconcile(
     settings: Path, out_path: Path | None = None
 ) -> str:
     """讀 FinMind Financials 快取 + 本地 fundamentals → 對帳 → markdown。"""
-    from tw_screener.analysis.sector_universe import load_industry_mapping
+    from tw_screener.analysis.sector_universe import (
+        list_subindustries,
+        load_industry_mapping,
+    )
     from tw_screener.data.finmind import load_financials_history
 
     with open(settings, encoding="utf-8") as fh:
@@ -246,7 +287,8 @@ def run_finmind_financials_reconcile(
         )
         n_targets = fm_fin["stock_id"].n_unique()
         is_partial = n_targets < 900
-        stats = build_reconciliation(fm_fin, local, financial_sids)
+        universe_sids = set(list_subindustries()["stock_id"].to_list())
+        stats = build_reconciliation(fm_fin, local, financial_sids, universe_sids)
         report = "\n".join(_format_report(stats, is_partial))
 
     dest = out_path or Path(
