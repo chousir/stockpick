@@ -234,7 +234,9 @@ def _load_local_fundamentals(cache_dir: Path) -> pl.DataFrame:
     files = sorted(glob.glob(str(cache_dir / "twse" / "fundamentals_*.parquet")))
     if not files:
         return pl.DataFrame()
-    return pl.concat([pl.read_parquet(f) for f in files], how="diagonal_relaxed")
+    local = pl.concat([pl.read_parquet(f) for f in files], how="diagonal_relaxed")
+    # decumulate_fundamentals 前提：(stock_id, year, quarter) 已去重
+    return local.unique(subset=["stock_id", "year", "quarter"], keep="last", maintain_order=True)
 
 
 def run_finmind_financials_reconcile(

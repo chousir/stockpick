@@ -2380,6 +2380,18 @@ def test_decumulate_fundamentals_chain_and_edge_cases():
     assert get("2454", 2026, 4)["revenue_m"] is None                  # 缺 2026Q3 → null
 
 
+def test_decumulate_fundamentals_margins_null_when_revenue_column_absent():
+    """有利潤率卻無 revenue_m 可加權：Q1 原值保留、Q2 利潤率 null（不得放行累計值）。"""
+    from tw_screener.data.twse import decumulate_fundamentals
+
+    df = pl.DataFrame([
+        {"stock_id": "2330", "year": 2026, "quarter": 1, "net_margin_pct": 6.0},
+        {"stock_id": "2330", "year": 2026, "quarter": 2, "net_margin_pct": 7.0},
+    ])
+    out = decumulate_fundamentals(df).sort("quarter")
+    assert out["net_margin_pct"].to_list() == [6.0, None]
+
+
 # ─── D4 融資融券（MI_MARGN）─────────────────────────────────────────────────
 
 MARGIN_FIXTURE = FIXTURE_DIR / "margin.json"

@@ -724,7 +724,8 @@ def decumulate_fundamentals(df: pl.DataFrame) -> pl.DataFrame:
     `roe_q_pct`＝單季 eps／bvps×100（bvps≤0→null）。`bvps`／負債比／流動比為期末時點值，不動。
 
     前一季缺（無該季快取或該股當季未公告）→ 該列單季值 null，**不回退成累計值**（誠實標未取得）。
-    輸入須已對 (stock_id, year, quarter) 去重；缺的可選欄（如純測試資料無利潤率）自動略過。
+    輸入須已對 (stock_id, year, quarter) 去重；缺的可選欄（如純測試資料無利潤率）自動略過；
+    有利潤率卻無 `revenue_m` 可加權 → Q2+ 利潤率 null（不放行累計值）。
     """
     if df.is_empty():
         return df
@@ -738,17 +739,19 @@ def decumulate_fundamentals(df: pl.DataFrame) -> pl.DataFrame:
     out = df.join(prev, on=["stock_id", "year", "quarter"], how="left")
     first = pl.col("quarter") == 1
     single: list[pl.Expr] = []
-    if "revenue_m" in cols:
-        d_rev = pl.col("revenue_m") - pl.col("_prev_revenue_m")
-        for c in _FUND_YTD_MARGIN_COLS:
-            if c in cols:
-                single.append(
-                    pl.when(first).then(pl.col(c))
-                    .when(d_rev > 0)
-                    .then((pl.col(c) * pl.col("revenue_m")
-                           - pl.col(f"_prev_{c}") * pl.col("_prev_revenue_m")) / d_rev)
-                    .alias(c)
-                )
+    has_rev = "revenue_m" in cols
+    d_rev = pl.col("revenue_m") - pl.col("_prev_revenue_m") if has_rev else None
+    for c in _FUND_YTD_MARGIN_COLS:
+        if c not in cols:
+            continue
+        expr = pl.when(first).then(pl.col(c))
+        if has_rev:  # 無營收可加權 → Q2+ 利潤率留 null（不放行仍是累計的值）
+            expr = expr.when(d_rev > 0).then(
+                (pl.col(c) * pl.col("revenue_m")
+                 - pl.col(f"_prev_{c}") * pl.col("_prev_revenue_m")) / d_rev
+            )
+        single.append(expr.alias(c))
+    if has_rev:
         single.append(
             pl.when(first).then(pl.col("revenue_m")).otherwise(d_rev).alias("revenue_m")
         )

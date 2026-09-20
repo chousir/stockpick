@@ -1172,6 +1172,14 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 - `g1_g2_g5_watch.LEDGER_SCHEMA` 加 `fund_basis`（舊列讀入補 `ytd`、新列 `single_q`）。
 - **實測對照預測（真實快取，經 loader）**：G2 三腿 **251**（預測 251±5）／Δnet≥1.5pp **830**（830±10）／Δop≥0 **1080**（1080±3）——
   全中。2330 Q2 讀出營收 1,270,380 百萬、EPS 27.25＝FinMind 單季值。Q2 `roe_q_pct` null 48 檔（無 bvps／缺 Q1 等，誠實 null）。
+- **外部獨立驗證（非自洽預測）**：Q2 單季還原值 vs FinMind 單季（真實快取）——營收 973 檔中位比值 **1.000000**（僅 7 檔偏離 >0.1%，
+  全是營收 ≤2 百萬的小型股四捨五入）；淨利率 967/973 檔 ≤0.5pp（中位差 0.005pp）；營益率 969/973；EPS 919/976 檔差 ≤0.011 元，
+  24 檔差 >0.05（MOPS 較大 9／FinMind 較大 15，無方向性偏誤；成因**未查明**，如 5386：MOPS 還原 −0.12 vs FinMind 14.22）。
+  `gross_margin_pct` FinMind 無毛利欄，仍為結構推論。
+- **真實資料端到端**（底帳副本、未動真實檔）：讀入真實底帳 1022 列全標 `ytd`；`build_g1_g2_g5_inputs`→snapshot→`upsert_ledger` 產 370 檔
+  `single_q` 列並存。命中數（含市值等全條件）：W38 累計口徑 g1 245／g2 42／g5 20／f2 23 → 單季口徑 g1 324／g2 35／g5 20／f2 25
+  （G1 變鬆、G2 變緊，方向同預測）。重跑 `make finmind-financials-reconcile`（改用共用函式後）四判準仍全過，數字不變。
+- 加固：`decumulate_fundamentals` 有利潤率無 `revenue_m` → Q2+ 利潤率 null（不放行累計值）；reconcile 載入端補 (stock,year,quarter) 去重。
 - 測試：`test_twse.py` 重寫 history delta 測試（期望值由 fixture 手算：Δnet +2.0／Δop +0.5）＋新增 latest 單季、前一季缺→null、
   三季鏈／ΔR=0／bvps≤0／跨年 edge case；`test_g1_g2_g5_watch.py` +2（fund_basis）；reconcile 5 測試**未改**即過（等價性）。
 - 消費端逐一確認：報告／prompt／`group_report`／`data_fetcher` 的「單季」標籤修後名實相符，無需改字；
@@ -1181,5 +1189,5 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
   (b) 未重跑歷史週報、也未評估 `min_gross_margin_pct=25`／`thin_margin_pct` 在單季分布下是否需重校（門檻未動，屬未校準）；
   (c) `gross_margin_pct` 為結構推論、非逐檔實證。
 
-**狀態**：程式＋測試＋文件完成，待跑全套驗收、commit。**merge 進 main 待使用者拍板。**
+**狀態**：程式＋測試＋文件完成；驗收 `pytest -q` 1385 passed／ruff 全過／唯一 FAIL＝既有 RED `test_w35_anchor`（非本次回歸）。**merge 進 main 待使用者拍板。**
 
