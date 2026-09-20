@@ -922,7 +922,7 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - `config/settings.yaml` 新增 `tw_valuation_history:` 區塊（`history_path`／`validation_target_trading_days=750`，零寫死）。
 - 驗收：`make test` 954 綠（+9：null 排除中位數／整欄全缺誠實 None／空快照不產列／冪等 append／跨日期累積不覆蓋既有列／深度訊息不洩漏任何百分位字樣）；ruff/mypy 零淨增；對真實本機快取乾跑（18 份快照檔，因一份重複日期被冪等機制擋下→實得 17 個交易日，`median_pe` 19.97、`n_pe`=1470 一切正常）。
 
-**下一步**：等累積達 ~750 個交易日（≈3 年）後，再開一個獨立 milestone 走跟 BAA10Y 同規格的 block-bootstrap 驗證；在那之前這條線維持「累積中、未驗證、不影響燈號」狀態，任何人不得因為「資料已經有了」就跳過驗證直接放行。分支待 merge 進 main（鐵律 3，待使用者拍板）。
+**下一步**：等累積達 ~750 個交易日（≈3 年）後，再開一個獨立 milestone 走跟 BAA10Y 同規格的 block-bootstrap 驗證；在那之前這條線維持「累積中、未驗證、不影響燈號」狀態，任何人不得因為「資料已經有了」就跳過驗證直接放行。**已 merge 進 main（03e14f1，2026-08-02）。**
 
 ---
 
@@ -939,7 +939,7 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - `config/settings.yaml` 的 `backtest.macro_regime_validate:` 區塊新增 `tw_index_file` 一個 key（Phase 3 事件目標改用台股等權指數，不是 Phase 2 的 NASDAQCOM——測的是台股表現，事件目標要對得上問題本身）。
 - 驗收：`make test` 958 綠（+4：遲滯帶跨日記憶重放／任意布林桶 planted 訊號偵測／`high_risk_lift`↔`bucket_lift` 重構回歸保護）；ruff/mypy 零淨增；`make macro-regime-resonance` 真實跑通並可重現 round5 報告全部數字（已獨立重跑驗證一致）。
 
-**下一步**：docs/25 §6 三個 Phase 全部收官（Phase 1/2/3 皆完成）；剩餘開放項＝台股估值 B 方案完整驗證（M-Macro2b 的下一步，另一個未定名獨立 milestone）、以及是否要投入 8-12 小時回補 2018-2020 本地日線快取以重新打開 M-Macro3 的驗證可能性（使用者裁決，不代為決定）。分支待 merge 進 main（鐵律 3，待使用者拍板）。
+**下一步**：docs/25 §6 三個 Phase 全部收官（Phase 1/2/3 皆完成）；剩餘開放項＝台股估值 B 方案完整驗證（M-Macro2b 的下一步，另一個未定名獨立 milestone）、以及是否要投入 8-12 小時回補 2018-2020 本地日線快取以重新打開 M-Macro3 的驗證可能性（使用者裁決，不代為決定）。**已 merge 進 main（d554332，2026-08-02）。**
 
 ---
 
@@ -974,7 +974,7 @@ M-修法7 四子項全完成並 push（分支 `fix/m7-entry-ladder`）：7a 計�
 - **一次性種子**：`panel_history.parquet` 從既有 `reports/2026-W31/macro_regime.csv` 種了 2026-07-30 那一輪（同一條 production 路徑產出、schema 相容，只缺 `run_as_of`），W32 那輪由真跑產生——目的是讓變化欄立刻可用可驗，不必等兩週。種子腳本是一次性的、未進 repo。
 - **首跑就抓到兩件舊面板看不見的事**：`STLFSI4` 金融壓力 **p3 → p39（↑+35.8p）**、`DEXJPUS` 163.71 → 159.16（**↓-4.55**，日圓一週走強約 2.8%）；同時 `DGS20` 維持 p99 但**變化是「→ -0.3p」**，正是 §5.1 說的高原而非急衝。
 
-**下一步 / 明確不做**：C 案（Put/Call＋FINRA＋CAPE 爬蟲進面板）**不排期**，解凍條件寫在 docs/26 §6.3（A 案累積 ≥ 半年、一次只加一項、若日後要升級為計分訊號必須先過 BAA10Y 同規格 block-bootstrap）。Q1 開放項：`DGS20` 要不要換 transform 或移出面板——本輪不動，等面板歷史累積後再判（改揭露面板設計依 docs/25 前例應有實測依據）。分支待 merge 進 main（鐵律 3，待使用者拍板）。
+**下一步 / 明確不做**：C 案（Put/Call＋FINRA＋CAPE 爬蟲進面板）**不排期**，解凍條件寫在 docs/26 §6.3（A 案累積 ≥ 半年、一次只加一項、若日後要升級為計分訊號必須先過 BAA10Y 同規格 block-bootstrap）。Q1 開放項：`DGS20` 要不要換 transform 或移出面板——本輪不動，等面板歷史累積後再判（改揭露面板設計依 docs/25 前例應有實測依據）。**已 merge 進 main（75fc829，2026-08-08）。**
 
 ---
 
@@ -1000,7 +1000,7 @@ M2/M8 的規格在 docs/27，M9 部署說明在 docs/28，M1 的人工解禁記�
 6409，等權大盤基準因此失真——M2 內部已用 `dense_days()` 守門，但 `regime`／`rotation`
 ／M6 的 α 欄仍承接該風險，讀 brief 的 α 與「跑贏大盤」時只看桶間相對比較。詳見 docs/29 §4-③。
 
-**分支待 merge 進 main（鐵律 3，待使用者拍板）。**
+**已併入 main（分支尖端 1071787 為 main 祖先，2026-08-09；無 merge bubble）。**
 
 ---
 
@@ -1026,8 +1026,7 @@ M2/M8 的規格在 docs/27，M9 部署說明在 docs/28，M1 的人工解禁記�
   `make diagnose` 產底稿，委派 Opus 子代理依 docs/30 規格產出
   `research/pick_outcome/retro_review_<日期>.md`（研究軌，不進 git）。
 
-**下一步**：使用者跑一次驗證輸出品質；`fwd_return_after_stop_pct` code 補強另案評估。分支
-待 merge 進 main（鐵律 3，待使用者拍板）。
+**下一步**：使用者跑一次驗證輸出品質；`fwd_return_after_stop_pct` code 補強另案評估。**已 merge 進 main（65bc74a，經 `test/retro-review-integration`，2026-08-09）。**
 
 ---
 
