@@ -673,7 +673,7 @@ _FUNDAMENTALS_SCHEMA: dict[str, type[pl.DataType]] = {
     # 快取存 API 原始值＝**累計 YTD**（Q2＝Q1+Q2，2026-09-20 實證）；單季值一律經
     # `decumulate_fundamentals()` 在讀取層還原（parquet 不改，reconcile 依此口徑）。
     "revenue_m": pl.Float64,  # 營業收入（百萬元，累計 YTD）
-    "gross_margin_pct": pl.Float64,   # 累計毛利率（%，營益分析；與 op/net 同端點，推定同為累計）
+    "gross_margin_pct": pl.Float64,   # 累計毛利率（%，營益分析；2026-09-20 已逐檔實證為累計）
     "op_margin_pct": pl.Float64,      # 累計營益率（%）
     "pretax_margin_pct": pl.Float64,  # 累計稅前純益率（%，營益分析，D5）
     "net_margin_pct": pl.Float64,     # 累計稅後純益率（%，營益分析，D5）

@@ -80,3 +80,15 @@
 錯誤信念：把「進本 milestone 前就是 RED」當成「與我無關、不必查」；根因未驗證就寫進 docs/31 Open item 3。
 修正：回歸錨對「外部會變的輸入」（最新日期、最新月檔、glob 最新）一律釘死到產生基準當時的值；RED 超過一個 milestone 就要當場二分（換輸入日期/檔案逐一比對，一支腳本即可）而不是標註帶過；未驗證的根因不寫進 docs。
 落點：`tests/backtest/test_valuation_gap_panel.py`（`_W35_DATE`／`_W35_INDUSTRY_FILES`）、docs/31 §20.14 Open item 3 更正；承接 2026-06-18「文件與行為漂移」條。
+
+## 2026-09-20 收尾 ritual 的 push 步被使用者撤回；且「下一步」字樣過期會誤導待辦盤點
+現象：使用者明說「都不要 push，我最後會自己 push」，與 CLAUDE.md 收尾 ritual「commit → push」衝突（2026-07-08 條依據的 feedback_commit_push 慣例已被覆蓋）。同 session 我依 docs/08 第 1086 行過期的「下一步：Phase 2 另立」誤報 M-Val-FinMind2「尚未開工」，實際早已 merge。
+錯誤信念：既往指示永遠有效；docs/08 舊里程碑段尾的「下一步」仍反映現況。
+修正：收尾只 commit、回報註明「尚未 push」；盤點待辦以 docs/08 各 milestone 的「已 merge」狀態行與 `git log` 為準，不採信舊段落尾的「下一步」，並在完工時回填舊「下一步」字樣。
+落點：CLAUDE.md「Milestone 紀律」收尾 ritual；memory `feedback-no-push-user-pushes`；承接 2026-07-08 條與 2026-06-18「文件與行為漂移」條。
+
+## 2026-09-20 「外部來源沒有這欄」只憑我們自己的快取／parser 下結論，實測一次 API 就翻案
+現象：M-Fund-SingleQ／M-G1-Converge 兩度寫「FinMind 無毛利欄、無法逐檔實證」；實際 `TaiwanStockFinancialStatements` 有 `GrossProfit`，是 `_FINANCIALS_FIELD_MAP` 沒收，快取才沒有。使用者同意新抓後，一次探測請求即證實，並完成 300 檔逐檔實證。
+錯誤信念：快取裡沒有的欄位＝來源沒有；把「結構推論」當作無從驗證而擱置數輪。
+修正：宣稱「外部來源無此資料」前先對來源做一次最小探測（單檔單 dataset 列出全部 type／欄位），不從自家 parser 輸出推斷；探測便宜（1 request），判準事前寫死後再抓樣本。
+落點：docs/31 §20.16 (c) 更正與實證；承接 2026-09-20「對帳判準全未過」「一個欄位查出累計口徑」兩條。
