@@ -2634,7 +2634,7 @@ W35 面板、比對 `reports/2026-W35/candidates_enriched.csv` 的 `val_gap_pct_
 #### 狀態
 
 - 分支 `feat/finmind-dcf`。程式＋測試完成（`tests/analysis/test_dcf.py` 新、`tests/data/test_finmind.py` 加 parser 測試含 capex 符號鎖）。`pytest -q` 1375 passed（+28）、唯一 FAIL＝既有 RED `test_w35_anchor`（非本次回歸）。
-- 全量 backfill＋正式對帳裁決：**已完成（2026-09-20，四判準全過，見上〔對帳裁決〕）**。**merge 進 main：待使用者拍板。**
+- 全量 backfill＋正式對帳裁決：**已完成（2026-09-20，四判準全過，見上〔對帳裁決〕）**。**已 merge 進 main（88197ca，2026-09-20；未 push）。**
 
 ## 21. 減量研究計畫 Part 1：逐式目的定義＋參數可行性分級（2026-08-24）
 
