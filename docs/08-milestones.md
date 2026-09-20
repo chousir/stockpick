@@ -1189,5 +1189,4 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
   (b) 未重跑歷史週報、也未評估 `min_gross_margin_pct=25`／`thin_margin_pct` 在單季分布下是否需重校（門檻未動，屬未校準）；
   (c) `gross_margin_pct` 為結構推論、非逐檔實證。
 
-**狀態**：程式＋測試＋文件完成；驗收 `pytest -q` 1385 passed／ruff 全過／唯一 FAIL＝既有 RED `test_w35_anchor`（非本次回歸）。**merge 進 main 待使用者拍板。**
-
+**狀態**：程式＋測試＋文件完成；驗收 `pytest -q` 1385 passed／ruff 全過／唯一 FAIL＝既有 RED `test_w35_anchor`（非本次回歸）。**已 merge 進 main（61982d4，2026-09-20；分支保留、未 push）。**
