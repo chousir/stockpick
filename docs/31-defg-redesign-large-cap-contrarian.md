@@ -2480,7 +2480,7 @@ search-augmented（前瞻 EPS × 目標 PE）保留但改算法**。兩點要記
 - **虧損股 FinMind 寫 `PER = 0.0`**（非 null、非負；實打 `data_id=2498` 2016-06 確認），`PBR` 仍有值 → parser 必須 `PER<=0→None`、`PBR<=0→None`（守 `_parse_valuation_ratios` 的「缺值→None 不當 0」），設回歸鎖測試。
 - **`dividend_yield` 單位是百分比**（2.14 = 2.14%），與 TWSE `BWIBBU_d` 同慣例 → `implied_price_from_yield_median` 直接可用。
 - **`data/cache/` 的 pruner 非遞迴**（`select_prune_candidates`＝`glob("*.parquet")` ＋ prefix 白名單），碰不到子目錄；`data/cache/fred/` 今天就靠這點存活 → `data/cache/finmind/` 天然 prune-safe。
-- **`test_w35_anchor_matches_production` 進本 milestone 前就是 RED**（452 檔重建與生產不一致，與本任務無關的既有漂移，memory 2026-09-06 條已記為 flaky）→「W35 anchor 綠」不能當本任務驗收條件，改用 `candidates_enriched.csv` 逐檔 before/after 比對。
+- **`test_w35_anchor_matches_production` 進本 milestone 前就是 RED**（452 檔重建與生產不一致，與本任務無關的既有漂移，memory 2026-09-06 條已記為 flaky；**真因見 Open item 3 的 2026-09-20 更正**）→「W35 anchor 綠」不能當本任務驗收條件，改用 `candidates_enriched.csv` 逐檔 before/after 比對。
 
 #### 範圍
 
@@ -2537,6 +2537,15 @@ W35 面板、比對 `reports/2026-W35/candidates_enriched.csv` 的 `val_gap_pct_
 維持「TWSE 基準」回歸錨、刻意不併 FinMind（把重建指向 merged history 只會讓紅測數字
 漂移、測不到東西）；FinMind-inclusive 錨待使用者重跑 W35 後另立。實測本 milestone 前後
 皆為 452，證明 1b 接線未動此測。
+
+> **更正（2026-09-20，上段根因作廢）**：重建路徑與生產路徑**並無系統性不一致**。真因是測試
+> 輸入沒釘住：(1) 比對日取 `val_history["date"].max()`，快取每長一天就漂移——W35 報告的估值
+> 資料日是 2026-08-28，`max()` 於 09-04 起已不是它（RED 452 正是 09-04 那格；對 08-21／09-04／09-18
+> 分別 456／452／450 檔不一致，對 08-28 僅 1 檔）；(2) `load_industry_mapping` 讀「最新月」產業檔，
+> 09 月檔相對 08 月檔有換類（3054 食品工業→電子通路業）／下市，牽動同業中位——1216 三條 peer 腿
+> 因此差 0.5–2pp、composite −5.0 vs −4.4；改用 `industry_202608` 後 463 檔全數一致（0 不一致）。
+> 處置：測試釘 `_W35_DATE=2026-08-28`＋`industry_202608`（`test_valuation_gap_panel.py`），綠燈。
+> 上段「452 與 FinMind 無關」結論仍成立；「面板重建 vs 生產系統性不一致」不成立。
 
 #### 全量回補 + 正式裁決（2026-09-09 夜）
 

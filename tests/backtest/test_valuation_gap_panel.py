@@ -145,13 +145,22 @@ def test_ledger_snapshot_and_upsert(tmp_path: Path) -> None:
 # --- 條件式 anchor（真實快取存在時才跑）------------------------------------
 _CE = Path("reports/2026-W35/candidates_enriched.csv")
 _CACHE = Path("data/cache/twse")
+# 錨必須釘在生產當時的兩個輸入，否則快取每長一天／換一個月就漂移成 RED：
+# 估值資料日＝W35 產報時的最新一日（非 val_history.max()）；產業對照＝當月 industry_202608
+# （load_industry_mapping 讀「最新月」，之後月份會有換類/下市，例：3054 食品工業→電子通路業）。
+_W35_DATE = date(2026, 8, 28)
+_W35_INDUSTRY_FILES = ("industry_202608.parquet", "otc_industry_202608.parquet")
 
 
 @pytest.mark.skipif(
-    not (_CE.exists() and any(_CACHE.glob("valuation_ratios_*.parquet"))),
-    reason="需要 data/cache + reports/2026-W35（gitignored，本地驗證用）",
+    not (
+        _CE.exists()
+        and any(_CACHE.glob("valuation_ratios_*.parquet"))
+        and all((_CACHE / f).exists() for f in _W35_INDUSTRY_FILES)
+    ),
+    reason="需要 data/cache（含 202608 產業檔）+ reports/2026-W35（gitignored，本地驗證用）",
 )
-def test_w35_anchor_matches_production() -> None:
+def test_w35_anchor_matches_production(tmp_path: Path) -> None:
     from tw_screener.analysis.rotation import load_market_history
     from tw_screener.analysis.sector_universe import (
         build_broad_industry_membership,
@@ -167,9 +176,11 @@ def test_w35_anchor_matches_production() -> None:
     # docs/31 §20.14 Open item 3：此錨為「TWSE 基準」回歸錨，刻意不併 FinMind——
     # reports/2026-W35/candidates_enriched.csv 是 FinMind 整合前產生的基準，把重建指向
     # merged history 只會讓紅測數字漂移、測不到東西。FinMind-inclusive 錨待使用者重跑
-    # W35 後另立。（本測進本 milestone 前即為既有 RED，非本次回歸。）
+    # W35 後另立。
     val_history = client.load_valuation_ratios_history()
-    ind = load_industry_mapping(_CACHE)
+    for f in _W35_INDUSTRY_FILES:
+        (tmp_path / f).symlink_to((_CACHE / f).resolve())
+    ind = load_industry_mapping(tmp_path)
     panel = build_valuation_gap_panel(
         val_history,
         build_peer_membership(list_subindustries(), ind),
@@ -177,7 +188,7 @@ def test_w35_anchor_matches_production() -> None:
         build_price_panel(load_market_history(_CACHE, n_days=320), horizons=(10, 20, 40)),
         subindustry_map=list_subindustries(),
     )
-    w35 = panel.filter(pl.col("date") == val_history["date"].max()).select(
+    w35 = panel.filter(pl.col("date") == _W35_DATE).select(
         "stock_id", "val_gap_pct_composite"
     )
     ce = pl.read_csv(_CE, infer_schema_length=2000).select(

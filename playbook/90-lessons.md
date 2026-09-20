@@ -74,3 +74,9 @@
 修正：發現一欄口徑錯，同一輪把同源所有欄逐一實測（本次 975/975 檔對照）；還原放讀取層單點（`decumulate_fundamentals`），parquet 保持原始值；累積型底帳同步加口徑標記欄（`fund_basis`），否則新舊列同名不同義。
 落點：docs/08 M-Fund-SingleQ、docs/02 §單季端點註記、docs/31 §11 口徑更正；承接 2026-09-20「對帳判準全未過」條。
 
+
+## 2026-09-20 回歸錨測試 RED 十天沒人查根因——「既有 RED／flaky」不是診斷，且錨必須釘住輸入
+現象：`test_w35_anchor_matches_production` 自 2026-09-04 起 RED（452 檔），先後被標「flaky」「面板重建與生產路徑系統性不一致」，各 milestone 驗收都寫「唯一 FAIL＝既有 RED」帶過。實查：測試比對日取 `val_history.max()`、產業對照讀「最新月」，兩者都隨快取成長漂移；釘回 W35 當時的日期（08-28）與 `industry_202608` 後 463 檔 0 不一致。
+錯誤信念：把「進本 milestone 前就是 RED」當成「與我無關、不必查」；根因未驗證就寫進 docs/31 Open item 3。
+修正：回歸錨對「外部會變的輸入」（最新日期、最新月檔、glob 最新）一律釘死到產生基準當時的值；RED 超過一個 milestone 就要當場二分（換輸入日期/檔案逐一比對，一支腳本即可）而不是標註帶過；未驗證的根因不寫進 docs。
+落點：`tests/backtest/test_valuation_gap_panel.py`（`_W35_DATE`／`_W35_INDUSTRY_FILES`）、docs/31 §20.14 Open item 3 更正；承接 2026-06-18「文件與行為漂移」條。
