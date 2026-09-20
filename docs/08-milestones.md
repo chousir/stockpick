@@ -1210,3 +1210,4 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 **未涵蓋／後續**：(i) G1 低基期翻正（79 檔前期淨利率≤0）未處理；(ii) 實證 (c) 需新抓 FinMind 毛利欄（新抓取，需使用者同意）；
 (iii) `single_q` 底帳批要等 W39 `make week` 才開始累積。
 
+**狀態**：驗收 `pytest -q` 1389 passed／ruff 全過／唯一 FAIL＝既有 RED `test_w35_anchor`；verifier 6 條全 PASS。**已 merge 進 main（40664fa，2026-09-20；分支保留、未 push——本環境無遠端寫入權限）。**
