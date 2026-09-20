@@ -16,6 +16,10 @@
   >同次產業中位（嚴格大於）∧ Δop_margin≥0 ∧ market_cap_billion≥300`。跟G5的區別：
   G5用`val_pctile≤40`（相對便宜百分位），F2'用絕對PE中段帶（明確排除深度價值）。
 
+**口徑斷裂（M-Fund-SingleQ，2026-09-20）**：財報衍生欄（margin/Δ/roe_q_pct）在此之前是累計 YTD、
+之後為單季（`twse.decumulate_fundamentals` 讀取層還原）；底帳 `fund_basis` 欄標 `ytd`／`single_q`，
+驗證時兩批不得混算。
+
 **cadence差異（跟L6/G4不同，讀底帳時要記住）**：`fundamentals`衍生欄位（net/op/gross
 margin、roe/debt/current_ratio、Δ）每季才更新一次（MOPS財報公告頻率）——同一季內
 連續好幾週的ledger快照，這些欄位數值會完全相同，只有市值/量能/MA60這類市場面欄位
@@ -30,6 +34,11 @@ from pathlib import Path
 
 import polars as pl
 
+# 底帳財報欄口徑標記（M-Fund-SingleQ，2026-09-20）：net/op/gross margin、Δ、roe_q_pct 在此之前
+# 誤用累計 YTD（Q2＝Q1+Q2）卻標「單季」，同欄名、不同定義——驗證底帳時兩批不得混算。
+FUND_BASIS_YTD = "ytd"
+FUND_BASIS_SINGLE_Q = "single_q"
+
 LEDGER_SCHEMA: dict[str, type[pl.DataType]] = {
     "week": pl.Utf8,
     "data_date": pl.Date,
@@ -42,6 +51,7 @@ LEDGER_SCHEMA: dict[str, type[pl.DataType]] = {
     "pe_ratio": pl.Float64,
     "val_pctile": pl.Float64,
     "fundamentals_quarter": pl.Utf8,     # 財報季別（如"2026Q2"），供未來判讀時對照
+    "fund_basis": pl.Utf8,               # 財報口徑：ytd＝M-Fund-SingleQ 前累計、single_q＝之後單季
     "net_margin_pct": pl.Float64,
     "delta_net_margin_pct": pl.Float64,
     "op_margin_pct": pl.Float64,
@@ -176,6 +186,7 @@ def build_g1_g2_g5_snapshot(
                 "pe_ratio": pe,
                 "val_pctile": val_pctile,
                 "fundamentals_quarter": r.get("quarter_label"),
+                "fund_basis": FUND_BASIS_SINGLE_Q,
                 "net_margin_pct": net_margin,
                 "delta_net_margin_pct": delta_net,
                 "op_margin_pct": r.get("op_margin_pct"),
@@ -360,7 +371,11 @@ def _read_ledger(path: Path) -> pl.DataFrame:
     """
     if not path.exists():
         return pl.DataFrame(schema=LEDGER_SCHEMA)
-    return pl.read_csv(path, try_parse_dates=True, schema_overrides=LEDGER_SCHEMA)
+    ledger = pl.read_csv(path, try_parse_dates=True, schema_overrides=LEDGER_SCHEMA)
+    # 無 fund_basis 的舊列（M-Fund-SingleQ 之前寫入）＝累計口徑；標出來而非任其與新列混同
+    if "fund_basis" not in ledger.columns:
+        return ledger.with_columns(pl.lit(FUND_BASIS_YTD).alias("fund_basis"))
+    return ledger.with_columns(pl.col("fund_basis").fill_null(FUND_BASIS_YTD))
 
 
 def upsert_ledger(path: Path, new_rows: pl.DataFrame) -> pl.DataFrame:

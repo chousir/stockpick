@@ -132,6 +132,7 @@ def test_g5_requires_gross_margin_above_peer_median() -> None:
     )
     row = snap.row(0, named=True)
     assert row["g5"] is True
+    assert row["fund_basis"] == "single_q"  # 新列一律標單季口徑（M-Fund-SingleQ）
 
     # 反例：毛利率低於同業中位 → 不命中
     fundamentals_low = _fundamentals(
@@ -412,6 +413,26 @@ def test_upsert_ledger_all_null_column_does_not_corrupt_later_weeks(tmp_path: Pa
     w2_val = ledger.filter(pl.col("stock_id") == "1101").row(0, named=True)["cum_rev_yoy_pct"]
     assert isinstance(w2_val, float)
     assert w2_val == 3.0
+
+
+def test_read_ledger_labels_legacy_rows_without_fund_basis_as_ytd(tmp_path: Path) -> None:
+    """M-Fund-SingleQ 之前寫的底帳沒有 fund_basis 欄 → 讀入時標 ytd（累計口徑），
+    與其後新增的 single_q 列並存、不混同。"""
+    path = tmp_path / "ledger.csv"
+    path.write_text(
+        "week,data_date,stock_id,name,fundamentals_quarter,roe_q_pct,g1,g2,g5,f2\n"
+        "2026-W34,2026-08-22,2330,台積電,2026Q2,19.9,false,true,false,false\n",
+        encoding="utf-8",
+    )
+    new = pl.DataFrame(
+        [{"week": "2026-W39", "data_date": date(2026, 9, 26), "stock_id": "1101",
+          "name": "台泥", "fundamentals_quarter": "2026Q2", "fund_basis": "single_q",
+          "roe_q_pct": 2.0, "g1": False, "g2": True, "g5": False, "f2": False}],
+        schema=LEDGER_SCHEMA,
+    )
+    ledger = upsert_ledger(path, new)
+    basis = dict(zip(ledger["stock_id"].to_list(), ledger["fund_basis"].to_list(), strict=True))
+    assert basis == {"2330": "ytd", "1101": "single_q"}
 
 
 def test_ledger_progress_summary_counts() -> None:

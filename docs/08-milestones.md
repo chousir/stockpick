@@ -1165,3 +1165,21 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 **行為連帶的消費端（完工清單逐一確認）**：`analysis/contrarian.py`（薄利降級 `net_margin_pct<thin_margin_pct`）、
 `analysis/valuation.py`（深度價值 gate `min_gross_margin_pct=25`）、`report/group_report.py`／`data_fetcher.py`
 （標籤本就寫「單季」——修後才名實相符）、`g1_g2_g5_watch.py`、docs/02 §單季表、docs/31 §11。
+
+**完成（2026-09-20）**
+- `twse.decumulate_fundamentals()`（純函式，全 repo 唯一還原點）＋ `TWSEClient._load_fundamentals_single_quarter()`；
+  `load_latest_fundamentals`／`load_fundamentals_history` 都走它（前者改讀全部季檔）；reconcile 改 import、刪 `_decumulate_local`。
+- `g1_g2_g5_watch.LEDGER_SCHEMA` 加 `fund_basis`（舊列讀入補 `ytd`、新列 `single_q`）。
+- **實測對照預測（真實快取，經 loader）**：G2 三腿 **251**（預測 251±5）／Δnet≥1.5pp **830**（830±10）／Δop≥0 **1080**（1080±3）——
+  全中。2330 Q2 讀出營收 1,270,380 百萬、EPS 27.25＝FinMind 單季值。Q2 `roe_q_pct` null 48 檔（無 bvps／缺 Q1 等，誠實 null）。
+- 測試：`test_twse.py` 重寫 history delta 測試（期望值由 fixture 手算：Δnet +2.0／Δop +0.5）＋新增 latest 單季、前一季缺→null、
+  三季鏈／ΔR=0／bvps≤0／跨年 edge case；`test_g1_g2_g5_watch.py` +2（fund_basis）；reconcile 5 測試**未改**即過（等價性）。
+- 消費端逐一確認：報告／prompt／`group_report`／`data_fetcher` 的「單季」標籤修後名實相符，無需改字；
+  `contrarian` 薄利降級與 `valuation` 深度價值毛利 gate 讀到的是單季值（Q2 起門檻語意回歸原意，數值分布改變，見下）；
+  docs/02、docs/31 §11 已加口徑更正註記。
+- **未涵蓋／後續**：(a) `research/g1_g2_g5_watch/ledger.csv` 既有 W34–W38 列（Q2 累計口徑）下次 `make week` upsert 時才會被標 `ytd`；
+  (b) 未重跑歷史週報、也未評估 `min_gross_margin_pct=25`／`thin_margin_pct` 在單季分布下是否需重校（門檻未動，屬未校準）；
+  (c) `gross_margin_pct` 為結構推論、非逐檔實證。
+
+**狀態**：程式＋測試＋文件完成，待跑全套驗收、commit。**merge 進 main 待使用者拍板。**
+

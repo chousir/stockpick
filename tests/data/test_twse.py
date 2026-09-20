@@ -1255,6 +1255,9 @@ def _fund_row(stock_id: str, year: int, quarter: int, **overrides: object) -> di
 
 
 def test_load_fundamentals_history_computes_qoq_delta(tmp_path: Path):
+    """快取為累計 YTD：Q1 單季 net6.0/op8.0（rev100）；Q2 累計 net7.0/op8.25（rev200）。
+    Q2 單季 net＝(7.0×200−6.0×100)/(200−100)＝8.0、op＝(8.25×200−8.0×100)/100＝8.5
+    → Δnet＝+2.0、Δop＝+0.5（單季−單季，非累計−單季）。"""
     client = TWSEClient(
         base_url="https://test.invalid", cache_dir=tmp_path,
         ttl_hours=6.0, user_agent="test", interval_sec=0.0,
@@ -1262,14 +1265,15 @@ def test_load_fundamentals_history_computes_qoq_delta(tmp_path: Path):
     pl.DataFrame([_fund_row("2330", 2026, 1, net_margin_pct=6.0, op_margin_pct=8.0)]).write_parquet(
         tmp_path / "fundamentals_2026Q1.parquet"
     )
-    pl.DataFrame([_fund_row("2330", 2026, 2, net_margin_pct=8.0, op_margin_pct=8.5)]).write_parquet(
-        tmp_path / "fundamentals_2026Q2.parquet"
-    )
+    pl.DataFrame(
+        [_fund_row("2330", 2026, 2, revenue_m=200.0, net_margin_pct=7.0, op_margin_pct=8.25)]
+    ).write_parquet(tmp_path / "fundamentals_2026Q2.parquet")
 
     df = client.load_fundamentals_history()
     row = df.filter(pl.col("stock_id") == "2330").row(0, named=True)
     assert row["quarter_label"] == "2026Q2"
-    assert row["net_margin_pct"] == 8.0
+    assert row["net_margin_pct"] == pytest.approx(8.0)
+    assert row["op_margin_pct"] == pytest.approx(8.5)
     assert row["delta_net_margin_pct"] == pytest.approx(2.0)
     assert row["delta_op_margin_pct"] == pytest.approx(0.5)
 
@@ -1298,7 +1302,7 @@ def test_load_fundamentals_history_missing_field_stays_none(tmp_path: Path):
     pl.DataFrame([_fund_row("2330", 2026, 1, net_margin_pct=None)]).write_parquet(
         tmp_path / "fundamentals_2026Q1.parquet"
     )
-    pl.DataFrame([_fund_row("2330", 2026, 2, net_margin_pct=8.0)]).write_parquet(
+    pl.DataFrame([_fund_row("2330", 2026, 2, revenue_m=200.0, net_margin_pct=8.0)]).write_parquet(
         tmp_path / "fundamentals_2026Q2.parquet"
     )
     df = client.load_fundamentals_history()
@@ -2314,6 +2318,66 @@ def test_load_latest_fundamentals(tmp_path: Path):
         tmp_path / "fundamentals_2026Q1.parquet")
     df = client.load_latest_fundamentals()
     assert df["eps"][0] == 13.94
+
+
+def test_load_latest_fundamentals_returns_single_quarter(tmp_path: Path):
+    """最新季（Q2）讀出來須是單季：營收 220−100＝120、EPS 2.5−1.0＝1.5、
+    毛利率(35×220−30×100)/120＝39.1667、ROE＝1.5/20×100＝7.5。bvps/負債比為時點值不動。"""
+    client = _make_client(tmp_path)
+    pl.DataFrame([_fund_row("2330", 2026, 1, revenue_m=100.0, gross_margin_pct=30.0, eps=1.0)]
+                 ).write_parquet(tmp_path / "fundamentals_2026Q1.parquet")
+    pl.DataFrame([_fund_row("2330", 2026, 2, revenue_m=220.0, gross_margin_pct=35.0, eps=2.5)]
+                 ).write_parquet(tmp_path / "fundamentals_2026Q2.parquet")
+    row = client.load_latest_fundamentals().row(0, named=True)
+    assert (row["year"], row["quarter"]) == (2026, 2)
+    assert row["revenue_m"] == pytest.approx(120.0)
+    assert row["eps"] == pytest.approx(1.5)
+    assert row["gross_margin_pct"] == pytest.approx(39.16667, abs=1e-4)
+    assert row["roe_q_pct"] == pytest.approx(7.5)
+    assert row["bvps"] == 20.0 and row["debt_ratio_pct"] == 40.0
+
+
+def test_load_latest_fundamentals_missing_prior_quarter_is_null_not_cumulative(tmp_path: Path):
+    """只有 Q2 檔（前一季檔缺）→ 單季欄 null，絕不回退成累計值當單季。"""
+    client = _make_client(tmp_path)
+    pl.DataFrame([_fund_row("2330", 2026, 2, revenue_m=220.0, eps=2.5)]
+                 ).write_parquet(tmp_path / "fundamentals_2026Q2.parquet")
+    row = client.load_latest_fundamentals().row(0, named=True)
+    assert row["revenue_m"] is None and row["eps"] is None
+    assert row["gross_margin_pct"] is None and row["roe_q_pct"] is None
+    assert row["debt_ratio_pct"] == 40.0  # 時點值仍在
+
+
+def test_decumulate_fundamentals_chain_and_edge_cases():
+    from tw_screener.data.twse import decumulate_fundamentals
+
+    df = pl.DataFrame([
+        # 2330：Q1/Q2/Q3 累計 rev 100/220/360、eps 1.0/2.5/4.5
+        _fund_row("2330", 2026, 1, revenue_m=100.0, eps=1.0),
+        _fund_row("2330", 2026, 2, revenue_m=220.0, eps=2.5),
+        _fund_row("2330", 2026, 3, revenue_m=360.0, eps=4.5),
+        # 2317：Q2 營收未增（ΔR=0）→ 利潤率 null；bvps≤0 → roe null
+        _fund_row("2317", 2026, 1, revenue_m=100.0),
+        _fund_row("2317", 2026, 2, revenue_m=100.0, bvps=-5.0),
+        # 2454：跨年——2027Q1 是新年度起點，不得減去 2026Q4
+        _fund_row("2454", 2026, 4, revenue_m=400.0),
+        _fund_row("2454", 2027, 1, revenue_m=90.0),
+    ])
+    out = decumulate_fundamentals(df)
+
+    def get(sid: str, y: int, q: int) -> dict:
+        return out.filter(
+            (pl.col("stock_id") == sid) & (pl.col("year") == y) & (pl.col("quarter") == q)
+        ).row(0, named=True)
+
+    assert get("2330", 2026, 1)["revenue_m"] == 100.0           # Q1 原值
+    assert get("2330", 2026, 2)["revenue_m"] == pytest.approx(120.0)
+    assert get("2330", 2026, 3)["revenue_m"] == pytest.approx(140.0)  # 360−220
+    assert get("2330", 2026, 3)["eps"] == pytest.approx(2.0)          # 4.5−2.5
+    assert get("2317", 2026, 2)["gross_margin_pct"] is None           # ΔR=0
+    assert get("2317", 2026, 2)["roe_q_pct"] is None                  # bvps≤0
+    assert get("2454", 2027, 1)["revenue_m"] == 90.0                  # 跨年不扣
+    assert get("2454", 2026, 4)["revenue_m"] is None                  # 缺 2026Q3 → null
 
 
 # ─── D4 融資融券（MI_MARGN）─────────────────────────────────────────────────

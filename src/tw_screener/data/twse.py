@@ -670,16 +670,18 @@ _FUNDAMENTALS_SCHEMA: dict[str, type[pl.DataType]] = {
     "stock_id": pl.Utf8,
     "year": pl.Int32,         # 西元
     "quarter": pl.Int32,
-    "revenue_m": pl.Float64,  # 營業收入（百萬元）
-    "gross_margin_pct": pl.Float64,
-    "op_margin_pct": pl.Float64,
-    "pretax_margin_pct": pl.Float64,  # 稅前純益率（%，營益分析，D5）
-    "net_margin_pct": pl.Float64,     # 稅後純益率（%，營益分析，D5）
-    "eps": pl.Float64,        # 單季基本每股盈餘（元）
+    # 快取存 API 原始值＝**累計 YTD**（Q2＝Q1+Q2，2026-09-20 實證）；單季值一律經
+    # `decumulate_fundamentals()` 在讀取層還原（parquet 不改，reconcile 依此口徑）。
+    "revenue_m": pl.Float64,  # 營業收入（百萬元，累計 YTD）
+    "gross_margin_pct": pl.Float64,   # 累計毛利率（%，營益分析；與 op/net 同端點，推定同為累計）
+    "op_margin_pct": pl.Float64,      # 累計營益率（%）
+    "pretax_margin_pct": pl.Float64,  # 累計稅前純益率（%，營益分析，D5）
+    "net_margin_pct": pl.Float64,     # 累計稅後純益率（%，營益分析，D5）
+    "eps": pl.Float64,        # 累計基本每股盈餘（元）
     "debt_ratio_pct": pl.Float64,     # 負債比＝負債總額/資產總額（%，一般業，D5）
     "current_ratio": pl.Float64,      # 流動比＝流動資產/流動負債（倍，一般業，D5）
     "bvps": pl.Float64,               # 每股淨值（元，每股參考淨值，一般業，D5）
-    "roe_q_pct": pl.Float64,          # 單季ROE＝EPS/每股淨值（%，歸屬母公司，D5）
+    "roe_q_pct": pl.Float64,          # 原始＝累計EPS/每股淨值（%）；讀取層以單季EPS重算
 }
 
 # _parse_quarterly_fundamentals 組列時用（schema 中除識別欄外的值欄，roe_q_pct 為衍生欄另算）
@@ -708,6 +710,57 @@ def _safe_ratio(num: float | None, den: float | None) -> float | None:
     if num is None or den is None or den <= 0:
         return None
     return num / den
+
+
+_FUND_YTD_MARGIN_COLS = ("gross_margin_pct", "op_margin_pct", "pretax_margin_pct", "net_margin_pct")
+
+
+def decumulate_fundamentals(df: pl.DataFrame) -> pl.DataFrame:
+    """fundamentals 累計 YTD → 單季（純函式；全 repo 唯一還原點，reconcile 亦用它）。
+
+    `revenue_m`／`eps`／利潤率（gross/op/pretax/net）在 MOPS 端點皆為年初至今累計，
+    但消費端（G1/G2/G5、報告）語意是單季。規則：Q1 原值；Qn＝Qn−Q(n−1)（同股同年）；
+    利潤率＝營收加權 `(m_n·R_n − m_{n−1}·R_{n−1})/(R_n−R_{n−1})`（ΔR≤0→null）；
+    `roe_q_pct`＝單季 eps／bvps×100（bvps≤0→null）。`bvps`／負債比／流動比為期末時點值，不動。
+
+    前一季缺（無該季快取或該股當季未公告）→ 該列單季值 null，**不回退成累計值**（誠實標未取得）。
+    輸入須已對 (stock_id, year, quarter) 去重；缺的可選欄（如純測試資料無利潤率）自動略過。
+    """
+    if df.is_empty():
+        return df
+    cols = set(df.columns)
+    src = [c for c in ("revenue_m", "eps", *_FUND_YTD_MARGIN_COLS) if c in cols]
+    prev = df.select(
+        "stock_id", "year",
+        (pl.col("quarter") + 1).alias("quarter"),
+        *[pl.col(c).alias(f"_prev_{c}") for c in src],
+    )
+    out = df.join(prev, on=["stock_id", "year", "quarter"], how="left")
+    first = pl.col("quarter") == 1
+    single: list[pl.Expr] = []
+    if "revenue_m" in cols:
+        d_rev = pl.col("revenue_m") - pl.col("_prev_revenue_m")
+        for c in _FUND_YTD_MARGIN_COLS:
+            if c in cols:
+                single.append(
+                    pl.when(first).then(pl.col(c))
+                    .when(d_rev > 0)
+                    .then((pl.col(c) * pl.col("revenue_m")
+                           - pl.col(f"_prev_{c}") * pl.col("_prev_revenue_m")) / d_rev)
+                    .alias(c)
+                )
+        single.append(
+            pl.when(first).then(pl.col("revenue_m")).otherwise(d_rev).alias("revenue_m")
+        )
+    if "eps" in cols:
+        eps_s = pl.when(first).then(pl.col("eps")).otherwise(pl.col("eps") - pl.col("_prev_eps"))
+        single.append(eps_s.alias("eps"))
+        if "bvps" in cols and "roe_q_pct" in cols:
+            single.append(
+                pl.when(pl.col("bvps") > 0).then(eps_s / pl.col("bvps") * 100)
+                .alias("roe_q_pct")
+            )
+    return out.with_columns(single).drop([f"_prev_{c}" for c in src])
 
 
 def _parse_quarterly_fundamentals(
@@ -2166,16 +2219,33 @@ class TWSEClient:
         logger.info("單季基本面快取 → {} ({} 檔)", cache_file, len(df))
         return df
 
-    def load_latest_fundamentals(self) -> pl.DataFrame:
-        """純讀最新 fundamentals_*.parquet（不打網）；無快取回空表。"""
+    def _load_fundamentals_single_quarter(self) -> tuple[pl.DataFrame, list[Path]]:
+        """讀全部 fundamentals_*.parquet（原始累計）→ 去重 → 還原單季。回 (df, 排序後檔案清單)。
+
+        parquet 保持原始累計值不改（reconcile 依賴此口徑）；還原只在此讀取層做。
+        """
         files = sorted(self.cache_dir.glob("fundamentals_*.parquet"))
         if not files:
-            return pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA)
-        return load_parquet(files[-1])
+            return pl.DataFrame(schema=_FUNDAMENTALS_SCHEMA), files
+        raw = pl.concat([pl.read_parquet(f) for f in files], how="diagonal_relaxed")
+        raw = raw.unique(subset=["stock_id", "year", "quarter"], keep="last", maintain_order=True)
+        return decumulate_fundamentals(raw), files
+
+    def load_latest_fundamentals(self) -> pl.DataFrame:
+        """純讀最新一季 fundamentals（不打網），**已還原單季**；無快取回空表。
+
+        回傳範圍＝最新快取檔內的 (stock, year, quarter) 列（同原行為，含尚未更新的晚報公司）；
+        單季還原需前一季檔，缺 → 該股單季欄 null（見 `decumulate_fundamentals`）。
+        """
+        single, files = self._load_fundamentals_single_quarter()
+        if not files:
+            return single
+        latest_keys = pl.read_parquet(files[-1]).select("stock_id", "year", "quarter")
+        return single.join(latest_keys, on=["stock_id", "year", "quarter"], how="semi")
 
     def load_fundamentals_history(self) -> pl.DataFrame:
-        """docs/31 §11：純讀全部 fundamentals_*.parquet 並合併，算 QoQ 差分
-        （`delta_net_margin_pct`/`delta_op_margin_pct`，G1/G5 用）——不打網。
+        """docs/31 §11：純讀全部 fundamentals_*.parquet 並合併、**還原單季**後算 QoQ 差分
+        （`delta_net_margin_pct`/`delta_op_margin_pct`，G1/G5 用；單季−單季）——不打網。
 
         比照 `load_revenue_yoy_deltas()` 同一種模式：每個快取檔是單一季度全體公司
         （`fetch_quarterly_fundamentals()` docstring：各端點只回最新一季），跨檔
@@ -2183,15 +2253,11 @@ class TWSEClient:
         2026Q1/Q2 兩季**，差分只有 1 個值、無時間序列深度（同 docs/31 §11 已記錄）；
         只有 1 季或缺對應季別的股票 delta 留 None，不外插、不假裝算得出來。
         """
-        files = list(self.cache_dir.glob("fundamentals_*.parquet"))
-        if not files:
-            return pl.DataFrame(schema=_FUNDAMENTALS_HISTORY_SCHEMA)
-        df = pl.concat([pl.read_parquet(f) for f in files], how="diagonal_relaxed")
-        if df.is_empty():
+        df, files = self._load_fundamentals_single_quarter()
+        if not files or df.is_empty():
             return pl.DataFrame(schema=_FUNDAMENTALS_HISTORY_SCHEMA)
         recent = (
-            df.unique(subset=["stock_id", "year", "quarter"])
-            .sort(["year", "quarter"], descending=True)
+            df.sort(["year", "quarter"], descending=True)
             .group_by("stock_id", maintain_order=True)
             .head(2)
         )
