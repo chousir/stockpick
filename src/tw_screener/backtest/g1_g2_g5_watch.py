@@ -234,6 +234,30 @@ def select_g1_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
     return snapshot.filter(pl.col("g1")).select("stock_id", "name").unique("stock_id")
 
 
+def select_g1_candidates_large_cap(
+    snapshot: pl.DataFrame, market_cap_min_billion: float = 300.0
+) -> pl.DataFrame:
+    """docs/31 §20.16：G1 候選生成路徑加市值≥`market_cap_min_billion`門檻（預設300億，
+    同 G2／G4／F2'）。M-Fund-SingleQ 還原單季後 `Δnet_margin≥1.5pp` 腿變鬆（652→830），
+    G1 命中 245→324 檔，且是五式中唯一無市值下限者；使用者 2026-09-20 拍板收斂。
+
+    `g1` 欄位本身（`g1_g2_g5_watch` 底帳前瞻累積軌）**刻意不動**，理由同 §20.4：
+    避免更動正在累積驗證中的判準定義。無門檻版本仍可用 `select_g1_candidates()`。
+    """
+    empty = pl.DataFrame(schema={"stock_id": pl.Utf8, "name": pl.Utf8})
+    need = {"stock_id", "name", "market_cap_billion", "g1"}
+    if snapshot.is_empty() or not need.issubset(snapshot.columns):
+        return empty
+    gated = snapshot.filter(
+        pl.col("g1")
+        & pl.col("market_cap_billion").is_not_null()
+        & (pl.col("market_cap_billion") >= market_cap_min_billion)
+    )
+    if gated.is_empty():
+        return empty
+    return gated.select("stock_id", "name").unique("stock_id")
+
+
 def select_g5_candidates(snapshot: pl.DataFrame) -> pl.DataFrame:
     """從 `build_g1_g2_g5_snapshot()` 輸出篩 `g5==True` 的列（同上，`screen
     run-local g5`用；G5同樣仍在「分析層」，依賴`Δop_margin`，零回測深度）。

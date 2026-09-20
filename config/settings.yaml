@@ -485,6 +485,7 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
   g1_g2_g5_watch:            # docs/31 §11/§20.10：G1/G2/G5/F2' 前瞻累積軌每週快照（手動指令，需每週跑）
     g1_delta_net_margin_min: 1.5   # docs/31 §4.1 G1：Δnet_margin≥+1.5pp
     g1_ma60_max_pct: 15.0           # docs/31 §4.1 G1：above_ma60_pct≤+15
+    g1_mktcap_min_billion: 300.0    # docs/31 §20.16：G1 候選生成路徑市值下限（同 G2/G4/F2'；g1 旗標／底帳不動）
     g2_roe_min: 3.5                 # docs/31 §4.1 G2：roe_q_pct≥3.5
     g2_debt_max_pct: 60.0           # docs/31 §4.1 G2：debt_ratio_pct≤60
     g2_current_min: 1.2             # docs/31 §4.1 G2：current_ratio≥1.2

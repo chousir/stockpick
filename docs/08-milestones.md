@@ -1190,3 +1190,23 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
   (c) `gross_margin_pct` 為結構推論、非逐檔實證。
 
 **狀態**：程式＋測試＋文件完成；驗收 `pytest -q` 1385 passed／ruff 全過／唯一 FAIL＝既有 RED `test_w35_anchor`（非本次回歸）。**已 merge 進 main（61982d4，2026-09-20；分支保留、未 push）。**
+
+---
+
+## M-G1-Converge：G1 收斂＋M-Fund-SingleQ 遺留三項（分支 `feat/g1-converge-fund-followups`）— 2026-09-20
+
+> 使用者 2026-09-20 指示「收尾 M-Fund-SingleQ 遺留三項＋G1 收斂」。G1 收斂方式經使用者拍板：**加市值≥300億**（選項對照見 docs/31 §20.16）。
+
+**完成**
+- `select_g1_candidates_large_cap()`＋`config g1_mktcap_min_billion: 300.0`；`screen run-local g1`／`make week` 走它；
+  `g1` 旗標／底帳判準不動（比照 §20.4 G4）。**實測 G1 324→76**（事前預測 76；G2 35／G5 20／F2' 25 不變）。
+- 遺留 (a)：真正缺口在消費端——`redesign_prelim_read` 原本不分 `fund_basis` 混算，已改分口徑（`g1[ytd]`／`g1[single_q]`）＋2 測試；
+  底帳讀取時補 `ytd` 本就生效，未改檔。
+- 遺留 (b)：**未動門檻**，只量影響面（`min_gross_margin_pct=25` 翻轉 33 出／41 進；`thin_margin_pct=5` 翻轉 70 進／76 出，約 3–4%）——重校與否待使用者決定。
+- 遺留 (c)：`gross_margin_pct` 無外部來源可逐檔驗；內部一致性檢驗（毛利≥營益）累計假設違反 3 檔 vs 單季假設 12 檔，
+  支持累計但**維持「推定、未逐檔實證」**。
+- 文件：docs/31 §20.16＋§20.5 表 G1 列、docs/11 收斂敘述。
+
+**未涵蓋／後續**：(i) G1 低基期翻正（79 檔前期淨利率≤0）未處理；(ii) 實證 (c) 需新抓 FinMind 毛利欄（新抓取，需使用者同意）；
+(iii) `single_q` 底帳批要等 W39 `make week` 才開始累積。
+

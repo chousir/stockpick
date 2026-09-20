@@ -7,6 +7,7 @@ from datetime import date, timedelta
 import polars as pl
 
 from tw_screener.backtest.redesign_prelim_read import (
+    _compute_by_fund_basis,
     compute_prelim_forward_alpha,
     format_prelim_report,
 )
@@ -134,3 +135,24 @@ def test_format_prelim_report_handles_empty_and_populated() -> None:
     assert "非規劃書§7.4正式驗證" in report
     assert "g1" in report
     assert "無資料" in report
+
+
+def test_compute_by_fund_basis_never_mixes_ytd_and_single_q() -> None:
+    """M-Fund-SingleQ：同一 flag 的 ytd／single_q 列分開算，flag 帶口徑後綴，n 不合併。"""
+    price = pl.concat([
+        _price("1101", [100.0 * (1.02**i) for i in range(15)]),
+        _price("2330", [100.0 * (1.01**i) for i in range(15)]),
+    ])
+    ledger = _ledger([
+        {"week": "2026-W02", "data_date": _DAYS[0], "stock_id": "1101", "g1": True, "g2": False},
+        {"week": "2026-W03", "data_date": _DAYS[1], "stock_id": "2330", "g1": True, "g2": False},
+    ]).with_columns(pl.Series("fund_basis", ["ytd", "single_q"]))
+    out = _compute_by_fund_basis(ledger, price)
+    g1_rows = out.filter(pl.col("flag").str.starts_with("g1"))
+    assert set(g1_rows["flag"].to_list()) == {"g1[ytd]", "g1[single_q]"}
+    assert all(n == 1 for n in g1_rows["n"].to_list())  # 各自 1 列，沒有被併成 2
+
+
+def test_compute_by_fund_basis_empty_ledger() -> None:
+    empty = pl.DataFrame(schema={"week": pl.Utf8, "fund_basis": pl.Utf8})
+    assert _compute_by_fund_basis(empty, pl.DataFrame()).is_empty()

@@ -137,6 +137,28 @@ def _read_ledger_csv(path: Path, schema: dict[str, type[pl.DataType]]) -> pl.Dat
     return pl.read_csv(path, try_parse_dates=True, schema_overrides=schema)
 
 
+def _read_g1g2g5_ledger(path: Path) -> pl.DataFrame:
+    """讀 G1/G2/G5/F2' 底帳並補 `fund_basis`（無此欄的舊列＝累計口徑 `ytd`，M-Fund-SingleQ）。"""
+    from tw_screener.backtest.g1_g2_g5_watch import _read_ledger
+
+    return _read_ledger(path)
+
+
+def _compute_by_fund_basis(ledger: pl.DataFrame, price_history: pl.DataFrame) -> pl.DataFrame:
+    """財報口徑（`ytd`／`single_q`）不同的列**不得混算**（同欄名不同定義，docs/31 §11 口徑更正）：
+    各口徑分開算 forward alpha，`flag` 加 `[口徑]` 後綴併成同一張表。"""
+    parts: list[pl.DataFrame] = []
+    for basis in sorted(ledger["fund_basis"].unique().to_list()) if not ledger.is_empty() else []:
+        part = compute_prelim_forward_alpha(
+            ledger.filter(pl.col("fund_basis") == basis), price_history, ("g1", "g2", "g5", "f2")
+        )
+        if not part.is_empty():
+            parts.append(
+                part.with_columns(pl.format("{}[{}]", pl.col("flag"), pl.lit(basis)).alias("flag"))
+            )
+    return pl.concat(parts) if parts else pl.DataFrame(schema=_READ_SCHEMA)
+
+
 def format_prelim_report(g1g2g5_read: pl.DataFrame, l6g4_read: pl.DataFrame) -> str:
     """把兩份讀值組成一份markdown報告（docs/31 §21.4附產物）。"""
     lines = [
@@ -186,7 +208,6 @@ def run_redesign_prelim_read(settings: Path, out_path: Path | None = None) -> st
     import yaml as _yaml
 
     from tw_screener.analysis.rotation import load_market_history
-    from tw_screener.backtest.g1_g2_g5_watch import LEDGER_SCHEMA as G1G2G5_SCHEMA
     from tw_screener.backtest.l6_g4_watch import LEDGER_SCHEMA as L6G4_SCHEMA
 
     with open(settings, encoding="utf-8") as fh:
@@ -204,13 +225,11 @@ def run_redesign_prelim_read(settings: Path, out_path: Path | None = None) -> st
     )
     cache_dir = Path(cfg["paths"]["cache_dir"]) / "twse"
 
-    g1g2g5_ledger = _read_ledger_csv(g1g2g5_path, G1G2G5_SCHEMA)
+    g1g2g5_ledger = _read_g1g2g5_ledger(g1g2g5_path)
     l6g4_ledger = _read_ledger_csv(l6g4_path, L6G4_SCHEMA)
     price_history = load_market_history(cache_dir, n_days=250)
 
-    g1g2g5_read = compute_prelim_forward_alpha(
-        g1g2g5_ledger, price_history, ("g1", "g2", "g5", "f2")
-    )
+    g1g2g5_read = _compute_by_fund_basis(g1g2g5_ledger, price_history)
     l6g4_read = compute_prelim_forward_alpha(
         l6g4_ledger, price_history, ("g4", "l6_2cond", "l6_4cond")
     )
