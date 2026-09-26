@@ -40,14 +40,10 @@
 3. 永遠不要用自信的語氣掩蓋低信心的判斷——這是本制度唯一無法自動偵測的失敗模式。
 
 ## 四、本次 session 未做／未驗證（接手前先知道）
-- Agent 工具 per-call model 指定：sonnet 已於 2026-07-08 實測 OK；haiku/opus/fable **未實測**，別名對應版本亦未查證（見 10 §1）。
+- Agent 工具 per-call model 指定：sonnet 已於 2026-07-08 實測 OK（對抗審查即用它跑的）；haiku/opus **未實測**（首次使用若行為異常，先讀 10 §1 過期警告）。
 - docs/09-coding-conventions.md 與 CLAUDE.md 工程速查的重疊度未逐條核對（CLAUDE.md 以精簡優先，細節以 docs/09 為準）。
-- ~~MCP「claude.ai Google Drive」未授權~~ → 2026-09-26 起 session 工具清單已出現 Google Drive connector（未實測呼叫）。
+- MCP「claude.ai Google Drive」未授權，相關能力不可用；需要時請使用者在 claude.ai connector 設定授權。
 - 本地分支 feat/ws5a、feat/ws5b（已併 main）與 research/* 兩支未清，屬倉庫衛生，未在本次範圍。
-
-### 2026-09-26 增補（Opus 5.5 換代 session）
-- 主對話換成 Opus 5.5 後重審本制度：10 §0 派工判準由「行數門檻」改為「輸出大而只需結論」（1M context＋subagent 冷啟動成本）；fable 限定為高風險第二意見（使用者拍板）。
-- **已知未修**：`report/builder.py` 取 `message.content[0].text`——claude-opus-5 預設開 thinking，首塊可能是 thinking block；thinking 也吃 `max_tokens: 4000` → 疑截斷。使用者裁定另開分支修，本 session 只記錄（docs/08、90-lessons 同步）。修好前 `report.llm.model` 維持 claude-opus-5，不升 5.5。
 
 ## 五、交接區（中斷時寫這裡；完成則保持空白）
 （無未完成項。）

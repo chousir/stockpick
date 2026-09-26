@@ -92,3 +92,9 @@
 錯誤信念：快取裡沒有的欄位＝來源沒有；把「結構推論」當作無從驗證而擱置數輪。
 修正：宣稱「外部來源無此資料」前先對來源做一次最小探測（單檔單 dataset 列出全部 type／欄位），不從自家 parser 輸出推斷；探測便宜（1 request），判準事前寫死後再抓樣本。
 落點：docs/31 §20.16 (c) 更正與實證；承接 2026-09-20「對帳判準全未過」「一個欄位查出累計口徑」兩條。
+
+## 2026-09-26 換模型時，直呼 API 的程式碼與 harness 文件要一起重審
+現象：2026-09-20 把 `report.llm.model` 升到 claude-opus-5 時只移除 temperature，沒查到該模型預設開 thinking——`builder.py` 仍取 `content[0].text`、`max_tokens: 4000` 未計 thinking。換代重審 harness 文件時才發現；playbook/10 §1 也停在 07-08 的查證（fable 被寫成「當日特例」，實際仍在 enum）。
+錯誤信念：模型升級＝改 model 字串＋拿掉會 400 的參數；harness 文件的環境事實季檢一次就夠。
+修正：改 model ID 前先載 claude-api skill 查該模型的 thinking／effort／回應區塊結構差異；主對話換模型時當場重查 10 §1。
+落點：CLAUDE.md 路由表「動程式內 Claude API 呼叫」列、playbook/10 §1 末條；builder 修復待另開分支（docs/08 Harness-Opus55）。

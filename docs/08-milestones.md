@@ -1210,3 +1210,19 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 (iii) `single_q` 底帳批要等 W39 `make week` 才開始累積。
 
 **狀態**：驗收 `pytest -q` 1389 passed／ruff 全過／唯一 FAIL＝既有 RED `test_w35_anchor`；verifier 6 條全 PASS。**已 merge 進 main（40664fa，2026-09-20；分支保留、未 push——本環境無遠端寫入權限）。**
+
+---
+
+## Harness-Opus55：Claude 協作文件換代重審（分支 `docs/opus55-harness-refresh`）— 2026-09-26
+
+> 使用者 2026-09-26 將主對話模型換成 Opus 5.5，指示重審本案 Claude 協作文件。黃區改動逐項經使用者拍板。
+
+**完成**
+- playbook/10：§0 派工判準改為「輸出大而只需結論」（原 200 行／2 輪 Grep 門檻）；§1 環境事實重查證；fable 限定為高風險第二意見（§2/§5/§6）。
+- CLAUDE.md 開工第 2 步同步＋路由表新增「動程式內 Claude API 呼叫」列；playbook/30 路徑與第二意見 model、playbook/50 §四 更新。
+- `/daily-picks`、`/retro-review` 的選模型理由改寫為職能描述（去除 Sonnet 4.6／「最強模型」字樣）；verifier 定義檢視後不動。
+- `.claude/settings.json` 移除指向舊路徑 `/home/user/stockpick` 的 3 條 allow＋1 條 additionalDirectories；刪除過期 `.claude/RESUME.md`（git-excluded）。
+
+**待辦（另開分支，使用者裁定）**：`src/tw_screener/report/builder.py` 以 `message.content[0].text` 取文字——`claude-opus-5` 預設開 adaptive thinking，
+首塊可能是 thinking block（無 `.text`）；thinking 亦計入 `max_tokens: 4000`，疑截斷。修法方向：取第一個 `type=="text"` 區塊、處理 `stop_reason=="refusal"`、
+重估 `max_tokens`（改動前先載 claude-api skill）。修好前 `report.llm.model` 維持 `claude-opus-5`，不升 `claude-opus-5-5`。

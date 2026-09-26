@@ -28,7 +28,7 @@ make diagnose
 ## Step 2 — Opus 子代理產出覆盤報告
 
 用 `Agent` 工具開一個 `general-purpose` 子代理，**model 指定 `opus`**（覆盤要下對/錯判斷、
-排優先順序，判斷含量高，用 opus 級——與 `/daily-picks` Step 4 同理）。
+排優先順序，值得用最強模型——比照 docs/11 對 ProPicks 合成步驟的同一個理由）。
 
 這個子代理沒有你的對話上下文，prompt 必須完整自包含，至少要包含：
 - 「讀 `docs/30-pick-outcome-retro-review.md` 全文，把裡面的 Persona／規則（§2）與任務
