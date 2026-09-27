@@ -1210,3 +1210,14 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 (iii) `single_q` 底帳批要等 W39 `make week` 才開始累積。
 
 **狀態**：驗收 `pytest -q` 1389 passed／ruff 全過／唯一 FAIL＝既有 RED `test_w35_anchor`；verifier 6 條全 PASS。**已 merge 進 main（40664fa，2026-09-20；分支保留、未 push——本環境無遠端寫入權限）。**
+
+---
+
+## W37 缺週紀錄（分支 `docs/w37-gap-note`）— 2026-09-27
+
+> 使用者 2026-09-27 問能否補產 W37 pick.md；裁決：**不補 W37，記錄缺週**。
+
+- **事實**：W37（2026-09-07～09-13）當週未跑 `make week`——`reports/2026-W37/`、`data/snapshots/2026-W37/` 皆不存在，無 picks.csv／pick.md。
+- **不事後補產**：`make week` 取 TWSE/TPEX OpenAPI 當下最新資料、無 as-of 回放；09-27 補跑＝W39 資料貼 W37 標籤，前視偏差且污染 picks.csv／pick-outcome／retro-review 底帳。比照 W26 前例（不造檔、如實標斷供）。
+- **覆盤規則**：pick-outcome／retro-review 遇 W37 一律視為斷供週，不插值、不以前後週代填。
+- **偵測缺口（未修）**：`pick_store.weeks_without_picks` 只抓「有 screen_result 但無 picks.csv」的週目錄；W37 整個目錄不存在，**不會被列出**（2026-09-27 實跑結果：W29/W30/W33/W34/W39，無 W37）。覆盤時需人工對照週次連續性。
