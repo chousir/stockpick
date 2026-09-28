@@ -1226,3 +1226,11 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 **待辦（另開分支，使用者裁定）**：`src/tw_screener/report/builder.py` 以 `message.content[0].text` 取文字——`claude-opus-5` 預設開 adaptive thinking，
 首塊可能是 thinking block（無 `.text`）；thinking 亦計入 `max_tokens: 4000`，疑截斷。修法方向：取第一個 `type=="text"` 區塊、處理 `stop_reason=="refusal"`、
 重估 `max_tokens`（改動前先載 claude-api skill）。修好前 `report.llm.model` 維持 `claude-opus-5`，不升 `claude-opus-5-5`。
+## W37 缺週紀錄（分支 `docs/w37-gap-note`）— 2026-09-27
+
+> 使用者 2026-09-27 問能否補產 W37 pick.md；裁決：**不補 W37，記錄缺週**。
+
+- **事實**：W37（2026-09-07～09-13）當週未跑 `make week`——`reports/2026-W37/`、`data/snapshots/2026-W37/` 皆不存在，無 picks.csv／pick.md。
+- **不事後補產**：`make week` 取 TWSE/TPEX OpenAPI 當下最新資料、無 as-of 回放；09-27 補跑＝W39 資料貼 W37 標籤，前視偏差且污染 picks.csv／pick-outcome／retro-review 底帳。比照 W26 前例（不造檔、如實標斷供）。
+- **覆盤規則**：pick-outcome／retro-review 遇 W37 一律視為斷供週，不插值、不以前後週代填。
+- **偵測缺口（未修）**：`pick_store.weeks_without_picks` 只抓「有 screen_result 但無 picks.csv」的週目錄；W37 整個目錄不存在，**不會被列出**（2026-09-27 實跑結果：W29/W30/W33/W34/W39，無 W37）。覆盤時需人工對照週次連續性。
