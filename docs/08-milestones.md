@@ -1267,14 +1267,43 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 **回退**：`picks.shortlist.enabled: false`＋還原 docs/11（`git log -- docs/11-propicks-analysis.md`）。
 
 **已知限制**
-- 排序證據在族群層；防禦 regime 下 r+20 IC 僅 +0.070。**族群內選哪一檔未驗證**——M-Pick2（個股層因子錦標賽）要補的就是這段。
+- 排序證據在族群層；防禦 regime 下 r+20 IC 僅 +0.070。**族群內選哪一檔未驗證**——M-Pick2（個股層因子錦標賽）要補的就是這段（**2026-09-28 已測：四因子皆未過關，見下方 M-Pick2 段**）。
 - 流動性只看單日成交額。
 - 本 milestone 起核心／補充池定義與過去不可比；以 `machine_rank` 非 null 區分新舊列。
 
-**下一步（待使用者指示）**：M-Pick2 研究軌（判準沿用 docs/22；候選：月營收創新高／YoY 加速、EPS 加速、個股 RS、52 週高點 recency）。
+**下一步（待使用者指示）**：M-Pick2 研究軌（判準沿用 docs/22；候選：月營收創新高／YoY 加速、EPS 加速、個股 RS、52 週高點 recency）。**——已執行（2026-09-28），見下方 M-Pick2 段。**
 
 **驗收後修正（2026-09-28）**：`test_picks_sync.py::_out` 改為先去 ANSI 色碼（`FORCE_COLOR` 環境下 7 條誤紅，playbook/90）；`shortlist.py` 已跌破 MA60 的停損依據改標 `low_60d（已跌破 MA60）`（原誤標「均線糾結」，僅持股／gated 列）＋1 測試；docs/11 依 W39 樣張回饋收緊措辭（持股條件價不限 `tier=held`、刪未定義的「過寬」、算不出條件價寫「未取得」、資料基準行可帶 `> `、上週帳可附評估週來源註、thesis 範例 ≤20 字）。
 
 **未涵蓋／待使用者裁決**：(i) 事件閘門日期查不到即「暫不當閘門」＝fail-open（M-Pick1 前既有規則，未改）——**使用者 2026-09-28 指示上網查證並新增**：`config/macro_calendar.yaml` 2026-09-30～2027-01 事件逐項查官方來源（Fed／BLS／BEA／TAIFEX 規則／TSMC IR／MSCI／央行／FEC），查到者 `verified: true`＋note 附來源；新增非農（就業）、PCE、央行理監事會、MSCI 公告日、Q3 財報截止、2027-01 結算／FOMC；更正三筆原檔錯誤（FOMC 12/16→12/09、10 月 CPI 11/13→11/10、MSCI 生效 11/24→12/01）；NVIDIA 財報與 Q3 財報截止官方未公告、維持 false。規則本身未改——2027-02 以後仍是舊路徑；(ii) 附錄 G 信心分級兩條可同時成立時無優先序（既有，樣張取較嚴者）；(iii) 價格不連續安全網只看近 10 交易日——更早的斷點（W39 樣張見 6669 緯穎 08-31→09-04 7095→2565）會讓距季線失真、仍可進 shortlist 排序（未修）；(iv) `data/cache/twse/daily_202609*` 僅 7 檔（6–8 月各 12–14 檔），對 MA 計算的影響**未查證**（docs/29 ③ 已知密度風險）。
 
 **狀態**：驗收 `make test` 1436 passed（含 FORCE_COLOR 環境）／ruff 淨／mypy 無新增錯；三週 shortlist 實跑自查全過；W39 樣張（scratchpad、未覆蓋真實 pick.md、未跑 picks sync）第一頁 44 行、禁詞 0、空方 ≥ 理由；verifier 6 條全過（5(a) 唯一命中 docs/11:525 屬「舊流程」歷史敘述，符合計畫「除歷史紀錄外為零」）。**已 merge 進 main（2026-09-28，排在 docs/opus55-harness-refresh、docs/w37-gap-note 之後；分支保留、未 push）。**
+
+---
+
+## M-Pick2：族群內個股因子錦標賽（分支 `feat/m-pick2-intra-sector-pick`）— 2026-09-28
+
+> 使用者 2026-09-28 指示「研究族群內該挑哪一檔」；同日拍板月營收因子「現在抓，四因子一起測」（新抓 FinMind 月營收）。
+> 研究軌、零生產改動；預註冊與結果全在 docs/32。
+
+**完成**
+- 資料：`finmind.fetch_month_revenue`／`load_month_revenue_history`＋`make backfill-finmind-revenue`（1,132 檔：有資料 1,129、無資料 3、請求失敗 0；
+  `data/cache/finmind/month_revenue_*.parquet`，2019 起；不接 make week）；docs/02 新增 dataset 段。
+- 預註冊（docs/32 §0–§5，commit `b8662c6`，任何評估之前）：重建 shortlist 可入選池（趨勢前 2 桶×gate，門檻值沿用生產）、
+  四因子一個定義一個方向（F1 6-1 月動能、F2 52 週高點接近度、F3 EPS 加速、F4 月營收 YoY 加速；EPS／營收以保守期限做 point-in-time、缺期不回退）、
+  M1 產業中性週 IC／M2 首選−組均／M3 首選−現行規則、C1–C5＋Bonferroni（k=4）。跑前只做宇宙規模可行性檢查。
+- `backtest/intra_pick.py`（純函式）＋`intra_pick_runner.py`＋`backtest intra-pick`／`make intra-pick`＋settings `backtest.intra_pick`；
+  `factor_lab.moving_block_bootstrap_ci` 加 `alpha`（預設不變）；測試 26 條＋月營收 6 條（`make test` 1468 passed、ruff 淨、mypy 49 錯＝main 既有、無新增）；評估前手算抽查 2330／5347 逐位相符。
+- **裁決（docs/32 §6）：四因子零個成立**——r+20 族群內 IC F1 −0.013（無證據）、F2 +0.024、F3 +0.016、F4 +0.022（未過關，點估計皆低於 0.03 底線、CI 全跨 0）；
+  M3（因子首選−現行首選）−0.08%～+0.13%、CI 全跨 0 → **shortlist 維持現行規則（偏好帶→成交額）**。
+  分寸：排除的是 ≳0.055 的大效應；CI 上界 0.042–0.054 未排除 0.03–0.05 的小效應（第二意見粗估檢定力約 2 成）＝弱證據、非否證。
+- 揭露（不得升格）：現行成交額鍵自身族群內 IC +0.041 [+0.012, +0.070]；偏好帶距離鍵 5 段全負（CI 跨 0）；F2–F4 在 r+40 與全次產業宇宙較強——列為衍生假設（docs/32 §6.4），未跑。
+- 文件：docs/32（新）、docs/11 狀態字樣＋變更紀錄（排序規則不變）、docs/02、docs/07、README、本段；memory 記未過關因子。
+
+- 驗收：verifier 9/9 PASS（預註冊早於評估、§0–§5 未動、數字與報告逐一相符、裁決獨立重推一致、零生產改動）；
+  fable 第二意見「結論成立」，另指出三處過度宣稱＋一處揭露不完整，docs/32 §6 已依建議修正措辭。
+
+**未涵蓋／待使用者裁決**：(i) 衍生假設（成交額鍵、偏好帶方向、r+40 慢訊號、宇宙效應、除息還原總報酬重建面板）要不要另立預註冊、以 2026-W40 起新週當樣本外；
+(ii) 研究池寬於生產池（生產只含篩選候選＋觀察名單）、「強漲法人賣」旗標與因子簇上限未重建；(iii) membership 非 PIT、2022–2025 除息未還原（docs/32 §5 已知偏誤）；
+(iv) **共用函式 bug（未修）**：`rotation_efficacy.weekly_snapshot_dates` 以 `dt.year()×dt.week()` 分組、非 ISO 年，跨年週併錯（每個受影響年界丟 1 個 1 月初快照、多 1 個 12-31 快照）；
+本研究影響 ≤2 週、不動結論，但 rotation_efficacy／laggard_grid／g3_grid 等研究共用，修正會改動其重跑結果——另開小分支、待使用者決定。
