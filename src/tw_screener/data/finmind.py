@@ -14,6 +14,9 @@ FinancialStatements／BalanceSheet）餵 `analysis/dcf.py` 的機械式 DCF。`_
 共用核心＋`fetch_cashflows/financials/balancesheet` 具名 wrapper＋`load_*_history`。parser
 保持笨（不 de-cumulate／不 TTM），語意判斷全在 dcf.py。
 
+M-Pick2（docs/32）：`TaiwanStockMonthRevenue` 月營收全歷史（寬表，形狀同 PER）餵族群內個股
+因子研究；`fetch_month_revenue`＋`load_month_revenue_history`，不接 make week。
+
 合規（鐵律 1 精神外推；官方開放資料、門檻比 Goodinfo 鬆）：concurrency=1、請求間隔
 ≥ settings.finmind.request_interval_sec、同 (dataset,stock_id) 24h 快取、連錯 3 次停。
 token 選填（未註冊 300 req/hr、註冊 600）；用 httpx 直打、不裝 finmind pip 套件。
@@ -48,6 +51,19 @@ _PER_SCHEMA: dict[str, type[pl.DataType]] = {
     "pe": pl.Float64,
     "pbr": pl.Float64,
     "dividend_yield": pl.Float64,
+}
+
+# ── M-Pick2（docs/32）：月營收（寬表，同 PER 形狀）──────────────────────────────
+# 實測（2026-09-28，2330）：`{date, stock_id, country, revenue, revenue_month, revenue_year,
+# create_time}`；`date`＝營收月的**次月 1 日**（2026-08 營收 → 2026-09-01）；`create_time`
+# 近期列＝實際公告日、舊列為空字串；revenue 單位＝元（當月、非累計）。
+_DATASET_MONTH_REVENUE = "TaiwanStockMonthRevenue"
+_MONTH_REVENUE_SCHEMA: dict[str, type[pl.DataType]] = {
+    "stock_id": pl.Utf8,
+    "year": pl.Int64,
+    "month": pl.Int64,
+    "revenue": pl.Float64,
+    "create_date": pl.Date,
 }
 
 
@@ -155,6 +171,50 @@ def _parse_taiwan_stock_per(payload: dict[str, Any]) -> pl.DataFrame:
             ),
         })
     return pl.DataFrame(rows, schema=_PER_SCHEMA)
+
+
+def _parse_month_revenue(payload: dict[str, Any]) -> pl.DataFrame:
+    """解析 FinMind `TaiwanStockMonthRevenue` JSON → (stock_id, year, month, revenue, create_date)。
+
+    year/month＝營收所屬月（`revenue_year`/`revenue_month`；`date` 是次月 1 日，不用）。
+    revenue 照抄（0／負值不改，分母判斷交給消費端）；create_time 空字串或無法解析 → null
+    （舊列 FinMind 不給公告日——point-in-time 由消費端依法定期限推，不從此欄臆造）。
+    同 (stock_id, year, month) 重複 → 保留最後一筆；無法解析的列略過（warn 不 raise）。
+    """
+    data = payload.get("data") or []
+    rows: list[dict[str, Any]] = []
+    for r in data:
+        try:
+            sid = str(r["stock_id"]).strip()
+            year = int(r["revenue_year"])
+            month = int(r["revenue_month"])
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning(f"略過無效 FinMind 月營收列：{r!r} — {e}")
+            continue
+        if not sid or not 1 <= month <= 12:
+            logger.warning(f"略過無 stock_id 或月份越界的 FinMind 月營收列：{r!r}")
+            continue
+        created: date | None = None
+        raw_ct = str(r.get("create_time") or "").strip()
+        if raw_ct:
+            try:
+                created = date.fromisoformat(raw_ct[:10])
+            except ValueError:
+                created = None
+        rows.append({
+            "stock_id": sid,
+            "year": year,
+            "month": month,
+            "revenue": _to_float_or_none(r.get("revenue"), drop_non_positive=False),
+            "create_date": created,
+        })
+    if not rows:
+        return pl.DataFrame(schema=_MONTH_REVENUE_SCHEMA)
+    return (
+        pl.DataFrame(rows, schema=_MONTH_REVENUE_SCHEMA)
+        .unique(subset=["stock_id", "year", "month"], keep="last", maintain_order=True)
+        .sort(["stock_id", "year", "month"])
+    )
 
 
 def _parse_finmind_long(
@@ -381,6 +441,37 @@ class FinMindClient:
                 consecutive_errors = 0
         return result
 
+    # ── M-Pick2（docs/32）：月營收 ───────────────────────────────────────────────
+    def fetch_month_revenue(
+        self, stock_id: str, start_date: str = "2019-01-01", force: bool = False
+    ) -> pl.DataFrame:
+        """抓單檔 TaiwanStockMonthRevenue 全歷史 → month_revenue_{stock_id}.parquet（同 PER 抓法）。
+
+        失敗且有舊快取 → 回退舊快取；失敗且無舊快取，或 `{"data":[]}` → 回空表
+        （schema=_MONTH_REVENUE_SCHEMA）。`last_request_failed` 語意同 fetch_taiwan_stock_per。
+        """
+        self.last_request_failed = False
+        cache_file = self.cache_dir / f"month_revenue_{stock_id}.parquet"
+        if not force and is_fresh(cache_file, self.ttl_hours):
+            logger.info(f"命中快取 {cache_file}")
+            return load_parquet(cache_file)
+
+        payload = self._request(_DATASET_MONTH_REVENUE, stock_id, start_date)
+        if payload is None:
+            self.last_request_failed = True
+            if cache_file.exists():
+                logger.warning(f"FinMind 月營收 {stock_id} 抓取失敗，回退舊快取")
+                return load_parquet(cache_file)
+            logger.warning(f"FinMind 月營收 {stock_id} 抓取失敗，且無舊快取")
+            return pl.DataFrame(schema=_MONTH_REVENUE_SCHEMA)
+
+        df = _parse_month_revenue(payload)
+        if df.is_empty():
+            logger.info(f"FinMind 月營收 {stock_id} 無資料（data=[]）")
+            return df
+        save_parquet(df, cache_file)
+        return df
+
     # ── Phase 2：財報 / 現金流 / 資產負債（M-Val-FinMind2）─────────────────────
     def _fetch_dataset(
         self,
@@ -477,6 +568,19 @@ def load_balancesheet_history(cache_dir: Path) -> pl.DataFrame:
     """全部 balancesheet_*.parquet（M-Val-FinMind2）。"""
     return _load_finmind_wide_history(
         cache_dir, "balancesheet", _BALANCESHEET_WIDE_SCHEMA
+    )
+
+
+def load_month_revenue_history(cache_dir: Path) -> pl.DataFrame:
+    """純讀**全部**已回補的 month_revenue_*.parquet（不打網；M-Pick2）；無快取回空表。"""
+    files = sorted(Path(cache_dir).glob("month_revenue_*.parquet"))
+    if not files:
+        return pl.DataFrame(schema=_MONTH_REVENUE_SCHEMA)
+    frames = [load_parquet(f) for f in files]
+    return (
+        pl.concat(frames, how="diagonal_relaxed")
+        .unique(subset=["stock_id", "year", "month"], keep="last")
+        .sort(["stock_id", "year", "month"])
     )
 
 

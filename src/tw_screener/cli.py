@@ -462,6 +462,81 @@ def data_backfill_finmind_per(
     )
 
 
+@data_app.command("backfill-finmind-revenue")
+def data_backfill_finmind_revenue(
+    limit: int = typer.Option(0, "--limit", help="只跑前 N 檔（測試用；0=全部）"),
+    force: bool = typer.Option(False, "--force", help="略過 24h TTL、強制重抓每一檔"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """一次性回補全次產業成員的 FinMind TaiwanStockMonthRevenue 月營收歷史（M-Pick2，docs/32）。
+
+    為何需要：TWSE 月營收端點只回最新月，`revenue_*.parquet` 從 2026-05 才起累 → 族群內
+    個股因子研究的「月營收 YoY 加速」無歷史可回測。宇宙＝`list_subindustries()` 全成員
+    （與 backfill-finmind-per 同一組）。免費層一次一檔、限速 settings.finmind.request_interval_sec；
+    ~1000 檔 × 1 call ≈ 註冊 600/hr → ~1.7h、未註冊 300/hr → ~3.4h。建議掛背景；24h TTL 內已抓到的
+    走快取 fast-path、天然可續跑。研究用、**不接 make week**。
+    """
+    import yaml
+
+    from tw_screener.analysis.sector_universe import list_subindustries
+    from tw_screener.data.finmind import create_client
+
+    client = create_client(settings)
+    with open(settings, encoding="utf-8") as fh:
+        start_date = yaml.safe_load(fh)["finmind"].get("month_revenue_start_date", "2019-01-01")
+
+    members = list_subindustries()
+    if members.is_empty():
+        console.print("[red]缺 concepts.yaml 次產業成員[/red]")
+        raise typer.Exit(1)
+    counts = members.group_by("sub_industry").len()
+    ordered = (
+        members.join(counts, on="sub_industry")
+        .sort("len", descending=True)["stock_id"]
+        .to_list()
+    )
+    seen: set[str] = set()
+    targets: list[str] = []
+    for sid in ordered:
+        if sid not in seen:
+            seen.add(sid)
+            targets.append(sid)
+    if limit > 0:
+        targets = targets[:limit]
+    console.print(f"[bold]FinMind 月營收回補：{len(targets)} 檔（起始 {start_date}）[/bold]")
+
+    done = failed = empty = 0
+    # 連續 3 次「請求失敗」（HTTP/額度）→ 停（鐵律 1）；`{"data":[]}` 不計入。
+    consecutive_fail = 0
+    for i, sid in enumerate(targets, 1):
+        try:
+            df = client.fetch_month_revenue(sid, start_date=start_date, force=force)
+            if client.last_request_failed:
+                failed += 1
+                consecutive_fail += 1
+            elif df.is_empty():
+                empty += 1
+                consecutive_fail = 0
+            else:
+                done += 1
+                consecutive_fail = 0
+            if i % 25 == 0 or i == len(targets):
+                console.print(f"  進度 {i}/{len(targets)}（最新：{sid} {len(df)} 列）")
+        except Exception as e:  # noqa: BLE001 — 單檔失敗不該中斷整批
+            failed += 1
+            consecutive_fail += 1
+            console.print(f"[yellow]  {sid} 失敗：{e}[/yellow]")
+        if consecutive_fail >= 3:
+            console.print(
+                f"[red]連續 3 次請求失敗（進度 {i}/{len(targets)}）——疑似 FinMind 額度用盡"
+                "／API 異常，停止本輪。稍後重跑，已抓到的走快取續跑。[/red]"
+            )
+            break
+    console.print(
+        f"[green]回補完成：有資料 {done}、無月營收 {empty}、請求失敗 {failed}[/green]"
+    )
+
+
 @data_app.command("backfill-finmind-financials")
 def data_backfill_finmind_financials(
     limit: int = typer.Option(0, "--limit", help="只跑前 N 檔（測試用；0=全部）"),
@@ -1652,6 +1727,22 @@ def backtest_laggard_grid_cmd(
     from tw_screener.backtest.laggard_grid_runner import run_laggard_grid
 
     run_laggard_grid(settings, out_dir, membership)
+
+
+@backtest_app.command("intra-pick")
+def backtest_intra_pick_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/intra_pick）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """M-Pick2 族群內個股因子錦標賽：四因子在重建 shortlist 可入選池的族群內挑檔力（docs/32）。
+
+    需先 make build-panel、backfill-finmind-financials、backfill-finmind-revenue。
+    """
+    from tw_screener.backtest.intra_pick_runner import run_intra_pick
+
+    run_intra_pick(settings, out_dir)
 
 
 @backtest_app.command("g3-grid")

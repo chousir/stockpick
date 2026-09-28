@@ -719,12 +719,15 @@ def moving_block_bootstrap_ci(
     n_boot: int = 1000,
     seed: int = 42,
     stat: Callable[[list[float]], float] = _mean,
+    alpha: float = 0.05,
 ) -> tuple[float | None, float | None]:
     """Moving-block bootstrap 百分位 CI（WS-I C 法・通用 helper，供 basket/laggard 表重用）。
 
     對序列（按既定順序，通常＝日期升冪）重抽 ceil(T/L) 個長度 L 的區塊（起點
     uniform∈[0, T-L]，區塊可重疊）、串接後截斷回長度 T，計 stat（預設 mean）；
-    重複 n_boot 次、CI＝percentile [2.5, 97.5]。純 python（無 numpy 依賴，鐵律 4）。
+    重複 n_boot 次、CI＝percentile [α/2, 1−α/2]（預設 α=0.05 → [2.5, 97.5]；
+    同 seed 改 α 只換分位、不換重抽分布——docs/32 Bonferroni 層用）。
+    純 python（無 numpy 依賴，鐵律 4）。
 
     T<10 → (None, None)（重抽不出可信分布，誠實不給，門檻同 bootstrap_mean_ci）；
     block_len ≥ T 時截斷至 T（單一區塊＝退化為對整段重抽，仍可跑不崩潰）。
@@ -747,8 +750,8 @@ def moving_block_bootstrap_ci(
             resampled.extend(clean[start : start + length])
         stats.append(stat(resampled[:t]))
     stats.sort()
-    lo_i = int(n_boot * 0.025)
-    hi_i = int(n_boot * 0.975) - 1
+    lo_i = int(n_boot * (alpha / 2))
+    hi_i = int(n_boot * (1 - alpha / 2)) - 1
     return stats[lo_i], stats[hi_i]
 
 

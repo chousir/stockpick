@@ -1,0 +1,14 @@
+{
+  "msg": "success",
+  "status": 200,
+  "data": [
+    {"date": "2019-01-01", "stock_id": "2330", "country": "Taiwan", "revenue": 89830598000, "revenue_month": 12, "revenue_year": 2018, "create_time": ""},
+    {"date": "2019-02-01", "stock_id": "2330", "country": "Taiwan", "revenue": 89464546000, "revenue_month": 1, "revenue_year": 2019, "create_time": ""},
+    {"date": "2026-09-01", "stock_id": "2330", "country": "Taiwan", "revenue": 514805337000, "revenue_month": 8, "revenue_year": 2026, "create_time": "2026-09-10"},
+    {"date": "2026-09-01", "stock_id": "2330", "country": "Taiwan", "revenue": 514805337001, "revenue_month": 8, "revenue_year": 2026, "create_time": "2026-09-10 17:30:00"},
+    {"date": "2026-09-01", "stock_id": "", "country": "Taiwan", "revenue": 1, "revenue_month": 8, "revenue_year": 2026, "create_time": ""},
+    {"date": "2026-09-01", "stock_id": "2330", "country": "Taiwan", "revenue": 1, "revenue_month": 13, "revenue_year": 2026, "create_time": ""},
+    {"date": "2026-09-01", "stock_id": "2330", "country": "Taiwan", "revenue": 1, "revenue_year": 2026, "create_time": ""},
+    {"date": "2026-08-01", "stock_id": "2330", "country": "Taiwan", "revenue": 0, "revenue_month": 7, "revenue_year": 2026, "create_time": "not-a-date"}
+  ]
+}

@@ -3,11 +3,11 @@
         group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
         l6-g4-watch g1-g2-g5-watch \
         backfill-daily-history backfill-institutional-history \
-        build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid contrarian-efficacy flow-inflection margin-factors \
+        build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid intra-pick contrarian-efficacy flow-inflection margin-factors \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check snapshot-week shortlist \
         target-price-read \
-        backfill-finmind-per backfill-finmind-financials finmind-reconcile finmind-financials-reconcile
+        backfill-finmind-per backfill-finmind-financials backfill-finmind-revenue finmind-reconcile finmind-financials-reconcile
 
 .DEFAULT_GOAL := help
 
@@ -171,6 +171,9 @@ backfill-finmind-per:  ## ⏳ 一次性回補全次產業成員 FinMind PER 歷�
 backfill-finmind-financials:  ## ⏳ 一次性回補全市場 FinMind 3 財報 dataset（現金流/財報/資產負債，~1130×3 call，註冊5.6h/未註冊11h，24h TTL 可續跑；LIMIT 選填；季頻重跑，不接 make week，docs/31 §20.15）
 	uv run tw-screener data backfill-finmind-financials $(if $(LIMIT),--limit $(LIMIT),)
 
+backfill-finmind-revenue:  ## ⏳ 一次性回補全次產業成員 FinMind 月營收歷史（~1000 檔×1 call，註冊1.7h/未註冊3.4h，24h TTL 可續跑；LIMIT 選填；研究用、不接 make week，docs/32）
+	uv run tw-screener data backfill-finmind-revenue $(if $(LIMIT),--limit $(LIMIT),)
+
 finmind-reconcile:  ## FinMind PER vs TWSE 官方估值比對帳（docs/31 §20.14，需先 backfill-finmind-per）
 	uv run tw-screener backtest finmind-reconcile
 
@@ -196,6 +199,9 @@ rotation-efficacy:  ## WS-C 輪動欄效度：歷史重建→生產對表→forw
 
 laggard-grid:  ## WS-D 族群內強弱：2×2×位階 forward 報酬格（產 research/laggard_grid/）
 	uv run tw-screener backtest laggard-grid
+
+intra-pick:  ## M-Pick2 族群內個股因子錦標賽：四因子挑檔力＋預註冊裁決（docs/32；需先 build-panel＋backfill-finmind-financials/revenue；產 research/intra_pick/）
+	uv run tw-screener backtest intra-pick
 
 contrarian-efficacy:  ## M-BR1 Phase 2 底部左側聯合桶（轉買×貼近低）forward alpha 檢驗＋§1 硬門檻裁決（產 research/contrarian_efficacy/）
 	uv run tw-screener backtest contrarian-efficacy
