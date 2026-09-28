@@ -8,8 +8,8 @@
 ```
 【目標】找出：【要找什麼，具體到欄位名/函式名/字串】
 【動機】因為【接下來要做什麼】，所以我需要知道【存在於哪裡/有幾處/長什麼樣】。
-【範圍】搜 /workspaces/stockpick 下的【目錄】；排除 data/、reports/、research/、playbook/_backup/。
-搜索廣度：【medium｜very thorough】。
+【範圍】搜 /home/user/stockpick 下的【目錄】；排除 data/、reports/、research/、playbook/_backup/。
+搜索廣度：【quick｜medium｜very thorough】。
 【驗收條件】
 - 每個結果附 file:line。
 - 找不到也要回報「確認不存在」＋你搜過的 pattern 清單（讓我判斷是真沒有還是沒搜到）。
@@ -46,7 +46,7 @@
 【回報格式】≤15 行：套用 N 處（檔案清單）／跳過 M 處（各附 file:line＋為何不符 pattern）／測試輸出尾 3 行。
 ```
 
-## T4 研究／分析（agent: general-purpose；model: sonnet；裁決存疑時 fable 出第二意見，見 playbook/10 §5）
+## T4 研究／分析（agent: general-purpose；model: sonnet；裁決存疑時 opus 出第二意見）
 ```
 【本輪唯一要回答的問題】【一句話，是非題或量值題】
 【裁決判準（先寫死，跑完不准改）】：【數字門檻，例：lift ≥1.3 且 z≥2 → 成立；否則否證】
@@ -60,7 +60,7 @@
 【回報格式】≤20 行：結論一行／關鍵數字 3-5 行／樣本數與但書／結果檔路徑／衍生假設清單（只列不跑）。
 ```
 
-## T5 審查／驗收（agent: verifier；model: 定義內建 sonnet+effort high；高風險加派 fable 第二意見）
+## T5 審查／驗收（agent: verifier；model: 定義內建 sonnet+effort high；高風險加派 opus 第二意見）
 ```
 【要驗收的宣稱】「【誰宣稱做完了什麼】」
 【驗收條件（逐條可判定）】

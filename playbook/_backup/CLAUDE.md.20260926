@@ -12,7 +12,7 @@
 
 ## 開工三步（每個 session 開場照做）
 1. 對照下方路由表：本任務要先讀哪個檔，先讀再動手。
-2. 輸出大而只需結論的工作（找不到目標的 repo 掃描／跨頁查網／批次改檔／消化 reports・research 產物）→ 派 subagent，主對話只收結論；已知路徑的讀檔小改自己做（判準 playbook/10 §0）。
+2. 大量讀取／掃 repo／查網頁／批次改檔 → 派 subagent（規則 playbook/10），主對話只收結論。
 3. 一個 session 只做一件事。使用者切換主題 → 建議先 /clear。
 
 ## 路由表（做 X 之前先讀 Y）
@@ -24,7 +24,6 @@
 | 寫任何個股/族群報告、pick、持股健檢 | playbook/60-analyst-persona.md |
 | 研究軌任務（因子／回測／假設檢定） | playbook/20 §6 ＋ docs/13 |
 | 動 goodinfo 爬蟲模組 | docs/02-data-sources.md（合規規則） |
-| 動程式內 Claude API 呼叫（report builder、report.llm 設定） | 先載 claude-api skill 查該模型參數限制＋playbook/10 §1 末條 |
 | 改 CLAUDE.md／playbook／memory | playbook/40-maintenance-protocol.md |
 | 踩了坑、被糾正、規則失效 | append 進 playbook/90-lessons.md（格式在檔頭） |
 | 新 milestone 開工 | docs/08-milestones.md 尾段＋下方 milestone 紀律 |

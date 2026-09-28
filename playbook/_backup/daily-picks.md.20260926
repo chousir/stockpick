@@ -33,7 +33,7 @@ TPEX OpenAPI、法人史、TDCC、族群分析等步驟，仍可能跑數分鐘�
 ## Step 2 — 總經第二意見掃描（Sonnet 子代理）
 
 用 `Agent` 工具開一個 `general-purpose` 子代理，**model 指定 `sonnet`**（掃描是重複性
-檢索工作、判斷含量低，用中階模型快且省——docs/28 §1 的分工理由）。
+檢索工作，不需要頂級推理，比照 docs/28 §1 原本「Sonnet 4.6：快且省」的分工理由）。
 
 Prompt 內容要包含：「讀 `.claude/commands/macro-scan.md` 並完整依其程序執行一次外部
 總經風險掃描（本專案今天的 `reports/<週次>/macro_regime.csv` 剛被 `make week` 產出，
@@ -60,9 +60,8 @@ Prompt 內容要包含：「讀 `.claude/commands/macro-scan.md` 並完整依其
 
 ## Step 4 — Opus 合成 `pick.md`
 
-用 `Agent` 工具再開一個 `general-purpose` 子代理，**model 指定 `opus`**（多空權衡＋估值綜合
-判斷是全流程判斷含量最高的一步，用 opus 級；用子代理是為了讓它在乾淨 context 裡讀完整份
-規格與產物，不受本對話前幾步干擾）。
+用 `Agent` 工具再開一個 `general-purpose` 子代理，**model 指定 `opus`**（比照 docs/11
+「選 Claude Opus，最強模型，這步值得用」——這是全流程唯一值得用最貴模型的地方）。
 
 這個子代理沒有你的對話上下文，prompt 必須完整自包含，至少要包含：
 - 「讀 `docs/11-propicks-analysis.md` 全文，把裡面的『Prompt 範本』段落與『任務 0-5』
