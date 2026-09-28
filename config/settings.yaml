@@ -469,6 +469,35 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     rs_window: 20                # rs_subind 回看窗（個股 vs 次產業籃報酬差）
     n_boot: 1000
     output_dir: research/laggard_grid
+  intra_pick:                # M-Pick2 族群內個股因子錦標賽（make intra-pick；docs/32 預註冊，跑後不得改）
+                             # gate 值不在此重複：沿用 picks.shortlist／picks.core_ext_ma60_max_pct／
+                             # propicks_flags.low_liquidity_amount／rotation.min_members／group_analysis.price_discontinuity_pct
+    horizon_td: 20                # 主窗 r+20（M-Pick1 使用者拍板主尺）
+    disclose_horizons_td: [10, 40]  # R2 揭露窗（不當門檻）
+    history_days: 1400            # 日線載入窗（≈2021-06 起：F2 250 日回看＋趨勢分暖身）
+    calendar_min_names: 300       # 交易日曆：當日 ≥ 此檔數有價（剔除零星快取日）
+    gate_disc_lookback_td: 10     # 價格不連續安全網回看（同生產 detect_price_discontinuity）
+    mom_skip_td: 21               # F1 mom_6_1：跳過最近 1 個月
+    mom_lookback_td: 126          # F1 mom_6_1：6 個月
+    high_window_td: 250           # F2 high52_near：52 週
+    eps_available_from:           # F3 保守期限次日起可用：[年位移, 月, 日]（一般業 5/15、8/14、11/14 再加緩衝）
+      q1: [0, 5, 31]
+      q2: [0, 9, 1]
+      q3: [0, 11, 30]
+      q4: [1, 4, 1]
+    revenue_available_day: 11     # F4 營收月次月 11 日起可用（法定次月 10 日前公告）
+    min_group: 2                  # 同（週, 次產業）≥ 此檔才計（1 檔無從挑）
+    min_names_week: 10            # 週合格成員下限（同 factor_lab.daily_ic_series ≥10）
+    min_coverage: 0.70            # 因子覆蓋底線（未達＝不可判）
+    min_weeks: 100                # 可計週數下限（未達＝不可判）
+    min_effect_ic: 0.03           # C1 效應量底線（docs/22 §0；未校準啟發式）
+    n_segments: 5                 # C3 分段數（無參數訓練，全期等分）
+    min_same_segments: 4          # C3 段內平均 >0 段數門檻（docs/23 §1(a) 4/5）
+    n_tests: 4                    # Bonferroni k＝預註冊主檢定數（四因子）
+    alpha: 0.05
+    n_boot: 1000                  # moving-block bootstrap 重抽次數（週頻塊長 ceil(h/5)+1）
+    seed: 42
+    output_dir: research/intra_pick
   g3_grid:                  # docs/31 G3 候選 filter 驗證（族群前5×個股貼落後×位階中段×資金非負）
     horizons_td: [10, 20]        # forward 窗（交易日），與 laggard_grid 同窗才可比較
     rs_window: 20                 # rs_subind 回看窗，同 laggard_grid 口徑

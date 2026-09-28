@@ -645,7 +645,8 @@ def coverage(df: pl.DataFrame, factor: str, target: str, universe_col: str) -> f
     base = df.filter(pl.col(universe_col) & pl.col(target).is_not_null())
     if base.is_empty():
         return None
-    return float(base[factor].is_not_null().mean() or 0.0)
+    share = base[factor].is_not_null().mean()
+    return float(share) if isinstance(share, (int, float)) else None
 
 
 def classify(r: FactorResult, cfg: IntraPickConfig) -> tuple[str, tuple[str, ...]]:

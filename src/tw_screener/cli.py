@@ -1729,6 +1729,22 @@ def backtest_laggard_grid_cmd(
     run_laggard_grid(settings, out_dir, membership)
 
 
+@backtest_app.command("intra-pick")
+def backtest_intra_pick_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/intra_pick）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """M-Pick2 族群內個股因子錦標賽：四因子在重建 shortlist 可入選池的族群內挑檔力（docs/32）。
+
+    需先 make build-panel、backfill-finmind-financials、backfill-finmind-revenue。
+    """
+    from tw_screener.backtest.intra_pick_runner import run_intra_pick
+
+    run_intra_pick(settings, out_dir)
+
+
 @backtest_app.command("g3-grid")
 def backtest_g3_grid_cmd(
     out_dir: Path | None = typer.Option(
