@@ -135,6 +135,7 @@ tw-screener cp candidates / calibrate / valuation
 tw-screener backtest strategies
 tw-screener backtest finmind-reconcile          # FinMind PER vs TWSE 官方估值三判準對帳（docs/31 §20.14）
 tw-screener backtest finmind-financials-reconcile  # FinMind 財報 vs 本地 fundamentals 四判準對帳（docs/31 §20.15）
+tw-screener picks shortlist [--week 2026-Www]   # M-Pick1 機器排序 Top N → reports/<週>/shortlist.csv（＝make shortlist；week 已內含，docs/11）
 tw-screener picks sync --week 2026-Www          # 解析 pick.md 尾端區塊整批落底帳（主流程）
 tw-screener picks record --week 2026-Www --stock XXXX --layer core   # 單檔補記
 tw-screener picks outcome [--diff]
@@ -166,11 +167,11 @@ tw-screener market macro [--refresh]   # ＝ make macro；--refresh 略過快取
 make week GROUP=defg           # 十步一鍵跑完
 open reports/2026-Www/group_analysis.md
 
-# 把 6 類報告貼給 Claude（docs/11 prompt）→ pick.md（含尾端機器可讀區塊）
+# 把 shortlist.csv＋報告貼給 Claude（docs/11 prompt）→ pick.md（一頁決策卡＋尾端機器可讀區塊）＋ pick_detail.md（明細）
 # pick.md 定稿後整批寫底帳（餵 pick 閉環；單檔補記用 picks record）：
 uv run tw-screener picks sync --week 2026-Www
 
-make report STOCK_ID=2330      # 對 picks 每檔產深度報告
+make report STOCK_ID=2330      # 對 Top 5 每檔產深度報告
 make weekend GROUP=defg        # 或：week ＋ commit/push（已含空 commit 守衛）
 ```
 

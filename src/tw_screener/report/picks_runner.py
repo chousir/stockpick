@@ -28,6 +28,7 @@ PICKS_BLOCK_END = "<!-- picks:end -->"
 
 _PICK_KEYS = {
     "stock", "layer", "sub", "entry", "stop", "thesis", "name", "ext_ma60", "late_entry",
+    "rank",  # M-Pick1：shortlist.csv 機器排序名次（≥1 整數）→ 底帳 machine_rank
 }
 _EXCLUDED_KEYS = {"stock", "reason", "detail", "name", "late_entry"}
 
@@ -278,14 +279,69 @@ def _parse_picks_block(text: str, path: Path) -> dict[str, Any]:
     return data
 
 
+def _parse_rank(value: Any) -> int | None:
+    """pick 的 rank 欄：缺 → None；≥1 整數 → int；其他（字串/小數/布林/≤0）→ ValueError。"""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"rank 必須是 ≥1 的整數（shortlist.csv 機器排序名次），收到 {value!r}")
+    return value
+
+
+def _shortlist_checks(
+    shortlist: pl.DataFrame,
+    prepared_picks: list[dict[str, Any]],
+    prepared_excluded: list[dict[str, Any]],
+    max_vetoes: int,
+) -> list[str]:
+    """M-Pick1 對帳（shortlist.csv 存在時）：回 warning 訊息清單（rank 不符屬 error，另處理）。
+
+    - shortlist top 檔既不在 picks 也不在 excluded → 漏記否決（否決須記 reason: 機器排序否決）
+    - excluded 中 機器排序否決 數量 > max_vetoes
+    - core 的 stop 抽不到絕對停損價（parse_stop_price）→ 停損延遲帳無法量測
+    """
+    import polars as pl
+
+    from tw_screener.backtest.picks_outcome import parse_stop_price
+    from tw_screener.report.shortlist import TIER_TOP, VETO_REASON
+
+    warnings: list[str] = []
+    covered = {r["stock_id"] for r in prepared_picks} | {r["stock_id"] for r in prepared_excluded}
+    for r in shortlist.filter(pl.col("tier") == TIER_TOP).iter_rows(named=True):
+        if r["stock_id"] not in covered:
+            warnings.append(
+                f"⚠️ shortlist top #{r['rank']} {r['stock_id']} {r.get('name') or ''}"
+                f"：既不在 picks 也不在 excluded——否決須記 excluded（reason: {VETO_REASON}）"
+            )
+    n_veto = sum(1 for r in prepared_excluded if r["reason"] == VETO_REASON)
+    if n_veto > max_vetoes:
+        warnings.append(
+            f"⚠️ 本週 {VETO_REASON} {n_veto} 檔 > 上限 {max_vetoes}"
+            "（picks.shortlist.max_vetoes）——否決理由僅限資料異常／重大負面外部事實／處置停牌"
+        )
+    for r in prepared_picks:
+        if r["layer"] == "core" and parse_stop_price(r["stop"]) is None:
+            warnings.append(
+                f"⚠️ {r['stock_id']} {r['name'] or ''}：core 的 stop 抽不到絕對停損價"
+                f"（{r['stop']!r}）——請照抄 shortlist.csv stop_text"
+            )
+    return warnings
+
+
 def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
-    """解析該週 pick.md 尾端機器可讀區塊，整批寫入底帳（全列驗證過才寫、冪等）。"""
+    """解析該週 pick.md 尾端機器可讀區塊，整批寫入底帳（全列驗證過才寫、冪等）。
+
+    M-Pick1：pick 可帶 rank（shortlist.csv 機器排序名次）→ 底帳 machine_rank。該週有
+    shortlist.csv 時逐檔核對 rank（不符＝error、整批不寫；遞補者帶自己的 alt 名次合法），
+    並對帳漏記否決／否決超額／core 停損抽不到價（warning、照寫）。
+    """
     from tw_screener.report.pick_store import (
         LAYERS,
         core_extension_violation,
         upsert_excluded,
         upsert_pick,
     )
+    from tw_screener.report.shortlist import ShortlistConfig, load_shortlist
 
     week_dir, cfg = _load_week_dir(settings, week)
     path = file if file is not None else week_dir / "pick.md"
@@ -332,6 +388,12 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
 
     enriched = _load_enriched(week_dir)
     max_ext = cfg.get("picks", {}).get("core_ext_ma60_max_pct")
+    shortlist = load_shortlist(week_dir)  # None＝該週無機器排序（舊週／停用）→ rank 不核對
+    shortlist_rank: dict[str, int | None] = (
+        dict(zip(shortlist["stock_id"].to_list(), shortlist["rank"].to_list(), strict=True))
+        if shortlist is not None
+        else {}
+    )
 
     errors: list[str] = []
     warnings: list[str] = []
@@ -375,6 +437,17 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
         if violation:
             errors.append(f"{where}：{violation}")
             continue
+        try:
+            rank = _parse_rank(raw.get("rank"))
+        except ValueError as e:
+            errors.append(f"{where}：{e}")
+            continue
+        # 有 shortlist.csv 就逐檔核對名次（遞補者帶自己在 shortlist 的 alt 名次＝合法）
+        if rank is not None and shortlist is not None and shortlist_rank.get(stock_id) != rank:
+            expected = shortlist_rank.get(stock_id)
+            got = f"#{expected}" if expected is not None else "無名次（未入 top/alt 或不在表內）"
+            errors.append(f"{where}：rank {rank} 與 shortlist.csv 不符（該檔機器排序 {got}）")
+            continue
         if layer == "core" and row_ext is None and max_ext is not None:
             warnings.append(
                 f"⚠️ {stock_id} {row_name or ''}：距季線乖離未知（candidates/watchlist/"
@@ -393,6 +466,7 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
                 "ext_ma60_pct": row_ext,
                 "thesis_tag": _opt_str(raw.get("thesis")),
                 "late_entry": bool(raw.get("late_entry", False)),
+                "machine_rank": rank,
             }
         )
 
@@ -436,6 +510,14 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
             console.print(f"[red]{msg}[/red]")
         console.print(f"[red]共 {len(errors)} 個錯誤——全列驗證過才寫，本次未寫入任何列[/red]")
         raise typer.Exit(1)
+
+    if shortlist is not None:
+        warnings += _shortlist_checks(
+            shortlist, prepared_picks, prepared_excluded,
+            ShortlistConfig.from_settings(cfg).max_vetoes,
+        )
+    elif any(r["machine_rank"] is not None for r in prepared_picks):
+        warnings.append("⚠️ 該週無 shortlist.csv——rank 無從核對，如實記錄")
 
     for msg in warnings:
         console.print(f"[yellow]{msg}[/yellow]")

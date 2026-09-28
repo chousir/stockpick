@@ -387,7 +387,7 @@ def data_backfill_finmind_per(
 
     為何需要：TWSE `BWIBBU_d` / TPEX `peratio` 皆「只回最新一交易日、不可回補」，
     `valuation_ratios_*.parquet` 從 2026-06-12 才起累、~13 ISO 週深度 → 自身估值歷史腿
-    樣本長期不足、附錄 G M1/M2 對半導體低獲利基期股失真。FinMind 2005-10 起逐日補齊
+    樣本長期不足、pick_detail.md 附錄 G M1/M2 對半導體低獲利基期股失真。FinMind 2005-10 起逐日補齊
     （docs/31 §20.14）。宇宙＝`list_subindustries()` 全成員（與 backfill-universe-history
     同一組，讓 §20.11 重建面板可 join）。免費層一次一檔、限速
     settings.finmind.request_interval_sec；~1130 檔 × 1 call ≈ 註冊 600/hr → ~2.5h、
@@ -2013,6 +2013,21 @@ def picks_sync_cmd(
     run_picks_sync(settings, week, file)
 
 
+@picks_app.command("shortlist")
+def picks_shortlist_cmd(
+    week: str | None = typer.Option(
+        None, "--week", help="週次目錄名（如 2026-W39）；預設 reports/ 下最新週"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """M-Pick1：機器排序 Top N（族群趨勢分×距季線位階×剔除旗標）→ reports/<week>/shortlist.csv。"""
+    from tw_screener.report.shortlist_runner import run_shortlist
+
+    code = run_shortlist(settings, week)
+    if code:
+        raise typer.Exit(code)
+
+
 @picks_app.command("outcome")
 def picks_outcome_cmd(
     exit_date: str | None = typer.Option(
@@ -2181,7 +2196,7 @@ def market_macro_risk_cmd(
     color = "red" if gate.downgrade_posture else ("green" if risk.status == STATUS_OK else "yellow")
     console.print(f"\n[bold]{week_dir.name} 宏觀窄橋（M8）[/bold]")
     console.print(f"  [{color}]{desc['line']}[/{color}]")
-    console.print("\n[dim]資料品質披露 yaml 用（貼進 pick.md 的披露區塊）：[/dim]")
+    console.print("\n[dim]資料品質披露 yaml 用（貼進 pick_detail.md 的披露區塊）：[/dim]")
     console.print(f"  macro_risk: {to_disclosure(risk)}")
     console.print(
         "\n[dim]定位：只影響倉位節奏，不改排序/剔除/燈色（裁決 D 局部覆寫 docs/26 §6.2(4)）。[/dim]"

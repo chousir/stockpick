@@ -34,6 +34,7 @@ PICKS_SCHEMA: dict[str, type[pl.DataType]] = {
     "ext_ma60_pct": pl.Float64,  # 入選時距季線乖離%（主虧損剖面欄，§1.3）
     "thesis_tag": pl.Utf8,     # 入選論點短標（如「F 主升續勢」）
     "late_entry": pl.Boolean,  # 明示覆寫同週 data_date 一致性檢查（WS-L；預設 False）
+    "machine_rank": pl.Int64,  # M-Pick1 shortlist.csv 機器排序名次（pick.md 區塊 rank；舊週 null）
 }
 
 EXCLUDED_SCHEMA: dict[str, type[pl.DataType]] = {
@@ -51,7 +52,10 @@ EXCLUDED_FILENAME = "excluded.csv"
 
 
 def _read_csv(path: Path, schema: dict[str, type[pl.DataType]]) -> pl.DataFrame:
-    """讀單一 CSV 並套 schema（缺欄補 null、多欄丟棄；日期字串轉 Date）。"""
+    """讀單一 CSV 並套 schema（缺欄補 null、多欄丟棄；日期字串轉 Date）。
+
+    舊週 CSV 無 machine_rank 欄（M-Pick1 前）→ 讀入為 null。
+    """
     if not path.exists():
         return pl.DataFrame(schema=schema)
     try:

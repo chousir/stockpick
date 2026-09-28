@@ -98,3 +98,9 @@
 錯誤信念：模型升級＝改 model 字串＋拿掉會 400 的參數；harness 文件的環境事實季檢一次就夠。
 修正：改 model ID 前先載 claude-api skill 查該模型的 thinking／effort／回應區塊結構差異；主對話換模型時當場重查 10 §1。
 落點：CLAUDE.md 路由表「動程式內 Claude API 呼叫」列、playbook/10 §1 末條；builder 修復待另開分支（docs/08 Harness-Opus55）。
+
+## 2026-09-28 子代理回報「全綠」，換個環境就 7 紅——rich 輸出斷言吃到 ANSI 色碼
+現象：M-Pick1 實作子代理回報 make test 1435 passed；session 中斷後以 bg job 重跑，`test_picks_sync.py` 7 條 FAIL。bg job 環境帶 `FORCE_COLOR=3`，rich 在數字前後插 ANSI 碼，子字串斷言（如「rank 必須是 ≥1 的整數」）被切斷。
+錯誤信念：子代理跑綠＝任何環境都綠；對 rich console 輸出做子字串比對只需去掉換行。
+修正：斷言 CLI/console 輸出前先 strip ANSI（`re.sub(r"\x1b\[[0-9;]*m", "", …)`）；驗收時在主 session 的實際環境親跑一次，不只採信子代理的綠燈。
+落點：`tests/report/test_picks_sync.py::_out`；尚未制度化（其他 capsys 斷言 rich 輸出的測試未普查）。

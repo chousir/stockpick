@@ -5,7 +5,7 @@
         backfill-daily-history backfill-institutional-history \
         build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid contrarian-efficacy flow-inflection margin-factors \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
-        dash-install dash-dev dash-build dash dash-test week-check snapshot-week \
+        dash-install dash-dev dash-build dash dash-test week-check snapshot-week shortlist \
         target-price-read \
         backfill-finmind-per backfill-finmind-financials finmind-reconcile finmind-financials-reconcile
 
@@ -21,7 +21,7 @@ help:  ## 列主要指令（裸打 make 即顯示）
 	@echo ""
 	@echo "進階指令：見 Makefile 各進階區段或 README「指令總覽」"
 
-week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-f-local → screen-redesign-local → fetch-candidates-history → rotation → macro → cp-value-candidates → group → snapshot-week → week-check → pick-outcome-brief
+week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-f-local → screen-redesign-local → fetch-candidates-history → rotation → macro → cp-value-candidates → group → snapshot-week → shortlist → week-check → pick-outcome-brief
 ifndef GROUP
 	@echo "❌ 請指定 GROUP=defg（現行唯一主流程；abc/def 已退役）"
 	@exit 1
@@ -45,6 +45,7 @@ endif
 	-$(MAKE) cp-value-candidates   # 個股 CP 補漲候選＋三重濾網（group 的 7. 分析請求要讀 cp_candidates.md；失敗不擋）
 	$(MAKE) group   # 官方族群前5(§13)/G1/G2/G4/G5/L6/F2'新設計候選揭露(§4/§7.2/§9/§11)前瞻累積軌皆已內含在這步，不必另跑
 	-$(MAKE) snapshot-week   # WS-J.1 point-in-time 快照：凍結本週 concepts/watchlist/holdings/宇宙成員（失敗不擋主流程）
+	-$(MAKE) shortlist   # M-Pick1 機器排序 Top N（讀本週 universe 快照＋輪動表；失敗不擋主流程，week-check 點名缺檔）
 	$(MAKE) week-check   # 尾段產物完整性檢查（規劃書 05 F4）：上面容錯步驟若無聲失敗，這裡點名
 	-$(MAKE) pick-outcome-brief   # WS-A3 上週 picks r+5 回饋一頁（輸入包；失敗不擋主流程）
 
@@ -118,6 +119,9 @@ week-check:  ## 產物完整性檢查：本週機器產物＋歷週 pick 底帳�
 
 snapshot-week:  ## WS-J.1 point-in-time 快照：凍結本週 concepts/watchlist/holdings/次產業宇宙成員到 data/snapshots/<週次>/
 	uv run tw-screener report snapshot
+
+shortlist:  ## M-Pick1 機器排序 Top N：族群趨勢分×距季線位階×剔除旗標 → reports/週次/shortlist.csv（WEEK=2026-W39 可指定，預設最新週；week 自動跑）
+	uv run tw-screener picks shortlist $(if $(WEEK),--week $(WEEK),)
 
 # ─── 進階：偶爾手動 ──────────────────────────────────────────────────────────
 

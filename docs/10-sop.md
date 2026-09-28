@@ -48,6 +48,7 @@ make fetch-candidates-history  # 補抓候選股 13 個月歷史 OHLCV（MA60 �
 make rotation                  # 次產業資金輪動，產 sector_rotation.md/csv
 make cp-value-candidates       # 個股 CP 補漲候選，產 cp_candidates.md
 make group                     # 族群分析，產 group_analysis.md＋candidates_enriched.csv
+make shortlist                 # M-Pick1 機器排序 Top 5＋候補，產 shortlist.csv（＝uv run tw-screener picks shortlist）
 ```
 
 **產出**：
@@ -58,29 +59,30 @@ reports/YYYY-Www/
   ├─ sector_rotation.md               ← ★ 全市場資金輪動地圖（四象限/★訊號/ΔRank）貼給 Claude
   ├─ cp_candidates.md                 ← ★ 個股 CP 補漲候選＋三重濾網（group Section 6 要讀）貼給 Claude
   ├─ group_analysis.md                ← Step 2 看這個（族群脈絡）貼給 Claude
-  ├─ candidates_enriched.csv          ← 全候選股 × 完整技術/籌碼/估值/flags（主要挑股宇宙）貼給 Claude
+  ├─ candidates_enriched.csv          ← 全候選股 × 完整技術/籌碼/估值/flags（shortlist 的候選宇宙）貼給 Claude
+  ├─ shortlist.csv                    ← ★ M-Pick1 機器排序 Top 5＋候補＋gate 剔除（pick.md 第一頁唯一排序來源）貼給 Claude
   └─ holdings/watchlist_enriched.csv  ← 有維護 watchlist/ 才產（庫存/觀察清單・必分析）貼給 Claude
 ```
 
 ### Step 2：產出進場清單（兩種模式擇一）
 
-**模式 2a（推薦）：ProPicks 風格全清單分析**
+**模式 2a（推薦）：shortlist 機器排序 ＋ Opus 一頁決策卡（M-Pick1）**
 
-把 `group_analysis.md` + `sector_rotation.md` + `candidates_enriched.csv` + `cp_candidates.md`
-+（若有）`holdings/watchlist_enriched.csv` + 所有 `screen_result_*.csv` 貼到 Claude Opus 網頁對話，
-配合範本 prompt 讓 AI 在「完整候選宇宙」中挑：
+把 `shortlist.csv` + `pick_outcome_brief.md` + `group_analysis.md` + `sector_rotation.md` + `candidates_enriched.csv`
++（若有）`holdings/watchlist_enriched.csv` + `cp_candidates.md` + 所有 `screen_result_*.csv` 貼到 Claude Opus 網頁對話
+（完整清單與順序見 docs/11 Step A／Step C），配合範本 prompt：
 
-- **任務 0（必做）**：庫存決策（續抱/加碼/減碼/停利/停損）＋觀察清單進場時機
-  （判「可進場」者升格入任務 2 四路匯流來源 D——與策略命中同權競爭核心/機會層）
-- 精選進場清單（寧缺勿濫）+ 為何入選 + 進場思路 + 主要風險
-- 訊號交集（F 命中股 × 個股鏡頭；本地未驗證式彼此交集只陳列不詮釋——D∩E 等經典交集已隨 D/E/G 軟退場）
-- 本週市場節奏 + 居安思危訊號 + 異常崛起個股
-- 觀察名單（追蹤但不進場）
+- **排序已由程式完成**（`shortlist.csv`：族群趨勢分＋距季線位階，只用已驗證訊號）——Claude 依 rank 說明 Top 5、
+  做否證式查證，最多否決 2 檔（限資料異常／重大負面外部事實／處置股停牌），由候補依序遞補；**不自由選股**
+- 持股動作表（續抱/加碼/減碼/停利/停損＋「收盤跌破 {價}」條件價）＋姿態 ≤2 行＋上週帳＋風險 ≤3
+- 其餘寫進明細 `pick_detail.md`：候補與 gate 計數、查證紀錄、市場節奏、觀察觸發、watchlist 逐檔（M-Pick1 起不再升格）、
+  族群解讀、附錄 G 綜合估值區間、未驗證訊號（M-BR1 左側／cp／轉折埋伏／deep_value_growth）
 
 完整 prompt + 流程 → [`docs/11-propicks-analysis.md`](./11-propicks-analysis.md)
 
-Claude 回覆存到 `reports/YYYY-Www/pick.md`（固定檔名，week-check 認這個名）；
-定稿後 `uv run tw-screener picks sync --week YYYY-Www` 把尾端機器可讀區塊整批落底帳。
+Claude 回覆存成兩檔：`reports/YYYY-Www/pick.md`（一頁決策卡 ≤50 行＋尾端 picks 區塊；固定檔名，week-check 認這個名）
+與 `reports/YYYY-Www/pick_detail.md`（明細，非必備）；定稿後 `uv run tw-screener picks sync --week YYYY-Www`
+把 pick.md 尾端機器可讀區塊整批落底帳。
 
 **模式 2b：純人工**
 
@@ -92,12 +94,13 @@ Claude 回覆存到 `reports/YYYY-Www/pick.md`（固定檔名，week-check 認�
 - **第 3 節**：各族群前 3 名
 - **第 5 節**：Claude 次產業深度分析請求（2.8 雷達挑 top-N 領先次產業、逐塊列成員股）
 - **第 6 節**：Claude CP 補漲候選分析請求（個股層，讀同夾 cp_candidates.md）
-- **第 7 節**：Claude 持有/觀察清單健檢請求（讀同夾 holdings/watchlist_enriched.csv，逐檔續抱/收緊/停利、接近進場/再等/剔除，與命中策略同等深度＝任務 0 的報告內版）
+- **第 7 節**：Claude 持有/觀察清單健檢請求（讀同夾 holdings/watchlist_enriched.csv，逐檔續抱/收緊/停利、接近進場/再等/剔除，與命中策略同等深度；M-Pick1 起對應 docs/11 的持股動作表＋pick_detail.md 附錄 E）
 
-挑股以 pick.md 精選清單或 candidates_enriched.csv 為準（族群/次產業強度排名是機械公式、僅輪動參考，勿直接照挑），記下股號（如 `2330`、`3008`、`6147`...）。
+挑股以 pick.md 的 Top 5（＝`shortlist.csv` 機器排序）為準；group_analysis 的族群/次產業強度排名是動能/廣度公式、
+未驗證、僅輪動參考——**不等於 shortlist 的排序**（後者用已驗證的族群趨勢分＋距季線位階），勿直接照挑。記下股號（如 `2330`、`3008`、`6147`...）。
 
-> 模式 2b 簡單快，但只看機械強度排名（5 日漲幅 + 族群強度），會漏
-> 「逆勢佈局」「低基期反轉」這類 setup。建議用 2a。
+> 模式 2b 簡單快，但只看 group_analysis 強度排名（5 日漲幅 + 族群強度，未驗證）。建議用 2a，
+> 或至少直接讀 `shortlist.csv`（tier=top/alt）。
 
 ### Step 3：逐檔產資料草稿
 
@@ -123,7 +126,7 @@ reports/YYYY-Www/stocks/2330_台積電.md
 - **「給 Claude 的指示」段**（範本 prompt 已內建）
 - 多個 `<!-- TODO: Claude 補寫 -->` 待填段落
 
-依本週 `pick.md`（Claude 精選清單）逐檔跑 `make report STOCK_ID=XXXX`，即產出多份 draft。
+依本週 `pick.md` 的 Top 5（機器排序）逐檔跑 `make report STOCK_ID=XXXX`，即產出多份 draft。
 
 ### Step 4：把 draft 貼到 Claude 對話
 
@@ -180,7 +183,7 @@ Claude 回覆完整 Markdown 後：
 
 報告寫完後，依個人習慣決定要不要：
 
-- **維護庫存/觀察清單**（下次 `make group` 會自動 enrich＋強制分析，見任務 0）：
+- **維護庫存/觀察清單**（下次 `make group` 會自動 enrich＋強制分析——持股進 pick.md 持股動作表、觀察清單進 shortlist 排序＋pick_detail.md 附錄 E，見 docs/11）：
   - 新進場 → 加進 `watchlist/holdings.csv`（`股號,買入價,股數,備註`；含成本、已 gitignore 不外流）
   - 想追蹤 → 加進 `watchlist/watchlist.csv`（`股號,備註`）
   - `watchlist/active.md` 仍可當自由筆記（不進分析流程）

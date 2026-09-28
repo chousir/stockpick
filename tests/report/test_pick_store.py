@@ -213,7 +213,7 @@ def test_load_legacy_csv_without_late_entry_column_backfills_false(tmp_path):
     """舊 CSV 無 late_entry 欄 → 載入時補 False，不得爆炸。"""
     week_dir = tmp_path / "2026-W27"
     week_dir.mkdir(parents=True)
-    legacy_cols = [c for c in PICKS_SCHEMA if c != "late_entry"]
+    legacy_cols = [c for c in PICKS_SCHEMA if c not in ("late_entry", "machine_rank")]
     pl.DataFrame([{c: _ROW[c] for c in legacy_cols}]).write_csv(week_dir / "picks.csv")
     out = load_week_picks(week_dir)
     assert dict(out.schema) == dict(PICKS_SCHEMA)
@@ -239,3 +239,27 @@ def test_f2_missing_ma60_dist_never_blocks_write():
     """乖離缺值不得擋寫（M1.5）——由呼叫端警告「位階無法查核」後如實記錄。"""
     assert core_extension_violation("core", None, 15.0) is None
     assert core_extension_violation("opportunity", None, 15.0) is None
+
+
+# ── M-Pick1 machine_rank ─────────────────────────────────────────────────────
+
+
+def test_load_legacy_csv_without_machine_rank_reads_null(tmp_path):
+    """M-Pick1 前的舊 CSV 無 machine_rank 欄 → 讀入為 null（Int64），不得爆炸。"""
+    week_dir = tmp_path / "2026-W27"
+    week_dir.mkdir(parents=True)
+    legacy_cols = [c for c in PICKS_SCHEMA if c != "machine_rank"]
+    legacy = {**_ROW, "late_entry": False}
+    pl.DataFrame([{c: legacy[c] for c in legacy_cols}]).write_csv(week_dir / "picks.csv")
+    out = load_week_picks(week_dir)
+    assert out.schema["machine_rank"] == pl.Int64
+    assert out.row(0, named=True)["machine_rank"] is None
+    assert load_all_picks(tmp_path)["machine_rank"].to_list() == [None]
+
+
+def test_upsert_pick_persists_machine_rank(tmp_path):
+    week_dir = tmp_path / "2026-W27"
+    upsert_pick(week_dir, {**_ROW, "machine_rank": 6})
+    upsert_pick(week_dir, {**_ROW, "stock_id": "2330", "name": "台積電"})  # 未帶 → null
+    ranks = dict(load_week_picks(week_dir).select("stock_id", "machine_rank").iter_rows())
+    assert ranks == {"2610": 6, "2330": None}

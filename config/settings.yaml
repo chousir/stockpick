@@ -156,6 +156,7 @@ report:
       - theme_strength.csv
       - cp_candidates.md
       - inflection_ambush.md   # M4.2 候選源 E（委託書 M4）：零命中週也會產出，缺檔＝該步驟失敗
+      - shortlist.csv          # M-Pick1 機器排序 Top N（picks shortlist）；pick_detail.md 非必備、不列
     analyst:                      # 分析師產物——往週缺＝斷供 WARNING（W26 型）；最新週缺＝提醒
       - pick.md                   # excluded.csv 不列：當週可能真無旗標剔除，缺檔合法
       - picks.csv
@@ -217,6 +218,26 @@ picks:                            # 規劃書 05 F2 核心層位階紀律（裁�
                                   # §1.3 實證分界：>15% 的 8 檔平均 −9.17% vs ≤15% 的 12 檔 +1.19%。
                                   # 試行值——F1 閉環（make pick-outcome）每季隨樣本變厚校準。
                                   # 10/12/15 三檔校準協議見 docs/20 §7（M-WS5c，W28+ 才有資格裁決）。
+  shortlist:                      # M-Pick1：機器排序 Top N → reports/<週>/shortlist.csv（docs/11；回退＝enabled: false）
+                                  # 只用已驗證訊號排序：族群趨勢分（F3，docs/22/23）＋距季線位階＋有效剔除旗標；
+                                  # 個股層法人流全數否證（docs/19/20/22 §4）→ 不入排序、不寫進任何說明欄
+    enabled: true
+    top_n: 5
+    alt_n: 5
+    trend_buckets: 5              # 次產業 trend_rank 切 5 桶：bucket = ceil(rank*k/n)
+    max_bucket_for_top: 2         # 只有前 2 桶可入 top/alt；不夠就少列，不從弱桶補
+    ext_min_pct: 0.0              # 距季線下限；上限沿用 picks.core_ext_ma60_max_pct
+    ext_band_pct: [5.0, 10.0]     # 偏好帶，只當同桶內次序鍵（弱證據，docs/19 §3）
+    exclude_flags: [強漲法人賣, 低流動]   # 位階延伸/過熱已被 F2 上限涵蓋；土洋對作刻意不列
+                                  # 流動性門檻沿用 propicks_flags.low_liquidity_amount（成交額直判，同 flags 口徑）
+    max_per_sub_industry: 1
+    max_per_cluster: 2            # portfolio.factor_clusters 同簇上限
+    include_watchlist: true
+    include_holdings: false       # 持股標 held、不占名額（true＝持股也進排序）
+    tangle_pct: 2.0               # |MA20−MA60|/MA60 ≤ 此值或 現價距 MA60 ≤ 此值 → 停損改 low_60d
+    bear_pe_high: 30.0            # PE 高於此值 → bear_hints 加「高PE」
+    bear_stop_dist_pct: 10.0      # 停損距現價超過此 % → bear_hints 加停損距離
+    max_vetoes: 2                 # Opus 每週最多否決幾檔（picks sync 超過→warning）
 
 group_analysis:
   weights:
@@ -370,7 +391,7 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
     cheap_pctile: 30.0       # 次產業升冪百分位 ≤ 此值標「相對便宜」（0=次產業內最便宜；PE 主、PB 補虧損股）
     max_rows: 40             # cp_valuation.md 列出前 N（依百分位遞增）；≤0 不截
     self_history_min_snapshots: 8  # docs/31 §14：自身PE歷史百分位至少要幾筆快照才計算（目前約10週/23筆深度）
-    dcf:                     # docs/31 §20.13「2026-09-07 修訂」：pick.md 附錄 G「綜合估值區間」的 M3 DCF 腿參數
+    dcf:                     # docs/31 §20.13「2026-09-07 修訂」：pick_detail.md 附錄 G「綜合估值區間」的 M3 DCF 腿參數
                             # ——由 pick.md 合成階段（Opus）手動套用，非 pipeline 計算；此處集中管理不寫死在 prompt
       equity_risk_premium_pct: 5.5   # 台股股權風險溢酬假設（無本地資料源，人工假設）
       terminal_growth_pct: 2.0       # 永續成長率（寫死、不逐檔調——DCF 最敏感的輸入）

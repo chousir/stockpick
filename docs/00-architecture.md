@@ -68,12 +68,13 @@
 | `src/tw_screener/analysis/leader.py` | 相對強度、領頭羊判斷 | polars |
 | `src/tw_screener/analysis/momentum.py`、`stock_panel.py` | 技術指標（N 日報酬、相對強度、均線距離、價格位階、z-score 等）以 Polars 向量化內嵌實作 | polars |
 | `src/tw_screener/report/group_report.py` | 族群分析 Markdown 渲染 | jinja2 |
+| `src/tw_screener/report/shortlist.py`、`shortlist_runner.py` | M-Pick1 機器排序 Top N：族群趨勢分分桶×距季線位階×剔除旗標 → `reports/<週>/shortlist.csv`（pick.md 第一頁的唯一排序來源，docs/11） | polars |
 | `src/tw_screener/report/data_fetcher.py` | 個股報告資料打包（OHLCV + 營收 + 法人 + 族群資訊） | polars |
 | `src/tw_screener/report/builder.py` | 個股報告 builder（API 模式 / 草稿模式） | anthropic, jinja2 |
 | `src/tw_screener/backtest/` | 策略勝率回測（骨架，2026-08 後實作） | polars |
 | `src/tw_screener/data/fred.py` | FRED 官方 API 抓取＋24h快取（總經序列） | httpx |
 | `src/tw_screener/data/finmind.py` | FinMind 開源 API 抓取＋24h快取（`TaiwanStockPER` 估值歷史深度 §20.14；現金流/財報/資產負債 3 dataset 餵機械式 DCF §20.15） | httpx |
-| `src/tw_screener/analysis/dcf.py` | 機械式 DCF（附錄 G M3，護欄兜住、8% 折現率地板恆綁定，docs/31 §20.15） | polars |
+| `src/tw_screener/analysis/dcf.py` | 機械式 DCF（pick_detail.md 附錄 G 的 M3，護欄兜住、8% 折現率地板恆綁定，docs/31 §20.15） | polars |
 | `src/tw_screener/analysis/macro_regime.py` | 總經燈號：BAA10Y 單訊號計分＋揭露面板（docs/25 M-Macro1） | polars |
 | `src/tw_screener/cli.py` | CLI 入口（Typer） | typer |
 

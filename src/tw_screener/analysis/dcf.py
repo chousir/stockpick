@@ -1,6 +1,6 @@
 """機械式 DCF（附錄 G M3，M-Val-FinMind2，docs/31 §20.15）。
 
-**完全機械、護欄兜住**的 per-share 內在價值 `dcf_intrinsic_est` ＋敏感度網格，餵 pick.md
+**完全機械、護欄兜住**的 per-share 內在價值 `dcf_intrinsic_est` ＋敏感度網格，餵 pick_detail.md
 附錄 G 的 Opus M3 當機械錨點（Opus 不重算 DCF 本體，只讀值／從敏感度網格內插）。
 
 紅線（CLAUDE.md 鐵律 2）：`dcf_intrinsic_est` **不是**公允價／目標價／合理價，不進任何

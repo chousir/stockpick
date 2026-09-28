@@ -12,7 +12,7 @@
 
 ## 開工三步（每個 session 開場照做）
 1. 對照下方路由表：本任務要先讀哪個檔，先讀再動手。
-2. 輸出大而只需結論的工作（找不到目標的 repo 掃描／跨頁查網／批次改檔／消化 reports・research 產物）→ 派 subagent，主對話只收結論；已知路徑的讀檔小改自己做（判準 playbook/10 §0）。
+2. 大量讀取／掃 repo／查網頁／批次改檔 → 派 subagent（規則 playbook/10），主對話只收結論。
 3. 一個 session 只做一件事。使用者切換主題 → 建議先 /clear。
 
 ## 路由表（做 X 之前先讀 Y）
@@ -24,7 +24,6 @@
 | 寫任何個股/族群報告、pick、持股健檢 | playbook/60-analyst-persona.md |
 | 研究軌任務（因子／回測／假設檢定） | playbook/20 §6 ＋ docs/13 |
 | 動 goodinfo 爬蟲模組 | docs/02-data-sources.md（合規規則） |
-| 動程式內 Claude API 呼叫（report builder、report.llm 設定） | 先載 claude-api skill 查該模型參數限制＋playbook/10 §1 末條 |
 | 改 CLAUDE.md／playbook／memory | playbook/40-maintenance-protocol.md |
 | 踩了坑、被糾正、規則失效 | append 進 playbook/90-lessons.md（格式在檔頭） |
 | 新 milestone 開工 | docs/08-milestones.md 尾段＋下方 milestone 紀律 |
@@ -32,7 +31,7 @@
 
 ## 鐵律（違反＝事故，無例外）
 1. **Goodinfo 爬蟲合規**：請求間隔 ≥3 秒＋隨機抖動、同 URL 24h 快取、concurrency=1、連錯 3 次停、真實瀏覽器 UA 且可設定。動 goodinfo 模組前先讀 docs/02。**2026-08-28 起 `make week` 預設流程已軟退場、不再自動呼叫 Goodinfo**（D/E/G 結構性無法本地重建、F 已改走本地等價路徑，docs/31 §20.6）——本鐵律對「手動 `screen run`/`screen-all`」仍全數適用，不是規則放寬。
-2. **報告紅線**：多空並陳（空方論點不得少於多方）、不下買/不買結論、不給目標價/公允價/合理價（**唯一例外：pick_detail.md 附錄 G「綜合估值區間」——多法機械估值＋Opus 綜合判斷，得用「綜合估值區間」字眼（M-Pick1 起不進決策卡），仍禁「公允價值/目標價/合理價」；docs/31 §20.13、playbook/60 例外二**）、不用「強烈建議／絕對／保證／飆股」（全清單見 playbook/60 禁止事項）；每個數字附日期與來源；資料沒有就寫「未取得」，不從記憶編。
+2. **報告紅線**：多空並陳（空方論點不得少於多方）、不下買/不買結論、不給目標價/公允價/合理價（**唯一例外：pick.md 附錄 G「綜合估值區間」——多法機械估值＋Opus 綜合判斷，得用「綜合估值區間」字眼＋得進決策卡參考欄，仍禁「公允價值/目標價/合理價」；docs/31 §20.13、playbook/60 例外二**）、不用「強烈建議／絕對／保證／飆股」（全清單見 playbook/60 禁止事項）；每個數字附日期與來源；資料沒有就寫「未取得」，不從記憶編。
 3. **git**：commit 前 diff 自查，每個 hunk 要能追溯到使用者請求；merge 進 main 前必問使用者；不 commit data/、reports/ 下個人持股內容。
 4. **依賴**：加任何新依賴先問；pandas／requests-html／selenium／playwright 預設禁止。
 5. **參數**：路徑、limit、URL、UA、門檻一律進 config/settings.yaml，不寫死在程式裡。

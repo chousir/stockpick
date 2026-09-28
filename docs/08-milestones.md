@@ -1226,6 +1226,9 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 **待辦（另開分支，使用者裁定）**：`src/tw_screener/report/builder.py` 以 `message.content[0].text` 取文字——`claude-opus-5` 預設開 adaptive thinking，
 首塊可能是 thinking block（無 `.text`）；thinking 亦計入 `max_tokens: 4000`，疑截斷。修法方向：取第一個 `type=="text"` 區塊、處理 `stop_reason=="refusal"`、
 重估 `max_tokens`（改動前先載 claude-api skill）。修好前 `report.llm.model` 維持 `claude-opus-5`，不升 `claude-opus-5-5`。
+
+---
+
 ## W37 缺週紀錄（分支 `docs/w37-gap-note`）— 2026-09-27
 
 > 使用者 2026-09-27 問能否補產 W37 pick.md；裁決：**不補 W37，記錄缺週**。
@@ -1234,3 +1237,44 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 - **不事後補產**：`make week` 取 TWSE/TPEX OpenAPI 當下最新資料、無 as-of 回放；09-27 補跑＝W39 資料貼 W37 標籤，前視偏差且污染 picks.csv／pick-outcome／retro-review 底帳。比照 W26 前例（不造檔、如實標斷供）。
 - **覆盤規則**：pick-outcome／retro-review 遇 W37 一律視為斷供週，不插值、不以前後週代填。
 - **偵測缺口（未修）**：`pick_store.weeks_without_picks` 只抓「有 screen_result 但無 picks.csv」的週目錄；W37 整個目錄不存在，**不會被列出**（2026-09-27 實跑結果：W29/W30/W33/W34/W39，無 W37）。覆盤時需人工對照週次連續性。
+
+---
+
+## M-Pick1：pick.md 一頁化＋機器排序 Top 5（分支 `feat/pick-one-page`）— 2026-09-27
+
+> 使用者 2026-09-27 指示「pick.md 太多太雜沒有重點」；拍板：持有 2–6 週、主尺 r+20、一頁 Top 5、先做 M-Pick1、
+> M-BR1 左側移明細標未驗證、同次產業最多 1 檔、無次產業標籤者排除（`no_trend_score`）。
+
+**F1 裁決（開工盤點，來源 reports/2026-W*/pick_outcome_brief.md、research/pick_outcome/outcome_20260919.md）**
+- 已評估 5 週（W26/28/32/35/36，r+5）；剔除 W28（大盤 −16.3% 為快取密度假象，docs/29 §③）後 n=50、平均 +0.63%、
+  勝過大盤 50%、α −0.25pp——**未打敗大盤**。4 週固定窗（W21–32）核心 −0.4%／機會 −0.9%／補充池 +0.2%——**分層無鑑別力**。
+- 唯一穩健訊號＝族群趨勢分（r+20 IC +0.11，三 regime CI >0，docs/23 §2.1）；個股層法人流全數否證（docs/19/20/22 §4）。
+  → 排序改由程式只用已驗證訊號完成，Opus 不再自由選股。
+
+**完成**
+- `report/shortlist.py`（純函式：`attach_sector_trend`／gates／`rank_shortlist`／承接區＋停損／evidence）＋`shortlist_runner.py`
+  → `reports/<週>/shortlist.csv`；CLI `picks shortlist`、`make shortlist`（`make week` 內跑）、`artifact_check.machine` 加 shortlist.csv。
+  設定 `picks.shortlist`（config/settings.yaml）。
+- 排序鍵：趨勢分桶（前 2 桶才可入選）→ 距季線偏好帶 5–10% → trend_score → 成交額（非訊號，僅定序）→ stock_id；
+  次產業上限 1、因子簇上限 2；持股標 `held` 不占名額；停損文字「收盤跌破 {價}（依據）、隔日未收復出場」。
+- picks 底帳：`PICKS_SCHEMA` 加 `machine_rank`（舊 CSV 讀入為 null）；`picks sync` 驗 rank 與 shortlist 相符、否決數 > `max_vetoes` 警告。
+- `parse_stop_price` 修：認得「收盤 < 82.5」寫法（W38/W39「停損延遲成本 0 筆可量測」成因之一）。
+- docs/11 prompt 全面改寫（一頁決策卡 ≤50 行＋`pick_detail.md` 附錄 A–H；退役四路匯流／三層選股／排序梯，changelog 附回退法）；
+  daily-picks skill、README、docs/00/06/07/10、CLAUDE.md 鐵律 2、playbook/60 例外二（附錄 G 移至 pick_detail.md、不進決策卡）同步。
+- 三週實跑 Top 5：W39 2303／6182／2464／2606／2801；W38 5347／2449／5880／6187／6271；W36 2362／6271／5880／6442／2376
+  ——皆 5 個不同次產業、桶 1、距季線 0–15%、停損文字可被 `parse_stop_price` 抽回。
+
+**回退**：`picks.shortlist.enabled: false`＋還原 docs/11（`git log -- docs/11-propicks-analysis.md`）。
+
+**已知限制**
+- 排序證據在族群層；防禦 regime 下 r+20 IC 僅 +0.070。**族群內選哪一檔未驗證**——M-Pick2（個股層因子錦標賽）要補的就是這段。
+- 流動性只看單日成交額。
+- 本 milestone 起核心／補充池定義與過去不可比；以 `machine_rank` 非 null 區分新舊列。
+
+**下一步（待使用者指示）**：M-Pick2 研究軌（判準沿用 docs/22；候選：月營收創新高／YoY 加速、EPS 加速、個股 RS、52 週高點 recency）。
+
+**驗收後修正（2026-09-28）**：`test_picks_sync.py::_out` 改為先去 ANSI 色碼（`FORCE_COLOR` 環境下 7 條誤紅，playbook/90）；`shortlist.py` 已跌破 MA60 的停損依據改標 `low_60d（已跌破 MA60）`（原誤標「均線糾結」，僅持股／gated 列）＋1 測試；docs/11 依 W39 樣張回饋收緊措辭（持股條件價不限 `tier=held`、刪未定義的「過寬」、算不出條件價寫「未取得」、資料基準行可帶 `> `、上週帳可附評估週來源註、thesis 範例 ≤20 字）。
+
+**未涵蓋／待使用者裁決**：(i) 事件閘門日期查不到即「暫不當閘門」＝fail-open（M-Pick1 前既有規則，未改）——**使用者 2026-09-28 指示上網查證並新增**：`config/macro_calendar.yaml` 2026-09-30～2027-01 事件逐項查官方來源（Fed／BLS／BEA／TAIFEX 規則／TSMC IR／MSCI／央行／FEC），查到者 `verified: true`＋note 附來源；新增非農（就業）、PCE、央行理監事會、MSCI 公告日、Q3 財報截止、2027-01 結算／FOMC；更正三筆原檔錯誤（FOMC 12/16→12/09、10 月 CPI 11/13→11/10、MSCI 生效 11/24→12/01）；NVIDIA 財報與 Q3 財報截止官方未公告、維持 false。規則本身未改——2027-02 以後仍是舊路徑；(ii) 附錄 G 信心分級兩條可同時成立時無優先序（既有，樣張取較嚴者）；(iii) 價格不連續安全網只看近 10 交易日——更早的斷點（W39 樣張見 6669 緯穎 08-31→09-04 7095→2565）會讓距季線失真、仍可進 shortlist 排序（未修）；(iv) `data/cache/twse/daily_202609*` 僅 7 檔（6–8 月各 12–14 檔），對 MA 計算的影響**未查證**（docs/29 ③ 已知密度風險）。
+
+**狀態**：驗收 `make test` 1436 passed（含 FORCE_COLOR 環境）／ruff 淨／mypy 無新增錯；三週 shortlist 實跑自查全過；W39 樣張（scratchpad、未覆蓋真實 pick.md、未跑 picks sync）第一頁 44 行、禁詞 0、空方 ≥ 理由；verifier 6 條全過（5(a) 唯一命中 docs/11:525 屬「舊流程」歷史敘述，符合計畫「除歷史紀錄外為零」）。**已 merge 進 main（2026-09-28，排在 docs/opus55-harness-refresh、docs/w37-gap-note 之後；分支保留、未 push）。**

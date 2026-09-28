@@ -1,12 +1,12 @@
 # 台股波段選股與分析系統 (TW Stock Screener)
 
-> 半自動化的台股每週流程：選股 → 次產業資金輪動 → 族群分析 → AI 挑股 → 個股深度報告
+> 半自動化的台股每週流程：選股 → 次產業資金輪動 → 族群分析 → 機器排序 Top 5（AI 查證說明）→ 個股深度報告
 > 個人工具，非投資建議。
 
 ## 一句話說明
 
-每週把 1800 檔台股 → 篩成 ~150 檔候選 → 疊上「全市場資金往哪流」的輪動地圖 → AI 蒸餾出 5-10 檔
-＋進場價/停損 → **你下決策**。
+每週把 1800 檔台股 → 篩成 ~150 檔候選 → 疊上「全市場資金往哪流」的輪動地圖 → 依已驗證訊號（族群趨勢分＋
+距季線位階）機器排出 Top 5＋承接區/停損、AI 查證說明 → **你下決策**。
 
 ---
 
@@ -23,7 +23,7 @@
   Yahoo 概念股       │ config/concepts.yaml 主題標籤（手標次產業＋自動爬概念股）      │
                     └──────────────────────────┬───────────────────────────────┘
                                                ▼
- make week GROUP=defg ＝ 一條指令串起以下十四步（GROUP=defg 只是必填 guard，2026-08-28 起不再作策略選擇）：
+ make week GROUP=defg ＝ 一條指令串起以下十五步（GROUP=defg 只是必填 guard，2026-08-28 起不再作策略選擇）：
  ① fetch-twse                日線/法人/月營收/產業別/官方估值比(PE/PB/殖利率) 增量入快取
  ② fetch-institutional-history 回補近 20 日上市＋上櫃法人（隔幾天沒跑也自動補齊）
  ③ fetch-tdcc                集保大戶持股比（容錯：TDCC 異常不擋，大戶欄退化 null）
@@ -36,11 +36,12 @@
  ⑩ cp-value-candidates       個股 CP 補漲候選＋C2 三重濾網 → cp_candidates.md（group Section 6 要讀）
  ⑪ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv（含揭露欄；docs/31 §13 官方族群前5＋§4/§7.2/§9/§11 G1/G2/G4/G5/L6/F2' 新設計候選觀察欄與前瞻累積軌皆已內含）
  ⑫ snapshot-week             point-in-time 週快照：凍結 concepts/宇宙/持股 → data/snapshots/（容錯：失敗不擋）
- ⑬ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
- ⑭ pick-outcome-brief        上週 picks r+5/α/勝率＋偽陰性一頁 → 本週輸入包（容錯：失敗不擋）
+ ⑬ shortlist                 M-Pick1 機器排序：候選股＋watchlist 依已驗證訊號（族群趨勢分分桶→距季線偏好帶→趨勢分）排 Top 5＋候補 → shortlist.csv（容錯：失敗不擋）
+ ⑭ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
+ ⑮ pick-outcome-brief        上週 picks r+5/α/勝率＋偽陰性一頁 → 本週輸入包（容錯：失敗不擋）
                                                ▼
- 手動：把報告貼給 Claude（docs/11 prompt）→ pick.md（首屏 ≤60 行一頁決策卡；核心層距季線 >+15% 硬擋）
- 手動：tw-screener picks sync 解析 pick.md 尾端區塊、整批寫底帳 → 每季 make pick-outcome 算命中率×α（pick 閉環）
+ 手動：把報告貼給 Claude（docs/11 prompt）→ pick.md（一頁決策卡 ≤50 行：Top 5 照 shortlist 排序、Opus 只查證說明、否決 ≤2）＋ pick_detail.md（明細）
+ 手動：tw-screener picks sync 解析 pick.md 尾端區塊（Top 5→core＋rank）、整批寫底帳 → 每季 make pick-outcome 算命中率×α（pick 閉環）
  手動：make report STOCK_ID=XXXX → 個股深度報告
 ```
 
@@ -85,7 +86,8 @@ make sync && make init          # 裝依賴（uv）、建目錄/.env
 
 **① 我的庫存／觀察清單**（放 `watchlist/`，已 gitignore、不外流）
 建這兩個 CSV，`make week` 會自動 enrich（算報酬率/MA60 停損價）、標進輪動「我的參與度」，
-貼給 Claude 時走 prompt 任務 0（庫存給續抱/加碼/減碼/停利/停損、觀察給進場時機）：
+觀察清單一併進 shortlist 排序；貼給 Claude 時庫存進決策卡的持股動作表（續抱/加碼/減碼/停利/停損）、
+觀察清單逐檔判讀寫在 pick_detail.md 附錄 E：
 
 ```
 watchlist/holdings.csv     stock_id,buy_price,shares,note    # 例：2330,1050,2,核心持股
@@ -122,17 +124,19 @@ make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退�
 
 | 檔案                                                   | 是什麼                                                                                                                                                                           |
 | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `group_analysis.md`                                  | 族群脈絡＋強度排名＋次產業/概念股/輪動雷達＋給 Claude 的分析請求（Section 5 次產業深度、6 CP 補漲、7 持有/觀察健檢）                                                             |
+| `shortlist.csv`                                      | ★**M-Pick1 機器排序**：Top 5＋候補＋gate 剔除（族群趨勢分分桶→距季線偏好帶→趨勢分；pick.md 第一頁的唯一排序來源，缺席＝決策卡寫「機器排序缺席」） |
+| `group_analysis.md`                                  | 族群脈絡＋強度排名＋次產業/概念股/輪動雷達＋給 Claude 的分析請求（Section 5 次產業深度、6 CP 補漲、7 持有/觀察健檢；M-Pick1 起依 docs/11 範圍處理） |
 | `sector_rotation.md`                                 | 全市場輪動地圖（**價格趨勢分數主鍵排序**＋流量確認欄/四象限/★訊號/週對週 ΔRank/**趨勢領頭板**，**無入選偏誤**，對照 group Section 2.8）                      |
-| `candidates_enriched.csv`                            | **主要挑股宇宙**：全候選股 × 技術/籌碼/估值（官方 PE/PB/殖利率＋次產業相對便宜位階）/月營收/flags 排雷欄/揭露欄（flow_state・risk_kind・pullback_quality，純揭露非 gate） |
+| `candidates_enriched.csv`                            | **shortlist 的候選宇宙**（查證 Top 5／對照持股用）：全候選股 × 技術/籌碼/估值（官方 PE/PB/殖利率＋次產業相對便宜位階）/月營收/flags 排雷欄/揭露欄（flow_state・risk_kind・pullback_quality，純揭露非 gate） |
 | `cp_candidates.md`                                   | 個股 CP 補漲候選＋三重濾網（錢進＋沒漲＋相對便宜；埋伏/追突破/反轉三型態）＋末段短窗早訊號／過熱-退潮警示（限庫存/觀察・低信心）                                                 |
 | `holdings_enriched.csv` / `watchlist_enriched.csv` | 我的庫存/觀察清單（有維護才產，**無論如何都要分析**）                                                                                                                      |
 | `screen_result_*.csv`                                | 各策略原始入選快照（看「哪檔中哪些策略」用）——`{d,e,f,g}` 是 Goodinfo 四策略；`{g1_margin_expansion,g2_quality_no_history,g4_yoy_divergence,g5_valuation_gap,l6_yoy_pe_flow,f2_growth_quality}` 是 docs/31 §4/§7.2 本地新設計候選（不打 Goodinfo，`source=local_unvalidated`，**未過統計驗證**） |
 
 **⚙️ 不必貼**：`theme_strength.csv`（內容已在 Section 2.8）、`screen_log.md`（檔數統計）。
 
-**送給 Claude 的流程**：把上表 6 類貼進 Claude 網頁對話 → 套 [docs/11](./docs/11-propicks-analysis.md) 範本 prompt → Claude
-產出 `pick.md`（精選進場清單，四路匯流：族群深度＋全宇宙掃描＋CP 補漲候選＋觀察清單升格）→ 對 picks 內每檔
+**送給 Claude 的流程**：把上表 7 類貼進 Claude 網頁對話 → 套 [docs/11](./docs/11-propicks-analysis.md) 範本 prompt → Claude
+產出 `pick.md`（一頁決策卡 ≤50 行：Top 5 照 `shortlist.csv` 排序不重排、Opus 只查證說明、最多否決 2 檔＋持股動作＋風險）
+＋ `pick_detail.md`（候補計數／查證／市場節奏／觀察／watchlist／族群解讀／附錄 G 綜合估值區間／未驗證訊號）→ 對 Top 5 每檔
 `make report STOCK_ID=XXXX` 產個股深度報告。
 
 ## 每週指令速查
@@ -140,20 +144,21 @@ make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退�
 首次設定做完後，平時就這幾條（產出與貼 Claude 細節見上方「主流程」）：
 
 ```bash
-make week GROUP=defg                              # ①~⑭ 一鍵跑完（尾段 week-check 缺產物自動 WARNING＋pick-outcome-brief）
-# 貼給 Claude 的 6 類檔（全在 reports/YYYY-Www/，詳見上方主流程表）：
-#   group_analysis.md  sector_rotation.md  candidates_enriched.csv
+make week GROUP=defg                              # ①~⑮ 一鍵跑完（含 ⑬ shortlist；尾段 week-check 缺產物自動 WARNING＋pick-outcome-brief）
+make shortlist                                    # （選用）單獨重排 Top 5 → shortlist.csv（week 已內含；＝uv run tw-screener picks shortlist）
+# 貼給 Claude 的 7 類檔（全在 reports/YYYY-Www/，詳見上方主流程表）：
+#   shortlist.csv  group_analysis.md  sector_rotation.md  candidates_enriched.csv
 #   cp_candidates.md  holdings/watchlist_enriched.csv  screen_result_*.csv
-# → 套 docs/11 範本 prompt → 得 pick.md（首屏 ≤60 行一頁決策卡＋尾端機器可讀區塊）
+# → 套 docs/11 範本 prompt → 得 pick.md（一頁決策卡 ≤50 行＋尾端 picks 區塊）＋ pick_detail.md（明細）
 uv run tw-screener picks sync --week 2026-Www     # pick.md 定稿後整批寫底帳（閉環輸入，§10；單檔補記用 picks record）
-make report STOCK_ID=2330                         # 對 picks 選出的每檔產個股深度報告（5-10 秒）
+make report STOCK_ID=2330                         # 對 Top 5 每檔產個股深度報告（5-10 秒）
 make pick-outcome                                 # （每季）pick 閉環：分層命中率×α＋偽陰性帳＋停損延遲帳 → research/pick_outcome/
 make dash-dev                                     # （選配）把本週報告開成可視化儀表板瀏覽（首次先 make dash-install）→ §13
 ```
 
 > **個股報告兩模式**：設了 `ANTHROPIC_API_KEY` → `make report` 直接產完整分析；沒設 → 產資料草稿，貼 Claude 對話依範本補寫。
 
-**每週 SOP 詳解 → [docs/10-sop.md](./docs/10-sop.md)**　|　**完整挑股 prompt → [docs/11-propicks-analysis.md](./docs/11-propicks-analysis.md)**　|　**問題排解 → [docs/99-troubleshooting.md](./docs/99-troubleshooting.md)**
+**每週 SOP 詳解 → [docs/10-sop.md](./docs/10-sop.md)**　|　**週選股 prompt（shortlist → 一頁決策卡）→ [docs/11-propicks-analysis.md](./docs/11-propicks-analysis.md)**　|　**問題排解 → [docs/99-troubleshooting.md](./docs/99-troubleshooting.md)**
 
 ---
 
@@ -180,7 +185,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 
 | 指令                                                     | 做什麼                                               | 何時用                               |
 | -------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------ |
-| `make week GROUP=defg`                                 | 完整週流程 ①~⑭                                     | **每週一次（主入口）**         |
+| `make week GROUP=defg`                                 | 完整週流程 ①~⑮                                     | **每週一次（主入口）**         |
 | `make pick-outcome`                                    | pick 閉環：分層命中率×α（vs 大盤＋族群）＋偽陰性帳＋**停損延遲帳（M3.1）** | 每季（pick 底帳變厚後）              |
 | `make dash-dev`                                        | 起 dashboard 開發伺服器（FastAPI:8000＋Vite:5173）   | 視覺化瀏覽本週報告（§13）           |
 
@@ -198,6 +203,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make screen-dry STRATEGY=…`                          | 只組 Goodinfo URL 不打網                             | 驗證 YAML 條件                       |
 | `make rotation-calib`                                  | ★ 起漲點回測校準（研究軌）                          | 每季重校準訊號門檻                   |
 | `make cp-value-valuation`                              | 個股相對 PE 估值表（次產業橫斷面）                   | 估值位階單獨重看                     |
+| `make shortlist [WEEK=2026-Www]`（＝`uv run tw-screener picks shortlist [--week …]`） | M-Pick1 機器排序 Top 5＋候補 → `shortlist.csv`（族群趨勢分＋距季線位階＋有效剔除旗標；參數 `picks.shortlist`，回退 `enabled: false`；docs/11） | week 已內含；缺檔或改參數後重排 |
 | `uv run tw-screener picks sync --week …`              | 解析 pick.md 尾端區塊，整批寫 picks.csv／excluded.csv 底帳（單檔補記用 `picks record`） | 每週 pick.md 定稿後                  |
 | `uv run tw-screener picks outcome --diff`              | pick-outcome ＋翻轉解剖（週對週降級＋翻轉前訊號）    | 個案覆盤                             |
 | `make backtest-strategies`                             | 回測 D/E/F/G 入選後勝率/報酬/回撤 vs 大盤            | 每季（規劃書 03 V1）                 |
@@ -309,17 +315,23 @@ Section 0 策略代號/除權息/總經事件、1 入選分布、2 族群強度�
 5 Claude 次產業深度分析請求（輪動雷達驅動）、6 Claude CP 補漲候選分析請求
 （個股層・讀同夾 cp_candidates.md）、7 持有/觀察清單健檢請求（你的部位・與命中策略同等深度）；
 同時產 `candidates_enriched.csv`
-（全候選股 × 技術/籌碼/估值/flags 排雷欄，**AI 挑股的主要宇宙**）。
+（全候選股 × 技術/籌碼/估值/flags 排雷欄，**shortlist 排序的候選宇宙**）。
 
-### 5. AI 挑股（手動・docs/11）
+### 5. 週選股：機器排序 Top 5＋AI 說明（`make shortlist`＋docs/11）
 
-跑完 week 後把報告貼給 Claude 網頁版，用 [docs/11-propicks-analysis.md](./docs/11-propicks-analysis.md)
-的範本 prompt 產 `pick.md`——**首屏 ≤60 行一頁決策卡**（姿態一行 → 持股動作表 → 核心每檔 ≤5 行 →
-機會表 → 本週三風險），觀察清單/族群底稿/交集分析全部後置附錄（不刪資訊、只分層；規劃書 05 F4）。
-**核心層位階紀律（規劃書 05 F2）**：距季線 >+15%（`settings.picks.core_ext_ma60_max_pct`，試行值、
-F1 每季校準）**硬擋入核心**，改列趨勢領頭板（部位減半＋移動停損）。**多空並陳、不下單一結論**。
-定稿後用 `tw-screener picks sync` 解析 pick.md 尾端機器可讀區塊（docs/11 交付結構第三層）、
-整批寫進底帳（單檔補記用 `picks record`），餵 §10 的 pick 閉環。
+`make week` 的 ⑬ `shortlist`（＝`uv run tw-screener picks shortlist`）先把候選股＋觀察清單依**已驗證訊號**排序 →
+`shortlist.csv`：族群趨勢分（F3，r+20 IC +0.11、三個 regime 皆穩健，docs/22、docs/23）分桶 → 距季線偏好帶 5–10%
+（弱證據）→ 趨勢分；gate＝距季線 0～+15%（F2 上限）、`強漲法人賣`／`低流動`、無次產業標籤者排除；同次產業 1 檔、
+同因子簇 2 檔。參數在 `config/settings.yaml` 的 `picks.shortlist`（回退＝`enabled: false`）。**個股層法人流已否證，不入排序。**
+
+接著用 [docs/11-propicks-analysis.md](./docs/11-propicks-analysis.md) 的範本 prompt 讓 Claude（Opus）產 `pick.md`——
+**一頁決策卡 ≤50 行**（姿態 ≤2 行 → 上週帳 → Top 5 表（順序＝shortlist rank、不重排；理由只引已驗證證據、
+空方條目 ≥ 理由）→ 否決／候補 → 持股動作 → 風險 ≤3 → 固定兩行閱讀說明）。Opus 最多否決 2 檔，理由只限
+資料異常／重大負面外部事實／處置股停牌，由候補依序遞補。其餘（候補與 gate 計數、查證紀錄、市場節奏、觀察觸發、
+watchlist 逐檔、族群解讀、附錄 G 綜合估值區間、未驗證訊號）全在 `pick_detail.md`。**多空並陳、不下單一結論；排序≠買進建議。**
+定稿後用 `tw-screener picks sync` 解析 pick.md 尾端 picks 區塊（Top 5→core＋rank、候補→pool）、整批寫進底帳
+（單檔補記用 `picks record`），餵 §10 的 pick 閉環。**核心層位階紀律（規劃書 05 F2）**照舊：距季線 >+15%
+（`settings.picks.core_ext_ma60_max_pct`）硬擋入 core，shortlist 已用同一上限 gate。
 
 ### 6. 個股深度報告（`make report STOCK_ID=…`）
 
@@ -349,8 +361,9 @@ F1 每季校準）**硬擋入核心**，改列趨勢領頭板（部位減半＋�
 
 - enrich 成 `holdings_enriched.csv`（＋報酬率/現值/MA60 停損價）、`watchlist_enriched.csv`
 - 在 `sector_rotation.md`「我的參與度」逐檔標象限與資金方向
-- Step 3 貼給 Claude 時走 prompt 任務 0：庫存給續抱/加碼/減碼/停利/停損、觀察給進場時機；
-  **觀察清單判「可進場」者升格入挑股四路匯流（docs/11 任務 2 來源 D），與策略命中同權競爭核心/機會層**
+- 觀察清單一併進 `shortlist.csv` 排序（`source=watchlist`），過 gate 者與候選股同規則競爭 Top 5
+- 貼給 Claude 時：庫存進 pick.md 決策卡的持股動作表（續抱/加碼/減碼/停利/停損＋「收盤跌破 {價}」條件價）；
+  觀察清單逐檔判讀寫在 pick_detail.md 附錄 E（**M-Pick1 起不再由 Claude 自行升格**）
 
 ### 9. 總經行事曆（`config/macro_calendar.yaml`）
 
@@ -364,7 +377,8 @@ FOMC/CPI/台股結算/法說等市場級事件 → `group_analysis.md` Section 0
 - **策略層（規劃書 03 V1）**：`make backtest-strategies` 回測 D/E/F/G 入選後 2/4/8/12 週
   勝率/中位報酬/回撤 vs 大盤（除息還原、下市 null、未到期排除）→ `research/strategy_backtest/`。
 - **pick 層（規劃書 05 F1）**：每週 `pick.md` 定稿後用 `tw-screener picks sync` 把 pick
-  （core/opportunity/pool 分層）與**被旗標剔除股**寫進 `reports/<week>/picks.csv`／`excluded.csv` 底帳；
+  （core/opportunity/pool 分層；**M-Pick1 起 core＝Top 5、pool＝候補、帶機器排序 `rank`，新週不再產 opportunity**）與
+  **剔除股**（M-Pick1 起新週只記 Opus 否決；gate 剔除留痕在 `shortlist.csv`）寫進 `reports/<week>/picks.csv`／`excluded.csv` 底帳；
   `make pick-outcome` 算分層命中率×α（**同列 vs 大盤、vs 所屬次產業兩個超額**）＋**偽陰性帳**
   （被剔除股同窗報酬——過熱/土洋對作等旗標第一次有績效裁判）→ `research/pick_outcome/`；
   另含**停損延遲帳（M3.1）**——「訊號日掛條件單」vs「等下週報覆核」的執行價差，
@@ -459,10 +473,12 @@ make dash                # uv run tw-screener serve：單一 FastAPI 同時服�
 | `sector_rotation.md` / `.csv`                      | ⑦ rotation            | **輪動地圖**：價格趨勢分數主鍵排序＋流量確認欄/四象限/★訊號/趨勢領頭板/我的參與度；CSV 供下週 ΔRank                                   |
 | `cp_candidates.md` / `.csv`                        | ⑧ cp-value-candidates | 個股 CP 補漲候選＋C2 三重濾網（官方 trailing PE/PB；group Section 6 要讀）＋短窗早訊號／過熱-退潮警示（限庫存/觀察・低信心觀察，非進場/賣訊） |
 | `group_analysis.md`                                  | ⑨ group               | 族群分析主報告（Section 0–7）                                                                                                                 |
-| `candidates_enriched.csv`                            | ⑨ group               | 全候選股 × 完整欄位（含 flow_state/risk_kind/pullback_quality 揭露欄）＝**AI 挑股主宇宙**                                              |
+| `candidates_enriched.csv`                            | ⑨ group               | 全候選股 × 完整欄位（含 flow_state/risk_kind/pullback_quality 揭露欄）＝**shortlist 候選宇宙**                                              |
 | `holdings_enriched.csv` / `watchlist_enriched.csv` | ⑨ group               | 庫存/觀察 enrich（有維護才產）                                                                                                                |
 | `theme_strength.csv`                                 | ⑨ group               | 2.8 雷達快照（供下週 ΔRank，不必貼給 Claude）                                                                                                |
-| `pick.md`                                            | 手動 Step 3            | AI 精選進場清單（首屏 ≤60 行一頁決策卡＋尾端機器可讀區塊）                                                                                   |
+| `shortlist.csv`                                      | make shortlist（week ⑬） | M-Pick1 機器排序：每個被考慮的股票一列（tier＝top/alt/capped/gated/held＋gate_reason、承接區/停損、已驗證 evidence／bear_hints）；week-check 必備產物 |
+| `pick.md`                                            | 手動 Step 3            | 一頁決策卡（≤50 行：Top 5 照 shortlist 排序＋持股動作＋風險）＋尾端 picks 區塊                                                                 |
+| `pick_detail.md`                                     | 手動 Step 3            | pick.md 的明細（附錄 A–H：候補計數／查證／節奏／觀察／watchlist／族群／綜合估值區間／未驗證訊號＋資料品質披露）；非必備產物                    |
 | `picks.csv` / `excluded.csv`                       | 手動 picks sync        | pick／剔除底帳（pick 閉環`make pick-outcome` 的輸入）                                                                                       |
 | `stocks/XXXX_名稱.md`                                | make report            | 個股深度報告                                                                                                                                  |
 
@@ -523,7 +539,7 @@ make typecheck   # mypy
 ## 技術棧
 
 **Python 3.11+**（uv）・**Polars**・**httpx**・**jinja2**（報表模板）・**typer**（CLI）・
-**Claude**（個股報告生成＋全清單挑股＋本專案的 pair programmer）
+**Claude**（個股報告生成＋週選股查證說明＋本專案的 pair programmer）
 
 ## 文件導覽
 
@@ -541,7 +557,7 @@ make typecheck   # mypy
 | [`docs/08-milestones.md`](./docs/08-milestones.md)                                           | 建置期 M0-M7＋上線後研究軌（M-MH 多窗起漲／Part B·C／修法7 進場階梯／落後濾鏡）；M-Dash 0–4 在 docs/17-dashboard-spec |
 | [`docs/09-coding-conventions.md`](./docs/09-coding-conventions.md)                           | 程式碼風格、命名、測試規範                                                                                          |
 | [`docs/10-sop.md`](./docs/10-sop.md)                                                         | **每週使用 SOP**（手動 Claude 對話模式、含範本 prompt）                                                       |
-| [`docs/11-propicks-analysis.md`](./docs/11-propicks-analysis.md)                             | **ProPicks 全清單分析**（Step 3 完整 prompt + 流程）                                                          |
+| [`docs/11-propicks-analysis.md`](./docs/11-propicks-analysis.md)                             | **週選股 prompt**（shortlist 機器排序 Top 5 → 一頁決策卡 pick.md＋明細 pick_detail.md；唯一規格來源）          |
 | [`docs/12-sector-rotation.md`](./docs/12-sector-rotation.md)                                 | **次產業資金輪動**規劃書＋方法論（R0-R6、起漲點校準、四象限）                                                 |
 | [`docs/13-cp-value-research.md`](./docs/13-cp-value-research.md)                             | **個股 CP 補漲研究**＋方法論（三重濾網、官方 PE 估值層、M-MH 多窗起漲/退潮校準裁決）                          |
 | [`docs/14-entry-ladder-portfolio-fix.md`](./docs/14-entry-ladder-portfolio-fix.md)           | 進場階梯 × 組合層修法（M-修法7：前重後輕分批、停損脫鉤、因子簇上限）                                               |
@@ -554,7 +570,7 @@ make typecheck   # mypy
 | [`docs/21-etf-holdings-integration.md`](./docs/21-etf-holdings-integration.md)               | ETF 持股整合：holdings ETF 輕量列（asset_type/報酬追蹤）＋組合曝險手標 etf_exposure；ETF 不進個股 alpha 框架  |
 | [`docs/22-factor-lab-w28.md`](./docs/22-factor-lab-w28.md)                                   | W28 統一因子實驗台（WS-A~G 收官）：trend_score 唯一存活、inflection 族/ΔRank/退潮全否證、宇宙效應方法論        |
 | [`docs/23-backtest-r2-w28.md`](./docs/23-backtest-r2-w28.md)                                 | W28 回測二輪（WS-H~L 收官）：推論硬化 Fisher-z→moving-block bootstrap＋晉升鐵則；補 docs/22 §7 四洞；trend_score 升雙 robustness、★/ambush 升級、WS-K 籌碼三因子無證據/樣本不足 |
-| [`docs/24-contrarian-base-detection.md`](./docs/24-contrarian-base-detection.md)             | 底部左側偵測 M-BR1：賣壓熄火×基本面完好×貼近結構低。Phase 1 揭露欄已實作；**Phase 2 面板檢驗已否證「轉買×貼低」兩條件桶**（lift r+20 −2.30%、CI95 [−3.52,−1.26]・§3.1）；**2026-08-08 裁決 A 人工解禁**三條件桶（＋防接刀）以小注進機會層、永不核心，附 M1.6 自動回收條款（§6）——證據狀態恆為「兩條件桶已否證、三條件桶未測且先驗不利」 |
+| [`docs/24-contrarian-base-detection.md`](./docs/24-contrarian-base-detection.md)             | 底部左側偵測 M-BR1：賣壓熄火×基本面完好×貼近結構低。Phase 1 揭露欄已實作；**Phase 2 面板檢驗已否證「轉買×貼低」兩條件桶**（lift r+20 −2.30%、CI95 [−3.52,−1.26]・§3.1）；**2026-08-08 裁決 A 人工解禁**三條件桶（＋防接刀）以小注進機會層、永不核心，附 M1.6 自動回收條款（§6）——證據狀態恆為「兩條件桶已否證、三條件桶未測且先驗不利」；**M-Pick1（2026-09-27）起左側不入 picks，只在 pick_detail.md 附錄 H 揭露（⚠️未驗證）** |
 | [`docs/25-macro-regime.md`](./docs/25-macro-regime.md)                                       | MacroRegime 總經避險層（外生風險燈號，與內生 V2 regime 並列不合成）：三輪 block-bootstrap 篩出 BAA10Y 為唯一穩健主訊號，v2 改單訊號決定燈色＋揭露面板；**Phase 1（M-Macro1）已上線、Phase 2（M-Macro2）as-of 回放驗證通過**，Phase 3 共振讀法實測待排 |
 | [`docs/26-macro-scan-integration.md`](./docs/26-macro-scan-integration.md)                   | 外部總經風險掃描整合評估（M-Macro4）：17 項美股情緒/籌碼指標逐項可得性對帳＋為何**不進 pipeline**（7 條硬觸發只有 2 條可求值）；採納 A 案面板「較上次」變化追蹤＋B 案人工掃描指令 `/macro-scan` |
 | [`docs/proposals/`](./docs/proposals/00-index.md)                                            | 審查改善規劃書 01–05（效能技債/資料韌性/量化驗證閉環/架構瘦身/**選股有效性總改造 F1–F5**，皆已收官）        |
