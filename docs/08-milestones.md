@@ -1328,3 +1328,18 @@ D5 先修 `weekly_snapshot_dates` 再跑；D6 面板除息還原另立 milestone
 **執行順序**：fix weekly_snapshot_dates → M-Pick3a 資料 → M-Pick3b 預註冊＋單次執行（M-Pick3c 前瞻台帳可平行）。
 
 **狀態**：規劃書＋裁決紀錄完成（純文件、未測任何東西）。**已 merge 進 main（2026-09-28；分支保留、未 push）。**
+
+---
+
+## fix：`weekly_snapshot_dates` 改 ISO 年分組（分支 `fix/weekly-snapshot-iso-year`）— 2026-09-28
+
+> docs/33 §5 D5：M-Pick3 保留樣本開跑前，先修 M-Pick2 待辦 (iv)。
+
+- `rotation_efficacy.weekly_snapshot_dates` 分組鍵 `dt.year()×dt.week()` → `dt.iso_year()×dt.week()`，與 docstring「每 ISO 週」
+  及 `valuation_gap_panel` 的 `isocalendar()` 同口徑；新增跨年回歸測試（2024/25 年界＋2020-W53），修前紅、修後綠。
+- 實測影響（`research/panel/panel.parquet` 2022-01-03～2026-08-28 交易日）：週數 239→239；移除 2024-12-31、2025-12-31，
+  補回 2024-01-05、2025-01-03——與 M-Pick2 (iv) 記載一致。對照 `date.isocalendar()` 逐週取末日（2010–2030 平日 1,097 週＋面板日期）全數一致。
+- 共用此函式的 11 個研究模組（rotation_efficacy／laggard_grid／g3_grid／intra_pick 等，皆只由 `tw-screener backtest` 子指令呼叫、
+  不在 `make week` 路徑）重跑時上述兩週會換；**既有報告與 docs 數字不回改**（D5 執行含義）。
+
+**狀態**：驗收 `make test` 1469 passed（main 1468＋新測 1）／ruff check 淨／mypy 49＝main 既有、無新增；verifier 9/9 PASS。**尚未 merge（待使用者）；未 push。**
