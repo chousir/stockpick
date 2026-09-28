@@ -18,9 +18,11 @@ from tw_screener.data.finmind import (
     _CASHFLOWS_WIDE_SCHEMA,
     _FINANCIALS_FIELD_MAP,
     _FINANCIALS_WIDE_SCHEMA,
+    _MONTH_REVENUE_SCHEMA,
     FinMindClient,
     _load_finmind_token,
     _parse_finmind_long,
+    _parse_month_revenue,
     _parse_taiwan_stock_per,
     create_client,
     load_balancesheet_history,
@@ -28,6 +30,7 @@ from tw_screener.data.finmind import (
     load_financials_history,
     load_finmind_per_history,
     load_merged_valuation_history,
+    load_month_revenue_history,
 )
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "finmind"
@@ -200,6 +203,52 @@ def test_load_wide_history_dedup(tmp_path: Path) -> None:
     assert got.height == 1
     assert got["revenue"].item() == pytest.approx(20.0)
     assert load_balancesheet_history(tmp_path).is_empty()
+
+
+# ── _parse_month_revenue（M-Pick2，docs/32）────────────────────────────────
+
+
+def test_parse_month_revenue_uses_revenue_month_not_publish_date() -> None:
+    """year/month＝營收所屬月（revenue_year/month），不是 date（次月 1 日）。"""
+    df = _parse_month_revenue(_load_json("month_revenue_2330.json"))
+    first = df.row(0, named=True)
+    assert (first["stock_id"], first["year"], first["month"]) == ("2330", 2018, 12)
+    assert first["revenue"] == pytest.approx(89830598000.0)
+    assert first["create_date"] is None  # 舊列 create_time 空字串 → null，不臆造
+
+
+def test_parse_month_revenue_dedup_bad_rows_and_create_date() -> None:
+    df = _parse_month_revenue(_load_json("month_revenue_2330.json"))
+    # 8 列：無 stock_id／月份 13／缺 revenue_month 三列略過；2026-08 重複留最後一筆
+    assert df.height == 4
+    aug = df.filter((pl.col("year") == 2026) & (pl.col("month") == 8)).row(0, named=True)
+    assert aug["revenue"] == pytest.approx(514805337001.0)
+    assert aug["create_date"] == date(2026, 9, 10)  # 帶時間字串只取日期
+    jul = df.filter((pl.col("year") == 2026) & (pl.col("month") == 7)).row(0, named=True)
+    assert jul["revenue"] == 0.0  # 0 照抄，分母判斷交給消費端
+    assert jul["create_date"] is None  # 無法解析 → null
+
+
+def test_parse_month_revenue_empty() -> None:
+    df = _parse_month_revenue({"msg": "success", "status": 200, "data": []})
+    assert df.is_empty()
+    assert dict(df.schema) == _MONTH_REVENUE_SCHEMA
+
+
+def test_load_month_revenue_history_dedup(tmp_path: Path) -> None:
+    assert load_month_revenue_history(tmp_path).is_empty()
+    a = pl.DataFrame(
+        {"stock_id": ["1"], "year": [2025], "month": [3], "revenue": [10.0],
+         "create_date": [None]},
+        schema=_MONTH_REVENUE_SCHEMA,
+    )
+    a.write_parquet(tmp_path / "month_revenue_1.parquet")
+    a.with_columns(pl.lit(20.0).alias("revenue")).write_parquet(
+        tmp_path / "month_revenue_1b.parquet"
+    )
+    got = load_month_revenue_history(tmp_path)
+    assert got.height == 1
+    assert got["revenue"].item() == pytest.approx(20.0)
 
 
 # ── _load_finmind_token ────────────────────────────────────────────────────
@@ -492,3 +541,51 @@ def test_load_merged_valuation_history_no_finmind_falls_back(tmp_path: Path) -> 
     )
     merged = load_merged_valuation_history(_twse_stub(twse_hist), tmp_path / "nope")
     assert merged.equals(twse_hist)  # FinMind 目錄不存在 → 原封不動回 TWSE
+
+
+def test_fetch_month_revenue_cache_hit_no_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache_dir = tmp_path / "finmind"
+    cache_dir.mkdir()
+    pl.DataFrame(
+        {"stock_id": ["2330"], "year": [2026], "month": [8], "revenue": [5.0],
+         "create_date": [date(2026, 9, 10)]},
+        schema=_MONTH_REVENUE_SCHEMA,
+    ).write_parquet(cache_dir / "month_revenue_2330.parquet")
+
+    def _boom(*a: object, **k: object) -> object:
+        raise AssertionError("httpx.get 不應被呼叫（快取新鮮）")
+
+    monkeypatch.setattr(httpx, "get", _boom)
+    df = _client(cache_dir).fetch_month_revenue("2330")
+    assert df.height == 1
+
+
+def test_fetch_month_revenue_writes_cache_and_flags_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache_dir = tmp_path / "finmind"
+    cache_dir.mkdir()
+    payload = _load_json("month_revenue_2330.json")
+
+    class _Resp:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return payload
+
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp())
+    client = _client(cache_dir, max_retries=0)
+    df = client.fetch_month_revenue("2330")
+    assert df.height == 4 and not client.last_request_failed
+    assert (cache_dir / "month_revenue_2330.parquet").exists()
+
+    def _down(*a: object, **k: object) -> object:
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(httpx, "get", _down)
+    down = _client(tmp_path / "empty", max_retries=0)
+    assert down.fetch_month_revenue("9999").is_empty()
+    assert down.last_request_failed  # 請求失敗 → 斷路器可計數

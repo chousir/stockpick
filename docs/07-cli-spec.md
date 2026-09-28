@@ -40,6 +40,7 @@ fetch-institutional-history:      ## 回補近 N 日上市＋上櫃三大法人�
 backfill-universe-history:        ## ⏳ 一次性回補全部次產業成員日線（~1500 檔，8-12 小時）
 backfill-finmind-per:             ## ⏳ 一次性回補全成員 FinMind PER 歷史（~1132 檔×1 call、2.5-5h，24h TTL 可續跑；LIMIT/START 選填，季頻重跑，docs/31 §20.14）
 backfill-finmind-financials:      ## ⏳ 一次性回補全市場 FinMind 3 財報 dataset（現金流/財報/資產負債，~1130×3 call、5.6-11h，24h TTL 可續跑；LIMIT 選填，季頻重跑，不接 make week，docs/31 §20.15）
+backfill-finmind-revenue:         ## ⏳ 一次性回補全次產業成員 FinMind 月營收歷史（~1000 檔×1 call、1.7-3.4h，24h TTL 可續跑；LIMIT 選填，研究用、不接 make week，docs/32）
 build-themes:    ## 爬 Yahoo 概念股 merge 進 config/concepts.yaml（DRY=1 預演）
 
 # ─── 選股 ───────────────────────────────────────

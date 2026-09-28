@@ -7,7 +7,7 @@
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check snapshot-week shortlist \
         target-price-read \
-        backfill-finmind-per backfill-finmind-financials finmind-reconcile finmind-financials-reconcile
+        backfill-finmind-per backfill-finmind-financials backfill-finmind-revenue finmind-reconcile finmind-financials-reconcile
 
 .DEFAULT_GOAL := help
 
@@ -170,6 +170,9 @@ backfill-finmind-per:  ## ⏳ 一次性回補全次產業成員 FinMind PER 歷�
 
 backfill-finmind-financials:  ## ⏳ 一次性回補全市場 FinMind 3 財報 dataset（現金流/財報/資產負債，~1130×3 call，註冊5.6h/未註冊11h，24h TTL 可續跑；LIMIT 選填；季頻重跑，不接 make week，docs/31 §20.15）
 	uv run tw-screener data backfill-finmind-financials $(if $(LIMIT),--limit $(LIMIT),)
+
+backfill-finmind-revenue:  ## ⏳ 一次性回補全次產業成員 FinMind 月營收歷史（~1000 檔×1 call，註冊1.7h/未註冊3.4h，24h TTL 可續跑；LIMIT 選填；研究用、不接 make week，docs/32）
+	uv run tw-screener data backfill-finmind-revenue $(if $(LIMIT),--limit $(LIMIT),)
 
 finmind-reconcile:  ## FinMind PER vs TWSE 官方估值比對帳（docs/31 §20.14，需先 backfill-finmind-per）
 	uv run tw-screener backtest finmind-reconcile

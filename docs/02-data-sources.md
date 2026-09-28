@@ -427,6 +427,19 @@ balancesheet}_<stock_id>.parquet`。
 殖利率）需付費 sponsor 層——拿不到，DCF 折現率靠 8% 地板兜住（§20.15：地板恆綁定 → 每檔
 折現率都 8.0%、`dcf_intrinsic_est` 是單一風險參數模型）。
 
+### M-Pick2：月營收 dataset（研究用，2026-09-28 新增，docs/32）
+
+`TaiwanStockMonthRevenue`（**寬表**，同 PER 形狀）：`{date, stock_id, revenue, revenue_year, revenue_month,
+create_time}`。`date`＝營收月的**次月 1 日**（非營收月）→ parser 以 `revenue_year`/`revenue_month`
+當主鍵；`revenue` 單位＝元（當月、非累計）；`create_time` 近期列＝實際公告日、舊列為空字串
+（→ `create_date` null，不臆造）。實測 2026-09-28：2330 回 2018-12～2026-08 共 93 月。
+
+用途：族群內個股因子研究（docs/32 F4 月營收 YoY 加速）的歷史——TWSE 月營收端點只回最新月、
+`revenue_*.parquet` 從 2026-05 才起累。`config/settings.yaml → finmind.month_revenue_start_date`（2019）；
+回補 `make backfill-finmind-revenue`（~1000 檔×1 call ≈ 註冊 1.7h）；**不接 `make week`**。
+快取 `data/cache/finmind/month_revenue_<stock_id>.parquet`。point-in-time 由消費端依法定公告期限
+（次月 10 日）推，不用 `create_date`（舊列缺）。
+
 ---
 
 ## trading_date 錨點

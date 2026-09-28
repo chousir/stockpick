@@ -229,6 +229,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make backfill-institutional-history START=… END=…` | 逐日上市法人歷史（TWSE T86，一日一請求；顯式起迄不依賴 latest 錨點） | 面板法人冷啟動（build-panel 前）|
 | `make backfill-finmind-per`                            | 全成員 FinMind PER 歷史（~1132 檔×1 call、2.5-5h，24h TTL 可續跑；`LIMIT`/`START` 選填，docs/31 §20.14） | 自身估值歷史腿冷啟動＋季頻延伸深度 |
 | `make backfill-finmind-financials`                     | 全市場 FinMind 3 財報 dataset（現金流/財報/資產負債，~1130×3 call、5.6-11h，24h TTL 可續跑；`LIMIT` 選填，docs/31 §20.15） | 機械式 DCF 冷啟動＋季頻重跑 |
+| `make backfill-finmind-revenue`                        | 全次產業成員 FinMind 月營收歷史（~1000 檔×1 call、1.7-3.4h，24h TTL 可續跑；`LIMIT` 選填，docs/32） | M-Pick2 族群內因子研究冷啟動＋重跑前延伸 |
 | `make doctor`                                          | Goodinfo 健康檢查（week 已內含，只診斷不擋，可單獨重跑）| 懷疑被擋/改版時                      |
 | `uv run tw-screener screen run-local f_value_rebound`  | Goodinfo 被擋時的手動退路：純用 TWSE/TPEX 官方快取跑 F 策略（唯一目前可完全本地化的策略，docs/31 §19.3；D/E/G 因表外條件無法本地化，未接進 `make week`） | doctor 顯示 BLOCKED 時想至少拿到 F 的候選 |
 | `make fetch-tdcc`                                      | TDCC 集保大戶持股比（week 已內含）                   | 大戶欄空值時單獨補                   |

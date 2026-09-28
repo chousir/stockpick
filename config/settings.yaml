@@ -135,6 +135,9 @@ finmind:
   cashflow_start_date: "2013-01-01"
   financials_start_date: "2013-01-01"
   balancesheet_start_date: "2013-01-01"
+  # M-Pick2（docs/32）：TaiwanStockMonthRevenue 月營收回補起點（FinMind 依公告月 date 截）。
+  # 研究面板 2022-01 起、營收加速需往前 18 個月 → 2019 起留足緩衝。快取 month_revenue_{sid}.parquet。
+  month_revenue_start_date: "2019-01-01"
 
 report:
   default_top_n: 10
