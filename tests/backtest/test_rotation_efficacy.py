@@ -42,6 +42,21 @@ def test_weekly_snapshot_dates_takes_last_trading_day() -> None:
     assert weekly == sorted(weekly)
 
 
+def test_weekly_snapshot_dates_groups_by_iso_year_across_year_end() -> None:
+    # 2024-12-30/31 屬 ISO 2025-W01：日曆年分組會併入 2024 的 W01、吃掉 01-05 且多出 12-31
+    ds = [date(2024, 1, d) for d in (2, 3, 4, 5)] + [
+        date(2024, 12, 27),
+        date(2024, 12, 30),
+        date(2024, 12, 31),
+        date(2025, 1, 2),
+        date(2025, 1, 3),
+    ]
+    assert weekly_snapshot_dates(ds) == [date(2024, 1, 5), date(2024, 12, 27), date(2025, 1, 3)]
+    # 2021-01-01（週五）屬 ISO 2020-W53：與 12-28～31 同週，只留一個快照
+    ds = [date(2020, 12, d) for d in (28, 29, 30, 31)] + [date(2021, 1, 1), date(2021, 1, 4)]
+    assert weekly_snapshot_dates(ds) == [date(2021, 1, 1), date(2021, 1, 4)]
+
+
 def test_basket_position_series_rolling_low() -> None:
     ds = _days(4)
     baskets = pl.DataFrame(

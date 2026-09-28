@@ -32,13 +32,17 @@ MEMBERSHIP_SOURCES = ("concepts", "official")
 
 
 def weekly_snapshot_dates(dates: list[date]) -> list[date]:
-    """每 ISO 週最後一個交易日（鏡射週報節奏；避免日頻重疊窗灌水）。"""
+    """每 ISO 週最後一個交易日（鏡射週報節奏；避免日頻重疊窗灌水）。
+
+    分組鍵＝(ISO 年, ISO 週)：年界 12/29–31 可屬次年 W01、1/1–3 可屬前年 W52/53，
+    日曆年配 ISO 週會拆散跨年週，並與同曆年另一端同週號的日子併組。
+    """
     if not dates:
         return []
     df = pl.DataFrame({"date": sorted(set(dates))})
     return (
         df.with_columns(
-            pl.col("date").dt.year().alias("_y"), pl.col("date").dt.week().alias("_w")
+            pl.col("date").dt.iso_year().alias("_y"), pl.col("date").dt.week().alias("_w")
         )
         .group_by("_y", "_w")
         .agg(pl.col("date").max())
