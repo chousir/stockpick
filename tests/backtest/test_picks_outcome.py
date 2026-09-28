@@ -721,3 +721,14 @@ def test_contrarian_recall_does_not_judge_on_empty_group():
     body = "\n".join(render_contrarian_recall_section(chk))
     assert "兩條件桶" in body  # 證據狀態必須印在報表上，不得寫成「未驗證」
     assert "未驗證" not in body
+
+
+def test_parse_stop_price_accepts_less_than_signs():
+    """M-Pick1：「<」與全形「＜」寫法（底帳實例：收盤 < 291.5(low60)）也要抽得到。"""
+    from tw_screener.backtest.picks_outcome import parse_stop_price
+
+    assert parse_stop_price("收盤 < 82.5（low_60d）") == 82.5
+    assert parse_stop_price("收盤＜2290.0") == 2290.0
+    assert parse_stop_price("收盤 < 291.5(low60) → 隔日減半；連2個收盤未收復291.5 → 出清") == 291.5
+    # shortlist.csv stop_text 固定格式（含 low_60d 標籤數字）
+    assert parse_stop_price("收盤跌破 115.50（low_60d（均線糾結））、隔日未收復出場") == 115.5

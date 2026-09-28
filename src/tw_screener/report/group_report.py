@@ -1371,7 +1371,7 @@ def _build_enriched_rows(
                 "val_gap_pct_peer": val_gap_pct_peer,
                 "val_implied_price_self": val_implied_price_self,
                 "val_gap_pct_self": val_gap_pct_self,
-                # docs/31 §20.13「2026-09-06 修訂」：pick.md 附錄 G search-augmented 腿
+                # docs/31 §20.13「2026-09-06 修訂」：pick_detail.md 附錄 G search-augmented 腿
                 # 的「目標 PE」輸入——self 腿＝自身歷史中位 PE（深度看 pe_self_n，~2028
                 # 前只是「PE vs 近一季」），peer 腿＝同產業中位 PE，**只在 val_metric=="PE"
                 # 時給值**（虧損股 val_median 是 PB 中位、掛 pe_ 名稱會誤導 → null）。

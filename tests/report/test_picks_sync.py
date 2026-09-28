@@ -5,6 +5,7 @@ tmp_path 上驗 happy path／冪等／F2 硬擋全不寫／解析錯誤／未知
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from pathlib import Path
 
@@ -280,3 +281,172 @@ def test_sync_core_without_ext_warns_but_records(tmp_path, capsys):
     assert "如實記錄" in capsys.readouterr().out
     row = load_week_picks(week_dir).row(0, named=True)
     assert row["stock_id"] == "8888" and row["ext_ma60_pct"] is None
+
+
+# ── M-Pick1：rank ＋ shortlist.csv 對帳 ─────────────────────────────────────
+
+
+def _write_shortlist(week_dir: Path, rows: list[tuple[str, str, int | None]]) -> None:
+    """[(stock_id, tier, rank)] → reports/<週>/shortlist.csv（picks sync 只讀這三欄＋name）。"""
+    pl.DataFrame(
+        {
+            "stock_id": [r[0] for r in rows],
+            "name": [f"股{r[0]}" for r in rows],
+            "tier": [r[1] for r in rows],
+            "rank": [r[2] for r in rows],
+        },
+        schema_overrides={"rank": pl.Int64},
+    ).write_csv(week_dir / "shortlist.csv")
+
+
+_STOP = "收盤跌破 100.00（MA60）、隔日未收復出場"
+
+
+def _out(capsys: pytest.CaptureFixture[str]) -> str:
+    """rich 會依終端寬度折行、FORCE_COLOR 下會插 ANSI 碼——兩者都去掉再比對訊息。"""
+    return re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out).replace("\n", "")
+
+
+def test_sync_without_rank_stores_null_machine_rank(tmp_path):
+    settings, week_dir = _setup_week(tmp_path)
+    _write_pick_md(week_dir, GOOD_BLOCK)
+    run_picks_sync(settings, WEEK)
+    picks = load_week_picks(week_dir)
+    assert picks.schema["machine_rank"] == pl.Int64
+    assert picks["machine_rank"].to_list() == [None, None]
+
+
+def test_sync_rank_matching_shortlist_is_written(tmp_path):
+    settings, week_dir = _setup_week(tmp_path)
+    _write_shortlist(week_dir, [("3006", "top", 1), ("6271", "alt", 6)])
+    _write_pick_md(
+        week_dir,
+        "<!-- picks:begin -->\n"
+        "picks:\n"
+        f'  - {{stock: "3006", layer: core, rank: 1, stop: "{_STOP}"}}\n'
+        '  - {stock: "6271", layer: pool, rank: 6}\n'
+        "<!-- picks:end -->\n",
+    )
+    run_picks_sync(settings, WEEK)
+    ranks = dict(load_week_picks(week_dir).select("stock_id", "machine_rank").iter_rows())
+    assert ranks == {"3006": 1, "6271": 6}
+
+
+def test_sync_rank_mismatch_blocks_entire_write(tmp_path, capsys):
+    settings, week_dir = _setup_week(tmp_path)
+    _write_shortlist(week_dir, [("3006", "top", 1), ("6271", "top", 2)])
+    _write_pick_md(
+        week_dir,
+        "<!-- picks:begin -->\n"
+        "picks:\n"
+        f'  - {{stock: "3006", layer: core, rank: 2, stop: "{_STOP}"}}\n'
+        f'  - {{stock: "6271", layer: core, rank: 2, stop: "{_STOP}"}}\n'
+        "<!-- picks:end -->\n",
+    )
+    with pytest.raises(typer.Exit):
+        run_picks_sync(settings, WEEK)
+    assert "不符" in _out(capsys)
+    assert not (week_dir / "picks.csv").exists()  # 合法的 6271 也不落帳
+
+
+def test_sync_rank_for_stock_outside_shortlist_top_alt_errors(tmp_path):
+    settings, week_dir = _setup_week(tmp_path)
+    _write_shortlist(week_dir, [("3006", "top", 1), ("2344", "gated", None)])
+    _write_pick_md(
+        week_dir,
+        "<!-- picks:begin -->\n"
+        "picks:\n"
+        '  - {stock: "2344", layer: pool, rank: 3}\n'
+        "<!-- picks:end -->\n",
+    )
+    with pytest.raises(typer.Exit):
+        run_picks_sync(settings, WEEK)
+    assert not (week_dir / "picks.csv").exists()
+
+
+@pytest.mark.parametrize("bad", ['"1"', "1.5", "true", "0", "-2", "第一"])
+def test_sync_non_integer_rank_errors(tmp_path, capsys, bad):
+    settings, week_dir = _setup_week(tmp_path)
+    _write_pick_md(
+        week_dir,
+        "<!-- picks:begin -->\n"
+        "picks:\n"
+        f'  - {{stock: "3006", layer: core, rank: {bad}}}\n'
+        "<!-- picks:end -->\n",
+    )
+    with pytest.raises(typer.Exit):
+        run_picks_sync(settings, WEEK)
+    assert "rank 必須是 ≥1 的整數" in _out(capsys)
+    assert not (week_dir / "picks.csv").exists()
+
+
+def test_sync_substitute_alt_promoted_to_core_keeps_own_rank(tmp_path, capsys):
+    """否決 top #5 → alt #6 遞補：YAML 帶它自己在 shortlist 的名次 6、layer 改 core＝合法。"""
+    settings, week_dir = _setup_week(tmp_path)
+    top = [("1101", "top", 1), ("1102", "top", 2), ("1103", "top", 3), ("1104", "top", 4),
+           ("1105", "top", 5), ("1106", "alt", 6)]
+    _write_shortlist(week_dir, top)
+    core_rows = "".join(
+        f'  - {{stock: "{sid}", layer: core, rank: {rank}, stop: "{_STOP}"}}\n'
+        for sid, _, rank in top if sid != "1105"
+    )
+    _write_pick_md(
+        week_dir,
+        "<!-- picks:begin -->\n"
+        f"picks:\n{core_rows}"
+        "excluded:\n"
+        '  - {stock: "1105", reason: 機器排序否決, detail: "處置股（查詢 2026-09-27）"}\n'
+        "<!-- picks:end -->\n",
+    )
+    run_picks_sync(settings, WEEK)
+    out = _out(capsys)
+    assert "既不在 picks 也不在 excluded" not in out
+    picks = load_week_picks(week_dir)
+    sub = picks.filter(pl.col("stock_id") == "1106").row(0, named=True)
+    assert (sub["layer"], sub["machine_rank"]) == ("core", 6)
+    veto = load_week_excluded(week_dir).row(0, named=True)
+    assert (veto["stock_id"], veto["reason"]) == ("1105", "機器排序否決")
+
+
+def test_sync_missing_veto_record_warns_but_writes(tmp_path, capsys):
+    settings, week_dir = _setup_week(tmp_path)
+    _write_shortlist(week_dir, [("3006", "top", 1), ("6271", "top", 2)])
+    _write_pick_md(
+        week_dir,
+        "<!-- picks:begin -->\n"
+        "picks:\n"
+        f'  - {{stock: "3006", layer: core, rank: 1, stop: "{_STOP}"}}\n'
+        "<!-- picks:end -->\n",
+    )
+    run_picks_sync(settings, WEEK)
+    out = _out(capsys)
+    assert "6271" in out and "既不在 picks 也不在 excluded" in out
+    assert load_week_picks(week_dir).height == 1
+
+
+def test_sync_vetoes_over_max_warns(tmp_path, capsys):
+    settings, week_dir = _setup_week(tmp_path)
+    ids = ["1101", "1102", "1103"]
+    _write_shortlist(week_dir, [(sid, "top", i) for i, sid in enumerate(ids, start=1)])
+    vetoes = "".join(f'  - {{stock: "{sid}", reason: 機器排序否決}}\n' for sid in ids)
+    _write_pick_md(
+        week_dir, f"<!-- picks:begin -->\nexcluded:\n{vetoes}<!-- picks:end -->\n"
+    )
+    run_picks_sync(settings, WEEK)  # 預設 max_vetoes=2
+    assert "機器排序否決 3 檔 > 上限 2" in _out(capsys)
+    assert load_week_excluded(week_dir).height == 3
+
+
+def test_sync_core_stop_unparseable_warns_when_shortlist_exists(tmp_path, capsys):
+    settings, week_dir = _setup_week(tmp_path)
+    _write_shortlist(week_dir, [("3006", "top", 1)])
+    _write_pick_md(
+        week_dir,
+        "<!-- picks:begin -->\n"
+        "picks:\n"
+        '  - {stock: "3006", layer: core, rank: 1, stop: "跌破季線停損"}\n'
+        "<!-- picks:end -->\n",
+    )
+    run_picks_sync(settings, WEEK)
+    assert "抽不到絕對停損價" in _out(capsys)
+    assert load_week_picks(week_dir).row(0, named=True)["machine_rank"] == 1

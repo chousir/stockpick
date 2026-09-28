@@ -92,3 +92,9 @@
 錯誤信念：快取裡沒有的欄位＝來源沒有；把「結構推論」當作無從驗證而擱置數輪。
 修正：宣稱「外部來源無此資料」前先對來源做一次最小探測（單檔單 dataset 列出全部 type／欄位），不從自家 parser 輸出推斷；探測便宜（1 request），判準事前寫死後再抓樣本。
 落點：docs/31 §20.16 (c) 更正與實證；承接 2026-09-20「對帳判準全未過」「一個欄位查出累計口徑」兩條。
+
+## 2026-09-28 子代理回報「全綠」，換個環境就 7 紅——rich 輸出斷言吃到 ANSI 色碼
+現象：M-Pick1 實作子代理回報 make test 1435 passed；session 中斷後以 bg job 重跑，`test_picks_sync.py` 7 條 FAIL。bg job 環境帶 `FORCE_COLOR=3`，rich 在數字前後插 ANSI 碼，子字串斷言（如「rank 必須是 ≥1 的整數」）被切斷。
+錯誤信念：子代理跑綠＝任何環境都綠；對 rich console 輸出做子字串比對只需去掉換行。
+修正：斷言 CLI/console 輸出前先 strip ANSI（`re.sub(r"\x1b\[[0-9;]*m", "", …)`）；驗收時在主 session 的實際環境親跑一次，不只採信子代理的綠燈。
+落點：`tests/report/test_picks_sync.py::_out`；尚未制度化（其他 capsys 斷言 rich 輸出的測試未普查）。
