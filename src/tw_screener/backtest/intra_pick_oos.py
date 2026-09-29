@@ -248,12 +248,13 @@ def before_price_consistency(
     }
 
 
-def ratio_rounding_error(dividends: pl.DataFrame) -> dict[str, Any]:
+def ratio_rounding_error(dividends: pl.DataFrame, flag_pp: float = 0.2) -> dict[str, Any]:
     """純現金事件：FinMind 還原比值 before/after vs 精確比值 before/(before−D) 的相對誤差。
 
     err_pp＝((before−D)/after − 1)×100＝該事件還原因子的誤差（百分點），也是含該事件之窗 target 的
     誤差量級（再乘 1+r，影響可忽略）。after_price 是四捨五入到分的參考價，此函式量它造成的誤差。
-    純現金＝event_type 不含「權」；需 D>0、before>D、before／after 皆有值。純描述，不設判準。
+    純現金＝event_type 不含「權」；需 D>0、before>D、before／after 皆有值。純描述，不設判準；
+    n_flagged＝|誤差| > flag_pp 的筆數（讓極端值不被 p99 藏起來）。
     """
     cash = dividends.filter(
         pl.col("event_type").is_not_null()
@@ -272,6 +273,8 @@ def ratio_rounding_error(dividends: pl.DataFrame) -> dict[str, Any]:
         "err_median": e.median() if cash.height else None,
         "err_abs_p99": e.abs().quantile(0.99) if cash.height else None,
         "err_abs_max": e.abs().max() if cash.height else None,
+        "flag_pp": flag_pp,
+        "n_flagged": cash.filter(pl.col("err_pp").abs() > flag_pp).height,
         "worst": cash.sort(pl.col("err_pp").abs(), descending=True)
         .select("stock_id", "ex_date", "before_price", "after_price", "dividend_value", "err_pp")
         .head(5),

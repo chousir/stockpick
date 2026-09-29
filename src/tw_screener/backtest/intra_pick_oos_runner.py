@@ -694,7 +694,18 @@ def _adjustment_lines(av: dict[str, Any] | None, hcfg: oos.HoldoutConfig) -> lis
             f"- 純現金事件 {r['n_checked']:,} 筆（全期，含保留樣本）：FinMind 比值 before/after "
             f"相對精確值 before/(before−D) 的誤差＝中位 {_fmt_pp(r['err_median'])}、"
             f"|誤差| p99 {_fmt_pp(r['err_abs_p99'])}、最大 {_fmt_pp(r['err_abs_max'])}"
-            "——即含該事件之窗 target 的還原誤差量級（after_price 為四捨五入到分的參考價）。",
+            "——即含該事件之窗 target 的還原誤差量級（after_price 為四捨五入到分的參考價）。"
+            f"|誤差| > {r['flag_pp']}pp 者 {r['n_flagged']} 筆（最大者見下表；低價股檔位相對大）。",
+        ]
+    if r and r["worst"].height:
+        cols = ["stock_id", "ex_date", "before_price", "after_price", "dividend_value", "err_pp"]
+        lines += ["", "|誤差| 最大的事件（前 5）：", "", "| " + " | ".join(cols) + " |",
+                  "|" + "---|" * len(cols)]
+        lines += [
+            "| " + " | ".join(
+                f"{row[c]:.3f}" if c == "err_pp" else str(row[c]) for c in cols
+            ) + " |"
+            for row in r["worst"].iter_rows(named=True)
         ]
     lines += ["", "**(2)(3) 獨立官方對照（TWSE 除權息預告表；只有 2026-05-19 起有）**", ""]
     if av.get("events") is None:

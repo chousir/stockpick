@@ -369,6 +369,8 @@ def test_ratio_rounding_error_pure_cash_only_hand_calc() -> None:
     assert r["err_abs_max"] == pytest.approx(b_err)
     assert r["err_median"] == pytest.approx(b_err / 2)
     assert r["worst"]["stock_id"].to_list()[0] == "B"
+    assert (r["flag_pp"], r["n_flagged"]) == (0.2, 0)  # 0.105pp 未超過預設 0.2pp
+    assert ratio_rounding_error(div, flag_pp=0.05)["n_flagged"] == 1  # 只有 B 超過 0.05pp
 
 
 def test_ratio_rounding_error_empty() -> None:
