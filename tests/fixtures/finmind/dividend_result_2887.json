@@ -1,0 +1,78 @@
+{
+ "msg": "success",
+ "status": 200,
+ "data": [
+  {
+   "date": "2014-02-19",
+   "stock_id": "2887",
+   "before_price": 14.6,
+   "after_price": 14.45,
+   "stock_and_cache_dividend": 0.148494,
+   "stock_or_cache_dividend": "權",
+   "max_price": 15.6,
+   "min_price": 13.45,
+   "open_price": 14.6,
+   "reference_price": 14.6
+  },
+  {
+   "date": "2015-07-13",
+   "stock_id": "2887",
+   "before_price": 12.6,
+   "after_price": 12.5,
+   "stock_and_cache_dividend": 0.1,
+   "stock_or_cache_dividend": "息",
+   "max_price": 13.75,
+   "min_price": 11.25,
+   "open_price": 12.5,
+   "reference_price": 12.5
+  },
+  {
+   "date": "2016-08-24",
+   "stock_id": "2887",
+   "before_price": 13.15,
+   "after_price": 11.81,
+   "stock_and_cache_dividend": 1.337219,
+   "stock_or_cache_dividend": "權息",
+   "max_price": 12.95,
+   "min_price": 10.65,
+   "open_price": 11.8,
+   "reference_price": 11.81
+  },
+  {
+   "date": "2017-08-16",
+   "stock_id": "2887",
+   "before_price": 0.0,
+   "after_price": 14.45,
+   "stock_and_cache_dividend": 0.148494,
+   "stock_or_cache_dividend": "權",
+   "max_price": 15.6,
+   "min_price": 13.45,
+   "open_price": 14.6,
+   "reference_price": 14.6
+  },
+  {
+   "date": "2014-02-19",
+   "stock_id": null,
+   "before_price": 14.6,
+   "after_price": 14.45,
+   "stock_and_cache_dividend": 0.148494,
+   "stock_or_cache_dividend": "權",
+   "max_price": 15.6,
+   "min_price": 13.45,
+   "open_price": 14.6,
+   "reference_price": 14.6
+  },
+  {
+   "date": "",
+   "stock_id": "2887",
+   "before_price": 14.6,
+   "after_price": 14.45,
+   "stock_and_cache_dividend": 0.148494,
+   "stock_or_cache_dividend": "權",
+   "max_price": 15.6,
+   "min_price": 13.45,
+   "open_price": 14.6,
+   "reference_price": 14.6
+  }
+ ]
+}

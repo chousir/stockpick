@@ -136,8 +136,15 @@ finmind:
   financials_start_date: "2013-01-01"
   balancesheet_start_date: "2013-01-01"
   # M-Pick2（docs/32）：TaiwanStockMonthRevenue 月營收回補起點（FinMind 依公告月 date 截）。
-  # 研究面板 2022-01 起、營收加速需往前 18 個月 → 2019 起留足緩衝。快取 month_revenue_{sid}.parquet。
-  month_revenue_start_date: "2019-01-01"
+  # 營收加速需往前 18 個月。原 2019（2022+ 面板夠用）；M-Pick3a（docs/33 §5 D3）改 2013，
+  # 讓 2015-01 起的保留樣本 F4 複驗滿窗——既有快取需 `--force` 重抓才會往前延伸。
+  # 快取 month_revenue_{sid}.parquet。
+  month_revenue_start_date: "2013-01-01"
+  # M-Pick3a（docs/33 §5 D3）：保留樣本 2015-01～2021-12 的日線＋除權息結果回補起點。
+  # 2013 起：F2 52 週高點（250 日）、F1 6-1 動能（126 日）、regime MA120 在 2015-01 前皆已滿窗。
+  # 快取 price_{sid}.parquet／dividend_{sid}.parquet（無事件也落空檔），同 data/cache/finmind/。
+  price_start_date: "2013-01-01"
+  dividend_start_date: "2013-01-01"
 
 report:
   default_top_n: 10
@@ -498,6 +505,28 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     n_boot: 1000                  # moving-block bootstrap 重抽次數（週頻塊長 ceil(h/5)+1）
     seed: 42
     output_dir: research/intra_pick
+  intra_pick_oos:            # M-Pick3a 保留樣本週快照（make intra-pick-holdout；docs/33 §5）：只做資料層，
+                             # 不算任何因子×target 統計（M-Pick3b 預註冊 commit 後才評估）。因子／gate／窗長
+                             # 全沿用上方 intra_pick 與生產設定；核價容差／通過線沿用 backtest.panel（docs/22）
+    holdout_start: "2015-01-01"   # 保留樣本快照起日（docs/33 §5 D1：本 repo 族群內研究從未用過的期間）
+    holdout_end: "2021-12-31"     # 快照迄日（r+h 出場日可落在次年初，由 M-Pick3b 預註冊決定是否剔除）
+    reconcile_years: [2014, 2021]  # TWSE MI_INDEX 抽樣核價年份範圍（含暖身年；僅上市）
+    reconcile_dates_per_year: 3   # 每年抽樣交易日數（一日一請求 → 8 年共 24 次官方請求）
+    reconcile_seed: 20260928      # 抽樣種子（每年獨立 seed+年）
+    reconcile_cache_dir: data/cache/twse_mi_index_check  # 抽樣日快取獨立目錄：不混入生產 data/cache/twse/
+    # 除權息還原驗證三條判準（看到任何真實結果前寫定，playbook/20 §6；未過只標 FAIL 待人工查，不自動改資料）。
+    # (1) 全期自洽（含 2015–2021 保留樣本，不需官方對照）：FinMind 除權息「除息前收盤價」應等於價格資料
+    #     前一交易列收盤。(2)(3) 獨立官方對照，只有 2026-05-19 起（TWSE 除權息預告表快取起點）：
+    #     (2) 事件層級配對＋現金股利金額；(3) 窗層級：還原 r+20 vs 「TWSE 現金股利線性加回」（面板同一公式、
+    #     同一批 FinMind 價格列——不用 research/panel：其 2026-06 起列數稀疏，不能當參考）。
+    adj_before_price_tol_pct: 0.5     # (1) 前收差 ≤ 此 % 算一致
+    adj_before_price_min_rate: 0.98   # (1) 一致事件占比下限
+    adj_event_match_min_rate: 0.95    # (2) 官方事件在 FinMind 有同股同日配對的比例下限
+    adj_cash_amount_min_rate: 0.99    # (2) 純現金配對事件金額差 ≤ 0.01 元的比例下限
+    adj_window_diff_p99_max_pp: 1.0   # (3) 兩方都看見的純現金窗：|還原 r+20 − 線性加回 r+20| 的 p99 上限（百分點）。
+                                      # 兩種還原的差＝二階項 (D/entry)·(exit/after−1)，隨除息後股價漲幅放大，
+                                      # 故這把尺對大漲幅敏感；門檻事前寫定、未因結果調整（結果見 docs/33 §6）
+    output_dir: research/intra_pick_oos
   g3_grid:                  # docs/31 G3 候選 filter 驗證（族群前5×個股貼落後×位階中段×資金非負）
     horizons_td: [10, 20]        # forward 窗（交易日），與 laggard_grid 同窗才可比較
     rs_window: 20                 # rs_subind 回看窗，同 laggard_grid 口徑

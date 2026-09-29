@@ -16,21 +16,27 @@ from tw_screener.data.finmind import (
     _BALANCESHEET_WIDE_SCHEMA,
     _CASHFLOWS_FIELD_MAP,
     _CASHFLOWS_WIDE_SCHEMA,
+    _DIVIDEND_RESULT_SCHEMA,
     _FINANCIALS_FIELD_MAP,
     _FINANCIALS_WIDE_SCHEMA,
     _MONTH_REVENUE_SCHEMA,
+    _STOCK_PRICE_SCHEMA,
     FinMindClient,
     _load_finmind_token,
+    _parse_dividend_result,
     _parse_finmind_long,
     _parse_month_revenue,
+    _parse_stock_price,
     _parse_taiwan_stock_per,
     create_client,
     load_balancesheet_history,
     load_cashflow_history,
+    load_dividend_result_history,
     load_financials_history,
     load_finmind_per_history,
     load_merged_valuation_history,
     load_month_revenue_history,
+    load_stock_price_history,
 )
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "finmind"
@@ -589,3 +595,128 @@ def test_fetch_month_revenue_writes_cache_and_flags_failure(
     down = _client(tmp_path / "empty", max_retries=0)
     assert down.fetch_month_revenue("9999").is_empty()
     assert down.last_request_failed  # 請求失敗 → 斷路器可計數
+
+
+# ── M-Pick3a（docs/33）：日線＋除權息結果 ─────────────────────────────────────
+
+
+def test_parse_stock_price_units_bad_rows_and_dedup() -> None:
+    df = _parse_stock_price(_load_json("stock_price_2330.json"))
+    # 9 列：無 stock_id／壞日期兩列略過；2019-06-21 重複留最後一筆 → 6 列
+    assert df.height == 6
+    assert dict(df.schema) == _STOCK_PRICE_SCHEMA
+    first = df.row(0, named=True)
+    assert first["date"] == date(2019, 6, 17)
+    assert (first["open"], first["high"], first["low"], first["close"]) == (
+        231.5, 235.0, 230.5, 233.0
+    )  # max/min → high/low
+    assert first["volume"] == 51692012  # Trading_Volume＝股（同 TWSE 日線單位）
+    assert first["amount"] == pytest.approx(12043369475.0)  # Trading_money＝元
+    assert first["transactions"] == 20943
+    dup = df.filter(pl.col("date") == date(2019, 6, 21)).row(0, named=True)
+    assert dup["close"] == 999.0
+    no_trade = df.filter(pl.col("date") == date(2019, 6, 24)).row(0, named=True)
+    assert no_trade["close"] is None and no_trade["open"] is None  # 0 價 → null，不當價
+    assert no_trade["volume"] == 0  # 量照抄，無成交日的取捨交給消費端
+
+
+def test_parse_stock_price_empty() -> None:
+    df = _parse_stock_price({"msg": "success", "status": 200, "data": []})
+    assert df.is_empty()
+    assert dict(df.schema) == _STOCK_PRICE_SCHEMA
+
+
+def test_parse_dividend_result_keeps_ratio_inputs_and_raw_event_type() -> None:
+    df = _parse_dividend_result(_load_json("dividend_result_2887.json"))
+    # 6 列：無 stock_id／空日期兩列略過 → 4 列（含 before_price=0 的事件列）
+    assert df.height == 4
+    assert dict(df.schema) == _DIVIDEND_RESULT_SCHEMA
+    rights = df.filter(pl.col("ex_date") == date(2014, 2, 19)).row(0, named=True)
+    assert (rights["before_price"], rights["after_price"]) == (14.6, 14.45)
+    assert rights["reference_price"] == 14.6  # 權類事件參考價可 ≠ after_price，照抄
+    assert rights["event_type"] == "權"
+    both = df.filter(pl.col("ex_date") == date(2016, 8, 24)).row(0, named=True)
+    assert both["event_type"] == "權息"
+    assert both["dividend_value"] == pytest.approx(1.337219)
+    bad = df.filter(pl.col("ex_date") == date(2017, 8, 16)).row(0, named=True)
+    assert bad["before_price"] is None  # ≤0 → null，事件列保留給消費端判無效
+
+
+def _payload_resp(payload: dict) -> object:
+    class _Resp:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return payload
+
+    return _Resp()
+
+
+def test_fetch_dividend_result_caches_confirmed_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """{"data":[]}＝確認無事件 → 也落空檔（與「沒抓過／抓失敗」可區分），重跑走快取。"""
+    cache_dir = tmp_path / "finmind"
+    cache_dir.mkdir()
+    monkeypatch.setattr(
+        httpx, "get", lambda *a, **k: _payload_resp({"msg": "success", "status": 200, "data": []})
+    )
+    client = _client(cache_dir, max_retries=0)
+    assert client.fetch_dividend_result("1101").is_empty()
+    assert not client.last_request_failed
+    assert (cache_dir / "dividend_1101.parquet").exists()
+
+    def _boom(*a: object, **k: object) -> object:
+        raise AssertionError("httpx.get 不應被呼叫（空檔快取新鮮）")
+
+    monkeypatch.setattr(httpx, "get", _boom)
+    again = client.fetch_dividend_result("1101")
+    assert again.is_empty() and dict(again.schema) == _DIVIDEND_RESULT_SCHEMA
+
+
+def test_fetch_stock_price_empty_not_cached_and_failure_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache_dir = tmp_path / "finmind"
+    cache_dir.mkdir()
+    monkeypatch.setattr(
+        httpx, "get", lambda *a, **k: _payload_resp({"msg": "success", "status": 200, "data": []})
+    )
+    client = _client(cache_dir, max_retries=0)
+    assert client.fetch_stock_price("9999").is_empty()
+    assert not (cache_dir / "price_9999.parquet").exists()  # 日線無資料不落檔（同月營收）
+
+    price_payload = _load_json("stock_price_2330.json")
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _payload_resp(price_payload))
+    df = client.fetch_stock_price("2330")
+    assert df.height == 6 and not client.last_request_failed
+    assert (cache_dir / "price_2330.parquet").exists()
+
+    def _down(*a: object, **k: object) -> object:
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(httpx, "get", _down)
+    monkeypatch.setattr(finmind, "is_fresh", lambda *a, **k: False)  # 強制過期
+    stale = client.fetch_stock_price("2330")
+    assert client.last_request_failed  # 請求失敗 → 斷路器可計數
+    assert stale.height == 6  # 回退舊快取
+
+
+def test_load_price_and_dividend_history(tmp_path: Path) -> None:
+    assert load_stock_price_history(tmp_path).is_empty()
+    assert load_dividend_result_history(tmp_path).is_empty()
+    px = _parse_stock_price(_load_json("stock_price_2330.json"))
+    px.write_parquet(tmp_path / "price_2330.parquet")
+    px.head(2).with_columns(pl.lit(1.0).alias("close")).write_parquet(
+        tmp_path / "price_2330b.parquet"
+    )
+    got = load_stock_price_history(tmp_path)
+    assert got.height == 6  # (stock_id, date) 去重
+    assert got.filter(pl.col("date") == date(2019, 6, 17))["close"].item() == 1.0  # 後讀者勝
+    pl.DataFrame(schema=_DIVIDEND_RESULT_SCHEMA).write_parquet(tmp_path / "dividend_1101.parquet")
+    _parse_dividend_result(_load_json("dividend_result_2887.json")).write_parquet(
+        tmp_path / "dividend_2887.parquet"
+    )
+    div = load_dividend_result_history(tmp_path)
+    assert div.height == 4 and div["stock_id"].unique().to_list() == ["2887"]

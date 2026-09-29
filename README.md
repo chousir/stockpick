@@ -219,6 +219,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make rotation-efficacy`                               | 輪動欄效度：歷史重建→生產對表→forward basket IC/lift（docs/22 WS-C；`backtest rotation-efficacy --membership official` 出官方產業別 robustness 版） | 每季                                 |
 | `make laggard-grid`                                    | 族群強弱×領先落後×位階 forward 報酬格（docs/22 WS-D；`--membership official` 同上） | 每季                                 |
 | `make intra-pick`                                      | 族群內個股因子錦標賽：RS／52 週高點／EPS 加速／月營收加速的族群內挑檔力（docs/32 預註冊） | 季頻重跑（新週累積後重驗）           |
+| `make intra-pick-holdout`                              | M-Pick3a 保留樣本 2015–2021 週快照（FinMind 日線、除權息還原總報酬 target、regime 降級標籤）＋資料品質報告（含 24 次 TWSE MI_INDEX 抽樣核價，`NO_RECONCILE=1` 略過）；**只做資料層、不評估因子**（docs/33） | M-Pick3b 預註冊前備妥資料 |
 | `make contrarian-efficacy`                             | 底部左側聯合桶（轉買×貼近低）forward alpha 檢驗＋§1 硬門檻裁決（docs/24 M-BR1 Phase 2） | 面板重建後／樣本變厚後重驗           |
 | `make macro-regime-validate`                           | 總經燈號 as-of 回放驗證＋門檻敏感度＋DEXJPUS tail-event 重測（docs/25 M-Macro2；讀 research/ raw，需先跑過三輪篩選研究） | 一次性驗證（Phase 2 已跑過）    |
 | `make macro-grid-search`                               | 宏觀指標視窗/門檻/組合 grid search，對3個已知事件測早期反應（docs/31 §23.4 Part 4；已跑，0候選，結論見§23.5，不可升級為決策依據） | 一次性研究（已跑過，backlog closed） |
@@ -230,7 +231,9 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make backfill-institutional-history START=… END=…` | 逐日上市法人歷史（TWSE T86，一日一請求；顯式起迄不依賴 latest 錨點） | 面板法人冷啟動（build-panel 前）|
 | `make backfill-finmind-per`                            | 全成員 FinMind PER 歷史（~1132 檔×1 call、2.5-5h，24h TTL 可續跑；`LIMIT`/`START` 選填，docs/31 §20.14） | 自身估值歷史腿冷啟動＋季頻延伸深度 |
 | `make backfill-finmind-financials`                     | 全市場 FinMind 3 財報 dataset（現金流/財報/資產負債，~1130×3 call、5.6-11h，24h TTL 可續跑；`LIMIT` 選填，docs/31 §20.15） | 機械式 DCF 冷啟動＋季頻重跑 |
-| `make backfill-finmind-revenue`                        | 全次產業成員 FinMind 月營收歷史（~1000 檔×1 call、1.7-3.4h，24h TTL 可續跑；`LIMIT` 選填，docs/32） | M-Pick2 族群內因子研究冷啟動＋重跑前延伸 |
+| `make backfill-finmind-revenue`                        | 全次產業成員 FinMind 月營收歷史（2013 起；~1000 檔×1 call、1.7-3.4h，24h TTL 可續跑；`LIMIT` 選填；既有快取要往前延伸需 `uv run tw-screener data backfill-finmind-revenue --force`，docs/32、docs/33） | M-Pick2／M-Pick3 族群內因子研究冷啟動＋重跑前延伸 |
+| `make backfill-finmind-price`                          | 全次產業成員 FinMind 日線（2013 起；原始 OHLC＋成交股數／金額；~1130 檔×1 call、1.9-3.8h，24h TTL 可續跑；`LIMIT` 選填，docs/33） | M-Pick3a 保留樣本（2015–2021）冷啟動 |
+| `make backfill-finmind-dividend`                       | 全次產業成員 FinMind 除權息結果（2013 起；除權息前收盤／參考價→還原比值；無事件也落空檔；~1130 檔×1 call、1.9-3.8h，docs/33） | M-Pick3a 總報酬 target 冷啟動 |
 | `make doctor`                                          | Goodinfo 健康檢查（week 已內含，只診斷不擋，可單獨重跑）| 懷疑被擋/改版時                      |
 | `uv run tw-screener screen run-local f_value_rebound`  | Goodinfo 被擋時的手動退路：純用 TWSE/TPEX 官方快取跑 F 策略（唯一目前可完全本地化的策略，docs/31 §19.3；D/E/G 因表外條件無法本地化，未接進 `make week`） | doctor 顯示 BLOCKED 時想至少拿到 F 的候選 |
 | `make fetch-tdcc`                                      | TDCC 集保大戶持股比（week 已內含）                   | 大戶欄空值時單獨補                   |

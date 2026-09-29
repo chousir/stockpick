@@ -40,7 +40,9 @@ fetch-institutional-history:      ## 回補近 N 日上市＋上櫃三大法人�
 backfill-universe-history:        ## ⏳ 一次性回補全部次產業成員日線（~1500 檔，8-12 小時）
 backfill-finmind-per:             ## ⏳ 一次性回補全成員 FinMind PER 歷史（~1132 檔×1 call、2.5-5h，24h TTL 可續跑；LIMIT/START 選填，季頻重跑，docs/31 §20.14）
 backfill-finmind-financials:      ## ⏳ 一次性回補全市場 FinMind 3 財報 dataset（現金流/財報/資產負債，~1130×3 call、5.6-11h，24h TTL 可續跑；LIMIT 選填，季頻重跑，不接 make week，docs/31 §20.15）
-backfill-finmind-revenue:         ## ⏳ 一次性回補全次產業成員 FinMind 月營收歷史（~1000 檔×1 call、1.7-3.4h，24h TTL 可續跑；LIMIT 選填，研究用、不接 make week，docs/32）
+backfill-finmind-revenue:         ## ⏳ 一次性回補全次產業成員 FinMind 月營收歷史（2013 起，~1000 檔×1 call、1.7-3.4h，24h TTL 可續跑；LIMIT 選填，研究用、不接 make week，docs/32、docs/33）
+backfill-finmind-price:           ## ⏳ 一次性回補全次產業成員 FinMind 日線（2013 起，~1130 檔×1 call、1.9-3.8h，24h TTL 可續跑；LIMIT 選填，M-Pick3a 保留樣本用、不接 make week，docs/33）
+backfill-finmind-dividend:        ## ⏳ 一次性回補全次產業成員 FinMind 除權息結果（2013 起，~1130 檔×1 call、1.9-3.8h，無事件也落空檔；LIMIT 選填，M-Pick3a 總報酬 target 用、不接 make week，docs/33）
 build-themes:    ## 爬 Yahoo 概念股 merge 進 config/concepts.yaml（DRY=1 預演）
 
 # ─── 選股 ───────────────────────────────────────
@@ -136,6 +138,7 @@ tw-screener cp candidates / calibrate / valuation
 tw-screener backtest strategies
 tw-screener backtest finmind-reconcile          # FinMind PER vs TWSE 官方估值三判準對帳（docs/31 §20.14）
 tw-screener backtest finmind-financials-reconcile  # FinMind 財報 vs 本地 fundamentals 四判準對帳（docs/31 §20.15）
+tw-screener backtest intra-pick-holdout [--no-reconcile]  # M-Pick3a 保留樣本 2015–2021 週快照＋資料品質報告（MI_INDEX 抽樣核價；不評估因子，docs/33）
 tw-screener picks shortlist [--week 2026-Www]   # M-Pick1 機器排序 Top N → reports/<週>/shortlist.csv（＝make shortlist；week 已內含，docs/11）
 tw-screener picks sync --week 2026-Www          # 解析 pick.md 尾端區塊整批落底帳（主流程）
 tw-screener picks record --week 2026-Www --stock XXXX --layer core   # 單檔補記
