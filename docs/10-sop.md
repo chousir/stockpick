@@ -49,6 +49,7 @@ make rotation                  # 次產業資金輪動，產 sector_rotation.md/
 make cp-value-candidates       # 個股 CP 補漲候選，產 cp_candidates.md
 make group                     # 族群分析，產 group_analysis.md＋candidates_enriched.csv
 make shortlist                 # M-Pick1 機器排序 Top 5＋候補，產 shortlist.csv（＝uv run tw-screener picks shortlist）
+make intra-pick-ledger         # M-Pick3c 前瞻台帳（2026-W40 起）：自動凍結本週 shortlist 池的因子值到 research/，不需人工處理；week-check 報「台帳缺列／覆蓋不足」才要看（docs/35）
 ```
 
 **產出**：

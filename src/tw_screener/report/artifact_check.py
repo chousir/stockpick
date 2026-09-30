@@ -13,7 +13,8 @@ cp_candidates.md 曾連續數週無聲斷供、W26 整週 pick 斷供也是事�
   缺只印提醒；往週缺＝真斷供（W26 型），WARNING。
   excluded.csv 不查：當週可能真的沒有旗標剔除，缺檔合法（F1-PO4 底帳自願制）。
 
-純檔案存在性檢查，不打網、不讀檔內容。
+純本地檢查、不打網：週次目錄產物只查檔案存在、不讀內容；M-Pick3c 前瞻台帳（docs/35）另讀底帳 CSV，
+點名最新週缺列或因子覆蓋不足（台帳寫入是 make week 尾段的容錯步驟，無聲失敗會少一週乾淨樣本）。
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import polars as pl
 import yaml
 from rich.console import Console
 
@@ -37,10 +39,11 @@ class ArtifactReport:
     missing_machine: list[str] = field(default_factory=list)
     pending_analyst: list[str] = field(default_factory=list)
     stale_weeks: dict[str, list[str]] = field(default_factory=dict)
+    ledger_warnings: list[str] = field(default_factory=list)
 
     @property
     def has_warnings(self) -> bool:
-        return bool(self.missing_machine or self.stale_weeks)
+        return bool(self.missing_machine or self.stale_weeks or self.ledger_warnings)
 
 
 def _missing_in(week_dir: Path, expected: list[str]) -> list[str]:
@@ -78,6 +81,79 @@ def check_week_artifacts(
     return report
 
 
+def check_intra_ledger(
+    ledger_path: Path, reports_dir: Path, start_week: str, min_coverage: float
+) -> list[str]:
+    """M-Pick3c 前瞻台帳（docs/35）：起算週之後每個有 shortlist.csv 的週次都該在底帳裡。
+
+    回傳 WARNING 句（空 list＝正常、尚未起算或無週次）：
+    - 底帳無法讀取（損毀／欄位不符）→ 一句警告；
+    - 最新週缺列 → 提示補跑（限 data_date+7 日內）；更早的週缺列 → 多半已逾補記期限，
+      該週不會進乾淨樣本；
+    - 最新週有列但合格成員內任一因子覆蓋率 < min_coverage → 點名因子與比率。
+    台帳靠 make week 尾段容錯步驟寫入，無聲失敗會少一週乾淨樣本，故在這裡點名（同本模組動機）。
+    week-check 沒有 make 的 `-` 前綴，所以本函式**不得 raise**（讀檔錯誤一律轉成警告句）。
+    """
+    from tw_screener.backtest import intra_pick_ledger as il
+    from tw_screener.report.shortlist import SHORTLIST_FILENAME
+
+    if not il.is_week_tag(start_week):
+        return [f"settings 的台帳 start_week={start_week!r} 不是 YYYY-Www 格式——台帳檢查停用"]
+    dirs = [d for d in week_dirs(reports_dir) if il.is_week_tag(d.name)]
+    if not dirs:
+        return []
+    latest = dirs[-1].name
+    try:
+        ledger = il.read_ledger(ledger_path)
+    except (OSError, pl.exceptions.PolarsError) as e:
+        return [f"前瞻台帳無法讀取（{ledger_path}）：{e}——檔案損毀或欄位不符，請人工檢查"]
+    recorded = set(ledger["week"].to_list())
+
+    out: list[str] = []
+    for d in dirs:
+        week = d.name
+        if il.is_before_start(week, start_week) or week in recorded:
+            continue
+        if not (d / SHORTLIST_FILENAME).is_file():
+            continue  # 沒有池可記（shortlist 步驟失敗另有機器產物檢查）
+        if week == latest:
+            out.append(
+                f"{week} 前瞻台帳缺列（{ledger_path}）——make intra-pick-ledger 可補跑"
+                "（限 data_date+7 日內，逾期拒寫）"
+            )
+        else:
+            out.append(
+                f"{week} 有 {SHORTLIST_FILENAME} 但前瞻台帳無此週——多半已逾補記期限"
+                f"（data_date+7 日），該週不會進乾淨樣本；"
+                f"期限內仍可 make intra-pick-ledger WEEK={week}"
+            )
+    if latest in recorded:
+        summary = il.week_summary(ledger.filter(pl.col("week") == latest), min_coverage)
+        cov, low = summary["coverage"], summary["low_coverage"]
+        if isinstance(cov, dict) and isinstance(low, list) and low:
+            out.append(
+                f"{latest} 前瞻台帳因子覆蓋不足："
+                + "・".join(f"{c} {cov[c]:.0%}" for c in low)
+                + f"（< {min_coverage:.0%}；原因與處置見 make intra-pick-ledger 輸出與 docs/35 §5）"
+            )
+    return out
+
+
+def _ledger_warnings(cfg: dict, reports_dir: Path) -> list[str]:
+    """從 settings 取台帳設定後檢查；未設定 backtest.intra_pick_ledger（舊設定檔）→ 不檢查。"""
+    from tw_screener.backtest.intra_pick import IntraPickConfig
+
+    lc = (cfg.get("backtest") or {}).get("intra_pick_ledger") or {}
+    if not lc.get("start_week"):
+        return []
+    return check_intra_ledger(
+        Path(lc.get("ledger_path", "research/intra_pick_ledger/ledger.csv")),
+        reports_dir,
+        str(lc["start_week"]),
+        IntraPickConfig.from_settings(cfg).min_coverage,
+    )
+
+
 def run_artifact_check(settings: Path) -> ArtifactReport:
     """CLI 進口：讀 settings、跑檢查、印結果。缺漏只 WARNING、不 raise（不擋 make week）。"""
     with open(settings, encoding="utf-8") as fh:
@@ -96,7 +172,13 @@ def run_artifact_check(settings: Path) -> ArtifactReport:
         )
         return report
 
+    try:
+        report.ledger_warnings = _ledger_warnings(cfg, Path(cfg["paths"]["reports_dir"]))
+    except Exception as e:  # noqa: BLE001 — 純提示段；本檔契約＝永遠 exit 0，台帳檢查壞掉不得擋 make week
+        report.ledger_warnings = [f"前瞻台帳檢查本身失敗（{type(e).__name__}：{e}）"]
     console.print(f"[bold]產物完整性檢查：{report.latest_week}[/bold]")
+    for msg in report.ledger_warnings:
+        console.print(f"[yellow]⚠️ WARNING：{msg}[/yellow]")
     for name in report.missing_machine:
         console.print(
             f"[yellow]⚠️ WARNING：{report.latest_week} 缺 {name}——"

@@ -37,8 +37,9 @@
  ⑪ group                     族群分析（候選股宇宙）→ group_analysis.md ＋ candidates_enriched.csv（含揭露欄；docs/31 §13 官方族群前5＋§4/§7.2/§9/§11 G1/G2/G4/G5/L6/F2' 新設計候選觀察欄與前瞻累積軌皆已內含）
  ⑫ snapshot-week             point-in-time 週快照：凍結 concepts/宇宙/持股 → data/snapshots/（容錯：失敗不擋）
  ⑬ shortlist                 M-Pick1 機器排序：候選股＋watchlist 依已驗證訊號（族群趨勢分分桶→距季線偏好帶→趨勢分）排 Top 5＋候補 → shortlist.csv（容錯：失敗不擋）
- ⑭ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳，缺者 WARNING（不擋流程）
- ⑮ pick-outcome-brief        上週 picks r+5/α/勝率＋偽陰性一頁 → 本週輸入包（容錯：失敗不擋）
+ ⑭ intra-pick-ledger         M-Pick3c 前瞻台帳（docs/35）：凍結本週**真實** shortlist 池的 F1–F4 因子值 → research/intra_pick_ledger/ledger.csv（2026-W40 起算；只記錄不含報酬欄；純本地；容錯：失敗不擋，week-check 點名缺週）
+ ⑮ week-check                產物完整性檢查：本週機器產物＋歷週 pick 底帳＋前瞻台帳缺週／覆蓋不足，缺者 WARNING（不擋流程）
+ ⑯ pick-outcome-brief        上週 picks r+5/α/勝率＋偽陰性一頁 → 本週輸入包（容錯：失敗不擋）
                                                ▼
  手動：把報告貼給 Claude（docs/11 prompt）→ pick.md（一頁決策卡 ≤50 行：Top 5 照 shortlist 排序、Opus 只查證說明、否決 ≤2）＋ pick_detail.md（明細）
  手動：tw-screener picks sync 解析 pick.md 尾端區塊（Top 5→core＋rank）、整批寫底帳 → 每季 make pick-outcome 算命中率×α（pick 閉環）
@@ -144,7 +145,7 @@ make week GROUP=defg          # defg 為現行唯一主流程；abc/def 已退�
 首次設定做完後，平時就這幾條（產出與貼 Claude 細節見上方「主流程」）：
 
 ```bash
-make week GROUP=defg                              # ①~⑮ 一鍵跑完（含 ⑬ shortlist；尾段 week-check 缺產物自動 WARNING＋pick-outcome-brief）
+make week GROUP=defg                              # ①~⑯ 一鍵跑完（含 ⑬ shortlist、⑭ 前瞻台帳；尾段 week-check 缺產物自動 WARNING＋pick-outcome-brief）
 make shortlist                                    # （選用）單獨重排 Top 5 → shortlist.csv（week 已內含；＝uv run tw-screener picks shortlist）
 # 貼給 Claude 的 7 類檔（全在 reports/YYYY-Www/，詳見上方主流程表）：
 #   shortlist.csv  group_analysis.md  sector_rotation.md  candidates_enriched.csv
@@ -185,7 +186,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 
 | 指令                                                     | 做什麼                                               | 何時用                               |
 | -------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------ |
-| `make week GROUP=defg`                                 | 完整週流程 ①~⑮                                     | **每週一次（主入口）**         |
+| `make week GROUP=defg`                                 | 完整週流程 ①~⑯                                     | **每週一次（主入口）**         |
 | `make pick-outcome`                                    | pick 閉環：分層命中率×α（vs 大盤＋族群）＋偽陰性帳＋**停損延遲帳（M3.1）** | 每季（pick 底帳變厚後）              |
 | `make dash-dev`                                        | 起 dashboard 開發伺服器（FastAPI:8000＋Vite:5173）   | 視覺化瀏覽本週報告（§13）           |
 
@@ -221,6 +222,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make intra-pick`                                      | 族群內個股因子錦標賽：RS／52 週高點／EPS 加速／月營收加速的族群內挑檔力（docs/32 預註冊） | 季頻重跑（新週累積後重驗）           |
 | `make intra-pick-holdout`                              | M-Pick3a 保留樣本 2015–2021 週快照（FinMind 日線、除權息還原總報酬 target、regime 降級標籤）＋資料品質報告（含 24 次 TWSE MI_INDEX 抽樣核價，`NO_RECONCILE=1` 略過）；**只做資料層、不評估因子**（docs/33） | M-Pick3a 資料層（M-Pick3b 已釘版快照 20260930，重跑產新日期檔、不影響釘版，docs/34 §2.1） |
 | `make intra-pick-holdout-eval`                         | M-Pick3b 保留樣本驗證：H1 成交額／H2 偏好帶（主族）＋F2／F4 複驗（副族）；先驗快照 SHA-256 與判準邏輯檔釘版，剔除 2021-12 快照；`FEASIBILITY=1` 只做跑前可行性檢查；**單次正式執行**（已有結果即拒絕重跑）（docs/34 預註冊） | M-Pick3b 一次性驗證 |
+| `make intra-pick-ledger [WEEK=2026-Www]`             | M-Pick3c 前瞻台帳：凍結本週真實 shortlist 池的 F1–F4 因子值＋band_dist＋tier/rank → `research/intra_pick_ledger/ledger.csv`；**只記錄、不含報酬欄**；2026-W40 前的週拒寫，寫入（含首次）限 `data_date+7` 日內、逾期拒寫；F3/F4 靠 FinMind 快取（月營收每月 11 日起、財報季報期限後需補跑 `backfill-finmind-*`）；F1/F2 需日線快取無缺日（docs/35 §4–§5） | week 已容錯內含，可單獨重跑 |
 | `make panel-tr`                                        | D6 成員稠密總報酬面板：FinMind 稠密日線＋除權息重建 2022 起的 ma60／r10／r20／r40（今日次產業成員；**不覆蓋** `research/panel/panel.parquet`）；另出新舊差異報告（列吻合率、r20 窗跨度、target 差、M-Pick2 主宇宙 target 差）與兩條驗收；不算任何因子×target（docs/33 §7） | 需要成員 target 免於面板稀疏／除息未還原時 |
 | `make contrarian-efficacy`                             | 底部左側聯合桶（轉買×貼近低）forward alpha 檢驗＋§1 硬門檻裁決（docs/24 M-BR1 Phase 2） | 面板重建後／樣本變厚後重驗           |
 | `make macro-regime-validate`                           | 總經燈號 as-of 回放驗證＋門檻敏感度＋DEXJPUS tail-event 重測（docs/25 M-Macro2；讀 research/ raw，需先跑過三輪篩選研究） | 一次性驗證（Phase 2 已跑過）    |
@@ -412,6 +414,8 @@ FOMC/CPI/台股結算/法說等市場級事件 → `group_analysis.md` Section 0
 > ① 把 `scripts/fetch_cron.sh` **排成常駐**每交易日盤後跑（建議）；或
 > ② 一次性 `make backfill-universe-history`（對 concepts.yaml 全部次產業成員逐檔走可回補的單檔 `STOCK_DAY`，
 > 把輪動籃子歷史補成 ~1 年；~1500 檔×13 月、8-12 小時、永久快取可中斷續跑）。
+>
+> **更正（2026-09-30 實測，docs/35 §5）**：上市全市場日線**其實可補**——`make backfill-daily-history START=… END=…`（官方 MI_INDEX，一天一請求、已快取的日子自動跳過）已驗證補回缺日；**上櫃仍補不回**（TPEX 歷史端點對回查一律回空）。另外個股月檔「月中抓、月底後被當永久快取」會使窗內缺日，見 docs/99 §14。
 
 `scripts/fetch_cron.sh` 已備好（解析專案路徑、補 cron 精簡
 PATH、`flock` 防重入、寫 `logs/cron_fetch.log`）。T86 法人收盤後約 90 分鐘、**15:00 起穩定**（docs/02），
@@ -580,6 +584,7 @@ make typecheck   # mypy
 | [`docs/24-contrarian-base-detection.md`](./docs/24-contrarian-base-detection.md)             | 底部左側偵測 M-BR1：賣壓熄火×基本面完好×貼近結構低。Phase 1 揭露欄已實作；**Phase 2 面板檢驗已否證「轉買×貼低」兩條件桶**（lift r+20 −2.30%、CI95 [−3.52,−1.26]・§3.1）；**2026-08-08 裁決 A 人工解禁**三條件桶（＋防接刀）以小注進機會層、永不核心，附 M1.6 自動回收條款（§6）——證據狀態恆為「兩條件桶已否證、三條件桶未測且先驗不利」；**M-Pick1（2026-09-27）起左側不入 picks，只在 pick_detail.md 附錄 H 揭露（⚠️未驗證）** |
 | [`docs/25-macro-regime.md`](./docs/25-macro-regime.md)                                       | MacroRegime 總經避險層（外生風險燈號，與內生 V2 regime 並列不合成）：三輪 block-bootstrap 篩出 BAA10Y 為唯一穩健主訊號，v2 改單訊號決定燈色＋揭露面板；**Phase 1（M-Macro1）已上線、Phase 2（M-Macro2）as-of 回放驗證通過**，Phase 3 共振讀法實測待排 |
 | [`docs/26-macro-scan-integration.md`](./docs/26-macro-scan-integration.md)                   | 外部總經風險掃描整合評估（M-Macro4）：17 項美股情緒/籌碼指標逐項可得性對帳＋為何**不進 pipeline**（7 條硬觸發只有 2 條可求值）；採納 A 案面板「較上次」變化追蹤＋B 案人工掃描指令 `/macro-scan` |
+| [`docs/35-intra-pick-forward-ledger-m-pick3c.md`](./docs/35-intra-pick-forward-ledger-m-pick3c.md) | M-Pick3c 前瞻台帳規格＋執行紀錄（承 docs/32–34 族群內挑檔研究）：2026-W40 起每週凍結真實 shortlist 池的因子值、起算/凍結規則、FinMind 快取維運、**日線快取殘缺缺陷與處置選項（§5）**、後續評估預註冊須先解的問題 |
 | [`docs/proposals/`](./docs/proposals/00-index.md)                                            | 審查改善規劃書 01–05（效能技債/資料韌性/量化驗證閉環/架構瘦身/**選股有效性總改造 F1–F5**，皆已收官）        |
 | [`docs/99-troubleshooting.md`](./docs/99-troubleshooting.md)                                 | 常見問題與解法                                                                                                      |
 
