@@ -1450,3 +1450,40 @@ verifier：程式／測試／文件 **8／8 PASS**；資料獨立重算 **8／9 
 runner 口徑（成員宇宙 1,132 檔）不同，查明非實作錯誤（通過率同為 99.95%、未過 2 筆相同），並因此更正文件對「1 筆不檢查」的錯誤解釋
 （實為 7631 除息日晚於價格資料末日）、報告補母體說明（docs/33 §7.2／§7.6）。本 milestone 無研究裁決，未跑 fable 第二意見。
 **已 merge 進 main（2026-09-30，使用者同意，在 M-Pick3b 之後；分支保留、未 push）。**
+
+---
+
+## M-Pick3c：前瞻台帳（分支 `feat/m-pick3c-forward-ledger`）— 2026-09-30
+
+> docs/33 §5 執行順序第 4 項（D1＝A＋B 的 B）。規格與發現全在 docs/35。研究軌：**不含任何報酬欄、不算任何因子×target 統計**；
+> 週流程只多一個容錯的記錄步驟，shortlist／gate／`picks.*`／`intra_pick.py` 零改動（blob id 與 docs/34 §6 釘版相同）。
+
+**完成**
+- `backtest/intra_pick_ledger.py`（純函式）＋`_runner.py`＋`backtest intra-pick-ledger [--week]`／`make intra-pick-ledger`＋settings
+  `backtest.intra_pick_ledger`：把 `reports/<週>/shortlist.csv` 的**真實池**（含 gated／held）連同凍結當下的 F1–F4、`band_dist`、tier／rank／gate_reason
+  寫進 `research/intra_pick_ledger/ledger.csv`；因子重用 `intra_pick` 既有純函式（docs/32 §3 定義不新增），只取 `data_date` 當日。
+- 規則：2026-W40 起算（更早週拒寫）；對某週的**任何**寫入（含首次）限 `data_date + 7` 日內、逾期拒寫（`LedgerFrozenError`，底帳不動——不得事後才決定要記哪幾週，
+  也不得在結果可見後改寫）；無法判定期限視為已凍結；輸入嚴格（缺欄／型別漂移／`week` 欄與目錄不符一律報錯、不靜默轉 null）。`eps_quarter`／`rev_month` 記錄當週查找期別，
+  `cache_staleness` 判斷 FinMind 月營收／財報快取是否落後；覆蓋率低於 `intra_pick.min_coverage` 時印警告並點名缺值股票。
+- `make week` 尾段 `-$(MAKE) intra-pick-ledger`（shortlist 之後、week-check 之前；容錯）；`week-check` 增台帳檢查：起算週後每個有 `shortlist.csv` 的週都該在底帳裡
+  （最新週缺列／更早週缺列／最新週因子覆蓋不足皆 WARNING），且**不得 raise**（week-check 在 Makefile 沒有 `-` 前綴；損毀底帳轉成警告句）。
+  README 流程圖步驟編號順延（新增 ⑭ 台帳），並同步 docs/07、docs/10、docs/33、docs/34、docs/99 §14。
+- 測試 +84（純函式與寫入期限 55〔含與 `eps_asof`／`revenue_asof` 交叉對照防漂移〕、runner 離線煙霧 12、week-check 台帳 17）；對新增／修改邏輯做變異檢查（第一輪 27 個＋
+  fresh-context verifier 指出缺口後的第二輪 17 個），存活者兩次都補測試後歸零。
+- **真實資料煙霧測試**（W39 池→暫存目錄，未寫真實台帳）：以獨立寫法（不呼叫 `intra_pick`）從原始快取手算 2303、2606 的 F1／F2 與 2303 的 F3／F4，與台帳逐位一致（≤ 1e-9）。
+
+**發現（docs/35 §5；待使用者裁決處置）**
+- **日線快取殘缺**：W39 真實池的 F1／F2 覆蓋率起初只有 21%。成因＝個股月檔月中抓取後被當「過去月份永久快取」而永遠殘缺（例：2303 的 7 月檔只有 7 列）＋
+  全市場日檔 `daily_all_*` 於 2026-06-09 停止累積。以既有 `fetch_daily_all_historical`（官方 MI_INDEX）補上市缺日（新增 31 個日檔，僅新增檔案）後覆蓋率
+  **21% → 68%**，上市 23／23 檔完整；剩餘 11 檔全是上櫃（TPEX 歷史端點實測 51／51 空回應，全市場日線補不回）。這也是舊研究面板 2026-06 起稀疏的**推測**成因。
+- 處置選項 R1（恢復每日 cron／補上市日檔）、R2（改 `twse.py` 快取規則：月中寫入的月檔月底後重抓一次，建議另立小 milestone）、R3（接受限制）見 docs/35 §5。
+
+**教訓**：合成夾具的離線測試全綠（含手算案例）不代表真實輸入可用——真實池煙霧測試才暴露 F1／F2 大半為 null（playbook/90 2026-09-30）。
+
+**未涵蓋／待使用者裁決**：(i) §5 處置 R1／R2；(ii) 評估預註冊（M-Pick3d）須先解 docs/35 §6 八點（C4 一年內結構性不可判、檢定力、C5 觀察集合、target 口徑…），
+在它 commit 之前不得 join 任何報酬；(iii) **W40 `make week` 前需先 merge 本分支（或在本分支上跑），否則 W40 不會被記錄**——漏跑時可在 `data_date + 7` 日內
+於本分支補跑 `make intra-pick-ledger WEEK=…`；(iv) 月營收快取每月 11 日起、財報快取各季期限後需補跑 `backfill-finmind-*`（docs/35 §4）。
+
+**狀態**：驗收 `make test` **1619 passed**（D6 基線 1535＋新測 84）／ruff 淨／mypy 49＝既有基線、台帳相關檔零錯；fresh-context verifier 兩輪
+（第 1 輪 V1–V12 通過、V13 挑出三項缺陷〔首次寫入無期限、壞台帳會擋 `make week-check`、輸入不夠嚴格〕已修；第 2 輪 D1–D9 全 PASS、D10 未發現漏洞）；變異檢查累計 44 個最終 0 存活。
+無研究裁決，未跑 fable 第二意見。**分支 `feat/m-pick3c-forward-ledger`，尚未 merge 進 main（merge 必問使用者）、未 push。**
