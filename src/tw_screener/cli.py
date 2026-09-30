@@ -1909,6 +1909,23 @@ def backtest_intra_pick_holdout_eval_cmd(
     run_intra_pick_holdout_eval(settings, out_dir, feasibility_only=feasibility)
 
 
+@backtest_app.command("panel-tr")
+def backtest_panel_tr_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/panel）"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """D6 成員稠密總報酬面板：FinMind 稠密日線＋除權息重建 2022 起的 r10／r20／r40（docs/33 §7）。
+
+    不覆蓋原面板、不算任何因子×target 統計；另出新舊差異報告與兩條驗收（窗跨度不退化、前收自洽）。
+    需先 make backfill-finmind-price、backfill-finmind-dividend、build-panel（差異量化用）。
+    """
+    from tw_screener.backtest.panel_tr_runner import run_panel_tr
+
+    run_panel_tr(settings, out_dir)
+
+
 @backtest_app.command("g3-grid")
 def backtest_g3_grid_cmd(
     out_dir: Path | None = typer.Option(

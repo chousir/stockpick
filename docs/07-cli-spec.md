@@ -140,6 +140,7 @@ tw-screener backtest finmind-reconcile          # FinMind PER vs TWSE 官方估�
 tw-screener backtest finmind-financials-reconcile  # FinMind 財報 vs 本地 fundamentals 四判準對帳（docs/31 §20.15）
 tw-screener backtest intra-pick-holdout [--no-reconcile]  # M-Pick3a 保留樣本 2015–2021 週快照＋資料品質報告（MI_INDEX 抽樣核價；不評估因子，docs/33）
 tw-screener backtest intra-pick-holdout-eval [--feasibility]  # M-Pick3b 保留樣本驗證（H1／H2／F2／F4；驗快照 SHA-256＋判準邏輯檔釘版；單次正式執行，docs/34）
+tw-screener backtest panel-tr  # D6 成員稠密總報酬面板（FinMind 稠密日線＋除權息重建 2022 起 ma60／r10／r20／r40；不覆蓋原面板、不算因子×target，docs/33 §7）
 tw-screener picks shortlist [--week 2026-Www]   # M-Pick1 機器排序 Top N → reports/<週>/shortlist.csv（＝make shortlist；week 已內含，docs/11）
 tw-screener picks sync --week 2026-Www          # 解析 pick.md 尾端區塊整批落底帳（主流程）
 tw-screener picks record --week 2026-Www --stock XXXX --layer core   # 單檔補記

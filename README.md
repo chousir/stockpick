@@ -221,6 +221,7 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make intra-pick`                                      | 族群內個股因子錦標賽：RS／52 週高點／EPS 加速／月營收加速的族群內挑檔力（docs/32 預註冊） | 季頻重跑（新週累積後重驗）           |
 | `make intra-pick-holdout`                              | M-Pick3a 保留樣本 2015–2021 週快照（FinMind 日線、除權息還原總報酬 target、regime 降級標籤）＋資料品質報告（含 24 次 TWSE MI_INDEX 抽樣核價，`NO_RECONCILE=1` 略過）；**只做資料層、不評估因子**（docs/33） | M-Pick3a 資料層（M-Pick3b 已釘版快照 20260930，重跑產新日期檔、不影響釘版，docs/34 §2.1） |
 | `make intra-pick-holdout-eval`                         | M-Pick3b 保留樣本驗證：H1 成交額／H2 偏好帶（主族）＋F2／F4 複驗（副族）；先驗快照 SHA-256 與判準邏輯檔釘版，剔除 2021-12 快照；`FEASIBILITY=1` 只做跑前可行性檢查；**單次正式執行**（已有結果即拒絕重跑）（docs/34 預註冊） | M-Pick3b 一次性驗證 |
+| `make panel-tr`                                        | D6 成員稠密總報酬面板：FinMind 稠密日線＋除權息重建 2022 起的 ma60／r10／r20／r40（今日次產業成員；**不覆蓋** `research/panel/panel.parquet`）；另出新舊差異報告（列吻合率、r20 窗跨度、target 差、M-Pick2 主宇宙 target 差）與兩條驗收；不算任何因子×target（docs/33 §7） | 需要成員 target 免於面板稀疏／除息未還原時 |
 | `make contrarian-efficacy`                             | 底部左側聯合桶（轉買×貼近低）forward alpha 檢驗＋§1 硬門檻裁決（docs/24 M-BR1 Phase 2） | 面板重建後／樣本變厚後重驗           |
 | `make macro-regime-validate`                           | 總經燈號 as-of 回放驗證＋門檻敏感度＋DEXJPUS tail-event 重測（docs/25 M-Macro2；讀 research/ raw，需先跑過三輪篩選研究） | 一次性驗證（Phase 2 已跑過）    |
 | `make macro-grid-search`                               | 宏觀指標視窗/門檻/組合 grid search，對3個已知事件測早期反應（docs/31 §23.4 Part 4；已跑，0候選，結論見§23.5，不可升級為決策依據） | 一次性研究（已跑過，backlog closed） |

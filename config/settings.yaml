@@ -541,6 +541,31 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
       src/tw_screener/backtest/factor_lab.py: 41d03c70bcf81e5c1f82c02adde4436efacb3703
       src/tw_screener/report/shortlist.py: a9fe83e1716d4f98abffd4024b31f12ec26ccbda
     output_dir: research/intra_pick_holdout
+  panel_tr:                  # D6 成員稠密總報酬面板（make panel-tr；docs/33 §7）：FinMind 稠密日線＋除權息重建 2022 起的 r10/r20/r40
+                             # 不覆蓋 research/panel/panel.parquet；驗收門檻（span_*、before_price_*）於看到重建結果前寫定
+    start_date: "2022-01-03"      # 輸出起日＝研究面板起日（暖身段參與計算、不輸出）
+    horizons_td: [10, 20, 40]
+    main_horizon_td: 20           # 報告／驗收看的主窗（M-Pick1 使用者拍板主尺）
+    old_panel_path: research/panel/panel.parquet   # 只用來量化新舊差異，不當參照（2026-06 起列稀疏，docs/33 §6.6）
+    old_panel_end: "2026-08-28"   # 舊面板末日；新舊比較只看 ≤ 此日
+    mpick2_stockweeks_glob: research/intra_pick/intra_pick_stockweeks_*.parquet  # 量化 M-Pick2 主宇宙 target 差（只比 target）
+    calendar_min_names: 300       # 市場交易日曆：當日 ≥ 此檔數有價
+    # A1 窗跨度不退化：門檻＝基線年各月「r20 窗恰跨 20 個市場交易日」比例的最小值 − margin。
+    # 量級先估（2026-09-30，FinMind 稠密日線、只看日期與列序）：2025 年各月 94.0%～96.5%（其餘為流動性差股
+    # 的無成交日，自然基線；不會 < 20），故 margin 取 1pp → 門檻約 93.0%。這是防「像 2026-06 後的舊面板那樣稀疏」
+    # 的退化門檻，不是正確性證明。
+    span_baseline_year: 2025
+    span_floor_margin_pp: 1.0
+    span_check_since: "2026-06-01"   # 舊面板開始稀疏的月份（docs/33 §6.6-1）
+    # A2 前收自洽（2022 起的除權息事件）：門檻同 M-Pick3a (1)
+    before_price_tol_pct: 0.5
+    before_price_min_rate: 0.98
+    spot_checks:                  # 報告內可手算拆解的窗 [股票, 快照日]：稀疏期／現金股利／股票股利
+      - ["3055", "2026-06-18"]
+      - ["2330", "2022-06-08"]
+      - ["2406", "2022-01-05"]
+    output_dir: research/panel
+    output_name: panel_tr_members.parquet
   g3_grid:                  # docs/31 G3 候選 filter 驗證（族群前5×個股貼落後×位階中段×資金非負）
     horizons_td: [10, 20]        # forward 窗（交易日），與 laggard_grid 同窗才可比較
     rs_window: 20                 # rs_subind 回看窗，同 laggard_grid 口徑
