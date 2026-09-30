@@ -1408,7 +1408,7 @@ SHA-256）；(ii) M-Pick3c 前瞻台帳；(iii) D6 面板重建（docs/33 §6.6-
 (ii) M-Pick3c 前瞻台帳；(iii) D6 面板重建（docs/33 §6.6-3）。
 
 **狀態**：驗收 `make test` 1520 passed（main 1505＋新測 15）／ruff 淨／新檔 mypy 淨；verifier 10/10 PASS（另有預註冊核對一輪）；
-fable 第二意見不矛盾、無推翻裁決的缺陷。**分支保留、尚未 merge、尚未 push。**
+fable 第二意見不矛盾、無推翻裁決的缺陷。**已 merge 進 main（2026-09-30，使用者同意；分支保留、未 push）。**
 
 ---
 
@@ -1442,11 +1442,11 @@ fable 第二意見不矛盾、無推翻裁決的缺陷。**分支保留、尚未
 （playbook/90「2026-09-30 報告模板預寫的解釋句是待驗假設」）。
 
 **未涵蓋／待使用者裁決**：(i) 是否用新 target 重驗 M-Pick2（同一面板第二次檢視、非樣本外）；(ii) 是否要全市場版（補快取或全市場
-FinMind；基準 mkt_ew／alpha 不在新面板）；(iii) M-Pick3c 前瞻台帳；(iv) **merge 順序**：本分支疊在尚未 merge 的 M-Pick3b 分支之上
-（main 停在 93668b8），建議先 merge M-Pick3b、再 merge 本分支，維持一 milestone 一顆 bubble。
+FinMind；基準 mkt_ew／alpha 不在新面板）；(iii) M-Pick3c 前瞻台帳；(iv) **merge 順序（已完成）**：本分支疊在 M-Pick3b 分支之上，使用者
+2026-09-30 同意後先 merge M-Pick3b（`2296c4f`）、再 merge 本分支，各一顆 `--no-ff` bubble（M-Pick3b 的狀態字樣併在本分支的 docs commit 更新）。
 
 **狀態**：驗收 `make test` 1535 passed（M-Pick3b 基線 1520＋新測 15）／ruff 淨／mypy 49＝既有、D6 檔零錯；兩個 fresh-context
 verifier：程式／測試／文件 **8／8 PASS**；資料獨立重算 **8／9 PASS**——唯一未過的 A2 是我寫的驗收條件母體（面板內 1,129 檔、未來事件處理）與
 runner 口徑（成員宇宙 1,132 檔）不同，查明非實作錯誤（通過率同為 99.95%、未過 2 筆相同），並因此更正文件對「1 筆不檢查」的錯誤解釋
 （實為 7631 除息日晚於價格資料末日）、報告補母體說明（docs/33 §7.2／§7.6）。本 milestone 無研究裁決，未跑 fable 第二意見。
-**分支保留、尚未 merge、尚未 push。**
+**已 merge 進 main（2026-09-30，使用者同意，在 M-Pick3b 之後；分支保留、未 push）。**
