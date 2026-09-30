@@ -13,7 +13,11 @@ from tw_screener.analysis.watchlist import (
 from tw_screener.data.cache import find_latest
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import polars as pl
+
+    from tw_screener.data.finmind import FinMindClient
 
 
 app = typer.Typer(help="台股波段選股與分析工具", no_args_is_help=True)
@@ -483,7 +487,7 @@ def data_backfill_finmind_revenue(
 
     client = create_client(settings)
     with open(settings, encoding="utf-8") as fh:
-        start_date = yaml.safe_load(fh)["finmind"].get("month_revenue_start_date", "2019-01-01")
+        start_date = yaml.safe_load(fh)["finmind"].get("month_revenue_start_date", "2013-01-01")
 
     members = list_subindustries()
     if members.is_empty():
@@ -534,6 +538,122 @@ def data_backfill_finmind_revenue(
             break
     console.print(
         f"[green]回補完成：有資料 {done}、無月營收 {empty}、請求失敗 {failed}[/green]"
+    )
+
+
+def _backfill_finmind_members(
+    label: str,
+    fetch: "Callable[[str], pl.DataFrame]",
+    client: "FinMindClient",
+    limit: int,
+) -> None:
+    """全次產業成員依序跑單一 FinMind dataset（M-Pick3a 兩個回補指令共用）。
+
+    宇宙與排序同 backfill-finmind-revenue（`list_subindustries()`、成員多的次產業先、去重）；
+    斷路器：連續 3 次「請求失敗」（HTTP/額度）→ 停本輪（鐵律 1 精神）；`{"data":[]}` 不計入。
+    """
+    from tw_screener.analysis.sector_universe import list_subindustries
+
+    members = list_subindustries()
+    if members.is_empty():
+        console.print("[red]缺 concepts.yaml 次產業成員[/red]")
+        raise typer.Exit(1)
+    counts = members.group_by("sub_industry").len()
+    ordered = (
+        members.join(counts, on="sub_industry")
+        .sort("len", descending=True)["stock_id"]
+        .to_list()
+    )
+    targets = list(dict.fromkeys(ordered))
+    if limit > 0:
+        targets = targets[:limit]
+    console.print(f"[bold]FinMind {label}回補：{len(targets)} 檔[/bold]")
+
+    done = failed = empty = 0
+    consecutive_fail = 0
+    for i, sid in enumerate(targets, 1):
+        try:
+            df = fetch(sid)
+            if client.last_request_failed:
+                failed += 1
+                consecutive_fail += 1
+            elif df.is_empty():
+                empty += 1
+                consecutive_fail = 0
+            else:
+                done += 1
+                consecutive_fail = 0
+            if i % 25 == 0 or i == len(targets):
+                console.print(f"  進度 {i}/{len(targets)}（最新：{sid} {len(df)} 列）")
+        except Exception as e:  # noqa: BLE001 — 單檔失敗不該中斷整批
+            failed += 1
+            consecutive_fail += 1
+            console.print(f"[yellow]  {sid} 失敗：{e}[/yellow]")
+        if consecutive_fail >= 3:
+            console.print(
+                f"[red]連續 3 次請求失敗（進度 {i}/{len(targets)}）——疑似 FinMind 額度用盡"
+                "／API 異常，停止本輪。稍後重跑，已抓到的走快取續跑。[/red]"
+            )
+            break
+    console.print(
+        f"[green]回補完成：有資料 {done}、無資料 {empty}、請求失敗 {failed}[/green]"
+    )
+
+
+@data_app.command("backfill-finmind-price")
+def data_backfill_finmind_price(
+    limit: int = typer.Option(0, "--limit", help="只跑前 N 檔（測試用；0=全部）"),
+    force: bool = typer.Option(False, "--force", help="略過 24h TTL、強制重抓每一檔"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """一次性回補全次產業成員的 FinMind TaiwanStockPrice 日線（M-Pick3a，docs/33 §5 D3）。
+
+    為何需要：保留樣本 2015-01～2021-12 從未被族群內研究用過，但本地 TWSE/TPEX 日線快取
+    只從 2021-06 起。宇宙＝`list_subindustries()` 全成員（與 backfill-finmind-revenue 同一組）。
+    起點 settings.finmind.price_start_date；~1130 檔 × 1 call ≈ 註冊 600/hr → ~1.9h、
+    未註冊 → ~3.8h。24h TTL 可續跑。研究用、**不接 make week**。
+    """
+    import yaml
+
+    from tw_screener.data.finmind import create_client
+
+    client = create_client(settings)
+    with open(settings, encoding="utf-8") as fh:
+        start_date = yaml.safe_load(fh)["finmind"].get("price_start_date", "2013-01-01")
+    console.print(f"起始 {start_date}")
+    _backfill_finmind_members(
+        "日線",
+        lambda s: client.fetch_stock_price(s, start_date=start_date, force=force),
+        client,
+        limit,
+    )
+
+
+@data_app.command("backfill-finmind-dividend")
+def data_backfill_finmind_dividend(
+    limit: int = typer.Option(0, "--limit", help="只跑前 N 檔（測試用；0=全部）"),
+    force: bool = typer.Option(False, "--force", help="略過 24h TTL、強制重抓每一檔"),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """一次性回補全次產業成員的 FinMind TaiwanStockDividendResult 除權息結果（M-Pick3a）。
+
+    用途：保留樣本 target 的除權息還原（before/after 比值，現金與股票股利一併還原，docs/33 §2A）。
+    無事件的股票也落空檔（「確認沒配過」≠「沒抓到」）。起點 settings.finmind.dividend_start_date；
+    ~1130 檔 × 1 call ≈ 註冊 ~1.9h。24h TTL 可續跑。研究用、**不接 make week**。
+    """
+    import yaml
+
+    from tw_screener.data.finmind import create_client
+
+    client = create_client(settings)
+    with open(settings, encoding="utf-8") as fh:
+        start_date = yaml.safe_load(fh)["finmind"].get("dividend_start_date", "2013-01-01")
+    console.print(f"起始 {start_date}")
+    _backfill_finmind_members(
+        "除權息",
+        lambda s: client.fetch_dividend_result(s, start_date=start_date, force=force),
+        client,
+        limit,
     )
 
 
@@ -1743,6 +1863,29 @@ def backtest_intra_pick_cmd(
     from tw_screener.backtest.intra_pick_runner import run_intra_pick
 
     run_intra_pick(settings, out_dir)
+
+
+@backtest_app.command("intra-pick-holdout")
+def backtest_intra_pick_holdout_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/intra_pick_oos）"
+    ),
+    reconcile: bool = typer.Option(
+        True, "--reconcile/--no-reconcile",
+        help="是否打 TWSE MI_INDEX 抽樣核價（預設 8 年×3 日＝24 次官方請求，已抓過的日子走快取）",
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """M-Pick3a 保留樣本（2015-01～2021-12）週快照＋資料品質報告（docs/33 §5）。
+
+    只做資料層：價格因子／趨勢分／gate 重用 M-Pick2 純函式，target＝除權息還原總報酬，
+    regime＝成員日線降級標籤；**不算任何因子×target 統計**（M-Pick3b 預註冊 commit 後才評估）。
+    需先 make backfill-finmind-price、backfill-finmind-dividend、
+    backfill-finmind-revenue（2013 起）。
+    """
+    from tw_screener.backtest.intra_pick_oos_runner import run_intra_pick_holdout
+
+    run_intra_pick_holdout(settings, out_dir, reconcile=reconcile)
 
 
 @backtest_app.command("g3-grid")

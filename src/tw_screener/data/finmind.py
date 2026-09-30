@@ -17,6 +17,11 @@ FinancialStatements／BalanceSheet）餵 `analysis/dcf.py` 的機械式 DCF。`_
 M-Pick2（docs/32）：`TaiwanStockMonthRevenue` 月營收全歷史（寬表，形狀同 PER）餵族群內個股
 因子研究；`fetch_month_revenue`＋`load_month_revenue_history`，不接 make week。
 
+M-Pick3a（docs/33 §5 D3）：`TaiwanStockPrice` 日線＋`TaiwanStockDividendResult` 除權息結果
+（皆寬表）餵 2015–2021 保留樣本週快照（總報酬 target）；`fetch_stock_price`／
+`fetch_dividend_result`＋`load_stock_price_history`／`load_dividend_result_history`，
+不接 make week。
+
 合規（鐵律 1 精神外推；官方開放資料、門檻比 Goodinfo 鬆）：concurrency=1、請求間隔
 ≥ settings.finmind.request_interval_sec、同 (dataset,stock_id) 24h 快取、連錯 3 次停。
 token 選填（未註冊 300 req/hr、註冊 600）；用 httpx 直打、不裝 finmind pip 套件。
@@ -26,6 +31,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -64,6 +70,37 @@ _MONTH_REVENUE_SCHEMA: dict[str, type[pl.DataType]] = {
     "month": pl.Int64,
     "revenue": pl.Float64,
     "create_date": pl.Date,
+}
+
+# ── M-Pick3a（docs/33 §5 D3）：日線＋除權息結果（寬表）──────────────────────────
+# 實測（2026-09-28，2330／2887／6488）：TaiwanStockPrice `{date, stock_id, Trading_Volume（股）,
+# Trading_money（元）, open, max, min, close, spread, Trading_turnover（筆）}`，
+# 2330 自 2013-01-02 起。
+# TaiwanStockDividendResult `{date＝除權息交易日, stock_id, before_price＝除權息前收盤,
+# after_price＝除權息參考價, stock_and_cache_dividend＝權值+息值, stock_or_cache_dividend
+# （上市「權息／權／息」、上櫃「除息」…）, max_price, min_price, open_price, reference_price＝
+# 減除股利參考價}`；權類事件 after_price 可 ≠ reference_price（2887 2014-02-19）。上市櫃皆有。
+_DATASET_STOCK_PRICE = "TaiwanStockPrice"
+_DATASET_DIVIDEND_RESULT = "TaiwanStockDividendResult"
+_STOCK_PRICE_SCHEMA: dict[str, type[pl.DataType]] = {
+    "date": pl.Date,
+    "stock_id": pl.Utf8,
+    "open": pl.Float64,
+    "high": pl.Float64,
+    "low": pl.Float64,
+    "close": pl.Float64,
+    "volume": pl.Int64,        # 成交股數（同 TWSE 日線 volume 單位：股）
+    "amount": pl.Float64,      # 成交金額（元）
+    "transactions": pl.Int64,  # 成交筆數
+}
+_DIVIDEND_RESULT_SCHEMA: dict[str, type[pl.DataType]] = {
+    "ex_date": pl.Date,
+    "stock_id": pl.Utf8,
+    "before_price": pl.Float64,
+    "after_price": pl.Float64,
+    "reference_price": pl.Float64,
+    "dividend_value": pl.Float64,
+    "event_type": pl.Utf8,
 }
 
 
@@ -214,6 +251,98 @@ def _parse_month_revenue(payload: dict[str, Any]) -> pl.DataFrame:
         pl.DataFrame(rows, schema=_MONTH_REVENUE_SCHEMA)
         .unique(subset=["stock_id", "year", "month"], keep="last", maintain_order=True)
         .sort(["stock_id", "year", "month"])
+    )
+
+
+def _to_int_or_none(raw: Any) -> int | None:
+    """轉非負 int；無法轉或負值 → None（量／筆數不會是負的，負值＝髒資料）。"""
+    if raw is None:
+        return None
+    try:
+        v = int(float(raw))
+    except (TypeError, ValueError):
+        return None
+    return v if v >= 0 else None
+
+
+def _parse_stock_price(payload: dict[str, Any]) -> pl.DataFrame:
+    """解析 FinMind `TaiwanStockPrice` JSON → (date, stock_id, open, high, low, close, volume,
+    amount, transactions)。
+
+    價格 ≤ 0 → null（誠實，不當價）；量／額／筆照抄（0 保留——「無成交日」怎麼處理交給
+    消費端）。同 (stock_id, date) 重複 → 保留最後一筆；無法解析的列略過（warn 不 raise）。
+    """
+    data = payload.get("data") or []
+    rows: list[dict[str, Any]] = []
+    for r in data:
+        try:
+            d = date.fromisoformat(str(r["date"]))
+            sid = str(r["stock_id"]).strip()
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning(f"略過無效 FinMind 日線列：{r!r} — {e}")
+            continue
+        if not sid:
+            logger.warning(f"略過無 stock_id 的 FinMind 日線列：{r!r}")
+            continue
+        rows.append({
+            "date": d,
+            "stock_id": sid,
+            "open": _to_float_or_none(r.get("open"), drop_non_positive=True),
+            "high": _to_float_or_none(r.get("max"), drop_non_positive=True),
+            "low": _to_float_or_none(r.get("min"), drop_non_positive=True),
+            "close": _to_float_or_none(r.get("close"), drop_non_positive=True),
+            "volume": _to_int_or_none(r.get("Trading_Volume")),
+            "amount": _to_float_or_none(r.get("Trading_money"), drop_non_positive=False),
+            "transactions": _to_int_or_none(r.get("Trading_turnover")),
+        })
+    if not rows:
+        return pl.DataFrame(schema=_STOCK_PRICE_SCHEMA)
+    return (
+        pl.DataFrame(rows, schema=_STOCK_PRICE_SCHEMA)
+        .unique(subset=["stock_id", "date"], keep="last", maintain_order=True)
+        .sort(["stock_id", "date"])
+    )
+
+
+def _parse_dividend_result(payload: dict[str, Any]) -> pl.DataFrame:
+    """解析 FinMind `TaiwanStockDividendResult` JSON → (ex_date, stock_id, before_price,
+    after_price, reference_price, dividend_value, event_type)。
+
+    價格 ≤ 0 → null（事件列照留，有效性由消費端判斷——還原比值算不出就不能假裝沒事件）；
+    event_type 照抄原字串（上市／上櫃用字不同）。同 (stock_id, ex_date) 重複 → 保留最後一筆；
+    無法解析的列略過（warn 不 raise）。
+    """
+    data = payload.get("data") or []
+    rows: list[dict[str, Any]] = []
+    for r in data:
+        try:
+            d = date.fromisoformat(str(r["date"]))
+            sid = str(r["stock_id"] or "").strip()
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning(f"略過無效 FinMind 除權息列：{r!r} — {e}")
+            continue
+        if not sid:
+            logger.warning(f"略過無 stock_id 的 FinMind 除權息列：{r!r}")
+            continue
+        rows.append({
+            "ex_date": d,
+            "stock_id": sid,
+            "before_price": _to_float_or_none(r.get("before_price"), drop_non_positive=True),
+            "after_price": _to_float_or_none(r.get("after_price"), drop_non_positive=True),
+            "reference_price": _to_float_or_none(
+                r.get("reference_price"), drop_non_positive=True
+            ),
+            "dividend_value": _to_float_or_none(
+                r.get("stock_and_cache_dividend"), drop_non_positive=False
+            ),
+            "event_type": str(r.get("stock_or_cache_dividend") or "").strip() or None,
+        })
+    if not rows:
+        return pl.DataFrame(schema=_DIVIDEND_RESULT_SCHEMA)
+    return (
+        pl.DataFrame(rows, schema=_DIVIDEND_RESULT_SCHEMA)
+        .unique(subset=["stock_id", "ex_date"], keep="last", maintain_order=True)
+        .sort(["stock_id", "ex_date"])
     )
 
 
@@ -443,7 +572,7 @@ class FinMindClient:
 
     # ── M-Pick2（docs/32）：月營收 ───────────────────────────────────────────────
     def fetch_month_revenue(
-        self, stock_id: str, start_date: str = "2019-01-01", force: bool = False
+        self, stock_id: str, start_date: str = "2013-01-01", force: bool = False
     ) -> pl.DataFrame:
         """抓單檔 TaiwanStockMonthRevenue 全歷史 → month_revenue_{stock_id}.parquet（同 PER 抓法）。
 
@@ -471,6 +600,65 @@ class FinMindClient:
             return df
         save_parquet(df, cache_file)
         return df
+
+    # ── M-Pick3a（docs/33）：日線＋除權息結果 ───────────────────────────────────
+    def _fetch_wide(
+        self,
+        dataset: str,
+        prefix: str,
+        parse: Callable[[dict[str, Any]], pl.DataFrame],
+        schema: dict[str, type[pl.DataType]],
+        stock_id: str,
+        start_date: str,
+        force: bool,
+        cache_empty: bool = False,
+    ) -> pl.DataFrame:
+        """抓單檔寬表 dataset 全歷史 → `{prefix}_{stock_id}.parquet`（抓法同 fetch_month_revenue）。
+
+        cache_empty=True → `{"data":[]}` 也落一個空檔：把「確認無資料」與「從沒抓過／抓失敗」
+        分開（除權息用——沒檔的股票不能當成沒配過息）。`last_request_failed` 語意同其他 fetch_*。
+        """
+        self.last_request_failed = False
+        cache_file = self.cache_dir / f"{prefix}_{stock_id}.parquet"
+        if not force and is_fresh(cache_file, self.ttl_hours):
+            logger.info(f"命中快取 {cache_file}")
+            return load_parquet(cache_file)
+
+        payload = self._request(dataset, stock_id, start_date)
+        if payload is None:
+            self.last_request_failed = True
+            if cache_file.exists():
+                logger.warning(f"FinMind {dataset} {stock_id} 抓取失敗，回退舊快取")
+                return load_parquet(cache_file)
+            logger.warning(f"FinMind {dataset} {stock_id} 抓取失敗，且無舊快取")
+            return pl.DataFrame(schema=schema)
+
+        df = parse(payload)
+        if df.is_empty():
+            logger.info(f"FinMind {dataset} {stock_id} 無資料（data=[]）")
+            if cache_empty:
+                save_parquet(df, cache_file)
+            return df
+        save_parquet(df, cache_file)
+        return df
+
+    def fetch_stock_price(
+        self, stock_id: str, start_date: str = "2013-01-01", force: bool = False
+    ) -> pl.DataFrame:
+        """單檔 TaiwanStockPrice 全歷史 → price_{stock_id}.parquet（原始 OHLC、股數、元）。"""
+        return self._fetch_wide(
+            _DATASET_STOCK_PRICE, "price", _parse_stock_price, _STOCK_PRICE_SCHEMA,
+            stock_id, start_date, force,
+        )
+
+    def fetch_dividend_result(
+        self, stock_id: str, start_date: str = "2013-01-01", force: bool = False
+    ) -> pl.DataFrame:
+        """單檔 TaiwanStockDividendResult 全歷史 → dividend_{stock_id}.parquet（無事件落空檔）。"""
+        return self._fetch_wide(
+            _DATASET_DIVIDEND_RESULT, "dividend", _parse_dividend_result,
+            _DIVIDEND_RESULT_SCHEMA, stock_id, start_date, force, cache_empty=True,
+        )
 
     # ── Phase 2：財報 / 現金流 / 資產負債（M-Val-FinMind2）─────────────────────
     def _fetch_dataset(
@@ -581,6 +769,33 @@ def load_month_revenue_history(cache_dir: Path) -> pl.DataFrame:
         pl.concat(frames, how="diagonal_relaxed")
         .unique(subset=["stock_id", "year", "month"], keep="last")
         .sort(["stock_id", "year", "month"])
+    )
+
+
+def _load_keyed_history(
+    cache_dir: Path, prefix: str, schema: dict[str, type[pl.DataType]], keys: list[str]
+) -> pl.DataFrame:
+    """純讀全部 `{prefix}_*.parquet`（不打網），依 keys 去重；無快取回空表（schema=schema）。"""
+    files = sorted(Path(cache_dir).glob(f"{prefix}_*.parquet"))
+    if not files:
+        return pl.DataFrame(schema=schema)
+    frames = [load_parquet(f) for f in files]
+    return (
+        pl.concat(frames, how="diagonal_relaxed")
+        .unique(subset=keys, keep="last")
+        .sort(keys)
+    )
+
+
+def load_stock_price_history(cache_dir: Path) -> pl.DataFrame:
+    """全部 price_*.parquet（M-Pick3a）；(stock_id, date) 去重。"""
+    return _load_keyed_history(cache_dir, "price", _STOCK_PRICE_SCHEMA, ["stock_id", "date"])
+
+
+def load_dividend_result_history(cache_dir: Path) -> pl.DataFrame:
+    """全部 dividend_*.parquet（M-Pick3a；含「確認無事件」的空檔）；(stock_id, ex_date) 去重。"""
+    return _load_keyed_history(
+        cache_dir, "dividend", _DIVIDEND_RESULT_SCHEMA, ["stock_id", "ex_date"]
     )
 
 

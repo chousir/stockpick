@@ -1,0 +1,114 @@
+{
+ "msg": "success",
+ "status": 200,
+ "data": [
+  {
+   "date": "2019-06-17",
+   "stock_id": "2330",
+   "Trading_Volume": 51692012,
+   "Trading_money": 12043369475,
+   "open": 231.5,
+   "max": 235.0,
+   "min": 230.5,
+   "close": 233.0,
+   "spread": -3.0,
+   "Trading_turnover": 20943
+  },
+  {
+   "date": "2019-06-18",
+   "stock_id": "2330",
+   "Trading_Volume": 28798087,
+   "Trading_money": 6758454612,
+   "open": 234.0,
+   "max": 235.5,
+   "min": 233.0,
+   "close": 235.5,
+   "spread": 2.5,
+   "Trading_turnover": 9681
+  },
+  {
+   "date": "2019-06-19",
+   "stock_id": "2330",
+   "Trading_Volume": 50234372,
+   "Trading_money": 12181979568,
+   "open": 242.5,
+   "max": 244.0,
+   "min": 240.5,
+   "close": 244.0,
+   "spread": 8.5,
+   "Trading_turnover": 20528
+  },
+  {
+   "date": "2019-06-20",
+   "stock_id": "2330",
+   "Trading_Volume": 39717291,
+   "Trading_money": 9697726719,
+   "open": 242.0,
+   "max": 245.5,
+   "min": 241.0,
+   "close": 245.0,
+   "spread": 1.0,
+   "Trading_turnover": 13879
+  },
+  {
+   "date": "2019-06-21",
+   "stock_id": "2330",
+   "Trading_Volume": 62136304,
+   "Trading_money": 15398139830,
+   "open": 248.0,
+   "max": 248.5,
+   "min": 246.0,
+   "close": 248.5,
+   "spread": 3.5,
+   "Trading_turnover": 19049
+  },
+  {
+   "date": "2019-06-24",
+   "stock_id": "2330",
+   "Trading_Volume": 0,
+   "Trading_money": 0,
+   "open": 0.0,
+   "max": 0.0,
+   "min": 0.0,
+   "close": 0.0,
+   "spread": 0.0,
+   "Trading_turnover": 0
+  },
+  {
+   "date": "2019-06-17",
+   "stock_id": "",
+   "Trading_Volume": 51692012,
+   "Trading_money": 12043369475,
+   "open": 231.5,
+   "max": 235.0,
+   "min": 230.5,
+   "close": 233.0,
+   "spread": -3.0,
+   "Trading_turnover": 20943
+  },
+  {
+   "date": "not-a-date",
+   "stock_id": "2330",
+   "Trading_Volume": 51692012,
+   "Trading_money": 12043369475,
+   "open": 231.5,
+   "max": 235.0,
+   "min": 230.5,
+   "close": 233.0,
+   "spread": -3.0,
+   "Trading_turnover": 20943
+  },
+  {
+   "date": "2019-06-21",
+   "stock_id": "2330",
+   "Trading_Volume": 62136304,
+   "Trading_money": 15398139830,
+   "open": 248.0,
+   "max": 248.5,
+   "min": 246.0,
+   "close": 999.0,
+   "spread": 3.5,
+   "Trading_turnover": 19049
+  }
+ ]
+}

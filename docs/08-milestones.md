@@ -1310,6 +1310,10 @@ E/G 與 F 之間有一條沒人守的縫（YoY 5-20%＋PE 15-30）；左側股�
 
 **狀態**：驗收 `make test` 1468 passed／ruff 淨／mypy 無新增錯（49＝main 既有）；verifier 9/9 PASS；fable 第二意見「結論成立」（§6 措辭已依建議修正）。**已 merge 進 main（2026-09-28；分支保留、未 push）。**
 
+**後記（2026-09-29，M-Pick3a 驗證時發現）**：研究面板 `research/panel/panel.parquet` 自 2026-06 起列數稀疏，且缺 127 檔成員；
+M-Pick2 主宇宙 234 週中有 12 週（5.1%）、715 股週（4.7%）的 r+20 窗碰到稀疏期，影響未量化。**M-Pick2 的裁決（四因子皆未過關）未改動**；
+細節與數字見 docs/33 §6.6。
+
 ---
 
 ## M-Pick3 規劃：M-Pick2 衍生假設的樣本外驗證（分支 `docs/m-pick3-oos-plan`）— 2026-09-28
@@ -1343,3 +1347,33 @@ D5 先修 `weekly_snapshot_dates` 再跑；D6 面板除息還原另立 milestone
   不在 `make week` 路徑）重跑時上述兩週會換；**既有報告與 docs 數字不回改**（D5 執行含義）。
 
 **狀態**：驗收 `make test` 1469 passed（main 1468＋新測 1）／ruff check 淨／mypy 49＝main 既有、無新增；verifier 9/9 PASS。**已 merge 進 main（2026-09-28；分支保留、未 push）。**
+
+---
+
+## M-Pick3a：保留樣本資料層（分支 `feat/m-pick3a-holdout-data`）— 2026-09-29
+
+> docs/33 §5 執行順序第 2 項。只做資料層＋資料品質驗證，**不算任何因子×target 統計**（M-Pick3b 預註冊 commit 之後才評估）。
+
+**完成**
+- FinMind `TaiwanStockPrice`／`TaiwanStockDividendResult` 抓取＋loader＋`make backfill-finmind-price`／`backfill-finmind-dividend`
+  （除權息無事件也落空檔）；月營收起點 2019→2013（D3）；設定 `finmind.{price,dividend}_start_date`。
+- `backtest/intra_pick_oos.py`（純函式：除權息還原總報酬 target、保留樣本快照日、事件對帳、前收自洽…）＋
+  `intra_pick_oos_runner.py`＋`backtest intra-pick-holdout`／`make intra-pick-holdout`＋settings `backtest.intra_pick_oos`：
+  2015-01～2021-12 週快照 361 週、317,585 股週（價格因子／趨勢分／gate 重用 M-Pick2 純函式，target＝除權息還原總報酬，
+  regime 走空法人降級路徑〔D4〕）。
+- 回補：日線 1,132/1,132、除權息 1,132（966 檔有事件／166 檔確認無事件）、月營收 2013 起重抓 1,129 檔有資料／3 檔無資料；請求失敗 0。
+- 核價：TWSE MI_INDEX 24 個抽樣日上市 10,029/10,029 收盤與股數全一致（PASS）；本地官方快取對照（上市 100%、上櫃收盤 100%）。
+- 除權息還原驗證（三判準事前寫進 settings）：(1) 前收自洽 99.98% **PASS**；(2) TWSE 預告表 385 筆 100% 配對＋現金金額
+  347/347 **PASS**；(3) 窗層級 p99 1.073pp > 1.0pp **FAIL（照實保留；成因＝二階項隨除息後漲幅放大，門檻未調）**。
+  事後補充診斷（不設判準）：還原比值誤差最大 0.410pp（> 0.2pp 僅 3 筆、皆 9105 TDR）、比值版參考殘差最大 0.177pp。
+- 測試 +36（手算案例）、docs/02（dataset 欄位）、docs/07、README、docs/33 §6、playbook/90 兩條教訓。
+
+**發現（docs/33 §6.6；不改 M-Pick2 結論）**：面板自 2026-06 起列數稀疏（M-Pick2 主宇宙 12 週、4.7% 股週受影響，未量化）；
+面板缺 127 檔成員；上櫃 stock_day_* 量約 0.5% 股日偏低（H1 跨樣本口徑差）。D6 建議：用本 milestone 的 FinMind 稠密日線＋
+除權息重建 2022–2026 target（同時解掉列稀疏與除息未還原）。
+
+**未涵蓋／待使用者裁決**：(i) M-Pick3b 預註冊（新檔，**任何保留樣本結果計算前 commit**；須引用 docs/33 §6.7、釘快照
+SHA-256）；(ii) M-Pick3c 前瞻台帳；(iii) D6 面板重建（docs/33 §6.6-3）；(iv) 2021-12 快照 r+20 出場落 2022 年初的處理
+由預註冊決定。
+
+**狀態**：驗收 `make test` 1505 passed（main 1469＋新測 36）／ruff 淨／mypy 49＝main 既有、無新增；verifier 10/10 PASS（含獨立重算面板稀疏、缺 127 檔成員、M-Pick2 受影響週數，皆與文件相符）；本 milestone 無研究裁決，未跑 fable 第二意見。最終快照 SHA-256 `47c6c0d7…bcc47cd`（重跑相同）。**已 merge 進 main（2026-09-30，使用者同意；分支保留、未 push）。**

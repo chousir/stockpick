@@ -435,10 +435,34 @@ create_time}`。`date`＝營收月的**次月 1 日**（非營收月）→ parse
 （→ `create_date` null，不臆造）。實測 2026-09-28：2330 回 2018-12～2026-08 共 93 月。
 
 用途：族群內個股因子研究（docs/32 F4 月營收 YoY 加速）的歷史——TWSE 月營收端點只回最新月、
-`revenue_*.parquet` 從 2026-05 才起累。`config/settings.yaml → finmind.month_revenue_start_date`（2019）；
+`revenue_*.parquet` 從 2026-05 才起累。`config/settings.yaml → finmind.month_revenue_start_date`
+（原 2019；**2026-09-28 M-Pick3a 改 2013**，讓 2015 起的保留樣本 F4 滿 18 個月回看，docs/33 §5 D3——
+既有快取在 24h TTL 內不會自動往前延伸，需 `backfill-finmind-revenue --force`）；
 回補 `make backfill-finmind-revenue`（~1000 檔×1 call ≈ 註冊 1.7h）；**不接 `make week`**。
 快取 `data/cache/finmind/month_revenue_<stock_id>.parquet`。point-in-time 由消費端依法定公告期限
 （次月 10 日）推，不用 `create_date`（舊列缺）。
+
+### M-Pick3a：日線＋除權息結果 dataset（研究用，2026-09-28 新增，docs/33）
+
+保留樣本 2015-01～2021-12 的價格與總報酬 target 來源（本地 TWSE/TPEX 日線快取只從 2021-06 起）。
+兩者皆**寬表**，實測 2026-09-28（2330／2887／6488 各 1 次）：
+
+| dataset | 欄位（→ parser 欄名） | 備註 |
+|---|---|---|
+| `TaiwanStockPrice` | `date`、`open`／`max`／`min`／`close`（→ high／low）、`Trading_Volume`（→ `volume`，**股**）、`Trading_money`（→ `amount`，元）、`Trading_turnover`（→ `transactions`，筆）；`spread` 不收 | 原始價（未還原）；2330 自 2013-01-02 起。價格 ≤0 → null；量／額照抄（無成交日的取捨交給消費端，保留樣本快照比照 TWSE 慣例濾掉量 0 列） |
+| `TaiwanStockDividendResult` | `date`（→ `ex_date`，除權息交易日）、`before_price`（除權息前收盤）、`after_price`（除權息參考價）、`reference_price`（減除股利參考價）、`stock_and_cache_dividend`（→ `dividend_value`，權值+息值）、`stock_or_cache_dividend`（→ `event_type`，原字串照抄） | 上市櫃皆有；上市用「權息／權／息」、上櫃用「除息」等不同字樣。權類事件 `after_price` 可 ≠ `reference_price`（2887 2014-02-19） |
+
+- **還原口徑**：`adj_factor = before_price / after_price`——現金股利（after＝before−D）與股票股利
+  （after＝before／(1+s)）一併還原，等同「還原權值」再投入假設；前後價缺 → 無效事件，窗內含它的 target
+  作廢（不假裝沒事件）。消費端 `backtest/intra_pick_oos.total_return_targets`。
+- **無事件也落空檔**（`dividend_<sid>.parquet` 0 列）：把「確認沒配過」與「沒抓到／抓失敗」分開；
+  沒檔的股票 target 一律 null（日線、月營收仍是「無資料不落檔」）。
+- 起點 `finmind.price_start_date`／`dividend_start_date`（2013：F2 250 日、F1 126 日、regime MA120
+  在 2015-01 前皆滿窗）；回補 `make backfill-finmind-price`／`backfill-finmind-dividend`（各 ~1130 檔×1 call
+  ≈ 註冊 1.9h）；**不接 `make week`**。快取 `data/cache/finmind/{price,dividend}_<stock_id>.parquet`。
+- **品質**：上市收盤／成交股數與 TWSE 官方（MI_INDEX 抽樣＋本地 daily_*）、上櫃與本地 stock_day_*
+  對照，結果見 docs/33 §6。本地上櫃 stock_day_* 源自 TPEX 仟股單位（已 ×1000）→ 與 FinMind 精確股數
+  只能比到「差 < 1 張」。
 
 ---
 

@@ -3,11 +3,12 @@
         group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
         l6-g4-watch g1-g2-g5-watch \
         backfill-daily-history backfill-institutional-history \
-        build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid intra-pick contrarian-efficacy flow-inflection margin-factors \
+        build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid intra-pick intra-pick-holdout contrarian-efficacy flow-inflection margin-factors \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check snapshot-week shortlist \
         target-price-read \
-        backfill-finmind-per backfill-finmind-financials backfill-finmind-revenue finmind-reconcile finmind-financials-reconcile
+        backfill-finmind-per backfill-finmind-financials backfill-finmind-revenue backfill-finmind-price backfill-finmind-dividend \
+        finmind-reconcile finmind-financials-reconcile
 
 .DEFAULT_GOAL := help
 
@@ -174,6 +175,12 @@ backfill-finmind-financials:  ## ⏳ 一次性回補全市場 FinMind 3 財報 d
 backfill-finmind-revenue:  ## ⏳ 一次性回補全次產業成員 FinMind 月營收歷史（~1000 檔×1 call，註冊1.7h/未註冊3.4h，24h TTL 可續跑；LIMIT 選填；研究用、不接 make week，docs/32）
 	uv run tw-screener data backfill-finmind-revenue $(if $(LIMIT),--limit $(LIMIT),)
 
+backfill-finmind-price:  ## ⏳ 一次性回補全次產業成員 FinMind 日線（2013 起，~1130 檔×1 call，註冊1.9h/未註冊3.8h，24h TTL 可續跑；LIMIT 選填；M-Pick3a 保留樣本用、不接 make week，docs/33）
+	uv run tw-screener data backfill-finmind-price $(if $(LIMIT),--limit $(LIMIT),)
+
+backfill-finmind-dividend:  ## ⏳ 一次性回補全次產業成員 FinMind 除權息結果（2013 起，~1130 檔×1 call，註冊1.9h/未註冊3.8h，24h TTL 可續跑；LIMIT 選填；M-Pick3a 總報酬 target 用、不接 make week，docs/33）
+	uv run tw-screener data backfill-finmind-dividend $(if $(LIMIT),--limit $(LIMIT),)
+
 finmind-reconcile:  ## FinMind PER vs TWSE 官方估值比對帳（docs/31 §20.14，需先 backfill-finmind-per）
 	uv run tw-screener backtest finmind-reconcile
 
@@ -202,6 +209,9 @@ laggard-grid:  ## WS-D 族群內強弱：2×2×位階 forward 報酬格（產 re
 
 intra-pick:  ## M-Pick2 族群內個股因子錦標賽：四因子挑檔力＋預註冊裁決（docs/32；需先 build-panel＋backfill-finmind-financials/revenue；產 research/intra_pick/）
 	uv run tw-screener backtest intra-pick
+
+intra-pick-holdout:  ## M-Pick3a 保留樣本 2015–2021 週快照＋資料品質報告（docs/33；需先 backfill-finmind-price/dividend/revenue；含 24 次 TWSE MI_INDEX 抽樣核價，NO_RECONCILE=1 略過；只做資料層、不評估因子；產 research/intra_pick_oos/）
+	uv run tw-screener backtest intra-pick-holdout $(if $(NO_RECONCILE),--no-reconcile,)
 
 contrarian-efficacy:  ## M-BR1 Phase 2 底部左側聯合桶（轉買×貼近低）forward alpha 檢驗＋§1 硬門檻裁決（產 research/contrarian_efficacy/）
 	uv run tw-screener backtest contrarian-efficacy
