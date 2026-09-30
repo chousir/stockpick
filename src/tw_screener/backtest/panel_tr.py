@@ -39,6 +39,10 @@ class PanelTrConfig:
     span_baseline_year: int = 2025
     span_floor_margin_pp: float = 1.0
     span_check_since: date = date(2026, 6, 1)
+    # 報告顯示切點（非門檻）：diff_month_from 起逐月列、之前併成逐年；
+    # mpick2_recent_from＝M-Pick2 主宇宙 target 差的分界（docs/33 §6.6-1）
+    diff_month_from: str = "2025-07"
+    mpick2_recent_from: date = date(2026, 5, 1)
     before_price_tol_pct: float = 0.5
     before_price_min_rate: float = 0.98
     spot_checks: tuple[tuple[str, date], ...] = ()
@@ -61,6 +65,10 @@ class PanelTrConfig:
             span_floor_margin_pp=float(pc.get("span_floor_margin_pp", d.span_floor_margin_pp)),
             span_check_since=date.fromisoformat(
                 str(pc.get("span_check_since", d.span_check_since))
+            ),
+            diff_month_from=str(pc.get("diff_month_from", d.diff_month_from)),
+            mpick2_recent_from=date.fromisoformat(
+                str(pc.get("mpick2_recent_from", d.mpick2_recent_from))
             ),
             before_price_tol_pct=float(pc.get("before_price_tol_pct", d.before_price_tol_pct)),
             before_price_min_rate=float(pc.get("before_price_min_rate", d.before_price_min_rate)),
@@ -139,6 +147,42 @@ def span_share_by_month(spans: pl.DataFrame, horizon: int) -> pl.DataFrame:
             (pl.col("span") > horizon).mean().alias("share_gt"),
         )
         .sort("ym")
+    )
+
+
+def span_share_by_old_coverage(
+    new_rows: pl.DataFrame, old_rows: pl.DataFrame, cal: pl.DataFrame, horizon: int, before: date
+) -> pl.DataFrame:
+    """新面板的 r{h} 窗，依「舊面板是否收錄該列」拆開看窗跨度（年 × 組）。
+
+    舊面板的「恰跨 h 日」比例常高於新面板，但舊面板是新面板的列子集：它漏掉的偏是流動性差的列
+    （無成交日多），使它看起來更稠密——這是組成效應，不是窗品質。本函式以新面板的列序算窗，
+    分三組：have_row＝舊面板有同鍵列；missing_row＝舊面板有收錄該股、缺這一列；absent_stock＝
+    舊面板整檔缺席該股。只計 date < before 且窗已到期者。
+    Returns: year / grp / n_windows / share_eq（恰 h 日）/ share_rows（該年各組窗數占比）。
+    """
+    spans = window_spans(new_rows, cal, horizon).filter(
+        pl.col("span").is_not_null() & (pl.col("date") < before)
+    )
+    old_keys = old_rows.select("date", pl.col("stock_id").cast(pl.Utf8)).unique().with_columns(
+        pl.lit(True).alias("_in_old")
+    )
+    old_ids = sorted(old_rows["stock_id"].cast(pl.Utf8).unique().to_list())
+    grp = (
+        pl.when(pl.col("_in_old").is_not_null())
+        .then(pl.lit("have_row"))
+        .when(pl.col("stock_id").is_in(old_ids))
+        .then(pl.lit("missing_row"))
+        .otherwise(pl.lit("absent_stock"))
+    )
+    return (
+        spans.join(old_keys, on=["date", "stock_id"], how="left")
+        .group_by(pl.col("date").dt.year().alias("year"), grp.alias("grp"))
+        .agg(pl.len().alias("n_windows"), (pl.col("span") == horizon).mean().alias("share_eq"))
+        .with_columns(
+            (pl.col("n_windows") / pl.col("n_windows").sum().over("year")).alias("share_rows")
+        )
+        .sort("year", "grp")
     )
 
 

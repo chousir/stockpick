@@ -108,6 +108,53 @@ def test_span_share_by_month_and_row_match() -> None:
     assert m["match_rate"].to_list() == pytest.approx([0.75, 0.0])
 
 
+def test_span_share_by_old_coverage_splits_composition() -> None:
+    days = _days(12)
+    cal = pl.DataFrame({"date": days, "ci": list(range(12))})
+    even = [d for i, d in enumerate(days) if i % 2 == 0]        # Z 只在偶數日成交（列序 0..5）
+    new = pl.concat([
+        pl.DataFrame({"date": days, "stock_id": "X"}),
+        pl.DataFrame({"date": days, "stock_id": "Y"}),
+        pl.DataFrame({"date": even, "stock_id": "Z"}),
+    ])
+    # 舊面板：X 全列收錄、Y 缺日 4、Z 整檔缺席
+    old = pl.concat([
+        pl.DataFrame({"date": days, "stock_id": "X"}),
+        pl.DataFrame({"date": [d for i, d in enumerate(days) if i != 4], "stock_id": "Y"}),
+    ])
+
+    def by_grp(got: pl.DataFrame) -> dict[str, dict[str, float]]:
+        return {r["grp"]: r for r in got.iter_rows(named=True)}
+
+    # h=2：列 i 的 entry＝列 i+1、exit＝列 i+3，到期需 i+3 ≤ 末列序。
+    # X（12 列）：i=0..8 → 9 窗、span 2；Y 同 9 窗（新面板稠密），其中列 4 不在舊面板
+    # → 1 窗 missing_row、8 窗 have_row；Z（6 列）：i=0..2 → 3 窗，entry／exit 隔 4 個日曆序
+    # → span 4 ≠ 2
+    got = by_grp(pt.span_share_by_old_coverage(new, old, cal, 2, date(2027, 1, 1)))
+    assert {g: r["n_windows"] for g, r in got.items()} == {
+        "have_row": 17, "missing_row": 1, "absent_stock": 3
+    }
+    assert got["have_row"]["share_eq"] == pytest.approx(1.0)
+    assert got["missing_row"]["share_eq"] == pytest.approx(1.0)
+    assert got["absent_stock"]["share_eq"] == pytest.approx(0.0)
+    assert got["have_row"]["share_rows"] == pytest.approx(17 / 21)          # 21 = 9+9+3
+    assert got["absent_stock"]["share_rows"] == pytest.approx(3 / 21)
+    assert all(r["year"] == 2026 for r in got.values())
+
+    # before＝日 4：只計 date < 日 4 的列。X、Y 各列 0..3 → 4 窗（Y 缺的列 4 被截掉）have_row；
+    # Z 列 0（日 0）、列 1（日 2）→ 2 窗；Z 列 2（日 4）被截掉
+    early = by_grp(pt.span_share_by_old_coverage(new, old, cal, 2, days[4]))
+    assert {g: r["n_windows"] for g, r in early.items()} == {"have_row": 8, "absent_stock": 2}
+
+    # 跨年：X 單股 8 個連續日（2025-12-29～2026-01-05），h=2 → 5 窗
+    # （起日 12-29、30、31、1-1、1-2）；share_rows 是「該年內」各組占比（各年各自加總為 1）
+    y_days = [date(2025, 12, 29) + timedelta(days=i) for i in range(8)]
+    y_rows = pl.DataFrame({"date": y_days, "stock_id": "X"})
+    y_cal = pl.DataFrame({"date": y_days, "ci": list(range(8))})
+    yr = pt.span_share_by_old_coverage(y_rows, y_rows, y_cal, 2, date(2027, 1, 1))
+    assert yr.select("year", "n_windows", "share_rows").rows() == [(2025, 3, 1.0), (2026, 2, 1.0)]
+
+
 def test_target_diff_by_period_counts_and_tails() -> None:
     d = date(2026, 3, 2)
     new = pl.DataFrame({"date": [d] * 5, "stock_id": list("abcde"),
@@ -145,6 +192,7 @@ def test_config_from_settings_and_defaults() -> None:
         "backtest": {"panel_tr": {
             "start_date": "2023-01-02", "horizons_td": [20], "old_panel_end": date(2026, 8, 28),
             "span_floor_margin_pp": 2.0, "span_check_since": "2026-07-01",
+            "diff_month_from": "2026-01", "mpick2_recent_from": "2026-06-01",
             "spot_checks": [["3055", "2026-06-18"], ["2330", "2024-06-06"]],
             "output_name": "x.parquet",
         }}
@@ -154,8 +202,10 @@ def test_config_from_settings_and_defaults() -> None:
     assert cfg.span_floor_margin_pp == 2.0 and cfg.span_check_since == date(2026, 7, 1)
     assert cfg.spot_checks == (("3055", date(2026, 6, 18)), ("2330", date(2024, 6, 6)))
     assert cfg.output_name == "x.parquet" and cfg.before_price_min_rate == 0.98  # 缺鍵走預設
-    assert pt.PanelTrConfig.from_settings({}).horizons == (10, 20, 40)
-    assert pt.PanelTrConfig.from_settings({}).main_horizon == 20
+    assert cfg.diff_month_from == "2026-01" and cfg.mpick2_recent_from == date(2026, 6, 1)
+    default = pt.PanelTrConfig.from_settings({})
+    assert default.horizons == (10, 20, 40) and default.main_horizon == 20
+    assert default.diff_month_from == "2025-07" and default.mpick2_recent_from == date(2026, 5, 1)
 
 
 def test_spot_check_decomposes_price_and_dividend() -> None:

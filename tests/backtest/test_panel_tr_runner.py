@@ -19,6 +19,7 @@ from tw_screener.data.finmind import _DIVIDEND_RESULT_SCHEMA, _STOCK_PRICE_SCHEM
 
 SECTORS = {"甲": ["1101", "1102", "1103"], "乙": ["2201", "2202", "2203"]}
 EX_SID, EX_DATE, EX_RATIO = "1101", date(2022, 9, 15), 1.05
+FUTURE_SID, FUTURE_EX = "1102", date(2023, 7, 3)   # 除息日晚於價格末日（2023-06-30）→ 無對齊列
 UNCOVERED = "2203"      # 沒有 dividend_ 檔 → target 全 null
 ABSENT_OLD = "1103"     # 舊面板整檔缺席（對應真實的 129 檔）
 SPARSE_FROM = date(2023, 3, 1)
@@ -76,6 +77,12 @@ def _write_world(tmp: Path) -> tuple[Path, dict[str, Any]]:
                         "ex_date": EX_DATE, "stock_id": sid, "before_price": before,
                         "after_price": before / EX_RATIO, "reference_price": before / EX_RATIO,
                         "dividend_value": before - before / EX_RATIO, "event_type": "息",
+                    })
+                if sid == FUTURE_SID:
+                    rows.append({
+                        "ex_date": FUTURE_EX, "stock_id": sid, "before_price": 100.0,
+                        "after_price": 99.0, "reference_price": 99.0, "dividend_value": 1.0,
+                        "event_type": "息",
                     })
                 pl.DataFrame(rows, schema=_DIVIDEND_RESULT_SCHEMA).write_parquet(
                     fm / f"dividend_{sid}.parquet"
@@ -166,6 +173,17 @@ def test_run_panel_tr_outputs_report_and_acceptance(
     assert "A1 窗跨度不退化" in report and "**PASS**" in report        # 稠密新面板 → A1、A2 皆 PASS
     assert report.count("**PASS**") == 2 and "FAIL" not in report
     assert "舊面板缺席的成員（整檔不在舊面板）1 檔，其中新面板有價者 1 檔" in report
+    # §1.2b：門檻月（2023-03）前舊面板尚未稀疏 → 6 檔中 1103（整檔缺席）占 1/6 窗、其餘 5 檔全列收錄
+    # 占 5/6；三組都稠密故恰跨 20 日皆 100%；沒有「有收錄該股、缺該列」的窗 → 「—」
+    assert "### 1.2b" in report
+    assert "| 2022 | 83.3%／100.0% | — | 16.7%／100.0% |" in report
+    assert "| 2023 | 83.3%／100.0% | — | 16.7%／100.0% |" in report
+    assert "不適用此讀法" in report                                      # 1.2b 讀法附例外句
+    # A2 母體＝成員宇宙 6 檔的事件：1101 的除息 1 筆（前收自洽、通過）＋1102 除息日晚於價格末日
+    # 的未來事件 1 筆（無對齊列、不檢查，也不進任何 r 窗）→ 事件 2 筆、可檢查 1／1
+    assert "1/1（100.00%）" in report
+    assert "母體＝今日次產業成員（6 檔，含被面板宇宙過濾排除者）的事件 2 筆" in report
+    assert "before_price 無效 0 筆" in report and "（如除息日晚於價格資料末日）1 筆" in report
     assert f"| {EX_SID} | 2022-09-01 |" in report                        # 抽查窗有列
     assert "找不到" in report                                           # 無 M-Pick2 檔 → 略過說明
 
@@ -200,6 +218,36 @@ def test_run_panel_tr_mpick2_section_when_file_present(
     assert "intra_pick_stockweeks_20260928.parquet" in report
     assert "快照日 ≥ 2026-05-01" not in report
     assert "快照日 < 2026-05-01" in report      # 2023-04 的列落在「<」期間
+    # 只比 M-Pick2 主宇宙的同一批鍵：in_main 只有 1101@d 一列 → 兩邊皆有 1、僅新有 0、僅舊有 0
+    # （1102 因 in_main 為假被排除；新面板其餘成員日不得灌進「僅新有」）。
+    # 該窗（2023-04-04 起 20 個交易列）不含除息日 → 新 r20 為純價差；差 ＝ 新 − 舊(1.0)
+    closes = _closes("1101")
+    t = DAYS.index(d)
+    diff = (closes[t + 1 + 20] / closes[t + 1] - 1) * 100 - 1.0
+    assert f"| 快照日 < 2026-05-01 | 1 | 0 | 0 | {diff:+.2f} |" in report
+
+
+def test_run_panel_tr_report_cut_points_come_from_settings(
+    world: tuple[Path, dict[str, Any], Path],
+) -> None:
+    path, cfg, tmp = world
+    d = date(2023, 4, 3)
+    (tmp / "mp2").mkdir()
+    pl.DataFrame(
+        {"date": [d], "stock_id": ["1101"], "in_main": [True], "r20": [1.0]}
+    ).write_parquet(tmp / "mp2" / "intra_pick_stockweeks_20260928.parquet")
+    pc = cfg["backtest"]["panel_tr"]
+    pc["mpick2_stockweeks_glob"] = str(tmp / "mp2" / "intra_pick_stockweeks_*.parquet")
+    pc["mpick2_recent_from"] = "2023-04-01"          # d 落在「≥」期間
+    pc["diff_month_from"] = "2023-03"                # 逐年表只到 2023-02、逐月表從 2023-03 起
+    path.write_text(yaml.safe_dump(cfg, allow_unicode=True), encoding="utf-8")
+    run_panel_tr(path, None)
+    report = next((tmp / "out").glob("panel_tr_rebuild_*.md")).read_text(encoding="utf-8")
+    assert "| 快照日 ≥ 2023-04-01 | 1 | 0 | 0 |" in report and "快照日 < 2023-04-01" not in report
+    by_year = report.split("**依年**")[1].split("**依月（2023-03 起）**")[0]
+    by_month = report.split("**依月（2023-03 起）**")[1].split("## 2.")[0]
+    assert "| 2022 |" in by_year and "| 2023 |" in by_year and "| 2023-03 |" not in by_year
+    assert "| 2023-03 |" in by_month and "| 2023-02 |" not in by_month
 
 
 def test_run_panel_tr_missing_inputs_exit(world: tuple[Path, dict[str, Any], Path]) -> None:

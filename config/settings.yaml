@@ -557,6 +557,8 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     span_baseline_year: 2025
     span_floor_margin_pp: 1.0
     span_check_since: "2026-06-01"   # 舊面板開始稀疏的月份（docs/33 §6.6-1）
+    diff_month_from: "2025-07"       # 報告「r20 新−舊」：此月起逐月列、之前併成逐年（顯示切點，非門檻）
+    mpick2_recent_from: "2026-05-01" # M-Pick2 主宇宙 target 差的分界：快照日 ≥ 此日者 r+20 窗碰到稀疏期（docs/33 §6.6-1；顯示切點，非門檻）
     # A2 前收自洽（2022 起的除權息事件）：門檻同 M-Pick3a (1)
     before_price_tol_pct: 0.5
     before_price_min_rate: 0.98

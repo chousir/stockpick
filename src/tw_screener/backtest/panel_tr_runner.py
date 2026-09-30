@@ -92,6 +92,27 @@ def _span_lines(new: pl.DataFrame, old: pl.DataFrame, h: int, recent_from: str) 
     return lines
 
 
+def _cov_lines(cov: pl.DataFrame, h: int) -> list[str]:
+    groups = [
+        ("have_row", "舊面板有該列"),
+        ("missing_row", "舊面板有收錄該股、缺該列"),
+        ("absent_stock", "舊面板整檔缺席該股"),
+    ]
+    lines = [
+        "| 年 | " + " | ".join(f"{name}：占比／恰跨 {h} 日" for _, name in groups) + " |",
+        "|---|---|---|---|",
+    ]
+    for year in sorted(cov["year"].unique().to_list()):
+        cells = []
+        for g, _ in groups:
+            r = cov.filter((pl.col("year") == year) & (pl.col("grp") == g))
+            cells.append(
+                f"{_pct(r['share_rows'][0])}／{_pct(r['share_eq'][0])}" if r.height else "—"
+            )
+        lines.append(f"| {year} | " + " | ".join(cells) + " |")
+    return lines
+
+
 def _diff_lines(diff: pl.DataFrame) -> list[str]:
     lines = [
         "| 期間 | 兩邊皆有 | 僅新有（補回） | 僅舊有 | 差中位 | \\|差\\| p90 | \\|差\\| p99 | "
@@ -141,7 +162,23 @@ def render_report(res: dict[str, Any], pcfg: pt.PanelTrConfig) -> list[str]:
         "",
         *_span_lines(res["span_new"], res["span_old"], h, recent),
         "",
+        f"### 1.2b 新舊「恰跨 {h} 日」比例的差距來自哪裡"
+        "（依舊面板是否收錄該列拆解；描述性，不設判準）",
+        "",
+        f"以新面板的窗（同 §1.2「新」欄口徑），依該列在舊面板的收錄狀況分組，至 {recent} 前：",
+        "",
+        *_cov_lines(res["span_cov"], h),
+        "",
+        "讀法：舊面板是新面板的列子集；若「舊面板有該列」組的比例≈ §1.2「舊」欄，表示同一批列上"
+        "窗密度無差，新舊差距是舊面板沒收的列（多為流動性差的股票／期間）造成的組成效應，"
+        "不是新面板窗品質較差；若明顯高於「舊」欄（舊面板的窗延伸進它自己的稀疏期，如 2026 年 "
+        "5 月起始的窗），則「舊」欄是被舊面板自身的稀疏拉低，不適用此讀法。",
+        "",
         f"### 1.3 r{h} 新−舊（百分點；只看兩邊皆有的窗）",
+        "",
+        "「僅新有」＝新面板有值而舊面板缺列或為 null：含舊面板稀疏造成的缺口，也含舊面板末日"
+        f"（{pcfg.old_panel_end}）前尚未到期、"
+        f"而新面板資料到 {res['last_date']} 的窗（本表未再拆）。",
         "",
         "**依年**：",
         "",
@@ -160,7 +197,10 @@ def render_report(res: dict[str, Any], pcfg: pt.PanelTrConfig) -> list[str]:
         f"- **A2 前收自洽（{pcfg.start} 起的除權息事件）**：FinMind「除息前收盤價」與價格資料"
         f"前一交易列收盤差 ≤ {pcfg.before_price_tol_pct:g}%：{a2['n_ok']:,}/{a2['n_checked']:,}"
         f"（{_pct(a2['rate'], 2)}）；通過線 {_pct(pcfg.before_price_min_rate, 0)}："
-        f"**{'PASS' if a2['ok'] else 'FAIL'}**。",
+        f"**{'PASS' if a2['ok'] else 'FAIL'}**。"
+        f"母體＝今日次產業成員（{res['n_members']:,} 檔，含被面板宇宙過濾排除者）的事件 "
+        f"{a2['n_events']:,} 筆；不檢查：before_price 無效 {a2['n_invalid_before']} 筆、"
+        f"無對齊列或事件前無價格列（如除息日晚於價格資料末日）{a2['n_no_prev_row']} 筆。",
         "",
         "## 3. M-Pick2 主宇宙（`in_main`）的 target 差（只比 target，不算任何因子×target）",
         "",
@@ -171,8 +211,8 @@ def render_report(res: dict[str, Any], pcfg: pt.PanelTrConfig) -> list[str]:
         lines += [
             f"M-Pick2 stockweeks（{res['mp2_file']}）的 `in_main` 股週：其 r{h}"
             f"（舊面板；已依 fwd_disc 作廢）對新面板 r{h}。"
-            "「僅新有」含 M-Pick2 因價格不連續（>15%）"
-            "作廢、但新面板以還原比值處理的窗。",
+            "「僅新有」含三類：M-Pick2 因價格不連續（>15%）作廢、但新面板以還原比值處理的窗；"
+            "舊面板末日前尚未到期、新面板資料較長的窗；舊面板稀疏造成的缺口（本表未再拆）。",
             "",
             *_diff_lines(res["mp2_diff"]),
             "",
@@ -267,10 +307,14 @@ def run_panel_tr(settings: Path, out_dir: Path | None) -> None:
     rate = chk["n_ok"] / chk["n_checked"] if chk["n_checked"] else None
     a2 = {**chk, "rate": rate, "ok": rate is not None and rate >= pcfg.before_price_min_rate}
 
-    diff_from = "2025-07"
+    span_cov = pt.span_share_by_old_coverage(
+        panel.select("date", "stock_id"), old, cal, h, pcfg.span_check_since
+    )
+
+    diff_from = pcfg.diff_month_from
     diff_month = pt.target_diff_by_period(new_cmp, old, h).filter(pl.col("period") >= diff_from)
     diff_year = pt.target_diff_by_period(
-        new_cmp.filter(pl.col("date") < date(2025, 7, 1)), old, h,
+        new_cmp.filter(pl.col("date") < date.fromisoformat(f"{diff_from}-01")), old, h,
         period=pl.col("date").dt.year().cast(pl.Utf8),
     )
 
@@ -281,11 +325,11 @@ def run_panel_tr(settings: Path, out_dir: Path | None) -> None:
         mp2 = pl.read_parquet(files[-1], columns=["date", "stock_id", "in_main", f"r{h}"]).filter(
             pl.col("in_main")
         )
-        cut = pl.col("date") >= date(2026, 5, 1)
+        cut = pl.col("date") >= pcfg.mpick2_recent_from
         label = (
             pl.when(cut)
-            .then(pl.lit("快照日 ≥ 2026-05-01"))
-            .otherwise(pl.lit("快照日 < 2026-05-01"))
+            .then(pl.lit(f"快照日 ≥ {pcfg.mpick2_recent_from}"))
+            .otherwise(pl.lit(f"快照日 < {pcfg.mpick2_recent_from}"))
         )
         # 只比 M-Pick2 主宇宙的同一批 (date, stock_id)：新面板其餘成員日不在比較範圍，
         # 否則「僅新有」會被全部成員日灌水
@@ -322,7 +366,7 @@ def run_panel_tr(settings: Path, out_dir: Path | None) -> None:
             "stock_id"
         ].n_unique(),
         "match": pt.row_match_by_month(new_cmp, old), "span_new": span_new, "span_old": span_old,
-        "floor": floor, "a1": a1, "a1_bad": a1_bad, "a2": a2,
+        "span_cov": span_cov, "floor": floor, "a1": a1, "a1_bad": a1_bad, "a2": a2,
         "diff_year": diff_year, "diff_month": diff_month, "diff_month_from": diff_from,
         "mp2_note": mp2_note, "mp2_diff": mp2_diff, "mp2_file": mp2_file, "spots": spots,
     }
