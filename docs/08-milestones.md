@@ -1480,10 +1480,39 @@ runner 口徑（成員宇宙 1,132 檔）不同，查明非實作錯誤（通過
 
 **教訓**：合成夾具的離線測試全綠（含手算案例）不代表真實輸入可用——真實池煙霧測試才暴露 F1／F2 大半為 null（playbook/90 2026-09-30）。
 
-**未涵蓋／待使用者裁決**：(i) §5 處置：使用者 2026-09-30 裁決先做 **R1**，已執行（補上市日檔到 2026-09-30、容器內裝 cron 並排程；**cron 不會撐過容器重啟**，紀錄與限制見 docs/35 §5）；R2（改 `twse.py` 快取規則，上櫃的洞只有它能解）尚待裁決；(ii) 評估預註冊（M-Pick3d）須先解 docs/35 §6 八點（C4 一年內結構性不可判、檢定力、C5 觀察集合、target 口徑…），
+**未涵蓋／待使用者裁決**：(i) §5 處置：使用者 2026-09-30 裁決先做 **R1**，已執行（補上市日檔到 2026-09-30、容器內裝 cron 並排程；**cron 不會撐過容器重啟**，紀錄與限制見 docs/35 §5）；R2（改 `twse.py` 快取規則，上櫃的洞只有它能解）使用者隨後裁決做，見下節「R2」；(ii) 評估預註冊（M-Pick3d）須先解 docs/35 §6 八點（C4 一年內結構性不可判、檢定力、C5 觀察集合、target 口徑…），
 在它 commit 之前不得 join 任何報酬；(iii) **已 merge 進 main，W40 起 `make week` 尾段自動記錄**；若某週在別處跑完，可在 `data_date + 7` 日內
 補跑 `make intra-pick-ledger WEEK=…`，逾期該週不入樣本；(iv) 月營收快取每月 11 日起、財報快取各季期限後需補跑 `backfill-finmind-*`（docs/35 §4）。
 
 **狀態**：驗收 `make test` **1619 passed**（D6 基線 1535＋新測 84）／ruff 淨／mypy 49＝既有基線、台帳相關檔零錯；fresh-context verifier 兩輪
 （第 1 輪 V1–V12 通過、V13 挑出三項缺陷〔首次寫入無期限、壞台帳會擋 `make week-check`、輸入不夠嚴格〕已修；第 2 輪 D1–D9 全 PASS、D10 未發現漏洞）；變異檢查累計 44 個最終 0 存活。
 無研究裁決，未跑 fable 第二意見。**分支 `feat/m-pick3c-forward-ledger`，已 merge 進 main（2026-09-30，使用者同意；分支保留、未 push）。**
+
+---
+
+## R2：個股月檔快取規則（分支 `fix/stock-day-month-cache-final`）— 2026-09-30
+
+> docs/35 §5 R2（使用者 2026-09-30 裁決「做 R2」）。資料層修正：過去月份的個股月檔只有「月結後寫入」才是最終版；月中寫入的暫定檔月結後重抓一次。
+> 改動生產抓取行為（`twse.py`、`cache.py`），零新增設定值、零新依賴；`intra_pick.py`／`factor_lab.py`／`shortlist.py` 零改動。
+
+**完成**
+- `cache.is_month_file_final`（檔案 mtime 日期 ≥ 次月 1 日）＋`TWSEClient._month_cache_hit`；上市 STOCK_DAY 與上櫃 tradingStock 兩條路徑的快速／慢速路徑共四處改用；
+  重抓回空／失敗、或回傳缺了暫定檔已有的日期時沿用暫定檔（不覆蓋、不設負快取、重置「連續 2 月空」計數）；當月維持 TTL。
+- 測試 +23（`tests/data/test_stock_day_month_cache.py`）；對規則、降級與子集護欄做 17 個變異檢查，兩度有存活者（降級分支不重置連續空月計數；護欄以列數而非日期比較）補測試後歸零。
+- **子集護欄**（fresh-context verifier 的 E7 發現）：重抓結果須涵蓋暫定檔已有的所有日期才覆蓋，否則沿用暫定檔——官方回傳非空子集時原本會靜默覆蓋並立刻成為最終版、丟資料無法回復（真實資料 1,292 個覆蓋檔未發生）。
+- 描述舊規則的註解／說明同步：cli.py 三處 docstring、watchlist.py 註解、Makefile help、台帳 runner 的使用者提示、README §12、docs/05、docs/35 §5、docs/99 §14
+  （docs/08 舊段落與 docs/proposals 屬歷史紀錄，不改）。
+- **真實資料修復與驗證**（詳 docs/35 §5）：W39 合格成員 34 檔（97 個暫定檔重抓、F1／F2 覆蓋率 68%→97%、原本有值的 23 檔數值 0 變動）＋
+  上櫃次產業成員全量（`backfill-otc-history`：495 檔、1,195 個暫定檔全數重抓、補回 10,819 列、約 52 分鐘、失敗 0）；被覆蓋的 1,292 個檔案 0 個非超集、0 處價量不一致。
+
+**發現／教訓**
+- 用 FinMind 列數去驗證「官方上櫃日線該有歷史」是錯的：7828 實為 2026-04-23 才上櫃掛牌（TPEX 端點對更早月份回空）；驗證要用與定義同源的資料（playbook/90 2026-09-30 第五條）。
+- 補檔（MI_INDEX）寫入歷史檔的新 mtime，會讓 `fetch_daily_all()` 的「最新 mtime 檔是否在 TTL 內」誤判今日日線已抓（docs/99 §14；本 milestone 未改該行為）。
+
+**未涵蓋／待使用者裁決**：(i) 剩餘 1,399 個暫定檔（上市成員 928、上市非成員 400、上櫃非成員 71）未掃——上市缺日已由 R1 的 `daily_*` 涵蓋，是否要一次掃
+（`make backfill-universe-history`，≈ 1,400 個請求、約 40 分鐘）；(ii) `fetch_daily_all()` 的 mtime-TTL 怪癖是否要修；(iii) cron 持久化（docs/35 §5）。
+
+**狀態**：驗收 `make test` **1642 passed**（main 1619＋新測 23）／ruff 淨／mypy 49＝既有基線、R2 相關檔零錯；fresh-context verifier 兩輪
+（第 1 輪 E1–E6 全 PASS〔自寫 38 項規則斷言 0 失敗、1,292 個被覆蓋檔獨立比對 0 違規〕，E7 挑出「非空子集會靜默覆蓋並標成最終版」→ 加子集護欄；
+第 2 輪 F1–F5 全 PASS〔32 項斷言 0 失敗〕，F6 抓到一行過時 memory 索引已修）；變異檢查累計 17 個最終 0 存活。無研究裁決。
+**分支 `fix/stock-day-month-cache-final`，尚未 merge 進 main（merge 必問使用者）、未 push。**

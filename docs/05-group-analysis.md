@@ -115,8 +115,8 @@ sigmoid 而非 clip：避免 5 日大漲 20% 仍只拿到 clip(10) 的天花板�
 
 **動能 / 均線資料來源（X+Y 混合策略）**：
 - **X**：`make week` 流程中跑 `make fetch-candidates-history`，對本週入選股聯集去重
-  個股批次補抓 STOCK_DAY **13 個月**歷史（MA60 斜率需 ≥70 日）。過去月份永久快取，
-  首次 ~30–40 分鐘，之後每週只抓當月
+  個股批次補抓 STOCK_DAY **13 個月**歷史（MA60 斜率需 ≥70 日）。過去月份月結後即為最終版
+  （月中抓的暫定檔月結後重抓一次，docs/35 §5 R2），首次 ~30–40 分鐘，之後每週只抓當月與暫定月
 - **Y**：`data/cache/twse/daily_*.parquet` 每週累積一筆
 - 兩者由 `TWSEClient.load_candidate_history()` 合併，算 5 日動能、MA20/60＋斜率；
   量比由 `load_volume_history()` 算（今日量 / 近 20 日均量）

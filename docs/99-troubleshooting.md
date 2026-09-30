@@ -66,7 +66,8 @@ make report STOCK_ID=2330
 make report STOCK_ID=2330
 ```
 
-快取檔名：`data/cache/twse/stock_day_{stock_id}_{YYYYMM}.parquet`，過去月份永久快取。
+快取檔名：`data/cache/twse/stock_day_{stock_id}_{YYYYMM}.parquet`。過去月份：月結後（mtime ≥ 次月 1 日）寫入的才是最終版、永久快取；
+月中寫入的暫定檔月結後會重抓一次（R2，docs/35 §5）。當月吃 TTL。
 
 ---
 
@@ -301,7 +302,7 @@ group_analysis.md 第 2 節「5 日中位」欄全部標 *，第 3 節族群標�
 
 ### 原因
 個股的 stock_day 快取尚未建立。`make week` 流程內含 `fetch-candidates-history`，
-會對本週入選股聯集去重個股逐檔抓 stock_day 13 個月歷史（MA60 斜率需 ≥70 日；首次 ~30–40 分鐘，過去月份永久快取）。
+會對本週入選股聯集去重個股逐檔抓 stock_day 13 個月歷史（MA60 斜率需 ≥70 日；首次 ~30–40 分鐘；過去月份月結後即為最終版，月中抓的暫定檔月結後重抓一次）。
 
 2026-W21 起 OTC 股也透過 TPEX 抓 stock_day（自動分派，下游無感），不再 fallback。
 若仍標 `*`：可能是新上市股或 TPEX 無收錄。
@@ -379,8 +380,8 @@ make intra-pick-ledger 印「high52_near／mom_6_1 覆蓋率 21% < 70%」，缺�
 ```
 
 ### 原因（2026-09-30 查證，詳見 docs/35 §5）
-1. 個股月檔命中規則是「過去月份只要檔案存在就視為完整」（`twse.py::_fetch_stock_history_twse`／上櫃版）。月中抓的檔在月底後**從不重抓**，永遠殘缺
-   （例：`stock_day_2303_202607.parquet` 只有 2026-07-01～07-09、mtime 07-10）。
+1. 個股月檔命中規則（R2 之前）是「過去月份只要檔案存在就視為完整」（`twse.py::_fetch_stock_history_twse`／上櫃版）。月中抓的檔在月底後**從不重抓**，永遠殘缺
+   （例：`stock_day_2303_202607.parquet` 只有 2026-07-01～07-09、mtime 07-10）。**R2（2026-09-30）已修**：mtime 在次月 1 日之後才是最終版，見下。
 2. 全市場日檔 `daily_*`／`otc_daily_*` 靠每交易日累積（README §12 建議 cron）；`daily_all_*`（每日一檔，2025-05-29～2026-06-09）之後，只有 `fetch-twse`／週流程當天才寫入。
    （devcontainer 預設沒有 cron，`logs/cron_fetch.log` 不存在——不是「cron 壞了」，是從來沒有。）
 
@@ -388,8 +389,11 @@ make intra-pick-ledger 印「high52_near／mom_6_1 覆蓋率 21% < 70%」，缺�
 - **上市**：`make backfill-daily-history START=YYYY-MM-DD END=YYYY-MM-DD`（官方 MI_INDEX，一天一請求、已快取的日子自動跳過、只新增檔案）。
   先量缺哪些日子再補；假日回空是正常的。**補檔時 `END` 請設為今天**：補檔寫入的歷史檔帶新 mtime，`fetch_daily_all()` 以「最新 mtime 檔是否在 TTL 6 小時內」判斷新鮮，
   補檔後 6 小時內的 `fetch-twse` 會誤判並跳過今日上市日線。
-- **上櫃**：全市場日線**補不回**（TPEX 歷史端點對回查一律回空，2026-09-30 實測 51／51 空）。只能靠每日 cron 往後累積，或重抓殘缺的個股月檔
-  （現行規則下需先刪殘缺月檔；根治＝改快取規則，見 docs/35 §5 R2，待使用者裁決）。
+- **上櫃**：全市場日線**補不回**（TPEX 歷史端點對回查一律回空，2026-09-30 實測 51／51 空）。缺日改由**個股月檔**補：R2 之後，月中寫入的暫定月檔
+  月結後會自動重抓（`make week` 的 `fetch-candidates-history` 對候選股；要一次掃上櫃成員跑 `uv run tw-screener data backfill-otc-history`，
+  上市＋上櫃成員跑 `make backfill-universe-history`，皆可中斷續跑）。2026-09-30 已掃完上櫃次產業成員（1,195 個暫定檔、補回 10,819 列）。
+- **判斷某個月檔是否為暫定檔**：`from tw_screener.data.cache import is_month_file_final`，對 `stock_day_{sid}_{YYYYMM}.parquet` 呼叫；
+  False 且該月已過＝月中寫入的暫定檔（下次 fetch 會重抓；重抓回空則沿用、不覆蓋）。
 - **持續累積**：README §12 的每日 cron（`scripts/fetch_cron.sh`）。devcontainer 預設沒有 cron；2026-09-30 已在容器內裝好並排程（`0 10 * * 1-5` UTC＝台北 18:00），
   但**不會撐過容器重啟**——重啟後 `sudo service cron start`，重建容器需重裝（持久化建議見 docs/35 §5）。
 - 確認缺日：對目標股票取最近 250 個「≥300 檔有價的交易日」（`intra_pick.trading_calendar`），列出該股沒有列的日子。
