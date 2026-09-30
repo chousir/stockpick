@@ -140,3 +140,9 @@
 錯誤信念：凍結只要約束既有列被改寫；檢查函式面對讀檔錯誤只需處理預期的 ValueError。而且測試寫的正是同一個盲點（`test_..._only_applies_to_existing_week` 把「新週永遠可寫」當成規格）。
 修正：期限規則改為對任何寫入（含首次）生效、無法判定期限時失敗關閉；檢查函式把 OSError／PolarsError 轉成警告句並在呼叫端加最後防線。另外：變異檢查存活者要追問「這個測試是被哪條規則擋下的」——第二輪抓到兩個測試其實是被別條規則（逾期）巧合擋下，導致「週欄與目錄不符」「先驗期限再載快取」兩條規則沒被單獨驗到。
 落點：docs/35 §2.5；`intra_pick_ledger.check_write_window`、`artifact_check.check_intra_ledger`；尚未制度化。
+
+## 2026-09-30 把「推測」寫進成因欄前先做便宜的查證——cron 日誌根本不存在
+現象：M-Pick3c 日線缺日調查時，我在 docs/35 §5、docs/99 §14、本檔上一條、memory 四處寫「`daily_all_*` 於 6/9 停止，推測與 README §12 的 cron 中斷有關（未查證）」。使用者裁決做 R1、我去查時才發現：這個環境（Debian devcontainer）沒有 `crontab` 指令、`logs/cron_fetch.log` 不存在——cron 從來沒有過，推測不成立。只要在寫下之前 `ls logs/` 與 `which crontab` 各一次就能發現。
+錯誤信念：標了「推測／未查證」就可以放心寫進多處文件，讀的人會自己打折。
+修正：寫進文件的成因，能用一條指令查證的先查（本案兩條指令）；已寫出的推測發現不成立時，所有出現處一次更正，並在新條目引用舊條目（本檔 append-only，上一條的相關句以本條為準）。「推測」一旦被複製到 lessons 與 memory 就很難收回，成本遠大於當下查一次。
+落點：docs/35 §5 成因 2 已更正；docs/99 §14；memory daily-price-cache-holes；尚未制度化。

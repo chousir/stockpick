@@ -105,9 +105,10 @@ EPS 取保守期限次日起可用的最新季、營收取次月 11 日起可用
 1. **個股月檔月中抓取、月底後被當永久快取**：`twse.py::_fetch_stock_history_twse`（及上櫃版）的命中條件是
    `cache_file.exists() and (ym != current_ym or is_fresh(...))`——過去月份只要檔案存在就視為完整。月中抓過的檔（當時是「當月」）到月底後從不重抓，
    永遠殘缺。例：`stock_day_2303_202607.parquet` 只有 7 列（2026-07-01～07-09，mtime 07-10）。
-2. **全市場日檔 `daily_YYYYMMDD` 只在「跑流程那幾天」才有**：`daily_all_*`（每日累積）於 **2026-06-09 停止**，之後只有手動跑流程當天的 `daily_*`
-   （2026-07 有 10 個、2026-08 有 9 個、2026-09 有 13 個平日沒有上市日檔，含少數非交易日）。README §12 早已建議把 `scripts/fetch_cron.sh`
-   排成每交易日常駐並警告 WSL2 cron 不會自動啟動；6 月中之後累積中斷**推測**與此有關（**未查證**）。
+2. **全市場日檔 `daily_YYYYMMDD` 只在「跑流程那幾天」才有**：`daily_all_*` 曾每個交易日一檔（2025-05-29～**2026-06-09**，整整一年），之後只有
+   `fetch-twse`／週流程當天寫入的 `daily_*`（2026-07 有 10 個、2026-08 有 9 個、2026-09 有 13 個平日沒有上市日檔，含少數非交易日）。
+   當初每日累積的機制是什麼、為何 6/9 後停止，**未查證**。**更正（R1 調查，2026-09-30）**：本檔先前寫的「推測與 README §12 的 cron 中斷有關」**不成立**——
+   這個環境（Debian devcontainer）從來沒有 cron：沒有 `crontab` 指令、`logs/cron_fetch.log` 不存在。該推測沒查那份日誌就寫進文件，見 playbook/90 2026-09-30 第四條。
 3. 兩者疊加：缺的日子既沒有全市場日檔、個股月檔又是月中定格的殘缺版 → 窗內缺日 → F1／F2 依定義為 null。
 4. 這不只影響台帳：舊研究面板自 2026-06 起列數稀疏（docs/33 §6.6-1）與 `daily_all_*` 停止累積的時點吻合，**推測**同因（未逐一驗證）；
    生產的 MA／動能也讀同一批快取（`twse.py` 個股歷史讀取合併 `stock_day_*` 與 `daily_*`）。
@@ -121,8 +122,24 @@ EPS 取保守期限次日起可用的最新季、營收取次月 11 日起可用
   （缺 2025-09～2026-03），屬同類的快取覆蓋缺口。0.68 < 0.70 → 記錄器與 week-check 會警告，且點名缺值股票。
 - 影響其他輸出：W40 `make week` 讀到的日線比 W39 完整，趨勢分／輪動基準等用近數月日線的計算數字可能與 W39 口徑略有差異（更完整、非更差；**未量化**）。
 
+**R1 執行紀錄（2026-09-30；使用者在 M-Pick3c merge 後裁決「做 R1」）**
+- 上市缺日：`make backfill-daily-history START=2026-09-24 END=2026-09-30` 補上 `daily_20260930`（MI_INDEX）；連同前述 31 個共新增 32 個上市日檔，
+  上市全市場日線 2025-09-15～2026-09-30 已完整（缺的只剩非交易日）。
+- 手動跑 `bash scripts/fetch_cron.sh`（約 15 秒、rc=0）：累積 `otc_daily_20260930`（6,555 列）、`valuation_ratios_20260930` 等當日資料。
+- **新發現的既有怪癖**：`fetch_daily_all()` 以「mtime 最新的 `daily_*` 檔是否在 TTL（6 小時）內」判斷快取新鮮；補檔寫入的歷史檔帶新 mtime，
+  會讓 `fetch-twse` 誤判新鮮而**跳過今日上市日線**（本次實際發生，已用 MI_INDEX 補到今日繞過）。補檔後 6 小時內請把 `END` 設為今天。
+- **安裝 cron（容器內，best-effort）**：`sudo apt-get install -y cron`（Debian 13，`cron 3.0pl1-197`）、`sudo service cron start`；`vscode` 的 crontab：
+  `0 10 * * 1-5 /bin/bash /workspaces/stockpick/scripts/fetch_cron.sh`（容器時區 UTC：10:00 UTC＝台北 18:00；T86 法人 15:00 起穩定）。
+  驗證：臨時每分鐘測試工作於 11:23:01 以 `vscode` 觸發（已移除）；`env -i PATH=/usr/bin:/bin` 模擬 cron 精簡環境跑腳本 rc=0。
+- **限制（重要）**：容器內 cron **不會撐過容器重啟／重建**——PID 1 是 `sh`（無 init；實測當時容器已連續執行 7 小時 41 分）；每次容器啟動後需 `sudo service cron start`，
+  容器重建後 cron 套件與 crontab 都會消失；且排程只在容器**正在執行**時才會觸發。上櫃全市場日線只能當天（最遲到下個交易日 15:00 前）抓，漏一天就永久缺——
+  所以 R1 對上櫃只能減少新洞、**補不回既有的洞**（2026-06-10～09-29，含 09-29 的 `otc_daily_*` 整日缺）。
+- 想持久化（**未測試的建議，需你裁決；只有重建容器才會生效**）：`.devcontainer/devcontainer.json` 加 `"postStartCommand": "sudo service cron start"`，並在
+  `postCreateCommand` 尾端接 `&& sudo apt-get update -qq && sudo apt-get install -y -qq cron && (crontab -l 2>/dev/null; echo '0 10 * * 1-5 /bin/bash /workspaces/stockpick/scripts/fetch_cron.sh') | crontab -`；
+  或改在主機端排 `docker exec <容器> /bin/bash /workspaces/stockpick/scripts/fetch_cron.sh`（容器仍須在跑）。
+
 **處置選項（請裁決；我不擅自改資料層）**
-- **R1 維運（不改程式）**：恢復 README §12 的每日 cron（Windows 工作排程器最穩），讓 `daily_*`／`otc_daily_*` 往後每交易日累積；上市缺日隨時可用
+- **R1 維運（不改程式；已於 2026-09-30 執行，見上，限制同上）**：恢復 README §12 的每日 cron（Windows 工作排程器最穩），讓 `daily_*`／`otc_daily_*` 往後每交易日累積；上市缺日隨時可用
   `make backfill-daily-history START=… END=…` 補（已驗證有效；該指令對上櫃每天多打一個空請求，無害）。**單靠 R1 補不回上櫃 2026-06-10 至今的洞**。
 - **R2 修快取規則（改 `twse.py`，建議）**：過去月份檔只有在「月底之後才寫入」（mtime ≥ 次月 1 日）時才視為完整；月中寫入的檔在月底後重抓一次。
   上市＋上櫃個股月檔同一條規則。一次性成本＝所有月中定格的殘缺月檔各重抓一次（量級待估）；之後不再產生新的殘缺月檔。
@@ -130,7 +147,7 @@ EPS 取保守期限次日起可用的最新季、營收取次月 11 日起可用
 - **R3 接受限制**：F1／F2 對上櫃股在洞滾出窗之前（最晚的洞在 2026-07-30；F1 窗 126 個交易日 → 粗估約 2027-01 底，F2 窗 250 個 → 粗估約 2027-07 中）多為 null；
   評估端只能用上市股或帶覆蓋率折扣。**不建議**：
   上櫃約占合格成員 1/3（W39：11／34），會引入市場組成偏誤。
-- 我的建議：R1（現在做）＋R2（另立小 milestone）。R3 只是沒做 R2 時的預設現實。
+- 我的建議：R1（已做）＋R2（另立小 milestone；上櫃的洞只有 R2 或往後累積能解）。R3 只是沒做 R2 時的預設現實。
 
 ## 6. 後續評估須先解決的問題（M-Pick3d 預註冊前置；本檔不裁決）
 
@@ -181,4 +198,5 @@ EPS 取保守期限次日起可用的最新季、營收取次月 11 日起可用
 - 本分支**已 merge 進 main**（2026-09-30，使用者同意；分支保留、未 push）：從 main 跑 `make week` 即會記錄 W40；若 W40 已在別處跑完，
   於 `data_date + 7` 日內補跑 `make intra-pick-ledger WEEK=2026-W40`，逾期該週就不入乾淨樣本。
 - F3／F4：W40（資料日約 10/02）與 W41（10/09）的 FinMind 快取可用；W42（資料日 ≥ 10/11）起需先補跑 `make backfill-finmind-revenue`（§4）。
-- 日線缺日（§5）：W40 的 F1／F2 覆蓋率取決於當時的日線快取；`make backfill-daily-history` 可補上市缺日，上櫃缺日待 §5 處置裁決。
+- 日線缺日（§5）：R1 已補上市日檔到 2026-09-30，容器內 cron 已排（限制見 §5）。W40 前（尤其 10/01、10/02）請確認容器有在跑且 `service cron status` 為 running，
+  或在 `make week` 前補：`make backfill-daily-history START=2026-10-01 END=<今天>`（僅上市；上櫃只能靠當天累積，既有的洞待 R2）。
