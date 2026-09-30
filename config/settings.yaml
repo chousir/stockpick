@@ -568,6 +568,14 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
       - ["2406", "2022-01-05"]
     output_dir: research/panel
     output_name: panel_tr_members.parquet
+  intra_pick_ledger:         # M-Pick3c 前瞻台帳（make intra-pick-ledger；make week 尾段容錯呼叫；docs/35，docs/33 §2B）
+                             # 每週把「真實 shortlist 候選池」的因子值凍結成一份底帳；不含任何報酬欄（結果一律事後 join）。
+                             # 因子定義／窗長／可得期限全沿用上方 intra_pick（docs/32 §3），偏好帶沿用 picks.shortlist.ext_band_pct
+    start_week: "2026-W40"        # 乾淨樣本起點（docs/33 §2B、docs/34 §8.5）；更早週拒寫（W39 前的池在台帳設計前已產出）
+    rewrite_days: 7               # 對某週的任何寫入（含首次）須在 data_date + 此日數內；逾期拒寫（防事後改列／事後挑週）
+    history_days: 320             # 日線載入窗（交易日）：F2 需 250 日＋缺日暖身，F3 取季末收盤
+    ledger_path: research/intra_pick_ledger/ledger.csv
+    # 合格成員（top／alt／capped）內各因子非 null 比例低於 intra_pick.min_coverage 時印警告（不擋寫入）
   g3_grid:                  # docs/31 G3 候選 filter 驗證（族群前5×個股貼落後×位階中段×資金非負）
     horizons_td: [10, 20]        # forward 窗（交易日），與 laggard_grid 同窗才可比較
     rs_window: 20                 # rs_subind 回看窗，同 laggard_grid 口徑

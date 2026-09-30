@@ -1909,6 +1909,26 @@ def backtest_intra_pick_holdout_eval_cmd(
     run_intra_pick_holdout_eval(settings, out_dir, feasibility_only=feasibility)
 
 
+@backtest_app.command("intra-pick-ledger")
+def backtest_intra_pick_ledger_cmd(
+    week: str | None = typer.Option(
+        None, "--week", help="週次目錄名（如 2026-W40）；預設 reports/ 下最新週"
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """M-Pick3c 前瞻台帳（docs/35）：凍結本週真實 shortlist 池的因子值。
+
+    寫入 research/intra_pick_ledger/ledger.csv。只記錄、不含任何報酬欄、不做統計裁決。
+    週次早於 backtest.intra_pick_ledger.start_week（2026-W40）拒寫；對某週的任何寫入（含首次）
+    須在 data_date + rewrite_days 日內，逾期拒寫。make week 尾段已容錯呼叫，本指令也可單獨重跑。
+    """
+    from tw_screener.backtest.intra_pick_ledger_runner import run_intra_pick_ledger
+
+    code = run_intra_pick_ledger(settings, week)
+    if code:
+        raise typer.Exit(code)
+
+
 @backtest_app.command("panel-tr")
 def backtest_panel_tr_cmd(
     out_dir: Path | None = typer.Option(

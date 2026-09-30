@@ -3,7 +3,7 @@
         group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
         l6-g4-watch g1-g2-g5-watch \
         backfill-daily-history backfill-institutional-history \
-        build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid intra-pick intra-pick-holdout intra-pick-holdout-eval panel-tr contrarian-efficacy flow-inflection margin-factors \
+        build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid intra-pick intra-pick-holdout intra-pick-holdout-eval intra-pick-ledger panel-tr contrarian-efficacy flow-inflection margin-factors \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check snapshot-week shortlist \
         target-price-read \
@@ -22,7 +22,7 @@ help:  ## 列主要指令（裸打 make 即顯示）
 	@echo ""
 	@echo "進階指令：見 Makefile 各進階區段或 README「指令總覽」"
 
-week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-f-local → screen-redesign-local → fetch-candidates-history → rotation → macro → cp-value-candidates → group → snapshot-week → shortlist → week-check → pick-outcome-brief
+week:  ## 完整週流程（GROUP=defg 主流程）：fetch-twse → fetch-institutional-history → fetch-tdcc → doctor → screen-f-local → screen-redesign-local → fetch-candidates-history → rotation → macro → cp-value-candidates → group → snapshot-week → shortlist → intra-pick-ledger → week-check → pick-outcome-brief
 ifndef GROUP
 	@echo "❌ 請指定 GROUP=defg（現行唯一主流程；abc/def 已退役）"
 	@exit 1
@@ -47,6 +47,7 @@ endif
 	$(MAKE) group   # 官方族群前5(§13)/G1/G2/G4/G5/L6/F2'新設計候選揭露(§4/§7.2/§9/§11)前瞻累積軌皆已內含在這步，不必另跑
 	-$(MAKE) snapshot-week   # WS-J.1 point-in-time 快照：凍結本週 concepts/watchlist/holdings/宇宙成員（失敗不擋主流程）
 	-$(MAKE) shortlist   # M-Pick1 機器排序 Top N（讀本週 universe 快照＋輪動表；失敗不擋主流程，week-check 點名缺檔）
+	-$(MAKE) intra-pick-ledger   # M-Pick3c 前瞻台帳（docs/35）：凍結本週真實 shortlist 池的因子值；純本地、不打網；失敗不擋主流程，week-check 點名缺週
 	$(MAKE) week-check   # 尾段產物完整性檢查（規劃書 05 F4）：上面容錯步驟若無聲失敗，這裡點名
 	-$(MAKE) pick-outcome-brief   # WS-A3 上週 picks r+5 回饋一頁（輸入包；失敗不擋主流程）
 
@@ -215,6 +216,9 @@ intra-pick-holdout:  ## M-Pick3a 保留樣本 2015–2021 週快照＋資料品�
 
 intra-pick-holdout-eval:  ## M-Pick3b 保留樣本驗證：H1 成交額／H2 偏好帶＋F2／F4 複驗（docs/34 預註冊；先驗快照 SHA-256＋判準邏輯檔釘版；FEASIBILITY=1 只做跑前可行性檢查；單次正式執行，已有結果即拒絕重跑；產 research/intra_pick_holdout/）
 	uv run tw-screener backtest intra-pick-holdout-eval $(if $(FEASIBILITY),--feasibility,)
+
+intra-pick-ledger:  ## M-Pick3c 前瞻台帳：凍結本週真實 shortlist 池的 F1–F4 因子值 → research/intra_pick_ledger/ledger.csv（WEEK=2026-W40 可指定，預設最新週；week 自動跑；2026-W40 前的週拒寫；寫入（含首次）限 data_date+7 日內、逾期拒寫；只記錄不含報酬欄；docs/35）
+	uv run tw-screener backtest intra-pick-ledger $(if $(WEEK),--week $(WEEK),)
 
 panel-tr:  ## D6 成員稠密總報酬面板：FinMind 稠密日線＋除權息重建 2022 起 ma60／r10／r20／r40（docs/33 §7；需先 backfill-finmind-price/dividend、build-panel；不覆蓋原面板、不算因子×target；產 research/panel/panel_tr_members.parquet＋差異報告）
 	uv run tw-screener backtest panel-tr
