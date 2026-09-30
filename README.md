@@ -416,6 +416,10 @@ FOMC/CPI/台股結算/法說等市場級事件 → `group_analysis.md` Section 0
 > 把輪動籃子歷史補成 ~1 年；~1500 檔×13 月、8-12 小時、永久快取可中斷續跑）。
 >
 > **更正（2026-09-30 實測，docs/35 §5）**：上市全市場日線**其實可補**——`make backfill-daily-history START=… END=…`（官方 MI_INDEX，一天一請求、已快取的日子自動跳過）已驗證補回缺日；**上櫃仍補不回**（TPEX 歷史端點對回查一律回空）。另外個股月檔「月中抓、月底後被當永久快取」會使窗內缺日，見 docs/99 §14。
+>
+> **devcontainer 注意（2026-09-30）**：本專案的 devcontainer（Debian）預設**沒有 cron**、也沒有 init。已在容器內 `sudo apt-get install -y cron` 並排入
+> `0 10 * * 1-5`（容器時區 UTC：10:00 UTC＝台北 18:00）；但**容器重啟後需 `sudo service cron start`、重建容器後需重裝**，且排程只在容器正在執行時才會觸發。
+> 持久化的建議做法見 docs/35 §5。
 
 `scripts/fetch_cron.sh` 已備好（解析專案路徑、補 cron 精簡
 PATH、`flock` 防重入、寫 `logs/cron_fetch.log`）。T86 法人收盤後約 90 分鐘、**15:00 起穩定**（docs/02），

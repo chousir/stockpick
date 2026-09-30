@@ -381,13 +381,17 @@ make intra-pick-ledger 印「high52_near／mom_6_1 覆蓋率 21% < 70%」，缺�
 ### 原因（2026-09-30 查證，詳見 docs/35 §5）
 1. 個股月檔命中規則是「過去月份只要檔案存在就視為完整」（`twse.py::_fetch_stock_history_twse`／上櫃版）。月中抓的檔在月底後**從不重抓**，永遠殘缺
    （例：`stock_day_2303_202607.parquet` 只有 2026-07-01～07-09、mtime 07-10）。
-2. 全市場日檔 `daily_*`／`otc_daily_*` 靠每交易日累積（README §12 建議 cron）；`daily_all_*` 於 2026-06-09 停止，之後只有手動跑流程那幾天才有。
+2. 全市場日檔 `daily_*`／`otc_daily_*` 靠每交易日累積（README §12 建議 cron）；`daily_all_*`（每日一檔，2025-05-29～2026-06-09）之後，只有 `fetch-twse`／週流程當天才寫入。
+   （devcontainer 預設沒有 cron，`logs/cron_fetch.log` 不存在——不是「cron 壞了」，是從來沒有。）
 
 ### 解法
 - **上市**：`make backfill-daily-history START=YYYY-MM-DD END=YYYY-MM-DD`（官方 MI_INDEX，一天一請求、已快取的日子自動跳過、只新增檔案）。
-  先量缺哪些日子再補；假日回空是正常的。
+  先量缺哪些日子再補；假日回空是正常的。**補檔時 `END` 請設為今天**：補檔寫入的歷史檔帶新 mtime，`fetch_daily_all()` 以「最新 mtime 檔是否在 TTL 6 小時內」判斷新鮮，
+  補檔後 6 小時內的 `fetch-twse` 會誤判並跳過今日上市日線。
 - **上櫃**：全市場日線**補不回**（TPEX 歷史端點對回查一律回空，2026-09-30 實測 51／51 空）。只能靠每日 cron 往後累積，或重抓殘缺的個股月檔
   （現行規則下需先刪殘缺月檔；根治＝改快取規則，見 docs/35 §5 R2，待使用者裁決）。
+- **持續累積**：README §12 的每日 cron（`scripts/fetch_cron.sh`）。devcontainer 預設沒有 cron；2026-09-30 已在容器內裝好並排程（`0 10 * * 1-5` UTC＝台北 18:00），
+  但**不會撐過容器重啟**——重啟後 `sudo service cron start`，重建容器需重裝（持久化建議見 docs/35 §5）。
 - 確認缺日：對目標股票取最近 250 個「≥300 檔有價的交易日」（`intra_pick.trading_calendar`），列出該股沒有列的日子。
 
 ---
