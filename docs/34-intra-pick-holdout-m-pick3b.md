@@ -309,4 +309,4 @@ F4 +0.063 vs +0.036；F4 排除 7–9 月仍 +0.036。
 3. D6（2022–2026 面板除息還原與稀疏重建）另案；M-Pick2 用新 target 重驗屬同一面板上的第二次檢視、不是樣本外，留給使用者裁決。
 
 **狀態**：驗收 `make test` 1520 passed（main 1505＋新測 15）／ruff 淨／新檔 mypy 淨；verifier 10/10 PASS；第二意見不矛盾、無推翻裁決的缺陷。
-**分支 `feat/m-pick3b-holdout-eval`，尚未 merge、尚未 push。**
+**分支 `feat/m-pick3b-holdout-eval`，已 merge 進 main（2026-09-30，使用者同意；分支保留、未 push）。**
