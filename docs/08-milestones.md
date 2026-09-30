@@ -1376,4 +1376,4 @@ D5 先修 `weekly_snapshot_dates` 再跑；D6 面板除息還原另立 milestone
 SHA-256）；(ii) M-Pick3c 前瞻台帳；(iii) D6 面板重建（docs/33 §6.6-3）；(iv) 2021-12 快照 r+20 出場落 2022 年初的處理
 由預註冊決定。
 
-**狀態**：驗收 `make test` 1505 passed（main 1469＋新測 36）／ruff 淨／mypy 49＝main 既有、無新增；verifier 10/10 PASS（含獨立重算面板稀疏、缺 127 檔成員、M-Pick2 受影響週數，皆與文件相符）；本 milestone 無研究裁決，未跑 fable 第二意見。最終快照 SHA-256 `47c6c0d7…bcc47cd`（重跑相同）。**分支 `feat/m-pick3a-holdout-data` 已 commit、未 push；merge 進 main 待使用者同意。**
+**狀態**：驗收 `make test` 1505 passed（main 1469＋新測 36）／ruff 淨／mypy 49＝main 既有、無新增；verifier 10/10 PASS（含獨立重算面板稀疏、缺 127 檔成員、M-Pick2 受影響週數，皆與文件相符）；本 milestone 無研究裁決，未跑 fable 第二意見。最終快照 SHA-256 `47c6c0d7…bcc47cd`（重跑相同）。**已 merge 進 main（2026-09-30，使用者同意；分支保留、未 push）。**
