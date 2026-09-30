@@ -1480,10 +1480,10 @@ runner 口徑（成員宇宙 1,132 檔）不同，查明非實作錯誤（通過
 
 **教訓**：合成夾具的離線測試全綠（含手算案例）不代表真實輸入可用——真實池煙霧測試才暴露 F1／F2 大半為 null（playbook/90 2026-09-30）。
 
-**未涵蓋／待使用者裁決**：(i) §5 處置 R1／R2；(ii) 評估預註冊（M-Pick3d）須先解 docs/35 §6 八點（C4 一年內結構性不可判、檢定力、C5 觀察集合、target 口徑…），
-在它 commit 之前不得 join 任何報酬；(iii) **W40 `make week` 前需先 merge 本分支（或在本分支上跑），否則 W40 不會被記錄**——漏跑時可在 `data_date + 7` 日內
-於本分支補跑 `make intra-pick-ledger WEEK=…`；(iv) 月營收快取每月 11 日起、財報快取各季期限後需補跑 `backfill-finmind-*`（docs/35 §4）。
+**未涵蓋／待使用者裁決**：(i) §5 處置：使用者 2026-09-30 裁決先做 **R1**（維運，merge 後執行、紀錄見 docs/35 §5）；R2（改 `twse.py` 快取規則）尚待裁決；(ii) 評估預註冊（M-Pick3d）須先解 docs/35 §6 八點（C4 一年內結構性不可判、檢定力、C5 觀察集合、target 口徑…），
+在它 commit 之前不得 join 任何報酬；(iii) **已 merge 進 main，W40 起 `make week` 尾段自動記錄**；若某週在別處跑完，可在 `data_date + 7` 日內
+補跑 `make intra-pick-ledger WEEK=…`，逾期該週不入樣本；(iv) 月營收快取每月 11 日起、財報快取各季期限後需補跑 `backfill-finmind-*`（docs/35 §4）。
 
 **狀態**：驗收 `make test` **1619 passed**（D6 基線 1535＋新測 84）／ruff 淨／mypy 49＝既有基線、台帳相關檔零錯；fresh-context verifier 兩輪
 （第 1 輪 V1–V12 通過、V13 挑出三項缺陷〔首次寫入無期限、壞台帳會擋 `make week-check`、輸入不夠嚴格〕已修；第 2 輪 D1–D9 全 PASS、D10 未發現漏洞）；變異檢查累計 44 個最終 0 存活。
-無研究裁決，未跑 fable 第二意見。**分支 `feat/m-pick3c-forward-ledger`，尚未 merge 進 main（merge 必問使用者）、未 push。**
+無研究裁決，未跑 fable 第二意見。**分支 `feat/m-pick3c-forward-ledger`，已 merge 進 main（2026-09-30，使用者同意；分支保留、未 push）。**
