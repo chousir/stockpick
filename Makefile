@@ -3,7 +3,7 @@
         group report week weekend backtest-strategies diagnose pick-outcome rotation-calib rotation backfill-universe-history \
         l6-g4-watch g1-g2-g5-watch \
         backfill-daily-history backfill-institutional-history \
-        build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid intra-pick intra-pick-holdout contrarian-efficacy flow-inflection margin-factors \
+        build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid intra-pick intra-pick-holdout intra-pick-holdout-eval contrarian-efficacy flow-inflection margin-factors \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check snapshot-week shortlist \
         target-price-read \
@@ -212,6 +212,9 @@ intra-pick:  ## M-Pick2 族群內個股因子錦標賽：四因子挑檔力＋�
 
 intra-pick-holdout:  ## M-Pick3a 保留樣本 2015–2021 週快照＋資料品質報告（docs/33；需先 backfill-finmind-price/dividend/revenue；含 24 次 TWSE MI_INDEX 抽樣核價，NO_RECONCILE=1 略過；只做資料層、不評估因子；產 research/intra_pick_oos/）
 	uv run tw-screener backtest intra-pick-holdout $(if $(NO_RECONCILE),--no-reconcile,)
+
+intra-pick-holdout-eval:  ## M-Pick3b 保留樣本驗證：H1 成交額／H2 偏好帶＋F2／F4 複驗（docs/34 預註冊；先驗快照 SHA-256＋判準邏輯檔釘版；FEASIBILITY=1 只做跑前可行性檢查；單次正式執行，已有結果即拒絕重跑；產 research/intra_pick_holdout/）
+	uv run tw-screener backtest intra-pick-holdout-eval $(if $(FEASIBILITY),--feasibility,)
 
 contrarian-efficacy:  ## M-BR1 Phase 2 底部左側聯合桶（轉買×貼近低）forward alpha 檢驗＋§1 硬門檻裁決（產 research/contrarian_efficacy/）
 	uv run tw-screener backtest contrarian-efficacy

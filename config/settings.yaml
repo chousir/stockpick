@@ -527,6 +527,20 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
                                       # 兩種還原的差＝二階項 (D/entry)·(exit/after−1)，隨除息後股價漲幅放大，
                                       # 故這把尺對大漲幅敏感；門檻事前寫定、未因結果調整（結果見 docs/33 §6）
     output_dir: research/intra_pick_oos
+  intra_pick_holdout:        # M-Pick3b 保留樣本驗證（make intra-pick-holdout-eval；docs/34 預註冊，跑後不得改）
+                             # 判準值（C1–C5、min_effect_ic、min_coverage、min_weeks…）全沿用上方 intra_pick（docs/32 §4）；
+                             # 這裡只放本輪新增／釘版項。單次正式執行：輸出目錄已有 holdout_eval_verdicts_*.csv 即拒絕重跑
+    snapshot_path: research/intra_pick_oos/holdout_stockweeks_20260930.parquet
+    snapshot_sha256: "47c6c0d78040ea29aea7b6b1bdbfd46231a735dbe20ba686657bf83e0bcc47cd"  # docs/34 §2.1 釘版；不符即中止
+    last_snapshot: "2021-11-30"   # docs/34 §2.3：r+20 出場日 ≤ 2021-12-31 ⇔ 快照日 ≤ 此日（剔除 2021-12 五週）
+    n_tests_primary: 2            # 主族 H1、H2 的 Bonferroni k（覆寫 intra_pick.n_tests＝4，後者是 M-Pick2 的值）
+    n_tests_secondary: 2          # 副族 F2、F4 複驗的 Bonferroni k
+    tdr_ids: ["9105", "9136"]     # 僅用於可行性檢查「計數」TDR 股週（docs/34 §2.2：不剔除）
+    pinned_blobs:                 # docs/34 §6：判準邏輯檔零改動（git blob id，main 93668b8）；不符即中止
+      src/tw_screener/backtest/intra_pick.py: 56b9981685d8f0ff73b3f00f79c7c6eb8bb5e449
+      src/tw_screener/backtest/factor_lab.py: 41d03c70bcf81e5c1f82c02adde4436efacb3703
+      src/tw_screener/report/shortlist.py: a9fe83e1716d4f98abffd4024b31f12ec26ccbda
+    output_dir: research/intra_pick_holdout
   g3_grid:                  # docs/31 G3 候選 filter 驗證（族群前5×個股貼落後×位階中段×資金非負）
     horizons_td: [10, 20]        # forward 窗（交易日），與 laggard_grid 同窗才可比較
     rs_window: 20                 # rs_subind 回看窗，同 laggard_grid 口徑
