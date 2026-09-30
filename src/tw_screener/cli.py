@@ -256,8 +256,9 @@ def data_backfill_otc_history(
     """一次性回補上櫃次產業成員的日線歷史（輪動籃子價格軸用，docs/12 §3 缺口）。
 
     對「concepts.yaml 次產業成員 ∩ 上櫃」逐檔走 TPEX tradingStock（限速 1 秒/請求）。
-    過去月份永久快取——中斷重跑會自動跳過已完成的檔（fast path），天然可續跑。
-    全量首跑約 2-3 小時，建議掛背景；之後 fetch_otc_daily_all 每日累積即可，不需重跑。
+    過去月份月結後寫入的月檔即為最終版（月中寫入的暫定檔月結後重抓一次，docs/35 §5 R2）——
+    中斷重跑會自動跳過已完成的月份，天然可續跑。全量首跑約 2-3 小時，建議掛背景；
+    之後 fetch_otc_daily_all 每日累積即可，不需重跑（若有暫定檔殘留，重跑本指令只會補那幾個月）。
     """
     import yaml as _yaml
 
@@ -318,9 +319,10 @@ def data_backfill_universe_history(
     把輪動籃子的歷史密度從「snapshot 累積」補成「~1 年」。--start 可指定回補到更早的起始月
     （如 factor-lab 二輪面板延伸），內部換算成 --months 後走同一套邏輯。
 
-    優先補成員多的次產業（成員數由多到少排序、跨次產業去重）。過去月份永久快取——中斷重跑
-    會自動跳過已完成的檔（fast path），天然可續跑。全量首跑約 8-12 小時，建議掛背景；
-    之後每日 fetch-twse 累積即可，不需重跑。涵蓋上櫃成員，故為 backfill-otc-history 的超集。
+    優先補成員多的次產業（成員數由多到少排序、跨次產業去重）。過去月份月結後寫入的月檔即為
+    最終版（暫定檔月結後重抓一次，docs/35 §5 R2）——中斷重跑會自動跳過已完成的月份，天然可續跑。
+    全量首跑約 8-12 小時，建議掛背景；之後每日 fetch-twse 累積即可，不需重跑。
+    涵蓋上櫃成員，故為 backfill-otc-history 的超集。
     """
     from datetime import date as _date
 
@@ -947,7 +949,8 @@ def data_fetch_candidates_history(
 ) -> None:
     """對本週篩選結果聯集去重的個股，補抓 STOCK_DAY 歷史（用於 5 日動能計算）。
 
-    過去月份永久快取（首次跑後不會再打網），首次大約 ~5–15 分鐘（200 檔 × 4 秒）。
+    過去月份月結後即為最終版、不再打網；月中抓的暫定檔月結後會重抓一次（docs/35 §5 R2）。
+    首次大約 ~5–15 分鐘（200 檔 × 4 秒）。
     """
     import polars as _pl
     import yaml as _yaml

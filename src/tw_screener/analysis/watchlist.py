@@ -144,7 +144,7 @@ def enrich_named_list(
         oh = client.fetch_stock_ohlcv(sid, n_days=100)
         if oh.height < _MIN_HISTORY_ROWS:
             # 快取不足 MA60 視窗（含全空）→ 主動抓歷史（上櫃股自動走 TPEX），再讀一次。
-            # 過去月份永久快取、當月吃 TTL，重複呼叫近零成本（上市未滿 60 日者亦安全）。
+            # 過去月份月結後即為最終版、當月吃 TTL，重複呼叫近零成本（上市未滿 60 日者亦安全）。
             client.fetch_stock_history(sid, months=6)
             oh = client.fetch_stock_ohlcv(sid, n_days=100)
         if oh.is_empty():

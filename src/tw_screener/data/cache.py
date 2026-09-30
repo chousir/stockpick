@@ -115,6 +115,20 @@ def is_fresh(path: Path, ttl_hours: float) -> bool:
     return age < timedelta(hours=ttl_hours)
 
 
+def is_month_file_final(path: Path, ym: str) -> bool:
+    """過去月份的個股月檔（`stock_day_{sid}_{YYYYMM}.parquet`）是否為「月結後寫入」的最終版。
+
+    月中抓的檔（當時是「當月」）缺該月後半段；若因「過去月份永久快取」而不再重抓就會永遠殘缺
+    （2026-09 W39 發現，docs/35 §5）。判準：檔案 mtime 的日期 ≥ 該月次月 1 日＝月結後才寫入；
+    月中寫入的暫定檔月底後必須重抓一次，重抓寫入的 mtime 已落在次月，即成為最終版。
+    只用 mtime：不需交易日曆，也不會因停牌股月末沒資料而永遠重抓。檔案不存在 → False。
+    """
+    if not path.exists():
+        return False
+    first_of_next = _last_day_of_month(int(ym[:4]), int(ym[4:6])) + timedelta(days=1)
+    return datetime.fromtimestamp(path.stat().st_mtime).date() >= first_of_next
+
+
 def is_fresh_with_columns(path: Path, ttl_hours: float, required_columns: list[str]) -> bool:
     """`is_fresh()` 之外，再檢查快取是否含 `required_columns`（只讀 schema、不讀整檔）。
 

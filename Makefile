@@ -95,7 +95,7 @@ screen-redesign-local:  ## docs/31 §4/§7.2 全新本地filter(G1/G2/G4/G5/L6/F
 	-uv run tw-screener screen run-local l6
 	-uv run tw-screener screen run-local f2
 
-fetch-candidates-history:  ## 對本週篩選結果補抓 STOCK_DAY 歷史（MA20/60+斜率+動能，MONTHS=13 預設≈年線；首次 30-40 分鐘，過去月份永久快取）
+fetch-candidates-history:  ## 對本週篩選結果補抓 STOCK_DAY 歷史（MA20/60+斜率+動能，MONTHS=13 預設≈年線；首次 30-40 分鐘；過去月份月結後即為最終版，月中抓的暫定檔月結後重抓一次，R2）
 	uv run tw-screener data fetch-candidates-history --months $(or $(MONTHS),13)
 
 rotation:  ## 次產業資金流向輪動報表（產 reports/週次/sector_rotation.md+csv；docs/12）

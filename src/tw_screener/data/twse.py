@@ -15,6 +15,7 @@ from .cache import (
     find_latest,
     is_fresh,
     is_fresh_with_columns,
+    is_month_file_final,
     load_parquet,
     save_parquet,
     select_recent_cache_files,
@@ -1442,6 +1443,15 @@ def _months_back(base: date, n: int) -> date:
     return date(year, month, 1)
 
 
+def _covers_dates(new: pl.DataFrame, old: pl.DataFrame) -> bool:
+    """new 是否涵蓋 old 已有的所有日期。
+
+    暫定月檔被重抓結果取代的前提：官方回傳缺了暫定檔已有的日期＝回傳不完整，
+    覆蓋會靜默丟資料且立刻成為「最終版」而無法回復，故不得覆蓋（R2）。
+    """
+    return old.select("date").join(new.select("date"), on="date", how="anti").is_empty()
+
+
 def _months_from_start(today: date, start: date) -> int:
     """換算「今天所在月」回推到「start 所在月（含）」的月數，供 --start 覆蓋 --months 用。
 
@@ -2563,6 +2573,15 @@ class TWSEClient:
             logger.warning("mopsfin_t187ap03_O 回傳空資料，上櫃股數無法取得")
         return df
 
+    def _month_cache_hit(self, cf: Path, ym: str, current_ym: str) -> bool:
+        """個股月檔能否直接當快取：當月看 TTL；過去月份必須是「月結後寫入」的最終版。
+
+        月中抓的過去月份檔缺後半個月，不能再當「永久快取」（R2，docs/35 §5）。
+        """
+        if ym == current_ym:
+            return is_fresh(cf, self.ttl_hours)
+        return is_month_file_final(cf, ym)
+
     def fetch_stock_history(
         self, stock_id: str, months: int = 3, anchor: date | None = None
     ) -> pl.DataFrame:
@@ -2587,7 +2606,9 @@ class TWSEClient:
         """
         TWSE 上市股 OHLCV 歷史（legacy STOCK_DAY 端點）。
         快取到 stock_day_{stock_id}_{YYYYMM}.parquet：
-          - 過去月份永久快取（資料不再變動）
+          - 過去月份：mtime 在次月 1 日之後（月結後寫入）才是最終版、永久快取；月中寫入的
+            暫定檔（缺後半個月）月底後重抓一次；重抓不到、或回傳缺了暫定檔已有的日期（不完整）
+            就沿用暫定檔、不覆蓋（R2，docs/35 §5）
           - 當月用 ttl_hours 過期（資料每日新增；anchor 為過去月時不涉當月）
         """
         _empty_schema = _STOCK_DAY_SCHEMA
@@ -2601,7 +2622,7 @@ class TWSEClient:
             target = _months_back(today, n)
             ym = target.strftime("%Y%m")
             cf = self.cache_dir / f"stock_day_{stock_id}_{ym}.parquet"
-            if cf.exists() and (ym != current_ym or is_fresh(cf, self.ttl_hours)):
+            if self._month_cache_hit(cf, ym, current_ym):
                 expected_files.append(cf)
             else:
                 all_cached = False
@@ -2623,12 +2644,19 @@ class TWSEClient:
             ym = target.strftime("%Y%m")
             cache_file = self.cache_dir / f"stock_day_{stock_id}_{ym}.parquet"
 
-            # 過去月份永久快取；當月用 ttl 控制
-            if cache_file.exists() and (ym != current_ym or is_fresh(cache_file, self.ttl_hours)):
+            # 過去月份看是否月結後寫入的最終版；當月用 ttl 控制
+            if self._month_cache_hit(cache_file, ym, current_ym):
                 logger.info(f"命中快取 {cache_file}")
                 frames.append(load_parquet(cache_file))
                 consecutive_empty = 0
                 continue
+
+            # 過去月份且檔案存在＝月中寫入的暫定檔：重抓；重抓不到就沿用，不讓該月消失
+            provisional = (
+                pl.read_parquet(cache_file) if ym != current_ym and cache_file.exists() else None
+            )
+            if provisional is not None:
+                logger.info(f"暫定月檔（月結前寫入）重抓 {cache_file}")
 
             url = (
                 f"{self.legacy_base_url}/exchangeReport/STOCK_DAY?response=json"
@@ -2636,9 +2664,16 @@ class TWSEClient:
             )
             payload = self._get_legacy(url)
             df = _parse_stock_day(payload, stock_id)
-            if not df.is_empty():
+            if not df.is_empty() and (provisional is None or _covers_dates(df, provisional)):
                 save_parquet(df, cache_file)
                 frames.append(df)
+                consecutive_empty = 0
+            elif provisional is not None:
+                logger.warning(
+                    f"STOCK_DAY {stock_id} {ym} 重抓回空或缺少暫定檔已有的日期，"
+                    f"沿用暫定月檔（{len(provisional)} 筆）"
+                )
+                frames.append(provisional)
                 consecutive_empty = 0
             else:
                 logger.warning(f"STOCK_DAY {stock_id} {ym} 空資料（可能未上市或休市）")
@@ -2662,6 +2697,9 @@ class TWSEClient:
         - URL: https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock?code={sid}&date=YYYY/MM/01
         - Cache 共用 stock_day_{stock_id}_{YYYYMM}.parquet（與 TWSE 同 schema）
         - 同樣有「連續 2 月空就 break」邏輯
+        - 過去月份快取規則同 _fetch_stock_history_twse：月結後寫入才是最終版，月中寫入的
+          暫定檔月底後重抓一次；重抓不到、或回傳缺了暫定檔已有的日期（不完整）就沿用、
+          不覆蓋（R2，docs/35 §5）
         """
         _empty_schema = _STOCK_DAY_SCHEMA
         today = date.today()
@@ -2674,7 +2712,7 @@ class TWSEClient:
             target = _months_back(today, n)
             ym = target.strftime("%Y%m")
             cf = self.cache_dir / f"stock_day_{stock_id}_{ym}.parquet"
-            if cf.exists() and (ym != current_ym or is_fresh(cf, self.ttl_hours)):
+            if self._month_cache_hit(cf, ym, current_ym):
                 expected_files.append(cf)
             else:
                 all_cached = False
@@ -2696,19 +2734,33 @@ class TWSEClient:
             ym = target.strftime("%Y%m")
             cache_file = self.cache_dir / f"stock_day_{stock_id}_{ym}.parquet"
 
-            if cache_file.exists() and (ym != current_ym or is_fresh(cache_file, self.ttl_hours)):
+            if self._month_cache_hit(cache_file, ym, current_ym):
                 logger.info(f"命中快取 {cache_file}")
                 frames.append(load_parquet(cache_file))
                 consecutive_empty = 0
                 continue
 
+            # 過去月份且檔案存在＝月中寫入的暫定檔：重抓；重抓不到就沿用，不讓該月消失
+            provisional = (
+                pl.read_parquet(cache_file) if ym != current_ym and cache_file.exists() else None
+            )
+            if provisional is not None:
+                logger.info(f"暫定月檔（月結前寫入）重抓 {cache_file}")
+
             date_param = target.strftime("%Y/%m/01")
             url = f"{self.tpex_base_url}{_TPEX_STOCK_DAY_PATH}?code={stock_id}&date={date_param}"
             payload = self._get_legacy(url)
             df = _parse_tpex_stock_day(payload, stock_id)
-            if not df.is_empty():
+            if not df.is_empty() and (provisional is None or _covers_dates(df, provisional)):
                 save_parquet(df, cache_file)
                 frames.append(df)
+                consecutive_empty = 0
+            elif provisional is not None:
+                logger.warning(
+                    f"TPEX tradingStock {stock_id} {ym} 重抓回空或缺少暫定檔已有的日期，"
+                    f"沿用暫定月檔（{len(provisional)} 筆）"
+                )
+                frames.append(provisional)
                 consecutive_empty = 0
             else:
                 logger.warning(f"TPEX tradingStock {stock_id} {ym} 空資料")

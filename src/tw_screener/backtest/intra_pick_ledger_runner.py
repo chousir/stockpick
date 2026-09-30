@@ -33,9 +33,10 @@ _PRICE_PATTERNS = ("stock_day_*.parquet", "daily_*.parquet", "otc_daily_*.parque
 
 _PRICE_HINT = (
     "日線快取在窗內有缺日（因子定義：窗內缺日即 null、不補值）。"
-    "已知成因：個股月檔月中抓取後被當永久快取而殘缺、全市場日檔只在跑流程那幾天才有；"
+    "已知成因：個股月檔月中抓取（R2 前被當永久快取）而殘缺、全市場日檔只在跑流程那幾天才有；"
     "上市股可 make backfill-daily-history START=… END=… 補齊，"
-    "上櫃股須重抓殘缺月檔（docs/35 §5）"
+    "暫定月檔月結後會自動重抓（make week 的 fetch-candidates-history，"
+    "或 uv run tw-screener data backfill-otc-history 掃上櫃成員；docs/35 §5）"
 )
 _FACTOR_HINTS = {
     "mom_6_1": f"F1 動能——{_PRICE_HINT}",
