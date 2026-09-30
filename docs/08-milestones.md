@@ -1377,3 +1377,35 @@ SHA-256）；(ii) M-Pick3c 前瞻台帳；(iii) D6 面板重建（docs/33 §6.6-
 由預註冊決定。
 
 **狀態**：驗收 `make test` 1505 passed（main 1469＋新測 36）／ruff 淨／mypy 49＝main 既有、無新增；verifier 10/10 PASS（含獨立重算面板稀疏、缺 127 檔成員、M-Pick2 受影響週數，皆與文件相符）；本 milestone 無研究裁決，未跑 fable 第二意見。最終快照 SHA-256 `47c6c0d7…bcc47cd`（重跑相同）。**已 merge 進 main（2026-09-30，使用者同意；分支保留、未 push）。**
+
+---
+
+## M-Pick3b：保留樣本驗證（分支 `feat/m-pick3b-holdout-eval`）— 2026-09-30
+
+> docs/33 §5 執行順序第 3 項。預註冊 docs/34（§0–§6 於任何保留樣本結果計算前 commit）→ 評估程式 → 跑前可行性檢查 →
+> **單次正式執行** → verifier＋fable 第二意見 → 結果回填 docs/34 §8。研究軌、零生產改動。
+
+**完成**
+- 預註冊 docs/34：主族 H1 成交額鍵（＋）、H2 偏好帶（鏡像因子 `band_dist`，＋）；副族 F2 `high52_near`、F4 `rev_accel` 複驗（＋）；
+  判準沿用 docs/32 §4（C1–C5、五選一），Bonferroni 分族各 k＝2；樣本規則＝r+20 出場日 ≤ 2021-12-31（剔除 2021-12 五個快照，保留 356 週）；
+  快照 SHA-256 與三個判準邏輯檔（intra_pick／factor_lab／shortlist）git blob 釘版。預註冊 commit 後 fresh-context verifier 核對事實全對、
+  另指出 10 處含糊，正式執行前以 §6.1 澄清（不改假設／判準）。
+- 評估程式：`intra_pick_holdout_eval.py`（純函式）＋`_runner.py`＋`backtest intra-pick-holdout-eval [--feasibility]`／
+  `make intra-pick-holdout-eval`＋settings `backtest.intra_pick_holdout`；裁決一律重用 `intra_pick.evaluate_factor`／`classify`（零改動）；
+  單次正式執行防線（已有 verdicts CSV 即拒絕重跑）；測試 +15（變異檢查 5 個全部使測試變紅）。
+- 跑前可行性檢查（docs/34 §7）：356 週、主宇宙 14,251 股週（每週中位 37.5 檔／9 組，M-Pick2 為 63／12）、可計週數 331／326、防禦 regime 僅 21 週。
+- **結果（docs/34 §8）**：H1 成交額 +0.006 [−0.024, +0.034]、H2 偏好帶（`−偏好帶距離`）−0.001 [−0.022, +0.017] → 兩者**未過關**（實質無證據；
+  M-Pick2 事後揭露的 +0.041／−0.017 未複現）；F2 +0.060 [+0.033, +0.087] 僅 C5 不過（M3 −0.01%）→ 未過關；
+  F4 +0.042 [+0.012, +0.072]，C1–C5 全過、Bonferroni 下界 +0.009 → **成立**（副族複驗；依預註冊只記結果、不提生產提案）。
+- 第二意見（fable）：獨立重算與報告逐週一致（≤ 4e-15）、程式忠實、無前視／洩漏。揭露：F2 標籤對 M2/M3 週集合敏感（登記口徑 356 週 → C5 不過；
+  同 M1 的 326 週 → 五條件全過＝成立；差異來自 2020-03 兩個稀疏週），**不改判**；F4 證據勉強過線（下界隨 seed 擺動、k＝4 邊緣）；
+  F2 的 IC 約 ¼ 可能來自原始收盤。
+
+**發現／教訓**：門檻所用每個統計量的「觀察集合」要在預註冊逐一寫明（本次 C5 的 M2/M3 週集合未寫，直接決定 F2 標籤）；
+預註冊寫完後的 fresh-context 挑刺一輪找出 10 處含糊，仍漏掉這一處（教訓條目見 playbook/90 2026-09-30）。
+
+**未涵蓋／待使用者裁決**：(i) F4（及 F2）是否值得走生產提案流程——需另立預註冊並先寫明 C5 週集合／容忍帶，乾淨樣本＝M-Pick3c 前瞻台帳（W40 起）；
+(ii) M-Pick3c 前瞻台帳；(iii) D6 面板重建（docs/33 §6.6-3）。
+
+**狀態**：驗收 `make test` 1520 passed（main 1505＋新測 15）／ruff 淨／新檔 mypy 淨；verifier 10/10 PASS（另有預註冊核對一輪）；
+fable 第二意見不矛盾、無推翻裁決的缺陷。**分支保留、尚未 merge、尚未 push。**

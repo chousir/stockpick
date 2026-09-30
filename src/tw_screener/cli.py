@@ -1888,6 +1888,27 @@ def backtest_intra_pick_holdout_cmd(
     run_intra_pick_holdout(settings, out_dir, reconcile=reconcile)
 
 
+@backtest_app.command("intra-pick-holdout-eval")
+def backtest_intra_pick_holdout_eval_cmd(
+    out_dir: Path | None = typer.Option(
+        None, help="輸出目錄（預設讀 settings，research/intra_pick_holdout）"
+    ),
+    feasibility: bool = typer.Option(
+        False, "--feasibility",
+        help="只做跑前可行性檢查（docs/34 §2.5）：只數宇宙規模與覆蓋，不算任何因子×target 統計",
+    ),
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+) -> None:
+    """M-Pick3b 保留樣本驗證：H1 成交額／H2 偏好帶（主族）＋F2／F4 複驗（副族）（docs/34 預註冊）。
+
+    驗快照 SHA-256 與判準邏輯檔釘版（不符即中止）→ 剔除 2021-12 快照 → 四假設評估。
+    **單次正式執行**：輸出目錄已有正式結果即拒絕重跑（docs/34 §6）。需先 make intra-pick-holdout。
+    """
+    from tw_screener.backtest.intra_pick_holdout_eval_runner import run_intra_pick_holdout_eval
+
+    run_intra_pick_holdout_eval(settings, out_dir, feasibility_only=feasibility)
+
+
 @backtest_app.command("g3-grid")
 def backtest_g3_grid_cmd(
     out_dir: Path | None = typer.Option(
