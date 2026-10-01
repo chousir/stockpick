@@ -1515,4 +1515,4 @@ runner 口徑（成員宇宙 1,132 檔）不同，查明非實作錯誤（通過
 **狀態**：驗收 `make test` **1642 passed**（main 1619＋新測 23）／ruff 淨／mypy 49＝既有基線、R2 相關檔零錯；fresh-context verifier 兩輪
 （第 1 輪 E1–E6 全 PASS〔自寫 38 項規則斷言 0 失敗、1,292 個被覆蓋檔獨立比對 0 違規〕，E7 挑出「非空子集會靜默覆蓋並標成最終版」→ 加子集護欄；
 第 2 輪 F1–F5 全 PASS〔32 項斷言 0 失敗〕，F6 抓到一行過時 memory 索引已修）；變異檢查累計 17 個最終 0 存活。無研究裁決。
-**分支 `fix/stock-day-month-cache-final`，尚未 merge 進 main（merge 必問使用者）、未 push。**
+**分支 `fix/stock-day-month-cache-final`，已 FF merge 進 main（tip `b429cff`，2026-10-01 以 `git merge-base --is-ancestor` 確認）、未 push。**
