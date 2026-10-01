@@ -96,7 +96,7 @@ EPS 取保守期限次日起可用的最新季、營收取次月 11 日起可用
   W42（資料日 ≥ 10/11）起 F4 應查 2026-09，快取落後就整週 null，記錄器會印黃字警告並註明補齊後可在 `data_date + 7 日` 內重跑覆寫。
 - 快取層級的落後由 `cache_staleness` 判斷（任一檔到了應查期即算新鮮）；逐檔缺值看覆蓋率警告。
 
-## 5. 發現：日線快取殘缺——既有資料層缺陷，F1／F2 覆蓋率受影響（處置：R1 已做；R2 已實作並修復，分支 `fix/stock-day-month-cache-final` 待 merge）
+## 5. 發現：日線快取殘缺——既有資料層缺陷，F1／F2 覆蓋率受影響（處置：R1 已做；R2 已實作並修復，分支 `fix/stock-day-month-cache-final` 已 FF 進 main〔tip `b429cff`〕）
 
 **現象**（2026-09-30 W39 真實池煙霧測試，輸出導向暫存目錄、未寫真實台帳）：合格成員 34 檔、`mom_6_1`／`high52_near` 覆蓋率只有 **21%**
 （F3 91%、F4 94% 正常）。F1／F2 的定義要求窗內完全無缺日（F1 往回 126 列、F2 往回 250 列），日線快取在窗內多處缺日。
@@ -139,7 +139,7 @@ EPS 取保守期限次日起可用的最新季、營收取次月 11 日起可用
   `postCreateCommand` 尾端接 `&& sudo apt-get update -qq && sudo apt-get install -y -qq cron && (crontab -l 2>/dev/null; echo '0 10 * * 1-5 /bin/bash /workspaces/stockpick/scripts/fetch_cron.sh') | crontab -`；
   或改在主機端排 `docker exec <容器> /bin/bash /workspaces/stockpick/scripts/fetch_cron.sh`（容器仍須在跑）。
 
-**R2 執行紀錄（2026-09-30；使用者在 R1 之後裁決「做 R2」；分支 `fix/stock-day-month-cache-final`，待 merge）**
+**R2 執行紀錄（2026-09-30；使用者在 R1 之後裁決「做 R2」；分支 `fix/stock-day-month-cache-final`，已 FF 進 main〔tip `b429cff`〕）**
 - **規則**（`data/cache.py::is_month_file_final`＋`TWSEClient._month_cache_hit`，上市 STOCK_DAY 與上櫃 tradingStock 兩條路徑的快速／慢速路徑共四處）：
   過去月份的 `stock_day_{sid}_{YYYYMM}.parquet` 只有 **mtime 日期 ≥ 次月 1 日**（月結後寫入）才是最終版、永久快取；月中寫入的暫定檔月底後重抓一次，
   重抓寫入後 mtime 已在次月即成最終版；當月維持 TTL 不變。**重抓回空／失敗、或回傳缺了暫定檔已有的日期（不完整）時沿用暫定檔**（不覆蓋、不標最終版、不設負快取，下次仍會重試）；
