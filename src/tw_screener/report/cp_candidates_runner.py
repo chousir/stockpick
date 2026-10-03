@@ -37,6 +37,7 @@ def run_cp_candidates(settings: Path) -> None:
         build_overheat_watch,
         compute_early_inflow,
         compute_overheat_warning,
+        drop_etf_warrants,
         latest_snapshot,
         recent_buy_confirm,
         render_cp_candidates_report,
@@ -89,7 +90,7 @@ def run_cp_candidates(settings: Path) -> None:
         raise typer.Exit(1)
     coverage = compute_coverage_meta(panel, institutional, members, universe="listed")
 
-    snapshot = latest_snapshot(panel)
+    snapshot = drop_etf_warrants(latest_snapshot(panel))
     confirm_days = int(cand.get("confirm_days", 2))
     confirm = recent_buy_confirm(panel, institutional, confirm_days=confirm_days)
     lag = cand.get("laggard", {})

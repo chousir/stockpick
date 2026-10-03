@@ -2695,3 +2695,35 @@ def test_fetch_valuation_ratios_both_sides_cached(tmp_path: Path) -> None:
     df = _valuation_client(tmp_path, [_LISTED_ROW], [_OTC_ROW]).fetch_valuation_ratios()
     assert df.height == 2
     assert len(list(tmp_path.glob("valuation_ratios_20261002.parquet"))) == 1
+
+
+def test_fetch_revenue_partial_side_not_cached(tmp_path: Path, monkeypatch) -> None:
+    """月營收上櫃端失敗 → 回上市資料但不落檔。"""
+    import tw_screener.data.twse as twse_mod
+
+    client = _valuation_client(tmp_path, [{"x": 1}], [])
+    rev = pl.DataFrame({"stock_id": ["2330"]})
+    monkeypatch.setattr(twse_mod, "_parse_revenue", lambda a, b: rev)
+    assert client.fetch_revenue().height == 1
+    assert list(tmp_path.glob("revenue_*.parquet")) == []
+
+    client = _valuation_client(tmp_path, [{"x": 1}], [{"y": 2}])
+    client.fetch_revenue()
+    assert len(list(tmp_path.glob("revenue_*.parquet"))) == 1
+
+
+def test_fetch_quarterly_fundamentals_partial_side_not_cached(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """單季基本面上櫃主端點失敗 → 不落檔。"""
+    import tw_screener.data.twse as twse_mod
+
+    df = pl.DataFrame({"stock_id": ["2330"], "year": [2026], "quarter": [2]})
+    monkeypatch.setattr(twse_mod, "_parse_quarterly_fundamentals", lambda *a: df)
+    client = _valuation_client(tmp_path, [{"x": 1}], [])
+    assert client.fetch_quarterly_fundamentals().height == 1
+    assert list(tmp_path.glob("fundamentals_*.parquet")) == []
+
+    client = _valuation_client(tmp_path, [{"x": 1}], [{"y": 2}])
+    client.fetch_quarterly_fundamentals()
+    assert len(list(tmp_path.glob("fundamentals_2026Q2.parquet"))) == 1

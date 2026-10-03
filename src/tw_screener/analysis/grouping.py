@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import math
+from typing import cast
 
 import polars as pl
 from loguru import logger
@@ -781,7 +782,7 @@ def group_stocks(
     )
 
     # Composite score (動能主導)
-    max_members = float(groups["members_count"].max() or 1)
+    max_members = float(cast(float, groups["members_count"].max()) or 1)
     log_max = math.log1p(max_members)
 
     w_mom = weights.get("momentum", _DEFAULT_WEIGHTS["momentum"])
@@ -923,7 +924,7 @@ def rank_themes(
             (pl.col("vol_surge_count").cast(pl.Float64) / members_f).alias("vol_surge_score"),
         ]
     )
-    log_max = math.log1p(float(g["members_count"].max() or 1))
+    log_max = math.log1p(float(cast(float, g["members_count"].max()) or 1))
     mom_score_vals = [_sigmoid(v / 5.0) for v in g["momentum_5d"].to_list()]
     g = g.with_columns(pl.Series("_mom", mom_score_vals, dtype=pl.Float64))
     g = g.with_columns(

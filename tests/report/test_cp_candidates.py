@@ -11,6 +11,7 @@ from tw_screener.report.cp_candidates import (
     attach_subind_quadrant,
     attach_valuation,
     build_cp_candidates,
+    drop_etf_warrants,
     latest_snapshot,
     recent_buy_confirm,
     render_cp_candidates_report,
@@ -671,3 +672,10 @@ def test_watch_flags_default_off_in_shipped_settings():
     cp = cfg["cp_value"]
     assert cp["early_watch"]["enabled"] is False
     assert cp["overheat_watch"]["enabled"] is False
+
+
+def test_drop_etf_warrants_keeps_only_common_stocks():
+    ids = ["2330", "00981T", "0050", "6669", "2330Y"]
+    snap = pl.DataFrame({"stock_id": ids, "x": [1, 2, 3, 4, 5]})
+    assert drop_etf_warrants(snap)["stock_id"].to_list() == ["2330", "6669"]
+    assert drop_etf_warrants(pl.DataFrame()).is_empty()

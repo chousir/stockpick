@@ -2226,6 +2226,10 @@ class TWSEClient:
         if df.is_empty():
             logger.warning("單季基本面解析結果為空")
             return df
+        if not (margin_listed and eps_listed and margin_otc and eps_otc):
+            # 同 fetch_valuation_ratios：單邊端點失敗不落檔，否則殘檔成為該季「完整」快取
+            logger.warning("單季基本面上市/上櫃主端點有缺 → 不寫快取，沿用前一份完整快取")
+            return df
         y, q = df["year"].max(), df.filter(pl.col("year") == df["year"].max())["quarter"].max()
         cache_file = self.cache_dir / f"fundamentals_{y}Q{q}.parquet"
         save_parquet(df, cache_file)
@@ -2480,8 +2484,13 @@ class TWSEClient:
             f"{self.tpex_base_url}{_REVENUE_OTC_PATH}", "上櫃月營收"
         )
         df = _parse_revenue(data, data_otc)
-        if not df.is_empty():
+        if not df.is_empty() and data and data_otc:
             save_parquet(df, cache_file)
+        elif not df.is_empty():
+            # 同 fetch_valuation_ratios：單邊失敗不落檔（殘檔會在 TTL 內被當完整月檔讀）
+            logger.warning(
+                "月營收單邊缺（上市 {} 筆、上櫃 {} 筆）→ 不寫快取", len(data), len(data_otc)
+            )
         return df
 
     def fetch_dividend_calendar(self) -> pl.DataFrame:
