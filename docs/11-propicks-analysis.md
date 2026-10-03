@@ -24,6 +24,8 @@
     （docs/19、docs/20、docs/22 §4）而舊 prompt 的入選理由大量倚賴它＋使用者要一頁 Top 5。
   - **回退**：`config/settings.yaml` 設 `picks.shortlist.enabled: false`，並把本檔還原為 M-Pick1 之前的版本
     （`git log -- docs/11-propicks-analysis.md` 可查）。
+- **2026-10-03 候補改小表**：決策卡「候補」由單行改為小表（次產業・桶／距季線・PE／機器旗標，皆取 shortlist.csv，標「未做外部查證」）；
+  超過 50 行時退回單行（任務 3「行數預算」）。使用者要求（W40 實例先手改、再同步本範本）；不改排序、picks YAML、`top_n`／`alt_n`。
 
 ---
 
@@ -306,7 +308,10 @@ pick.md **只有兩段**：一頁決策卡（下方模板）＋ picks YAML 區�
 | {rank} | {stock_id} {name} | {sub_industry}（{trend_score}・#{trend_rank}/{trend_n}） | {evidence}；⚠️未驗證：{至多 1 條} | {bear_hints}；{補充空方} | {entry_text} | {stop_text} |
 
 **否決**：{本週無否決｜#{rank} {stock_id} {name}——{類別}：{事實}（外部查證：{來源}，查詢 {YYYY-MM-DD}）→ 由 #{rank'} 遞補}
-**候補**（alt）：{#{rank} {stock_id} {name}（{sub_industry}）／…｜無}
+
+| 候補（alt・未做外部查證） | 次產業（趨勢分排名・桶） | 距季線／PE（shortlist.csv・{data_date}） | 機器旗標 |
+|---|---|---|---|
+| #{rank} {stock_id} {name} | {sub_industry}（#{trend_rank}/{trend_n}・第{trend_bucket}桶） | {ma60_dist_pct}%／{pe_ratio} | {旗標｜無} |
 
 ## 持股動作
 
@@ -328,7 +333,13 @@ pick.md **只有兩段**：一頁決策卡（下方模板）＋ picks YAML 區�
   - **空方**＝`bear_hints`（首項「族群層訊號、個股層未驗證」固定保留）＋你補的空方（表內事實附日期／外部查證附來源與日期／除息或事件日期）。
     **空方條目數 ≥ 理由條目數**（表格內以「；」分隔計數，⚠️未驗證那條也算理由）；不夠就刪掉⚠️註記，**不准灌水或編造空方**。
   - **承接區／停損**＝`entry_text`／`stop_text` 照抄，不改價、不改寫法。
-- **否決**一行、**候補**一行（未遞補的 alt 依 rank 列出；遞補已用者不重列）。
+- **否決**一行；**候補**用小表（2026-10-03 起，原為單行）：
+  - 列＝未遞補的 alt 依 rank 列出（遞補已用者不重列）；無候補＝整張小表改寫成一行「**候補**：無」。
+  - 欄位數字全取 `shortlist.csv`（`ma60_dist_pct`／`pe_ratio`／`trend_*`），表頭帶來源與 `data_date`；`pe_ratio` 缺值寫「未取得」。
+  - **機器旗標**＝該列 `bear_hints` 去掉固定首項「族群層訊號、個股層未驗證」與重複的距季線偏好帶字樣後的剩餘項（如「高PE」「停損距現價 X%（>10%）」），**不補寫、不外部查證**；剩餘為空寫「無」。
+  - 候補**不適用**「空方 ≥ 理由」規則（小表無理由欄）、不做否證式查證；表頭「未做外部查證」不可省，避免讀者誤認同 Top 5 深度。
+  - **行數預算**：小表佔「空行＋表頭＋分隔＋alt 列數」行（`alt_n`＝5 時最多 8 行）。總行數超過 50 時，**候補小表退回單行**
+    `**候補**（未做外部查證）：#{rank} {stock_id} {name}（{sub_industry}）／…`，不得砍 Top 5 表、持股動作或風險段。
 - **風險 ≤3 條**：足以改寫姿態或 Top 5 的事件／集中度／資料風險，每條附日期與來源。Top 5 與持股同因子簇（`portfolio.factor_clusters`；
   group_analysis 組合體檢段）或押同一事件，寫在這裡（不否決、不重排）。**風險段不可比理由短。**
 - **最後兩行閱讀說明逐字照抄**（上方模板最後兩行）。
