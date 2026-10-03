@@ -2666,3 +2666,32 @@ def test_parse_tpex_stock_day_accepts_both_volume_headers():
     assert new["trade_volume"][0] == 2906 * 1000
     assert old["close"][0] == 421.0 and new["close"][0] == 421.0
     assert old["date"][0].year == 2024 and new["date"][0].year == 2025
+
+
+def _valuation_client(tmp_path: Path, listed: list, otc: list) -> TWSEClient:
+    client = TWSEClient(
+        base_url="https://example.invalid", cache_dir=tmp_path, ttl_hours=0.0,
+        user_agent="test", interval_sec=0.0,
+    )
+    client._get = lambda path: listed  # type: ignore[method-assign]
+    client._get_openapi_json = lambda url, label: otc  # type: ignore[method-assign]
+    return client
+
+
+_LISTED_ROW = {"Date": "20261002", "Code": "2330", "PEratio": "20", "PBratio": "5",
+               "DividendYield": "1.5"}
+_OTC_ROW = {"Date": "1151002", "SecuritiesCompanyCode": "3293", "PriceEarningRatio": "18.28",
+            "PriceBookRatio": "14.75", "YieldRatio": "4.55"}
+
+
+def test_fetch_valuation_ratios_partial_side_not_cached(tmp_path: Path) -> None:
+    """上櫃端失敗（W40 TPEX DNS）→ 回上市資料但不落檔，避免殘檔成為該日完整快取。"""
+    df = _valuation_client(tmp_path, [_LISTED_ROW], []).fetch_valuation_ratios()
+    assert df.height == 1
+    assert list(tmp_path.glob("valuation_ratios_*.parquet")) == []
+
+
+def test_fetch_valuation_ratios_both_sides_cached(tmp_path: Path) -> None:
+    df = _valuation_client(tmp_path, [_LISTED_ROW], [_OTC_ROW]).fetch_valuation_ratios()
+    assert df.height == 2
+    assert len(list(tmp_path.glob("valuation_ratios_20261002.parquet"))) == 1

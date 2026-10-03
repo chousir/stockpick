@@ -2358,6 +2358,15 @@ class TWSEClient:
         if df.is_empty():
             logger.warning("官方日估值比解析結果為空")
             return df
+        if not listed or not otc:
+            # 單邊失敗（W40：TPEX DNS 不通 → 只剩上市 1082 檔）若照常落檔，會成為該日「完整」快取、
+            # 讀取端（load_latest）取最新 → 上櫃股整批無 PE；TPEX/TWSE 只供最新日、不可回補。
+            # 不落檔：讀取端沿用前一份完整快取（PE 晚一日，檔名日期誠實標示）。
+            logger.warning(
+                "官方日估值比單邊缺（上市 {} 筆、上櫃 {} 筆）→ 不寫快取，沿用前一份完整快取",
+                len(listed), len(otc),
+            )
+            return df
         date_str = df.select(pl.col("date").max().dt.strftime("%Y%m%d")).item()
         cache_file = self.cache_dir / f"valuation_ratios_{date_str}.parquet"
         save_parquet(df, cache_file)
