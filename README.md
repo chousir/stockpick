@@ -335,7 +335,7 @@ Section 0 策略代號/除權息/總經事件、1 入選分布、2 族群強度�
 
 接著用 [docs/11-propicks-analysis.md](./docs/11-propicks-analysis.md) 的範本 prompt 讓 Claude（Opus）產 `pick.md`——
 **一頁決策卡 ≤50 行**（姿態 ≤2 行 → 上週帳 → Top 5 表（順序＝shortlist rank、不重排；理由只引已驗證證據、
-空方條目 ≥ 理由）→ 否決／候補 → 持股動作 → 風險 ≤3 → 固定兩行閱讀說明）。Opus 最多否決 2 檔，理由只限
+空方條目 ≥ 理由）→ 否決／候補小表（未做外部查證；超行時退回單行）→ 持股動作 → 風險 ≤3 → 固定兩行閱讀說明）。Opus 最多否決 2 檔，理由只限
 資料異常／重大負面外部事實／處置股停牌，由候補依序遞補。其餘（候補與 gate 計數、查證紀錄、市場節奏、觀察觸發、
 watchlist 逐檔、族群解讀、附錄 G 綜合估值區間、未驗證訊號）全在 `pick_detail.md`。**多空並陳、不下單一結論；排序≠買進建議。**
 定稿後用 `tw-screener picks sync` 解析 pick.md 尾端 picks 區塊（Top 5→core＋rank、候補→pool）、整批寫進底帳
