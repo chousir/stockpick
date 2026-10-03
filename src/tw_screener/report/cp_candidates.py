@@ -86,6 +86,21 @@ def latest_snapshot(panel: pl.DataFrame) -> pl.DataFrame:
     return panel.filter(pl.col("date") == pl.col("date").max().over("stock_id"))
 
 
+def drop_etf_warrants(snapshot: pl.DataFrame) -> pl.DataFrame:
+    """候選池排除 ETF／權證（個股 alpha 框架不含 ETF；日線 daily_* 含上市 ETF，面板沒濾）。
+
+    只用於生產候選清單；B2 回測面板不動（樣本不變，見 docs/13）。
+    """
+    if snapshot.is_empty() or "stock_id" not in snapshot.columns:
+        return snapshot
+    from tw_screener.analysis.grouping import is_etf_or_warrant
+
+    etf_ids = [sid for sid in snapshot["stock_id"].unique().to_list() if is_etf_or_warrant(sid)]
+    if etf_ids:
+        logger.info("cp 候選排除 ETF／權證 {} 檔", len(etf_ids))
+    return snapshot.filter(~pl.col("stock_id").is_in(etf_ids))
+
+
 def recent_buy_confirm(
     panel: pl.DataFrame, institutional: pl.DataFrame, confirm_days: int = 2
 ) -> pl.DataFrame:

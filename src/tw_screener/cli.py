@@ -391,6 +391,11 @@ def data_backfill_finmind_per(
         "--include-uncovered",
         help="次產業成員跑完後，再補全市場其餘一般股（候選／持股不在 concepts 時才有資料）",
     ),
+    only_uncovered: bool = typer.Option(
+        False,
+        "--only-uncovered",
+        help="只補全市場不在 concepts 的一般股、跳過次產業成員（免被 24h TTL 重抓、浪費額度）",
+    ),
     force: bool = typer.Option(False, "--force", help="略過 24h TTL、強制重抓每一檔"),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
@@ -432,7 +437,9 @@ def data_backfill_finmind_per(
         if sid not in seen:
             seen.add(sid)
             targets.append(sid)
-    if include_uncovered:
+    if only_uncovered:
+        targets = _uncovered_market_ids(settings, targets)
+    elif include_uncovered:
         targets += _uncovered_market_ids(settings, targets)
     if limit > 0:
         targets = targets[:limit]
@@ -698,6 +705,11 @@ def data_backfill_finmind_financials(
         "--include-uncovered",
         help="次產業成員跑完後，再補全市場其餘一般股（候選／持股不在 concepts 時才有資料）",
     ),
+    only_uncovered: bool = typer.Option(
+        False,
+        "--only-uncovered",
+        help="只補全市場不在 concepts 的一般股、跳過次產業成員（免被 24h TTL 重抓、浪費額度）",
+    ),
     force: bool = typer.Option(False, "--force", help="略過 24h TTL、強制重抓每一檔"),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
@@ -740,7 +752,9 @@ def data_backfill_finmind_financials(
         if sid not in seen:
             seen.add(sid)
             targets.append(sid)
-    if include_uncovered:
+    if only_uncovered:
+        targets = _uncovered_market_ids(settings, targets)
+    elif include_uncovered:
         targets += _uncovered_market_ids(settings, targets)
     if limit > 0:
         targets = targets[:limit]
