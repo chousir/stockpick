@@ -261,8 +261,11 @@ group_analysis:
   dividend_lookahead_days: 14   # 除權息前瞻窗（日曆日，約 10 交易日）
   dividend_lookback_days: 20    # 除權息「過去已發生」窗（日曆日）：group_analysis 除權息段雙向列
   macro_lookahead_days: 30      # 總經事件前瞻窗（日曆日，涵蓋雙雷／法說／結算）
-  price_discontinuity_pct: 15.0 # 價格不連續安全網：近 10 交易日單日報酬絕對值 > 此值且 change 無法解釋
+  price_discontinuity_pct: 15.0 # 價格不連續安全網：近 N 交易日單日報酬絕對值 > 此值且 change 無法解釋
                                 # → 標 price_discontinuity（除權息/減資/面額分割/停牌補跳），pick 階段不判多空
+  price_discontinuity_lookback_td: 60 # 上式 N＝ma60／low_60d／high_60d 最長窗（2026-10-03 由 10 改 60：6669 於
+                                # 09-02 分割、10-01 已滿 20 交易日，窗外未標但 MA60／60 日高仍含分割前價；
+                                # 回測 intra_pick.gate_disc_lookback_td 仍 10，與生產分叉見 docs/11 價格不連續段）
   vol_lookback_days: 20         # 量比均量視窗（交易日）；每檔只取今日前最近 N 天平均，與輸入列數脫鉤
   radar:                        # 輪動雷達（Section 2.8 領先鏡頭 + Section 6 深度解讀驅動）
     vol_surge_ratio: 1.5        # 量比 ≥ 此值算「量能放大」（領先訊號之一）
@@ -349,6 +352,8 @@ cp_value:                    # B2 個股版起漲事件回測（docs/13 Phase B�
   history_days: 250          # 載入上市日線/法人歷史天數（≈ 1 年；個股層只框上市）
   z_window: 60               # panel 個股自身滾動 z 視窗（與 B1 stock_panel 一致）
   z_min_periods: 30          # z 暖機最低樣本
+  z_min_abs_flow_shares: 100000 # 資金 z 量能下限（股；100 張，未校準、低信心）：窗內滾動加總絕對值低於此值 → z 為 null。
+                             # 擋「投信長期零、某日零股級淨買 5～29 股」被推到 z 數學上限 7.62（W40 追突破 25 檔全是此型）
   position_low_pct: 15.0     # 「+low」CP 變體：距 60 日低 ≤ 此值＝價未動（個股波動大於族群）
   early_gate:                # ★ M-MH Phase 2 早偵測閘（改判「早」非「準」；docs/13 Phase D）
     enabled: true            # 開：scan 加 +early/+early+low/+nodiv 變體＋跑跨窗配對領先

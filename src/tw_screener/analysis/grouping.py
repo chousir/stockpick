@@ -34,9 +34,11 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
 _MOMENTUM_DAYS = 5
 # 修法6 趨勢窗：近 10 日報酬，供報表區分「健康回踩」vs「下跌反彈」（比照 _MOMENTUM_DAYS）。
 _TREND_DAYS = 10
-# 價格不連續安全網：近 _TREND_DAYS 日內單日報酬絕對值 > 此門檻且 change 無法解釋
+# 價格不連續安全網：近 _PRICE_DISC_LOOKBACK 日內單日報酬絕對值 > 此門檻且 change 無法解釋
 # → 標 price_discontinuity（除權息／減資／面額分割／停牌補跳，pick 階段「資料異常不判多空」）。
 _PRICE_DISC_PCT = 15.0
+# 價格不連續回看（交易日）＝ma60／low_60d／high_60d 的最長窗：斷層落在窗內，這些欄就被污染
+_PRICE_DISC_LOOKBACK = 60
 # 法人近端窗：三大法人/外資/投信近 5/10 日累計，揭露 20 日累計蓋住的近端轉向（純揭露、非 gate）。
 # 修法6 起於外資；分析層補窗擴及投信(trust)/三大法人(inst=total_net)，比照外資同口徑。
 _INST_NEAR_WINDOWS = (5, 10)
@@ -343,6 +345,7 @@ def group_stocks(
     trajectory_cfg: dict | None = None,
     skip_etf: bool = True,
     price_disc_pct: float = _PRICE_DISC_PCT,
+    price_disc_lookback: int = _PRICE_DISC_LOOKBACK,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """
     Group screened stocks by industry and compute group strength scores (動能主導).
@@ -496,11 +499,11 @@ def group_stocks(
             )
         )
 
-    # 價格不連續安全網（除權息／減資／面額分割／停牌補跳）：近 _TREND_DAYS 日內單日報酬
+    # 價格不連續安全網（除權息／減資／面額分割／停牌補跳）：近 price_disc_lookback 日內單日報酬
     # 絕對值 > price_disc_pct 且 change 無法解釋 → 標 price_discontinuity（pick 階段強制
     # 「資料異常、本週不判多空」）。需 price_history 帶 change 欄；無則靜默略過（不誤報）。
     disc_map = detect_price_discontinuity(
-        stock_ids, price_history, lookback=_TREND_DAYS, threshold_pct=price_disc_pct
+        stock_ids, price_history, lookback=price_disc_lookback, threshold_pct=price_disc_pct
     )
     disc_vals = [bool(sid in disc_map) for sid in stock_ids]
     disc_detail = [

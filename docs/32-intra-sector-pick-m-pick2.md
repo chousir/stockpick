@@ -39,7 +39,7 @@
   （`picks.shortlist.max_bucket_for_top`）。
 - **個股 gate**（可重建者，門檻值同生產）：`0 ≤ ma60_dist_pct ≤ 15`（ext_min／F2 上限）；
   當日成交額 `close×volume/1e6 ≥ 100` 百萬（`propicks_flags.low_liquidity_amount`，單日口徑同生產）；
-  近 10 交易日無價格不連續（單日 |收盤報酬| > 15%，同 `group_analysis.price_discontinuity_pct`）。
+  近 10 交易日無價格不連續（單日 |收盤報酬| > 15%，同 `group_analysis.price_discontinuity_pct`）。（2026-10-03 起生產回看改 60 日 `price_discontinuity_lookback_td`；本研究／回測 `intra_pick.gate_disc_lookback_td` 維持 10，已知與生產分叉，預註冊口徑不改。）
 - **不可重建（誠實帳）**：生產池只含當週篩選候選＋觀察名單（研究池＝全體過 gate 成員，較寬）；
   「強漲法人賣」旗標、因子簇上限未重建（本輪只看次產業內）。
 - **組（group）**：同（週, 主次產業）過 gate、且該因子與 target 皆非 null 的成員；**n_g ≥ 2 才計**

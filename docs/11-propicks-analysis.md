@@ -179,7 +179,7 @@ reports/YYYY-Www/pick_detail.md   ← 明細（附錄 A–H＋資料品質披露
 1. **除權息部分還原**：`5日漲幅`(`momentum_5d`)／`近10日報酬`(`ret_10d`) 已還原現金股利＋配股（`flags` 標「除息還原X元」／
    「除權還原配股X」）；**`距月線`／`距季線`／`當日`漲跌／區間高低（`low/high_20/60d`）／法人張數仍未還原**——配股／面額分割／
    減資跨 ex 日的距均線、N 日報酬、區間高低不可比。另對照 group_analysis.md「0.5 本週除權息」（含已發生與未來 N 日）。
-2. **`price_discontinuity=True`**（近 10 交易日內單日收盤漲跌幅 >±15% 且漲跌價差無法解釋，附 `price_disc_detail`）：該檔
+2. **`price_discontinuity=True`**（近 60 交易日內單日收盤漲跌幅 >±15% 且漲跌價差無法解釋，附 `price_disc_detail`；回看 = `group_analysis.price_discontinuity_lookback_td`，2026-10-03 由 10 改 60＝ma60／60 日高低最長窗，6669 於 09-02 分割、10 日窗過期後漏標而 MA60 仍含分割前價）：該檔
    momentum／距均線／PE／區間欄本週全部失真，一律標「**資料異常、本週不判多空**」，不寫成轉弱/崩盤。shortlist 已把它 gate 掉；
    **未標但明顯失真**（如疑似面額分割造成的價格斷層）＝否決類別①。
 3. **月營收 YoY 為單月口徑**：`月營收YoY%` 是最新單月 vs 去年同月；F／G4／L6 篩選看的是**累計** YoY——口徑不同、可合理不一致，

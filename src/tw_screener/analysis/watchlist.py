@@ -113,6 +113,7 @@ def enrich_named_list(
     vol_lookback: int = 20,
     dividends: pl.DataFrame | None = None,
     price_disc_pct: float = 15.0,
+    price_disc_lookback: int = 60,
 ) -> tuple[pl.DataFrame, dict]:
     """把任意股票清單 enrich 成 (members, synth_screener)，reuse group_stocks 同套指標。
 
@@ -189,6 +190,7 @@ def enrich_named_list(
         vol_lookback=vol_lookback,
         dividends=dividends,
         price_disc_pct=price_disc_pct,
+        price_disc_lookback=price_disc_lookback,
         skip_etf=False,  # 持股/觀察清單的 ETF 產輕量列（docs/21）；選股宇宙仍排除
     )
     # ETF 列 industry 標「ETF」（不混入「未分類」）；基本面/族群欄由後段誠實留 null

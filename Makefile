@@ -167,11 +167,11 @@ backfill-daily-history:  ## ⏳ 一次性逐日回補全市場歷史日線（MI_
 backfill-institutional-history:  ## ⏳ 一次性逐日回補上市法人歷史（T86，一天一請求；顯式 START/END 不依賴錨點，供面板法人冷啟動；START=2022-01-01 END=2025-06-05 必填）
 	uv run tw-screener data backfill-institutional-history --start $(START) --end $(END)
 
-backfill-finmind-per:  ## ⏳ 一次性回補全次產業成員 FinMind PER 歷史（~1130 檔×1 call，註冊2.5h/未註冊5h，24h TTL 可中斷續跑；LIMIT/START 選填；季頻重跑，不接 make week，docs/31 §20.14）
-	uv run tw-screener data backfill-finmind-per $(if $(START),--start $(START),) $(if $(LIMIT),--limit $(LIMIT),)
+backfill-finmind-per:  ## ⏳ 一次性回補全次產業成員 FinMind PER 歷史（~1130 檔×1 call，註冊2.5h/未註冊5h，24h TTL 可中斷續跑；LIMIT/START 選填；UNCOVERED=1 再補全市場其餘一般股（+~980 檔）；季頻重跑，不接 make week，docs/31 §20.14）
+	uv run tw-screener data backfill-finmind-per $(if $(START),--start $(START),) $(if $(LIMIT),--limit $(LIMIT),) $(if $(UNCOVERED),--include-uncovered,)
 
-backfill-finmind-financials:  ## ⏳ 一次性回補全市場 FinMind 3 財報 dataset（現金流/財報/資產負債，~1130×3 call，註冊5.6h/未註冊11h，24h TTL 可續跑；LIMIT 選填；季頻重跑，不接 make week，docs/31 §20.15）
-	uv run tw-screener data backfill-finmind-financials $(if $(LIMIT),--limit $(LIMIT),)
+backfill-finmind-financials:  ## ⏳ 一次性回補全市場 FinMind 3 財報 dataset（現金流/財報/資產負債，~1130×3 call，註冊5.6h/未註冊11h，24h TTL 可續跑；LIMIT 選填；UNCOVERED=1 再補全市場其餘一般股（+~980 檔×3 call）；季頻重跑，不接 make week，docs/31 §20.15）
+	uv run tw-screener data backfill-finmind-financials $(if $(LIMIT),--limit $(LIMIT),) $(if $(UNCOVERED),--include-uncovered,)
 
 backfill-finmind-revenue:  ## ⏳ 一次性回補全次產業成員 FinMind 月營收歷史（~1000 檔×1 call，註冊1.7h/未註冊3.4h，24h TTL 可續跑；LIMIT 選填；研究用、不接 make week，docs/32）
 	uv run tw-screener data backfill-finmind-revenue $(if $(LIMIT),--limit $(LIMIT),)

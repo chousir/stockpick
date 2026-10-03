@@ -316,6 +316,15 @@ def test_price_discontinuity_outside_lookback_ignored():
     assert detect_price_discontinuity(["6669"], hist, lookback=5, threshold_pct=15.0) == {}
 
 
+def test_price_discontinuity_default_window_covers_ma60_contamination():
+    """6669 型回歸：09-02 分割、20 交易日後 10 日窗已漏標，但 MA60／60 日高仍含分割前價 →
+    生產回看（60）要仍命中；舊 10 日窗不命中（保留當時行為作對照）。"""
+    rows = [(7800.0, 5.0), (2610.0, None)] + [(2600.0 + i, 1.0) for i in range(25)]
+    hist = _hist_ch("6669", rows)
+    assert detect_price_discontinuity(["6669"], hist, lookback=10, threshold_pct=15.0) == {}
+    assert "6669" in detect_price_discontinuity(["6669"], hist, lookback=60, threshold_pct=15.0)
+
+
 # ─── aggregate_group_momentum ─────────────────────────────────────────────────
 
 

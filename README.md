@@ -233,8 +233,8 @@ make dash-dev            # 起 FastAPI(:8000)＋Vite(:5173)，瀏覽器開 http:
 | `make snapshot-week`                                    | point-in-time 週快照：凍結 concepts/宇宙/持股到 data/snapshots/（docs/23 WS-J.1） | week 已內含，可單獨重跑     |
 | `make backfill-daily-history START=… END=…`         | bulk 逐日全市場歷史（TWSE MI_INDEX，一日一請求；上櫃無 bulk 走逐檔） | 面板延伸冷啟動（比逐檔快）    |
 | `make backfill-institutional-history START=… END=…` | 逐日上市法人歷史（TWSE T86，一日一請求；顯式起迄不依賴 latest 錨點） | 面板法人冷啟動（build-panel 前）|
-| `make backfill-finmind-per`                            | 全成員 FinMind PER 歷史（~1132 檔×1 call、2.5-5h，24h TTL 可續跑；`LIMIT`/`START` 選填，docs/31 §20.14） | 自身估值歷史腿冷啟動＋季頻延伸深度 |
-| `make backfill-finmind-financials`                     | 全市場 FinMind 3 財報 dataset（現金流/財報/資產負債，~1130×3 call、5.6-11h，24h TTL 可續跑；`LIMIT` 選填，docs/31 §20.15） | 機械式 DCF 冷啟動＋季頻重跑 |
+| `make backfill-finmind-per`                            | 全成員 FinMind PER 歷史（~1132 檔×1 call、2.5-5h，24h TTL 可續跑；`LIMIT`/`START` 選填；`UNCOVERED=1` 再補不在 concepts 的其餘一般股 ~980 檔，docs/31 §20.14） | 自身估值歷史腿冷啟動＋季頻延伸深度 |
+| `make backfill-finmind-financials`                     | 全市場 FinMind 3 財報 dataset（現金流/財報/資產負債，~1130×3 call、5.6-11h，24h TTL 可續跑；`LIMIT` 選填；`UNCOVERED=1` 再補其餘一般股 ~980 檔×3 call，docs/31 §20.15） | 機械式 DCF 冷啟動＋季頻重跑 |
 | `make backfill-finmind-revenue`                        | 全次產業成員 FinMind 月營收歷史（2013 起；~1000 檔×1 call、1.7-3.4h，24h TTL 可續跑；`LIMIT` 選填；既有快取要往前延伸需 `uv run tw-screener data backfill-finmind-revenue --force`，docs/32、docs/33） | M-Pick2／M-Pick3 族群內因子研究冷啟動＋重跑前延伸 |
 | `make backfill-finmind-price`                          | 全次產業成員 FinMind 日線（2013 起；原始 OHLC＋成交股數／金額；~1130 檔×1 call、1.9-3.8h，24h TTL 可續跑；`LIMIT` 選填，docs/33） | M-Pick3a 保留樣本（2015–2021）冷啟動 |
 | `make backfill-finmind-dividend`                       | 全次產業成員 FinMind 除權息結果（2013 起；除權息前收盤／參考價→還原比值；無事件也落空檔；~1130 檔×1 call、1.9-3.8h，docs/33） | M-Pick3a 總報酬 target 冷啟動 |

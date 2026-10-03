@@ -57,6 +57,7 @@ def run_group_analysis(settings: Path) -> None:
     macro_lookahead = int(ga_cfg.get("macro_lookahead_days", 30))
     vol_lookback = int(ga_cfg.get("vol_lookback_days", 20))
     price_disc_pct = float(ga_cfg.get("price_discontinuity_pct", 15.0))
+    price_disc_lookback = int(ga_cfg.get("price_discontinuity_lookback_td", 60))
 
     week_tag, screener_results = load_latest_screener_results(settings)
     if not screener_results:
@@ -237,6 +238,7 @@ def run_group_analysis(settings: Path) -> None:
         dividends=recent_dividends,
         trajectory_cfg=cfg.get("trajectory", {}),  # F5 軌跡欄（沿舊 07 TR1）
         price_disc_pct=price_disc_pct,             # 價格不連續安全網（除權息/減資/分割）
+        price_disc_lookback=price_disc_lookback,
     )
 
     if groups.is_empty():
@@ -851,6 +853,7 @@ def run_group_analysis(settings: Path) -> None:
             vol_lookback=vol_lookback,
             dividends=recent_dividends,
             price_disc_pct=price_disc_pct,
+            price_disc_lookback=price_disc_lookback,
         )
         out_csv = output_path.parent / f"{label}_enriched.csv"
         n = write_named_list_csv(

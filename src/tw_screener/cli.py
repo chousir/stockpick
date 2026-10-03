@@ -386,6 +386,11 @@ def data_backfill_finmind_per(
     start: str = typer.Option(
         "", "--start", help="回補起始日 YYYY-MM-DD；預設讀 settings.finmind.per_start_date"
     ),
+    include_uncovered: bool = typer.Option(
+        False,
+        "--include-uncovered",
+        help="次產業成員跑完後，再補全市場其餘一般股（候選／持股不在 concepts 時才有資料）",
+    ),
     force: bool = typer.Option(False, "--force", help="略過 24h TTL、強制重抓每一檔"),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
@@ -427,6 +432,8 @@ def data_backfill_finmind_per(
         if sid not in seen:
             seen.add(sid)
             targets.append(sid)
+    if include_uncovered:
+        targets += _uncovered_market_ids(settings, targets)
     if limit > 0:
         targets = targets[:limit]
     console.print(
@@ -541,6 +548,30 @@ def data_backfill_finmind_revenue(
     console.print(
         f"[green]回補完成：有資料 {done}、無月營收 {empty}、請求失敗 {failed}[/green]"
     )
+
+
+def _uncovered_market_ids(settings: Path, covered: list[str]) -> list[str]:
+    """全市場（上市＋上櫃產業別快取）一般股中、不在 `covered`（concepts 次產業成員）的代號。
+
+    次產業成員只涵蓋手標的 ~1130 檔；不在其中的候選／持股（如 W40 的 3293 鈊象、W40 candidates
+    83／249 檔）沒有 FinMind PER／財報快取 → pe_self 歷史薄、DCF 整列缺。純讀本地快取、不打網。
+    ETF／權證（is_etf_or_warrant）排除；回傳排序、不含 covered。
+    """
+    import polars as _pl
+    import yaml as _yaml
+
+    from tw_screener.analysis.grouping import is_etf_or_warrant
+
+    with open(settings, encoding="utf-8") as fh:
+        cache_dir = Path(_yaml.safe_load(fh)["paths"]["cache_dir"]) / "twse"
+    ids: set[str] = set()
+    for pattern in ("industry_*.parquet", "otc_industry_*.parquet"):
+        latest = find_latest(cache_dir, pattern, by="name")
+        if latest is None:
+            console.print(f"[yellow]缺 {pattern} 快取，--include-uncovered 少了該市場別[/yellow]")
+            continue
+        ids |= set(_pl.read_parquet(latest)["stock_id"].to_list())
+    return sorted(i for i in ids - set(covered) if not is_etf_or_warrant(i))
 
 
 def _backfill_finmind_members(
@@ -662,6 +693,11 @@ def data_backfill_finmind_dividend(
 @data_app.command("backfill-finmind-financials")
 def data_backfill_finmind_financials(
     limit: int = typer.Option(0, "--limit", help="只跑前 N 檔（測試用；0=全部）"),
+    include_uncovered: bool = typer.Option(
+        False,
+        "--include-uncovered",
+        help="次產業成員跑完後，再補全市場其餘一般股（候選／持股不在 concepts 時才有資料）",
+    ),
     force: bool = typer.Option(False, "--force", help="略過 24h TTL、強制重抓每一檔"),
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
 ) -> None:
@@ -704,6 +740,8 @@ def data_backfill_finmind_financials(
         if sid not in seen:
             seen.add(sid)
             targets.append(sid)
+    if include_uncovered:
+        targets += _uncovered_market_ids(settings, targets)
     if limit > 0:
         targets = targets[:limit]
     console.print(

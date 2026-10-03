@@ -28,14 +28,20 @@ _FLOW_PREFIX = {"total_net": "net_flow", "foreign_net": "foreign_flow", "trust_n
 _MOM_PREFIX = {"total_net": "flow", "foreign_net": "foreign", "trust_net": "trust"}
 
 
-def _rolling_z(col: str, window: int, min_periods: int, over: str = "stock_id") -> pl.Expr:
+def _rolling_z(
+    col: str, window: int, min_periods: int, over: str = "stock_id", min_abs: float = 0.0
+) -> pl.Expr:
     """個股自身滾動 z 分數（與 backtest.standardize_signals 同義，改 partition 為個股）。
 
     std=0 或暖機（樣本 < min_periods）→ null，不誤判為訊號。
+    `min_abs`>0 時，|當前值| < min_abs 也回 null：序列幾乎全零（如投信長期不碰的個股，
+    某日零股級淨買 5～29 股）時 std 趨近 0，z 會被推到視窗數學上限 (n−1)/√n（n=60 → 7.62）
+    而與「真有資金進場」無關；以量能下限擋掉這類退化 z。預設 0＝不過濾（回測路徑不變）。
     """
     mean = pl.col(col).rolling_mean(window, min_samples=min_periods).over(over)
     std = pl.col(col).rolling_std(window, min_samples=min_periods).over(over)
-    return pl.when(std > 0).then((pl.col(col) - mean) / std).otherwise(None)
+    ok = (std > 0) & (pl.col(col).abs() >= min_abs) if min_abs > 0 else (std > 0)
+    return pl.when(ok).then((pl.col(col) - mean) / std).otherwise(None)
 
 
 def _market_returns(
@@ -95,6 +101,7 @@ def build_stock_panel(
     rs_window: int = 20,
     z_window: int = 60,
     z_min_periods: int = 30,
+    z_min_abs_flow: float = 0.0,
     clip_daily_return_pct: float = 10.0,
 ) -> pl.DataFrame:
     """個股每日特徵長表（docs/13 §4 B1；M-MH Phase D 多窗化）。
@@ -111,6 +118,8 @@ def build_stock_panel(
         position_window: 位階回看視窗（距 N 日低 %）
         rs_window: 相對強度報酬視窗（個股 vs 大盤 / 次產業）
         z_window / z_min_periods: 個股自身滾動 z 視窗與暖機最低樣本
+        z_min_abs_flow: 資金 z 的量能下限（股）；窗內滾動加總絕對值低於此值 → 該日資金 z 為 null
+            （擋零股級退化 z）。0＝不過濾（預設，回測路徑不變）；成交量 z 不受影響
         clip_daily_return_pct: 市場/個股日報酬夾限（防未還原假跳動，0 停用）
 
     Returns:
@@ -180,7 +189,10 @@ def build_stock_panel(
     # 資金 z：個股自身滾動 z（各窗；跨個股可比；std=0 或暖機 → null 不誤判）
     z_targets = [f"{_FLOW_PREFIX[c]}_{w}d" for c in _NET_COLS for w in wins]
     panel = panel.with_columns(
-        [_rolling_z(t, z_window, z_min_periods).alias(f"{t}_z") for t in z_targets]
+        [
+            _rolling_z(t, z_window, z_min_periods, min_abs=z_min_abs_flow).alias(f"{t}_z")
+            for t in z_targets
+        ]
     )
 
     # 買方主導度 dom（B-P2／docs/15 T1，D-E1 拍板）：長窗外資＋投信淨買集中度，∈[−1,1]。

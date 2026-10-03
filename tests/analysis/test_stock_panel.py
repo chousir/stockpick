@@ -293,6 +293,30 @@ def test_volume_z_warmup_then_value():
     assert vz[-1] is not None and vz[-1] > 0  # 末日爆量 → 正 z
 
 
+def test_flow_z_min_abs_flow_nulls_degenerate_z():
+    """長期零、末日零股級淨買 → z 被推到數學上限；量能下限擋掉，真實大額進場不受影響。"""
+    ds = _dates(6)
+    prices = _price({"1111": [100.0] * 6, "2222": [50.0] * 6})
+    inst = pl.DataFrame(
+        [
+            {"date": d, "stock_id": sid, "foreign_net": 0, "trust_net": tr, "dealer_net": 0,
+             "total_net": tr}
+            for sid, trs in (("1111", [0, 0, 0, 0, 0, 8]), ("2222", [0, 0, 0, 0, 0, 500_000]))
+            for d, tr in zip(ds, trs)
+        ]
+    )
+    args = (prices, inst, pl.DataFrame(), pl.DataFrame())
+    off = build_stock_panel(*args, **PARAMS)
+    on = build_stock_panel(*args, z_min_abs_flow=100_000, **PARAMS)
+
+    def last_z(panel: pl.DataFrame, sid: str) -> float | None:
+        return panel.filter(pl.col("stock_id") == sid).sort("date")["trust_flow_2d_z"][-1]
+
+    assert last_z(off, "1111") is not None  # 對照：不設下限＝退化 z 照出
+    assert last_z(on, "1111") is None       # 8 股 < 100 張 → null
+    assert last_z(on, "2222") == last_z(off, "2222") is not None  # 大額進場值逐位不變
+
+
 # ---- coverage meta ----
 
 def test_coverage_meta():

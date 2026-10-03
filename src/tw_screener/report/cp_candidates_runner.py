@@ -52,6 +52,7 @@ def run_cp_candidates(settings: Path) -> None:
     history_days = int(cp.get("history_days", 250))
     z_window = int(cp.get("z_window", 60))
     z_min_periods = int(cp.get("z_min_periods", 30))
+    z_min_abs_flow = float(cp.get("z_min_abs_flow_shares", 0.0))
     position_low_pct = float(cp.get("position_low_pct", 15.0))
     cp_ceiling = float(rot.get("cp_score", {}).get("position_ceiling", 60.0))
     rules = cand.get("rules", [])
@@ -80,7 +81,8 @@ def run_cp_candidates(settings: Path) -> None:
     )
     console.print("[bold]建個股特徵面板 + 取最新快照...[/bold]")
     panel = build_stock_panel(
-        market, institutional, members, baskets, z_window=z_window, z_min_periods=z_min_periods
+        market, institutional, members, baskets, z_window=z_window, z_min_periods=z_min_periods,
+        z_min_abs_flow=z_min_abs_flow,
     )
     if panel.is_empty():
         console.print("[red]面板為空——檢查日線/法人快取[/red]")
