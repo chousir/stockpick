@@ -437,10 +437,7 @@ def data_backfill_finmind_per(
         if sid not in seen:
             seen.add(sid)
             targets.append(sid)
-    if only_uncovered:
-        targets = _uncovered_market_ids(settings, targets)
-    elif include_uncovered:
-        targets += _uncovered_market_ids(settings, targets)
+    targets = _with_uncovered(targets, settings, include_uncovered, only_uncovered)
     if limit > 0:
         targets = targets[:limit]
     console.print(
@@ -579,6 +576,17 @@ def _uncovered_market_ids(settings: Path, covered: list[str]) -> list[str]:
             continue
         ids |= set(_pl.read_parquet(latest)["stock_id"].to_list())
     return sorted(i for i in ids - set(covered) if not is_etf_or_warrant(i))
+
+
+def _with_uncovered(
+    targets: list[str], settings: Path, include_uncovered: bool, only_uncovered: bool
+) -> list[str]:
+    """回補宇宙選項：only＝只留未涵蓋股（跳過成員）、include＝成員後接未涵蓋股、皆否＝原宇宙。"""
+    if only_uncovered:
+        return _uncovered_market_ids(settings, targets)
+    if include_uncovered:
+        return targets + _uncovered_market_ids(settings, targets)
+    return targets
 
 
 def _backfill_finmind_members(
@@ -752,10 +760,7 @@ def data_backfill_finmind_financials(
         if sid not in seen:
             seen.add(sid)
             targets.append(sid)
-    if only_uncovered:
-        targets = _uncovered_market_ids(settings, targets)
-    elif include_uncovered:
-        targets += _uncovered_market_ids(settings, targets)
+    targets = _with_uncovered(targets, settings, include_uncovered, only_uncovered)
     if limit > 0:
         targets = targets[:limit]
     console.print(
@@ -1702,12 +1707,18 @@ def analysis_leaders(
         n_days=20, as_of=client.latest_trading_date()
     )
 
+    import yaml as _yaml
+
+    with open(settings, encoding="utf-8") as fh:
+        ga_cfg = (_yaml.safe_load(fh) or {}).get("group_analysis", {})
     _, enriched_stocks = group_stocks(
         screener_results,
         price_history,
         _pl.DataFrame(),
         industry_df=industry_df if not industry_df.is_empty() else None,
         institutional=institutional,
+        price_disc_pct=float(ga_cfg.get("price_discontinuity_pct", 15.0)),
+        price_disc_lookback=int(ga_cfg.get("price_discontinuity_lookback_td", 60)),
     )
 
     members = rank_within_groups(enriched_stocks, price_history, institutional)
