@@ -216,7 +216,8 @@ reports/YYYY-Www/pick_detail.md   ← 明細（附錄 A–H＋資料品質披露
 ### 任務 1：讀 shortlist.csv、查證 Top 5、決定否決
 
 1. **先確認 shortlist.csv 可用**：檔案存在、`week` 與本週目錄相符、`data_date` 不早於本週輸入的資料日（screen_result 的
-   `screened_at`／group_analysis.md 標示的資料日）。
+   `screened_at`／group_analysis.md 標示的資料日）。`data_date`＝candidates_enriched.csv `price_date`（close 實際所屬交易日）最大值，
+   可能比 `screened_at`（STOCK_DAY_ALL 全市場快照，盤後較晚更新）晚一日——屬正常，以 `data_date` 為準（2026-10 修正；W40/W41 舊檔標籤早一日）。
    不存在或過期 → **機器排序缺席**：第一頁在 Top 5 的位置只寫「**機器排序缺席**（原因一句；可 `make shortlist` 重跑後再產）」、
    **不列 Top 5、不得自己挑股補位**；picks 區塊寫 `picks: []`／`excluded: []`（本週不落帳；`picks sync` 會拒絕空區塊，屬預期）；
    姿態、上週帳、持股動作、風險與 pick_detail.md 其餘段落照做。
@@ -371,7 +372,7 @@ excluded:
   **不必抄進 excluded**。舊受控詞彙（`過熱`／`土洋對作`／`強漲法人賣`／`低流動`／`高PE`／`法人缺漏`／`籌碼熄火`／`價格已跌`／`位階延伸`／`基本面轉差`）
   只供舊週解析與 `picks record` 單檔補記，新週不用。
 - **欄位**：picks 必填 `stock`／`layer`，選填 `rank`（M-Pick1 起必填）、`sub`、`entry`、`stop`、`thesis`；excluded 必填 `stock`／`reason`，選填 `detail`。
-  `name`／`ext_ma60_pct` 由 sync 自動從 candidates_enriched.csv 補、`data_date` 自動取 screen_result 的 screened_at（三者皆可用 `name:`／
+  `name`／`ext_ma60_pct` 由 sync 自動從 candidates_enriched.csv 補、`data_date` 自動取 candidates_enriched.csv 的 `price_date` 最大值、舊週缺欄退回 screen_result 的 screened_at（三者皆可用 `name:`／
   `ext_ma60:`／頂層 `data_date:` 覆寫，僅 enriched 查無時才需要）。
 - **F2 位階紀律照擋**：core 距季線 > +15% 任一筆＝**整批拒寫**（與 `picks record` 同一套 `core_extension_violation`）。shortlist 已用同一上限 gate，
   照抄即合規；寫檔前仍以 candidates_enriched.csv 的 `ma60_dist_pct` 自查。

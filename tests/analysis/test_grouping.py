@@ -678,6 +678,21 @@ def test_group_stocks_ma20_correct():
     assert row["ma20_dist_pct"] == pytest.approx((110.0 - 102.5) / 102.5 * 100, rel=1e-3)
 
 
+def test_group_stocks_price_date_follows_local_close():
+    """price_date＝本地最新收盤的日期；無本地歷史的股票（close 退回 screener）為 None。"""
+    price_history = _make_price_history("2330", [100.0, 101.0, 102.0])
+    results = {
+        "a_breakout": _make_screener_df(["2330", "2454"], [3.5, 2.8], "a_breakout")
+    }
+    _, members = group_stocks(
+        results, price_history, pl.DataFrame(),
+        industry_df=_INDUSTRY_DF, min_group_size=2,
+    )
+    by_id = {r["stock_id"]: r for r in members.to_dicts()}
+    assert by_id["2330"]["price_date"] == "2026-01-03"
+    assert by_id["2454"]["price_date"] is None
+
+
 def test_group_stocks_ma60_none_when_insufficient():
     """不足 60 日歷史 → ma60_dist_pct 為 None（顯示 '-'）。"""
     closes = [100.0] * 30  # only 30 days

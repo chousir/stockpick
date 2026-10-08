@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import typer
+from loguru import logger
 from rich.console import Console
 
 if TYPE_CHECKING:
@@ -47,17 +48,42 @@ def _load_week_dir(settings: Path, week: str) -> tuple[Path, dict[str, Any]]:
 
 
 def _resolve_data_date(week_dir: Path) -> date | None:
-    """該週 screen_result_*.csv 的 screened_at（全找不到 → None）。"""
+    """該週價格資料日：candidates_enriched.csv 的 price_date 最大值為主，
+    缺欄（舊週）退回 screen_result_*.csv 的 screened_at（全找不到 → None）。
+
+    screened_at＝STOCK_DAY_ALL 全市場快照日，盤後更新常晚於個股月檔一日；
+    close／距季線實際取自個股月檔，標籤須跟著價格走（W40/W41 標 10-07、價為 10-08）。
+    """
     import polars as pl
 
+    screened: date | None = None
     for csv in sorted(week_dir.glob("screen_result_*.csv")):
         try:
             col = pl.read_csv(csv, columns=["screened_at"])["screened_at"]
         except Exception:  # noqa: BLE001 — 換下一個檔找 screened_at
             continue
         if col.len():
-            return date.fromisoformat(str(col[0]))
-    return None
+            screened = date.fromisoformat(str(col[0]))
+            break
+
+    price: date | None = None
+    cand = week_dir / "candidates_enriched.csv"
+    if cand.exists():
+        try:
+            dates = pl.read_csv(cand, columns=["price_date"], infer_schema_length=0)[
+                "price_date"
+            ].drop_nulls()
+        except (pl.exceptions.ColumnNotFoundError, pl.exceptions.ComputeError):
+            dates = pl.Series([], dtype=pl.Utf8)  # 舊週無 price_date 欄
+        if dates.len():
+            price = date.fromisoformat(str(dates.max())[:10])
+
+    if price is not None and screened is not None and price != screened:
+        logger.warning(
+            "價格資料日 {} ≠ screened_at {}（全市場快照較晚更新）——data_date 採價格日",
+            price, screened,
+        )
+    return price or screened
 
 
 # name/ext 查找順序：candidates 為主（挑股主宇宙），watchlist/holdings 兜底——

@@ -209,6 +209,26 @@ def _latest_close_change_map(
     return out
 
 
+def _latest_price_date_map(price_history: pl.DataFrame) -> dict[str, str]:
+    """本地日線快取 → 每檔最新收盤價的日期（YYYY-MM-DD）。
+
+    與`_latest_close_change_map`同源：`close`取自哪天，這裡就回報哪天。下游
+    shortlist 的`data_date`以此為準——STOCK_DAY_ALL 全市場快照（`latest_trading_date`）
+    盤後更新晚於個股月檔時兩者差一日，舊作法把標籤掛在快照日、價格卻是新一日（W40/W41）。
+    """
+    need = {"stock_id", "date", "close"}
+    if price_history.is_empty() or not need.issubset(price_history.columns):
+        return {}
+    agg = (
+        price_history.drop_nulls("close")
+        .group_by("stock_id")
+        .agg(pl.col("date").max().alias("_d"))
+    )
+    return {
+        str(sid): str(d)[:10] for sid, d in agg.iter_rows() if d is not None
+    }
+
+
 def _latest_amount_million_map(
     volume_history: pl.DataFrame | None,
     close_map: dict[str, tuple[float | None, float | None]],
@@ -387,6 +407,7 @@ def group_stocks(
     # docstring。兩者皆缺時給None，不捏造0（避免下游算出-100.0這種假訊號）。
     local_close_map = _latest_close_change_map(price_history)
     local_amount_map = _latest_amount_million_map(volume_history, local_close_map)
+    local_date_map = _latest_price_date_map(price_history)
 
     # Build per-stock dict from all strategies (skip ETFs and warrants)
     stock_rows: dict[str, dict] = {}
@@ -406,6 +427,10 @@ def group_stocks(
                     "stock_id": stock_id,
                     "name": str(row.get("name") or ""),
                     "close": _coalesce_num(local_close, row.get("close")),
+                    # 本地收盤的日期；退回 screener 值時為 None（日期不明，不捏造）
+                    "price_date": (
+                        local_date_map.get(stock_id) if local_close is not None else None
+                    ),
                     "change_pct": _coalesce_num(local_change, row.get("change_pct")),
                     "amount_million": _coalesce_num(
                         local_amount_map.get(stock_id), row.get("amount_million")
