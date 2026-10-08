@@ -385,7 +385,7 @@ excluded:
 - **未遞補的 alt** → `layer: pool` ＋ `rank` ＋ `sub` ＋ `thesis`（`entry`／`stop` 選填）。
 - **分析師精選（任務 6）** → 新增檔 `layer: analyst`（不帶 `rank`）＋ `sub`／`entry`／`stop`（停損須「收盤跌破 {價}」）／`thesis`（≤20 字，寫觸發準則代號）；
   分析師剔除的機器 core → `excluded: {stock, reason: 分析師剔除, detail: "準則代號＋事實＋日期"}`，**該檔 core 列照留**（sync 允許此重複）。
-  analyst 同樣受 F2 +15% 上限整批拒寫。
+  analyst 同樣受 F2 +15% 上限整批拒寫。alt 被選為分析師新增時**只記 analyst 列**（不重列 pool；同股兩列 sync 報錯），附錄 A 註明。
 - **新週不再產 `layer: opportunity`**（保留給舊週解析）；持股（`tier=held`）不寫進 picks。
 - **excluded**：每筆否決必記 `{stock, reason: 機器排序否決, detail: "類別＋來源＋日期"}`；gate 剔除已由 shortlist.csv 的 `gate_reason` 留痕，
   **不必抄進 excluded**。舊受控詞彙（`過熱`／`土洋對作`／`強漲法人賣`／`低流動`／`高PE`／`法人缺漏`／`籌碼熄火`／`價格已跌`／`位階延伸`／`基本面轉差`）
