@@ -542,3 +542,16 @@ def test_runner_happy_path_latest_week_default(tmp_path):
     assert tuple(out.columns) == SHORTLIST_COLUMNS
     assert out["stock_id"].to_list() == ["A", "B"] and out["rank"].to_list() == [1, 2]
     assert out["data_date"][0] == "2026-09-24"
+
+
+def test_runner_data_date_follows_price_date(tmp_path):
+    """candidates 的 price_date 比 screened_at 新（全市場快照晚更新）→ data_date 跟價格走。"""
+    settings, week_dir = _setup_runner(tmp_path)
+    cand = _df([_row("A"), _row("B", ma60_dist_pct=8.0)]).with_columns(
+        pl.Series("price_date", ["2026-09-25", None])
+    )
+    cand.write_csv(week_dir / "candidates_enriched.csv")
+    _rotation(ROT5).write_csv(week_dir / "sector_rotation.csv")
+    assert run_shortlist(settings, WEEK) == 0
+    out = pl.read_csv(week_dir / "shortlist.csv", schema_overrides={"stock_id": pl.Utf8})
+    assert out["data_date"][0] == "2026-09-25"

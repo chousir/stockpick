@@ -20,14 +20,19 @@ from pathlib import Path
 import polars as pl
 from loguru import logger
 
-LAYERS = ("core", "opportunity", "pool")
+LAYERS = ("core", "opportunity", "pool", "analyst")
+# analyst＝分析師精選（docs/11 任務 6）：與機器 core 並列記帳，只放「機器 core 以外」的新增檔；
+# 分析師不認同的機器 core 記 excluded（reason＝ANALYST_VETO_REASON），core 列照留——
+# pick-outcome 因此能拆出「機器 core」vs「分析師新增」vs「分析師剔除」三組事後績效。
+ANALYST_VETO_REASON = "分析師剔除"
+F2_LAYERS = ("core", "analyst")  # F2 位階上限適用層（分析師判斷不放寬既定門檻）
 
 PICKS_SCHEMA: dict[str, type[pl.DataType]] = {
     "week": pl.Utf8,           # 週次 tag（= reports/ 子目錄名，如 2026-W27）
     "data_date": pl.Date,      # pick 依據的資料日（= screen_result 的 screened_at）
     "stock_id": pl.Utf8,
     "name": pl.Utf8,
-    "layer": pl.Utf8,          # core | opportunity | pool
+    "layer": pl.Utf8,          # core | opportunity | pool | analyst
     "sub_industry": pl.Utf8,   # 所屬次產業（vs 族群超額的基準籃；可空）
     "entry_zone": pl.Utf8,     # 進場條件（自由文字，如「回測23不破分批」）
     "stop": pl.Utf8,           # 停損條件（自由文字，如「收盤破季線19.16」）
@@ -126,20 +131,20 @@ def weeks_without_picks(reports_dir: Path) -> list[str]:
 def core_extension_violation(
     layer: str | None, ext_ma60_pct: float | None, max_pct: float | None
 ) -> str | None:
-    """F2 位階紀律：core 距季線乖離 > 門檻 → 回擋下訊息；通過回 None。
+    """F2 位階紀律：core／analyst 距季線乖離 > 門檻 → 回擋下訊息；通過回 None。
 
     §1.3 主虧損剖面：入選時 >15% 的 8 檔平均 −9.17% vs ≤15% 的 12 檔 +1.19%——
     核心層不再收延伸股（裁決點 #1 收回買強勢例外、#2 拍板 +15% 嚴）。
     乖離未知（None）不在此擋：由呼叫端警告「位階無法查核」後如實記錄。
     門檻 None 或 ≤0 ＝未設定，不啟用。
     """
-    if layer != "core" or ext_ma60_pct is None or not max_pct or max_pct <= 0:
+    if layer not in F2_LAYERS or ext_ma60_pct is None or not max_pct or max_pct <= 0:
         return None
     if ext_ma60_pct <= max_pct:
         return None
     return (
         f"距季線 {ext_ma60_pct:+.1f}% > 核心層上限 +{max_pct:g}%（F2 位階紀律）——"
-        f"延伸股不得入 core；改列 opportunity（買強勢僅存在趨勢領頭板，F3）"
+        f"延伸股不得入 {layer}；改列 opportunity（買強勢僅存在趨勢領頭板，F3）"
         f"或等回踩 ≤+{max_pct:g}% 再記"
     )
 

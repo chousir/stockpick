@@ -38,7 +38,7 @@
 
 | 欄 | 內容 |
 |---|---|
-| `week` `data_date` | 週次目錄名；shortlist.csv 的資料日（因子的 as-of 日） |
+| `week` `data_date` | 週次目錄名；shortlist.csv 的資料日（因子的 as-of 日）。2026-10 起＝candidates `price_date`（close 所屬交易日）；W40/W41 的列取自 STOCK_DAY_ALL 快照日，比 shortlist close 早一日（ledger 自身因子以該日為 as-of、內部一致，不重寫） |
 | `recorded_at` | 該週列最後一次寫入時間（UTC，秒）——稽核用，不進統計 |
 | `stock_id` `name` `source` `sub_industry` | 池成員；來源 candidate／watchlist／holding；主次產業（生產口徑，取當週 point-in-time 快照） |
 | `tier` `rank` `gate_reason` | 生產 shortlist 當週結果：top／alt／capped／gated／held；top／alt 的機器名次；gated／capped 的原因 |

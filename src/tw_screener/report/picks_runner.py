@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import typer
+from loguru import logger
 from rich.console import Console
 
 if TYPE_CHECKING:
@@ -47,17 +48,42 @@ def _load_week_dir(settings: Path, week: str) -> tuple[Path, dict[str, Any]]:
 
 
 def _resolve_data_date(week_dir: Path) -> date | None:
-    """該週 screen_result_*.csv 的 screened_at（全找不到 → None）。"""
+    """該週價格資料日：candidates_enriched.csv 的 price_date 最大值為主，
+    缺欄（舊週）退回 screen_result_*.csv 的 screened_at（全找不到 → None）。
+
+    screened_at＝STOCK_DAY_ALL 全市場快照日，盤後更新常晚於個股月檔一日；
+    close／距季線實際取自個股月檔，標籤須跟著價格走（W40/W41 標 10-07、價為 10-08）。
+    """
     import polars as pl
 
+    screened: date | None = None
     for csv in sorted(week_dir.glob("screen_result_*.csv")):
         try:
             col = pl.read_csv(csv, columns=["screened_at"])["screened_at"]
         except Exception:  # noqa: BLE001 — 換下一個檔找 screened_at
             continue
         if col.len():
-            return date.fromisoformat(str(col[0]))
-    return None
+            screened = date.fromisoformat(str(col[0]))
+            break
+
+    price: date | None = None
+    cand = week_dir / "candidates_enriched.csv"
+    if cand.exists():
+        try:
+            dates = pl.read_csv(cand, columns=["price_date"], infer_schema_length=0)[
+                "price_date"
+            ].drop_nulls()
+        except (pl.exceptions.ColumnNotFoundError, pl.exceptions.ComputeError):
+            dates = pl.Series([], dtype=pl.Utf8)  # 舊週無 price_date 欄
+        if dates.len():
+            price = date.fromisoformat(str(dates.max())[:10])
+
+    if price is not None and screened is not None and price != screened:
+        logger.warning(
+            "價格資料日 {} ≠ screened_at {}（全市場快照較晚更新）——data_date 採價格日",
+            price, screened,
+        )
+    return price or screened
 
 
 # name/ext 查找順序：candidates 為主（挑股主宇宙），watchlist/holdings 兜底——
@@ -191,7 +217,9 @@ def run_pick_record(
             )
         else:
             if layer is None:
-                console.print("[red]非 --excluded 時必須給 --layer core|opportunity|pool[/red]")
+                console.print(
+                    "[red]非 --excluded 時必須給 --layer core|opportunity|pool|analyst[/red]"
+                )
                 raise typer.Exit(1)
             # F2 位階紀律：核心層距季線乖離硬上限（settings.picks.core_ext_ma60_max_pct）
             max_ext = cfg.get("picks", {}).get("core_ext_ma60_max_pct")
@@ -320,9 +348,9 @@ def _shortlist_checks(
             "（picks.shortlist.max_vetoes）——否決理由僅限資料異常／重大負面外部事實／處置停牌"
         )
     for r in prepared_picks:
-        if r["layer"] == "core" and parse_stop_price(r["stop"]) is None:
+        if r["layer"] in ("core", "analyst") and parse_stop_price(r["stop"]) is None:
             warnings.append(
-                f"⚠️ {r['stock_id']} {r['name'] or ''}：core 的 stop 抽不到絕對停損價"
+                f"⚠️ {r['stock_id']} {r['name'] or ''}：{r['layer']} 的 stop 抽不到絕對停損價"
                 f"（{r['stop']!r}）——請照抄 shortlist.csv stop_text"
             )
     return warnings
@@ -336,6 +364,8 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
     並對帳漏記否決／否決超額／core 停損抽不到價（warning、照寫）。
     """
     from tw_screener.report.pick_store import (
+        ANALYST_VETO_REASON,
+        F2_LAYERS,
         LAYERS,
         core_extension_violation,
         upsert_excluded,
@@ -400,6 +430,7 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
     prepared_picks: list[dict[str, Any]] = []
     prepared_excluded: list[dict[str, Any]] = []
     seen: dict[str, str] = {}  # stock_id → 首見位置（區塊內重複＝手誤，報錯）
+    core_ids: set[str] = set()  # 分析師剔除可與 core 並存（docs/11 任務 6）
 
     for i, raw in enumerate(picks_rows, start=1):
         where = f"picks 第 {i} 筆"
@@ -423,6 +454,8 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
         if layer not in LAYERS:
             errors.append(f"{where}：layer 必須是 {LAYERS}，收到 {layer!r}")
             continue
+        if layer == "core":
+            core_ids.add(stock_id)
         found_name, found_ext = _lookup_enriched(enriched, stock_id)
         row_name = _opt_str(raw.get("name")) or found_name
         try:
@@ -448,7 +481,7 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
             got = f"#{expected}" if expected is not None else "無名次（未入 top/alt 或不在表內）"
             errors.append(f"{where}：rank {rank} 與 shortlist.csv 不符（該檔機器排序 {got}）")
             continue
-        if layer == "core" and row_ext is None and max_ext is not None:
+        if layer in F2_LAYERS and row_ext is None and max_ext is not None:
             warnings.append(
                 f"⚠️ {stock_id} {row_name or ''}：距季線乖離未知（candidates/watchlist/"
                 f"holdings_enriched 皆無此檔且未給 ext_ma60）——F2 位階紀律無法查核，如實記錄"
@@ -484,11 +517,13 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
             errors.append(f"{where}：缺 stock（股號請加引號，防前導零丟失）")
             continue
         where = f"{where}（{stock_id}）"
-        if stock_id in seen:
+        reason = _opt_str(raw.get("reason"))
+        # 分析師剔除＝不認同機器 core（core 列照留，雙記帳供事後比對）；其餘重複仍是手誤
+        analyst_veto_of_core = reason == ANALYST_VETO_REASON and stock_id in core_ids
+        if stock_id in seen and not analyst_veto_of_core:
             errors.append(f"{where}：與 {seen[stock_id]} 重複")
             continue
         seen[stock_id] = where
-        reason = _opt_str(raw.get("reason"))
         if not (reason or "").strip():
             errors.append(f"{where}：缺 reason（剔除旗標類別，如 過熱／土洋對作）")
             continue
@@ -519,6 +554,12 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
     elif any(r["machine_rank"] is not None for r in prepared_picks):
         warnings.append("⚠️ 該週無 shortlist.csv——rank 無從核對，如實記錄")
 
+    analyst_max = int(cfg.get("picks", {}).get("analyst", {}).get("max_n", 5))
+    n_analyst = sum(1 for r in prepared_picks if r["layer"] == "analyst")
+    if n_analyst > analyst_max:
+        warnings.append(
+            f"⚠️ analyst 層 {n_analyst} 檔 > 上限 {analyst_max}（picks.analyst.max_n）"
+        )
     for msg in warnings:
         console.print(f"[yellow]{msg}[/yellow]")
     for row in prepared_picks:
@@ -537,6 +578,7 @@ def run_picks_sync(settings: Path, week: str, file: Path | None = None) -> None:
     n = {layer: sum(1 for r in prepared_picks if r["layer"] == layer) for layer in LAYERS}
     console.print(
         f"[bold green]sync 完成：picks {len(prepared_picks)} 檔"
-        f"（core {n['core']}／opportunity {n['opportunity']}／pool {n['pool']}）"
+        f"（core {n['core']}／opportunity {n['opportunity']}／pool {n['pool']}"
+        f"／analyst {n['analyst']}）"
         f"＋excluded {len(prepared_excluded)} 檔 → {week_dir}[/bold green]"
     )

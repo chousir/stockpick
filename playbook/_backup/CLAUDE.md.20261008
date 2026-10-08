@@ -1,0 +1,53 @@
+# CLAUDE.md — 路由與鐵律
+
+> 本檔每個 session 自動載入，只放「每次都需要」的內容；細節住在 `playbook/`，**需要時才讀，讀了就照做**。
+> 不要用 @import 引 playbook（會每次全載）。路由指到的檔案若不存在＝制度建置曾中斷，跳過該行並回報使用者。
+> 2026-07-08 重寫；舊版全文在 `playbook/_backup/CLAUDE.md.20260708`。修改本檔前先讀 playbook/40。
+
+## 這個專案是什麼（30 秒版）
+台股週選股系統：本地篩選（TWSE/TPEX OpenAPI＋FinMind 估值歷史）＋歷史 Goodinfo 定義參照 → 族群/輪動分析 → 週報與個股報告，**人做最終決策**。
+- 入口 `make help`（主要三指令）；測試 `make test 2>&1 | tail -20`。
+- 技術棧：Python 3.11+／uv／Polars（不用 pandas）／httpx／loguru／Pydantic。
+- 週報產物 `reports/2026-Wxx/`；規劃書 `docs/`（編號索引）；研究產物 `research/`（gitignored）。
+
+## 開工三步（每個 session 開場照做）
+1. 對照下方路由表：本任務要先讀哪個檔，先讀再動手。
+2. 輸出大而只需結論的工作（找不到目標的 repo 掃描／跨頁查網／批次改檔／消化 reports・research 產物）→ 派 subagent，主對話只收結論；已知路徑的讀檔小改自己做（判準 playbook/10 §0）。
+3. 一個 session 只做一件事。使用者切換主題 → 建議先 /clear。
+
+## 路由表（做 X 之前先讀 Y）
+| 情境 | 先讀 |
+|---|---|
+| 要派 subagent、選 model/effort | playbook/10-model-dispatch.md |
+| 寫委派 prompt | playbook/30-delegation-templates.md（模板直接套） |
+| 判斷：做完了嗎／卡住了嗎／該問使用者嗎／方向錯了嗎 | playbook/20-judgment-rubrics.md |
+| 寫任何個股/族群報告、pick、持股健檢 | playbook/60-analyst-persona.md |
+| 研究軌任務（因子／回測／假設檢定） | playbook/20 §6 ＋ docs/13 |
+| 動 goodinfo 爬蟲模組 | docs/02-data-sources.md（合規規則） |
+| 動程式內 Claude API 呼叫（report builder、report.llm 設定） | 先載 claude-api skill 查該模型參數限制＋playbook/10 §1 末條 |
+| 改 CLAUDE.md／playbook／memory | playbook/40-maintenance-protocol.md |
+| 踩了坑、被糾正、規則失效 | append 進 playbook/90-lessons.md（格式在檔頭） |
+| 新 milestone 開工 | docs/08-milestones.md 尾段＋下方 milestone 紀律 |
+| 想懂這套制度的由來與退化風險 | playbook/00 ＋ playbook/50 |
+
+## 鐵律（違反＝事故，無例外）
+1. **Goodinfo 爬蟲合規**：請求間隔 ≥3 秒＋隨機抖動、同 URL 24h 快取、concurrency=1、連錯 3 次停、真實瀏覽器 UA 且可設定。動 goodinfo 模組前先讀 docs/02。**2026-08-28 起 `make week` 預設流程已軟退場、不再自動呼叫 Goodinfo**（D/E/G 結構性無法本地重建、F 已改走本地等價路徑，docs/31 §20.6）——本鐵律對「手動 `screen run`/`screen-all`」仍全數適用，不是規則放寬。
+2. **報告紅線**：多空並陳（空方論點不得少於多方）、不下買/不買結論、不給目標價/公允價/合理價（**唯一例外：pick_detail.md 附錄 G「綜合估值區間」——多法機械估值＋Opus 綜合判斷，得用「綜合估值區間」字眼（M-Pick1 起不進決策卡），仍禁「公允價值/目標價/合理價」；docs/31 §20.13、playbook/60 例外二**）、不用「強烈建議／絕對／保證／飆股」（全清單見 playbook/60 禁止事項）；每個數字附日期與來源；資料沒有就寫「未取得」，不從記憶編。
+3. **git**：commit 前 diff 自查，每個 hunk 要能追溯到使用者請求；merge 進 main 前必問使用者；不 commit data/、reports/ 下個人持股內容。
+4. **依賴**：加任何新依賴先問；pandas／requests-html／selenium／playwright 預設禁止。
+5. **參數**：路徑、limit、URL、UA、門檻一律進 config/settings.yaml，不寫死在程式裡。
+
+## Milestone 紀律
+- 一次只做一個 milestone。做完＝驗收指令跑過＋完成清單給使用者＋停下等指示，不主動跳下一個。
+- 一 milestone＝一條 feature 分支＝一顆 `--no-ff` merge bubble（分支上 commit 可多可小）。
+- 收尾 ritual（驗收跑過之後）：commit → 提醒使用者 /clear，並註明「尚未 push」。commit 依使用者既往指示不必再問；**一律不 push**（使用者 2026-09-20 指示：最後自己 push），**merge 進 main 仍必問**（鐵律 3），依據見 playbook/90 的 2026-07-08、2026-09-20 條。
+- 「做完」包含文件同步：改了行為/欄位/章節，同 commit 內把 README、docs/、src/**/prompts/ 的舊引用一次改完（本 repo 歷史最高頻錯誤，見 playbook/90）。
+
+## 工程速查
+- public function 全加 type hints；錯誤處理明確 catch，禁 bare except；log 用 loguru 不用 print。
+- 測試：make test；解析 HTML 用 tests/fixtures/ 離線檔，不打真站。
+- 寫碼四問（Karpathy）：需求模糊先列解讀方案問人／資深工程師會嫌複雜嗎／每行改動可追溯嗎／驗收指令是什麼。
+- 不要為「未來可能用到」加抽象層；不要順手改鄰近程式碼；不要重構沒壞的東西。
+
+## 誠實原則
+不確定就說不確定；資料沒有就標「未取得」；研究否證也是收穫，照實記錄；未校準的啟發式明標「未校準、低信心」。寧可少做，不可含糊做。

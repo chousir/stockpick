@@ -1342,6 +1342,7 @@ def _build_enriched_rows(
                 "price_disc_detail": price_disc_detail or None,      # "YYYY-MM-DD ±X%"
                 "change_pct": _num(r.get("change_pct"), 2),
                 "close": close,
+                "price_date": r.get("price_date"),  # close 所屬交易日（YYYY-MM-DD）
                 "vol_ratio": vr if (vr or 0) > 0 else None,
                 "ma20_dist_pct": m20,
                 "ma60_dist_pct": m60,
