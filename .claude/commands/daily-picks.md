@@ -68,9 +68,9 @@ Prompt 內容要包含：「讀 `.claude/commands/macro-scan.md` 並完整依其
 規格與產物，不受本對話前幾步干擾）。
 
 這個子代理沒有你的對話上下文，prompt 必須完整自包含，至少要包含：
-- 「讀 `docs/11-propicks-analysis.md` 全文，把裡面的『Prompt 範本』段落（含任務 1–5 與『附錄 G』節）
-  當成你這次分析的完整規格——輸出結構（`pick.md`＝一頁決策卡 ≤50 行＋picks YAML；`pick_detail.md`＝
-  附錄 A–H＋資料品質披露）、Top 5 照 `shortlist.csv` 的 rank 不重排、否決規則（≤ `max_vetoes`、理由只限
+- 「讀 `docs/11-propicks-analysis.md` 全文，把裡面的『Prompt 範本』段落（含任務 1–6 與『附錄 G』節）
+  當成你這次分析的完整規格——輸出結構（`pick.md`＝一頁決策卡 ≤60 行＋picks YAML；`pick_detail.md`＝
+  附錄 A–I＋資料品質披露）、任務 6 分析師精選（固定準則 R1–R3／A1–A6，未驗證、不得引個股法人流、不得放寬湊數）、Top 5 照 `shortlist.csv` 的 rank 不重排、否決規則（≤ `max_vetoes`、理由只限
   三類）、多空並陳紅線、禁用詞、macro_risk gate 讀法，全部照那份規格，不要自己另創格式、不要自己挑股。」
 - 「依 docs/11 §Step A 的清單，讀 `reports/<週次>/` 下這些檔案：**`shortlist.csv`（★第一頁唯一排序
   來源；不存在或過期就照 docs/11 寫『機器排序缺席』）**、`pick_outcome_brief.md`（若存在）、
@@ -78,8 +78,9 @@ Prompt 內容要包含：「讀 `.claude/commands/macro-scan.md` 並完整依其
   `watchlist_enriched.csv`（若存在）、剛寫好的 `macro_risk_latest.yaml`（若存在）、`dcf_inputs.csv`、
   `cp_candidates.md`、`inflection_ambush.md`、**所有 `screen_result_*.csv`**（2026-08-28 起為本地篩選
   F/F2/G1/G2/G4/G5/L6，檔數不固定；舊 Goodinfo D/E/G 已軟退場、不會有其 CSV，這是預期、不是缺檔）。」
-- 「附錄 G 綜合估值區間：規則見 docs/11『附錄 G』節（唯一真相來源；範圍＝持股個股＋Top 5，只寫在 `pick_detail.md`、不上第一頁）。」
-- 「**寫檔前自己查核 F2 位階紀律**：`picks:` 區塊裡每一筆 `layer: core` 的股票，
+- 「附錄 G 綜合估值區間：規則見 docs/11『附錄 G』節（唯一真相來源；範圍＝持股個股＋Top 5＋分析師新增；推導寫在 `pick_detail.md`，
+  第一頁 Top 5／分析師精選表的『綜合估值區間（信心）』欄只照抄 M4 區間＋信心）。」
+- 「**寫檔前自己查核 F2 位階紀律**：`picks:` 區塊裡每一筆 `layer: core` 與 `layer: analyst` 的股票，
   對照 `candidates_enriched.csv` 的 `ma60_dist_pct` 欄（sync 落帳後即 `ext_ma60_pct`），必須 ≤
   `config/settings.yaml` 的 `picks.core_ext_ma60_max_pct`（現行 +15%）。shortlist 已用同一上限 gate，
   照抄即合規；若仍有超標（代表 shortlist 與 candidates 資料不一致），**不要自行降層或換股**——該檔依
@@ -90,7 +91,8 @@ Prompt 內容要包含：「讀 `.claude/commands/macro-scan.md` 並完整依其
   `tier=top` 的 rank——扣掉被否決者、依 rank 補上遞補的 `tier=alt`——沒有 shortlist 之外的股票、沒有重排；
   ② `excluded:` 中 `reason: 機器排序否決` 的筆數 ≤ `config/settings.yaml` 的 `picks.shortlist.max_vetoes`
   （現行 2），每筆 `detail` 帶否決類別＋來源＋日期；③ 未遞補的 alt 以 `layer: pool`＋`rank` 列入；
-  ④ `pick.md` 從檔首到 `<!-- picks:begin -->` 之前 ≤50 行
+  ④ `pick.md` 從檔首到 `<!-- picks:begin -->` 之前 ≤60 行；⑤ `layer: analyst` 不帶 rank、同受 F2 上限，
+  分析師剔除記 `excluded: reason: 分析師剔除`（core 列照留）
   （`awk '/<!-- picks:begin -->/{exit} {n++} END{print n}' reports/<週次>/pick.md`）。在回報裡明講
   『Top 5 順序＝shortlist rank、否決 N 筆 ≤ max_vetoes、第一頁 N 行』或列出不符處。」
 - 「產出完成後，存到 `reports/<週次>/pick.md`（固定檔名，不可改——`week-check` 與

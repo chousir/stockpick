@@ -81,7 +81,7 @@ reports/YYYY-Www/
 
 完整 prompt + 流程 → [`docs/11-propicks-analysis.md`](./11-propicks-analysis.md)
 
-Claude 回覆存成兩檔：`reports/YYYY-Www/pick.md`（一頁決策卡 ≤50 行＋尾端 picks 區塊；固定檔名，week-check 認這個名）
+Claude 回覆存成兩檔：`reports/YYYY-Www/pick.md`（一頁決策卡 ≤60 行＋分析師精選表＋尾端 picks 區塊；固定檔名，week-check 認這個名）
 與 `reports/YYYY-Www/pick_detail.md`（明細，非必備）；定稿後 `uv run tw-screener picks sync --week YYYY-Www`
 把 pick.md 尾端機器可讀區塊整批落底帳。
 

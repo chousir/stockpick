@@ -450,3 +450,58 @@ def test_sync_core_stop_unparseable_warns_when_shortlist_exists(tmp_path, capsys
     run_picks_sync(settings, WEEK)
     assert "抽不到絕對停損價" in _out(capsys)
     assert load_week_picks(week_dir).row(0, named=True)["machine_rank"] == 1
+
+
+# ── docs/11 任務 6：分析師精選（layer: analyst）＋分析師剔除 ──────────────────
+
+
+def _analyst_block(extra_excluded: str = "") -> str:
+    return f"""<!-- picks:begin -->
+```yaml
+picks:
+  - {{stock: "3006", layer: core, stop: "收盤跌破199.2"}}
+  - {{stock: "5555", layer: analyst, stop: "收盤跌破50", ext_ma60: 6.0}}
+excluded:
+  - {{stock: "3006", reason: 分析師剔除, detail: "急跌接刀"}}
+{extra_excluded}```
+<!-- picks:end -->
+"""
+
+
+def test_sync_analyst_layer_and_analyst_veto_of_core_coexist(tmp_path):
+    settings, week_dir = _setup_week(tmp_path)
+    _write_pick_md(week_dir, _analyst_block())
+    run_picks_sync(settings, WEEK)
+    picks = load_week_picks(week_dir)
+    assert dict(zip(picks["stock_id"], picks["layer"])) == {"3006": "core", "5555": "analyst"}
+    exc = load_week_excluded(week_dir)
+    assert exc["stock_id"].to_list() == ["3006"] and exc["reason"][0] == "分析師剔除"
+
+
+def test_sync_core_duplicated_in_excluded_with_other_reason_still_errors(tmp_path):
+    settings, week_dir = _setup_week(tmp_path)
+    _write_pick_md(
+        week_dir,
+        _analyst_block().replace("reason: 分析師剔除", "reason: 機器排序否決"),
+    )
+    with pytest.raises(typer.Exit):
+        run_picks_sync(settings, WEEK)
+    assert load_week_picks(week_dir).is_empty()
+
+
+def test_sync_analyst_f2_extension_blocks(tmp_path):
+    settings, week_dir = _setup_week(tmp_path)
+    _write_pick_md(week_dir, _analyst_block().replace("ext_ma60: 6.0", "ext_ma60: 18.0"))
+    with pytest.raises(typer.Exit):
+        run_picks_sync(settings, WEEK)
+    assert load_week_picks(week_dir).is_empty()
+
+
+def test_sync_analyst_over_max_warns(tmp_path, capsys):
+    settings, week_dir = _setup_week(tmp_path)
+    cfg = yaml.safe_load(settings.read_text(encoding="utf-8"))
+    cfg["picks"]["analyst"] = {"max_n": 0}
+    settings.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    _write_pick_md(week_dir, _analyst_block())
+    run_picks_sync(settings, WEEK)
+    assert "analyst 層 1 檔 > 上限 0" in _out(capsys)

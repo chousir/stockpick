@@ -44,8 +44,9 @@ _COMPUTED_SCHEMA: dict[str, type[pl.DataType]] = {
     "status": pl.Utf8,                 # matured | no_entry | no_window
 }
 
-_LAYER_ORDER = {"core": 0, "opportunity": 1, "pool": 2}
-_LAYER_LABEL = {"core": "核心", "opportunity": "機會", "pool": "補充池"}
+# analyst 與 opportunity 同階；降層判定的「除名」=3，故 pool 維持 2
+_LAYER_ORDER = {"core": 0, "analyst": 1, "opportunity": 1, "pool": 2}
+_LAYER_LABEL = {"core": "核心", "analyst": "分析師精選", "opportunity": "機會", "pool": "補充池"}
 _ABSENT = "（除名）"
 
 

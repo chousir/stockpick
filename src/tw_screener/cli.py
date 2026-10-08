@@ -2327,7 +2327,9 @@ def report_snapshot_cmd(
 def picks_record_cmd(
     week: str = typer.Option(..., help="週次目錄名（如 2026-W27）"),
     stock: str = typer.Option(..., help="股號"),
-    layer: str | None = typer.Option(None, help="core|opportunity|pool（非 --excluded 必填）"),
+    layer: str | None = typer.Option(
+        None, help="core|opportunity|pool|analyst（非 --excluded 必填）"
+    ),
     sub: str | None = typer.Option(None, help="所屬次產業（族群超額基準，用 concepts.yaml 名稱）"),
     entry: str | None = typer.Option(None, help="進場條件（自由文字）"),
     stop: str | None = typer.Option(None, help="停損條件（自由文字）"),
