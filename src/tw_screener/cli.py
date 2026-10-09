@@ -2167,6 +2167,47 @@ def backtest_valuation_gap_read_cmd(
     console.print(report)
 
 
+@backtest_app.command("fv-replica-read")
+def backtest_fv_replica_read_cmd(
+    settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),
+    reuse_panel: bool = typer.Option(False, help="重用 research/fv_replica/panel.parquet 不重建"),
+    investing_template: bool = typer.Option(
+        False, help="A 輔線：只產最新交易日快照範本（research/fv_replica/）"
+    ),
+    m4_csv: Path | None = typer.Option(None, help="範本併入 M4 區間（欄 stock_id,m4_lo,m4_hi）"),
+    investing_compare: Path | None = typer.Option(
+        None, help="A 輔線：讀使用者填好 investing_fv 的範本 → 產對照報告"
+    ),
+) -> None:
+    """docs/31 §20.17：investing.com 式多模型估值仿製版（研究用）照時點月頻回測 Q1–Q5。
+
+    FinMind 快取（財報／現金流／資產負債／PER／日線／除權息）逐月回放 2016-04~2025-09，
+    10 模型簡單平均（剔除偏離現價 >+100%/<−60%）→ 對 alpha{60,120,250} 的 IC、控動能／規模、
+    對綜合缺口% 的增益、收斂率與價格誤差。判準事前寫死。輸出 research/fv_replica/read_<今日>.md。"""
+    from datetime import date as _date
+
+    import polars as _pl
+
+    from tw_screener.backtest.fv_replica_read import (
+        compare_investing,
+        run_fv_replica_read,
+        run_investing_template,
+    )
+
+    if investing_template:
+        console.print(f"範本已寫入 {run_investing_template(settings, m4_csv)}")
+        return
+    if investing_compare is not None:
+        filled = _pl.read_csv(investing_compare, schema_overrides={"stock_id": _pl.Utf8})
+        report = compare_investing(filled)
+        dest = investing_compare.with_name(f"investing_compare_{_date.today().isoformat()}.md")
+        dest.write_text(report, encoding="utf-8")
+        console.print(report)
+        return
+    report = run_fv_replica_read(settings, reuse_panel=reuse_panel)
+    console.print(report)
+
+
 @backtest_app.command("finmind-reconcile")
 def backtest_finmind_reconcile_cmd(
     settings: Path = typer.Option(Path("config/settings.yaml"), help="設定檔路徑"),

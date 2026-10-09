@@ -644,6 +644,31 @@ backtest:                    # 規劃書 03 V1 策略回測閉環（make backtes
     min_rows_per_day: 900          # 日線快取當日股數低於此值＝部分抓取日，排除（forward-return row-shift 防錯位）
     market_history_days: 320       # load_market_history 回看天數（12 週快照×5＋40 前瞻＋MA60 暖身）
     ledger_path: research/valuation_gap/ledger.csv  # 獨立薄 ledger（不動 g1_g2_g5_watch，§20.3/§20.4 先例）
+  fv_replica:               # docs/31 §20.17：investing.com 式多模型估值仿製版（研究用）照時點回測；DCF 參數沿用 cp_value.valuation.dcf
+    start: "2016-04-01"            # 首錨點（需 ≥3 完整年 FCF/營收：FY2013–2015 年報 2016-03-31 截止）
+    end: "2025-09-30"              # 末錨點（r+250 須在價格快取 2026-09 內到期）
+    horizons: [60, 120, 250]       # 前瞻交易日；焦點格 r+120（§20.17 事前指定）
+    min_names_per_day: 500         # 錨點日至少幾檔有收盤（部分抓取日不當錨點）
+    min_peers: 5                   # 同儕中位最低樣本（同 valuation_gap）
+    keep_lo_mult: 0.4              # 主版剔除下界：模型值 < 0.4×現價（investing.com「低於 −60%」）
+    keep_hi_mult: 2.0              # 主版剔除上界：模型值 > 2.0×現價（investing.com「高於 +100%」）
+    epv_tax_rate: 0.2              # EPV 稅率（台灣營所稅 20%）
+    ddm_stage1_years: 5            # 兩階段 DDM 第一階段年數
+    self_window_days: 1825         # composite6 基準的自身歷史視窗（日曆日，5 年）
+    self_min_obs: 250              # 自身歷史腿最低觀測數
+    max_stale_days: 10             # PER 列距錨點最多幾日
+    abs_upside_min_pct: 10.0       # Q4 收斂率只看 |upside| ≥ 此值的樣本
+    n_permutations: 200            # Q4 置換基準次數
+    seed: 42                       # Q4 置換亂數種子
+    market_ma_days: 200            # Q5 市場狀態代理：等權指數 vs 此日數均線（§20.17 事前寫定）
+    shares_min_abs_eps: 0.1        # 歷史股數用 TTM 淨利/EPS 的最小 |EPS|，不足退 權益/(P/PBR)
+    dps_window_days: 365           # DDM 的 D0＝過去此日數現金股利合計
+    ic_min_names_sector: 15        # Q5 產業切片 per-date IC 最少檔數（全市場為 30）
+    out_dir: research/fv_replica
+    # A 輔線（investing.com 現值對照）股票清單：W41 持股＋Top5＋分析師層＋權值股（使用者從 InvestingPro 手抄）
+    investing_compare_ids: ["2330", "2345", "8028", "3131", "8033", "2327", "6683", "5439", "6531",
+                            "3006", "5536", "2472", "8110", "6770", "2317", "2454", "2412", "2881",
+                            "2882", "2308", "1301", "2603", "2002", "3711", "2891"]
   official_sector_watch:     # docs/31 §12：官方族群前5前瞻累積軌每週快照（手動指令，需每週跑）
     min_purity: 0.5                # docs/31 §10.10：穩健區間0.4-0.6取中點，非重新調參
     top_n_groups: 5                 # 同§10 top_n，維持可比較
