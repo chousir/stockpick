@@ -6,7 +6,7 @@
         build-panel regime-history factor-lab pick-outcome-brief rotation-efficacy laggard-grid intra-pick intra-pick-holdout intra-pick-holdout-eval intra-pick-ledger panel-tr contrarian-efficacy flow-inflection margin-factors \
         audit-concepts cp-value-calib cp-value-candidates cp-value-valuation \
         dash-install dash-dev dash-build dash dash-test week-check snapshot-week shortlist \
-        target-price-read \
+        target-price-read fv-replica-read \
         backfill-finmind-per backfill-finmind-financials backfill-finmind-revenue backfill-finmind-price backfill-finmind-dividend \
         finmind-reconcile finmind-financials-reconcile
 
@@ -228,6 +228,9 @@ contrarian-efficacy:  ## M-BR1 Phase 2 底部左側聯合桶（轉買×貼近低
 
 target-price-read:  ## docs/31 §20.13 Phase 1 實驗性機械式目標價校準回測（backlog 研究，季頻重跑看 r+20 rho/CI；產 research/target_price/）
 	uv run tw-screener backtest target-price-read
+
+fv-replica-read:  ## docs/31 §20.17 investing.com 式多模型估值仿製版照時點回測（研究用；REUSE=1 重用面板；產 research/fv_replica/）
+	uv run tw-screener backtest fv-replica-read $(if $(REUSE),--reuse-panel,)
 
 macro-regime-validate:  ## M-Macro2 as-of 回放驗證＋門檻敏感度＋DEXJPUS tail-event 重測（需先跑過三輪研究，產 research/macro_regime_screening/round4）
 	uv run tw-screener backtest macro-regime-validate
