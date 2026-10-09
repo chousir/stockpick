@@ -2719,6 +2719,87 @@ W35 面板、比對 `reports/2026-W35/candidates_enriched.csv` 的 `val_gap_pct_
   > `backfill-finmind-financials` 前再決定，屬另案）。
 
 
+### 20.17 investing.com 式多模型估值仿製版——歷史效度檢驗 pre-registration（2026-10-09，執行前寫死）
+
+**觸發**：使用者 2026-10-08「對標 investing.com 的公允價值並檢驗準不準，深度研究」。分支 `feat/fv-replica-validation`。
+**不消耗 §22 的 14 測試預算**（precedent §23.4／§20.11：估值研究線、資料源不同）。
+
+**investing.com 事實查核（web，2026-10-08）**：InvestingPro Fair Value＝**約 17 個模型簡單平均**，三族——DCF
+（營收／成長／EBITDA 驅動，5 或 10 年）＋EPV、同業可比倍數（如 EV/Revenue）、股利模型（穩定成長 DDM、多階段
+DDM）；**銀行不做 DCF**；**單一模型偏離現價 >+100% 或 <−60% 視為低可信度剔除**；不確定度依波動、獲利、可用模型數。
+**付費牆、無歷史序列**（WebFetch 2330 頁只回 "InvestingPro"）；**找不到任何獨立準確度研究**，只有官方挑選個案（QCOM、
+PJT）。→ investing.com 本身的數字**不可回測**。使用者拍板：**B 主線＝本地仿製 + 2016–2025 照時點回測**；**A 輔線＝使用者
+從 InvestingPro 手抄 ~25 檔現值，做橫斷面對照（純描述、無裁決）**。不寫爬蟲。
+
+**命名紅線**：「公允價值」只用於指稱 investing.com 的產品；本地數字一律稱「**仿製估值（研究用）**」`fv_replica`，
+不進決策卡／`picks:`／排序／candidates／`make week`。結果再好也只能另案向使用者提案。
+
+**仿製模型清單（10 個，固定；investing.com 17 個中本地做不到的標「未取得」）**——全部 per-share、point-in-time：
+
+| # | 模型 | 公式（r＝8% 地板恆綁定、g_term＝2%，同 `cp_value.valuation.dcf`） | 排除 |
+|---|---|---|---|
+| m1 | DCF-FCFE 5y | `dcf_with_guardrails`，stage1=5 | 金融業／近 4 季虧損／營收波動 >40pp／FCF≤0（同 §20.15 gate） |
+| m2 | DCF-FCFE 10y | 同上 stage1=10（＝`dcf_intrinsic_est` 同法） | 同上 |
+| m3 | DCF 營收驅動 10y | fcf0＝TTM 營收 × 近 3 年平均 FCF margin | 同上＋margin≤0 |
+| m4 | EPV | 近 3 完整年平均營業利益 ×(1−20%) ÷ 8% − 淨負債 | 金融業／平均營業利益≤0 |
+| m5 | DDM 穩定成長 | D0×(1+2%)/(8%−2%)，D0＝過去 365 日現金股利合計 | D0＝0 |
+| m6 | DDM 兩階段 | 5 年以保守成長 g1、之後 2% | D0＝0／g1 不可得 |
+| m7 | 同儕 PE | 同儕 PE 中位 × EPS_TTM | EPS_TTM≤0／同儕 <5 |
+| m8 | 同儕 PB | 同儕 PBR 中位 × BVPS | 同儕 <5 |
+| m9 | 同儕 P/S | 同儕 (市值/TTM 營收) 中位 × 每股 TTM 營收 | 金融業／同儕 <5 |
+| m10 | 同儕 EV/Sales | (同儕 EV/營收 中位 × TTM 營收 − 淨負債) / 股數 | 金融業／同儕 <5 |
+
+未取得：EBITDA 驅動 DCF／EV/EBITDA（FinMind 快取無折舊攤銷）、分析師共識（鐵律禁）、其餘 investing.com 未公開的模型。
+同儕＝`list_subindustries()` 手標次產業（多標籤取聯集），不足 5 檔退 `load_industry_mapping` 28 類；**同儕歸屬是今天的靜態
+分類**（已知偏差）。
+
+**合成（兩版都報、主版事前指定）**：
+- **主版 `fv_replica`**（照 investing.com）：先剔除 V≤0 與 V∉[0.4P, 2.0P] 的模型，剩餘**簡單平均**；`fv_upside_pct＝fv/P−1`；
+  `fv_n_models`＝剩幾個。剩 0 → null。
+- **副版 `fv_replica_raw`**：不做價格剔除、取正值模型**中位數**。理由：剔除區間以現價為錨，主版 upside 被機械地夾在
+  [−60%, +100%] 內、有循環性；兩版方向不一致要明說。
+
+**照時點規則**：
+- 錨點＝**2016-04 ~ 2025-09 每月第一個交易日**（約 114 個；止於 2025-09 讓 r+250 可到期，價格快取止 2026-09-24）。
+- **申報延遲 gate**（FinMind 快取無公告日 → 用法定截止日）：Q1→5/15、Q2→8/14、Q3→11/14、Q4／年報→次年 3/31；
+  錨點 t 只用截止日 **< t** 的季別。
+- 股數＝`TTM 稅後淨利 / TTM EPS`（|EPS_TTM|≥0.1 時），否則 `權益 / (P/PBR)`；`shares_map` 是今天股數、不得用於歷史。
+  已知偏差：稅後淨利含非控制權益 → 少數股權大的公司股數偏高。
+- 價格＝錨點當日收盤（未還原）；PE/PBR 取 FinMind PER 該股 ≤t 最後一列。前瞻＝`total_return_targets`（除權息還原，
+  entry＝次一交易日收盤）`r{60,120,250}`；`alpha{h}＝r{h} − 同錨點橫斷面中位數`。
+- 母體＝FinMind 價格快取（今日次產業成員 ~1,132 檔）排除 ETF。**生存者偏差**：母體＝今日存活者，下市股缺席
+  （`research/survivorship/delisted_2022.csv`：2022 起光上市就 24 檔）→ 方向上**高估**低價股／價值策略報酬，必揭露。
+
+**主問題**：不是「價格會不會到 FV」（同義反覆），而是 **`fv_upside_pct` 在時點 t 對 t+h 的 alpha 是否有橫斷面預測資訊，
+且不是動能／規模的再表述，且勝過簡單基準**。
+
+**固定 5 格（全部報告、不得事後加格）**：
+
+| 格 | 內容 | 工具 |
+|---|---|---|
+| Q1 | `fv_upside_pct` vs `alpha{60,120,250}` pooled Spearman IC ＋ per-date IC 的 moving-block bootstrap CI（塊長＝ceil(h/21)+1 個月錨）＋ 非重疊子樣本 CI | `factor_lab.evaluate` |
+| Q2 | 同 Q1，`controls=[ma60_dist_pct, trail_r250, log_mktcap]` 殘差 IC（**動能／規模守門**） | `factor_lab.residual_ic` |
+| Q3 | 增益：簡單基準 `up_peer_pe`（m7 單腿）、`up_composite6`（§20.9 六腿綜合版之歷史近似：同儕 PE/PB/殖利率 ＋ 自身 5 年 PE/PB/殖利率中位，取中位）各自 IC；`fv_upside_pct` 控制基準後的殘差 IC | 同上 |
+| Q4 | 「準度」描述：五分位桶 alpha／勝率；**收斂率**（\|upside\|≥10% 樣本中 250 日總報酬方向與 upside 同號的比例 vs 同錨點打亂 FV 的置換基準）；**誤差**＝中位 \|log(P_{t+250}^{TR}/FV_t)\| vs naive「FV＝現價」的中位 \|log(P_{t+250}^{TR}/P_t)\| | 新函式 |
+| Q5 | 切片：①**市場狀態代理**（母體等權指數 vs 其 200 日均線 多／空；全期覆蓋）②既有 `regime_labels`（僅 2022-01 起，描述性）③前後半 ④walk-forward 4 段 ⑤產業（電子／非電子／金融）⑥`fv_n_models` ≥5 vs <5 ⑦**各模型單腿 IC（描述性，非 10 個獨立假設）** | `regime_ic_slices`／`regime_alignment_verdict` 等 |
+
+焦點格＝**主版 × r+120**（其餘 horizon 為佐證）。
+
+**裁決句（跑之前寫定，跑完不論結果照寫）**：
+- **Q2 殘差 IC CI95（block bootstrap）排除 0 ∧ 多／空兩狀態同號（非 thin） ∧ 前後半同號** → 「仿製估值帶獨立於動能／規模的
+  橫斷面資訊」；再看 Q3：控制 `up_composite6` 後殘差 CI 仍排除 0 → 「多模型平均勝過現行綜合缺口%」，否則 → 「≈現行綜合缺口%，
+  不需另建」。
+- **Q1 顯著但 Q2 CI 跨 0** → 「≈動能／規模代理；只能當描述性相對貴賤參考」。
+- **Q1 CI 跨 0** → 「對前瞻報酬無預測力；『準』只剩相對貴賤的描述」。
+- **CI 排除 0 但方向為負**（高 upside→跑輸）→ 「作為多頭訊號否證」。
+- **Q4 誤差不低於 naive** → 明寫「預測價格水準不如直接用現價」（不論 Q1–Q3 結果）。
+- 主版與副版方向矛盾 → 以副版為準檢查是否為剔除規則造成的循環性，兩者都寫。
+
+**明文不測**：investing.com 自身數字的歷史準度（無資料）；參數最佳化（折現率、成長、剔除區間一律固定，不 grid）。
+
+**交付**：`research/fv_replica/read_<日>.md`＋本節結果補記；docs/11 附錄 G 只加一行研究結論引用（不改 M4 流程）。
+
+
 ## 21. 減量研究計畫 Part 1：逐式目的定義＋參數可行性分級（2026-08-24）
 
 使用者要求「先定義好每個策略目的以及它可以使用那些參數來達到，再來看是不是
